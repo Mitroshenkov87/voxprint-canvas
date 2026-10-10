@@ -471,6 +471,17 @@ def semiglobal_cer(target: str, text: str) -> float:
     return min(prev) / len(t)
 
 
+def _as_embeds(out: Any, alt: str) -> Any:
+    """Newer transformers return BaseModelOutputWithPooling from get_*_features; older ones a tensor."""
+    if hasattr(out, "norm"):
+        return out
+    for name in ("pooler_output", alt):
+        value = getattr(out, name, None)
+        if value is not None:
+            return value
+    raise TypeError(f"unexpected feature output {type(out).__name__}")
+
+
 class Scorer:
     def __init__(self, device: str = "cuda") -> None:
         self.detector = load_detector()
@@ -500,6 +511,7 @@ class Scorer:
         with torch.no_grad():
             img = self.clip.get_image_features(pixel_values=inputs["pixel_values"].half())
             txt = self.clip.get_text_features(input_ids=inputs["input_ids"])
+        img, txt = _as_embeds(img, "image_embeds"), _as_embeds(txt, "text_embeds")
         img = img / img.norm(dim=-1, keepdim=True)
         txt = txt / txt.norm(dim=-1, keepdim=True)
         return float((img * txt).sum()) * 100

@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from typing import Callable
 
-from PySide6.QtCore import Qt, QRectF
-from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
+from PySide6.QtCore import Qt, QRectF, QUrl
+from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from canvas.app.info import APP_NAME, ENLARGE_HINT, RESPONSIBILITY, THIRD_PARTY_NOTICE
+from canvas.app.info import APP_NAME, ENLARGE_HINT, ENLARGE_RELEASES, RESPONSIBILITY, THIRD_PARTY_NOTICE
 from canvas.ui.about import AboutDialog
 from canvas.ui.icons import load_approved
 from canvas.core.formats import DEFAULT_FORMAT, OutputFormat
@@ -80,6 +80,9 @@ class MainWindow(QWidget):
         self.fourk_hint = QLabel(ENLARGE_HINT)
         self.fourk_hint.setObjectName("fourk-hint")
         self.fourk_hint.setWordWrap(True)
+        self.install_enlarge = QPushButton("Install Enlarge")
+        self.install_enlarge.setObjectName("install-enlarge")
+        self.install_enlarge.clicked.connect(self._install_enlarge)
         self.set_enlarge_ready(enlarge_ready)
         self.generate_button = QPushButton("Generate")
         self.generate_button.setObjectName("primary")
@@ -112,7 +115,11 @@ class MainWindow(QWidget):
         layout.addWidget(tabs)
         layout.addWidget(self.prompt)
         layout.addWidget(self.aspect_row)
-        layout.addWidget(self.fourk)
+        fourk_row = QHBoxLayout()
+        fourk_row.addWidget(self.fourk)
+        fourk_row.addWidget(self.install_enlarge)
+        fourk_row.addStretch(1)
+        layout.addLayout(fourk_row)
         layout.addWidget(self.fourk_hint)
         row = QHBoxLayout()
         row.addWidget(self.format_box)
@@ -141,8 +148,12 @@ class MainWindow(QWidget):
         self.fourk.setEnabled(ready)
         self.fourk_hint.setVisible(not ready)
         self.fourk.setToolTip("" if ready else ENLARGE_HINT)
+        self.install_enlarge.setVisible(not ready)
         if not ready:
             self.fourk.setChecked(False)
+
+    def _install_enlarge(self) -> None:
+        QDesktopServices.openUrl(QUrl(ENLARGE_RELEASES))
 
     def set_input_size(self, width: int, height: int) -> None:
         """Image-to-image starts from the input's aspect until the picker is used."""

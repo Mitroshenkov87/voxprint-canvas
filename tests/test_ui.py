@@ -9,7 +9,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication, QTabWidget
 
 from canvas.app.identity import version_label
-from canvas.app.info import APP_NAME, ENLARGE_HINT, RESPONSIBILITY, THIRD_PARTY_NOTICE
+from canvas.app.info import APP_NAME, ENLARGE_HINT, ENLARGE_RELEASES, RESPONSIBILITY, THIRD_PARTY_NOTICE
 from canvas.core.formats import OutputFormat
 from canvas.models.modes import Mode, Tier
 from canvas.models.sizes import ASPECT_GROUPS
@@ -98,6 +98,8 @@ def test_16gb_hides_creative_and_instruction(app):
     assert window.fourk.isEnabled() is False
     assert window.fourk_hint.text() == ENLARGE_HINT
     assert window.fourk_hint.isHidden() is False
+    assert window.install_enlarge.text() == "Install Enlarge"
+    assert window.install_enlarge.isHidden() is False
     tabs.setCurrentIndex(1)
     assert window.aspect_row.isEnabled()
     window.close()
@@ -142,6 +144,7 @@ def test_aspect_groups_and_input_default_and_fourk_when_enlarge_is_installed(app
     window.show()
     assert window.fourk.isEnabled() is True
     assert window.fourk_hint.isHidden() is True
+    assert window.install_enlarge.isHidden() is True
     buttons = _aspect_buttons(window)
     buttons["16:9"].click()
     assert window.current_aspect() == "16:9"
@@ -160,6 +163,19 @@ def test_aspect_groups_and_input_default_and_fourk_when_enlarge_is_installed(app
     assert fresh.current_aspect() == "1:1"
     window.close()
     fresh.close()
+
+
+def test_install_enlarge_opens_the_releases_page(app, monkeypatch):
+    del app
+    opened: list[str] = []
+    monkeypatch.setattr(
+        "canvas.ui.main_window.QDesktopServices.openUrl",
+        lambda url: opened.append(url.toString()) or True,
+    )
+    window = MainWindow(lambda prompt, mode, fmt: "ok", Tier.GB16)
+    window.install_enlarge.click()
+    assert opened == [ENLARGE_RELEASES]
+    window.close()
 
 
 def test_about_and_splash_show_the_release_identity(app, monkeypatch):

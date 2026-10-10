@@ -24,7 +24,7 @@ python -m pytest
 python tools/audit.py --python python
 ```
 
-Tests do not download weights and do not need a GPU. Image encoding and the diffusers 0.41.0 call are still stubs. The Windows installer and the Linux packaging stub select a VRAM tier and register the shared models folder; they do not download weights either.
+Tests do not download weights and do not need a GPU. AVIF, JPEG XL, WebP and JPEG are written by the installed libraries. HEIC still needs a system codec. The Windows installer and the Linux packaging stub select a VRAM tier and register the shared models folder; they do not download weights. The first picture on a supported GPU downloads the pinned models.
 
 ## License
 

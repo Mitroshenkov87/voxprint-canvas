@@ -1,7 +1,7 @@
 """Pinned runtime and the diffusers pipeline classes for each mode.
 
-Inference itself is not wired yet. The names and the diffusers pin are fixed
-so the loader stub cannot drift from the registry.
+The names and the diffusers pin match the registry. Inference loads these
+classes when a snapshot is already on disk.
 """
 from __future__ import annotations
 

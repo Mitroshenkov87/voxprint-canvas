@@ -1,22 +1,33 @@
 """Command line and window startup."""
 import argparse
+import json
 import sys
+from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
 
 from canvas.app.identity import version_label
 from canvas.app.info import APP_VERSION
 from canvas.app.platform import GpuCheck, check_gpu, current_os_check
+from canvas.app.selftest import selftest_report
 from canvas.app.updates import check_for_update
-from canvas.core.formats import OutputFormat
+from canvas.core.formats import OutputFormat, parse_format
 from canvas.infra.enlarge import EnlargeClient, EnlargeError
 from canvas.infra.gpu import probe_gpu
 from canvas.infra.models_users import register, unregister
 from canvas.infra.paths import models_dir
-from canvas.models.loader import ZImageGenerator, load_catalog_stack
+from canvas.models.loader import (
+    ModelNotReady,
+    ZImageGenerator,
+    download_generator,
+    download_safety,
+    load_catalog_stack,
+)
+from canvas.models.runtime import InferenceUnavailable
 from canvas.models.modes import Mode, Tier
-from canvas.models.plan import BaseNotSelected, ModeUnavailable
+from canvas.models.plan import BaseNotSelected, ModeUnavailable, build_plan
 from canvas.models.registry import load_catalog
+from canvas.models.snapshots import SnapshotError
 from canvas.pipeline.bf16_schedule import VramRefused
 from canvas.pipeline.pipeline import CoolingDown, EnlargeMissing, JobError, Pipeline
 from canvas.safety.gate import AgeGate, SafetyError
@@ -29,8 +40,18 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--register-models", action="store_true", help="mark Canvas as a user of the shared models folder")
     parser.add_argument("--unregister-models", action="store_true", help="remove Canvas from the shared models folder")
     parser.add_argument("--check-update", action="store_true", help="print a newer GitHub release tag, if one exists")
-    parser.add_argument("--selftest", action="store_true", help="import the app and exit")
+    parser.add_argument("--selftest", action="store_true", help="check the GPU, model files and encoders")
+    parser.add_argument("--json", action="store_true", help="print a JSON document")
     parser.add_argument("--version", action="store_true", help="print the release identity and exit")
+    generate = parser.add_subparsers(dest="command", required=False).add_parser(
+        "generate", help="generate one image and exit",
+    )
+    generate.add_argument("--prompt", required=True)
+    generate.add_argument("--aspect", default="1:1")
+    generate.add_argument("--out", required=True)
+    generate.add_argument("--output-size", default="native", choices=("native", "4k"))
+    generate.add_argument("--seed", type=int, default=0)
+    generate.add_argument("--json", action="store_true")
     return parser
 
 
@@ -43,15 +64,25 @@ def _callback(tier: Tier, window_box: list[MainWindow | None], enlarge: EnlargeC
         aspect = "1:1" if window is None else window.current_aspect()
         output = "4k" if window is not None and window.fourk.isChecked() else "native"
         try:
+            download_safety(catalog, models_dir())
             stack = load_catalog_stack(models_dir(), catalog)
-        except SafetyError as exc:
+        except (SafetyError, SnapshotError) as exc:
             return str(exc)
         pipeline = Pipeline(
             AgeGate(stack), ZImageGenerator(catalog, tier), tier, use_gpu_lock=True, catalog=catalog, enlarge=enlarge,
         )
         try:
+            screened = AgeGate(stack).release_request(prompt, mode.value, ())
+            try:
+                plan = build_plan(catalog, screened, tier)
+            finally:
+                screened.wipe()
+            download_generator(catalog, plan, models_dir())
             pipeline.generate(prompt, mode, aspect=aspect, output=output)
-        except (SafetyError, ModeUnavailable, BaseNotSelected, JobError, CoolingDown, EnlargeMissing, EnlargeError, VramRefused) as exc:
+        except (
+            SafetyError, SnapshotError, InferenceUnavailable, ModelNotReady,
+            ModeUnavailable, BaseNotSelected, JobError, CoolingDown, EnlargeMissing, EnlargeError, VramRefused,
+        ) as exc:
             return str(exc)
         return "Done"
 
@@ -71,14 +102,71 @@ def _launch(tier: Tier) -> None:
     app.exec()
 
 
+def _emit(payload: dict[str, object], as_json: bool, code: int) -> int:
+    if as_json:
+        print(json.dumps(payload))
+    elif payload.get("error"):
+        print(payload["error"], file=sys.stderr)
+    elif payload.get("path"):
+        print(payload["path"])
+    return code
+
+
+def _generate(args: argparse.Namespace) -> int:
+    """Download what is missing, generate one image, and write it."""
+    as_json = bool(args.json)
+    os_result = current_os_check()
+    if not os_result.ok:
+        return _emit({"ok": False, "error": os_result.message}, as_json, 2)
+    gpu = check_gpu(probe_gpu())
+    if not gpu.ok or gpu.tier is None:
+        return _emit({"ok": False, "error": gpu.message}, as_json, 2)
+    path = Path(args.out)
+    try:
+        fmt = parse_format(path.suffix)
+    except ValueError as exc:
+        return _emit({"ok": False, "error": str(exc)}, as_json, 2)
+    catalog = load_catalog()
+    root = models_dir()
+    output = "4k" if args.output_size == "4k" else "native"
+    try:
+        download_safety(catalog, root)
+        stack = load_catalog_stack(root, catalog)
+        gate = AgeGate(stack)
+        screened = gate.release_request(args.prompt, Mode.TEXT.value, ())
+        try:
+            plan = build_plan(catalog, screened, gpu.tier)
+        finally:
+            screened.wipe()
+        download_generator(catalog, plan, root)
+        generator = ZImageGenerator(catalog, gpu.tier)
+        generator.seed = args.seed
+        generator.models = root
+        pipeline = Pipeline(gate, generator, gpu.tier, use_gpu_lock=True, catalog=catalog, enlarge=EnlargeClient())
+        pipeline.export(args.prompt, Mode.TEXT, (), path, fmt, aspect=args.aspect, output=output)
+    except (
+        SafetyError, SnapshotError, InferenceUnavailable, ModelNotReady,
+        ModeUnavailable, BaseNotSelected, JobError, CoolingDown, EnlargeMissing, EnlargeError, VramRefused, OSError,
+    ) as exc:
+        return _emit({"ok": False, "error": str(exc)}, as_json, 1)
+    return _emit({"ok": True, "path": str(path)}, as_json, 0)
+
+
 def main(argv: list[str] | None = None) -> int:
     """Register the shared model folder, check for a release, or open the window."""
     args = _parser().parse_args(argv)
     if args.version:
         print(version_label())
         return 0
+    if getattr(args, "command", None) == "generate":
+        return _generate(args)
     if args.selftest:
-        return 0
+        report = selftest_report()
+        if args.json:
+            print(json.dumps(report, indent=2))
+        else:
+            print("ok" if report["ok"] else "failed")
+        return 0 if report["ok"] else 2
     if args.register_models:
         register(models_dir())
         return 0

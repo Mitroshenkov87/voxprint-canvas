@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -55,6 +55,12 @@ class ModelSpec:
     text_base: str
     guidance_kind: str
     quality_gate: str = ""
+    revision: str = ""
+    mirror_revision: str = ""
+    mirror_status: str = ""
+    origins: dict[str, tuple[str, str]] = field(default_factory=dict)
+    fallback_files: dict[str, str] = field(default_factory=dict)
+    fallback_revision: str = ""
 
     def pinned(self) -> bool:
         """True when every listed file has a 64-character SHA-256."""
@@ -110,10 +116,27 @@ def _sha_map(files: dict[str, Any]) -> dict[str, str]:
     return out
 
 
+def _origins(files: dict[str, Any]) -> dict[str, tuple[str, str]]:
+    """Remote path on the mirror and on the upstream repo. ``-`` means that source has no copy."""
+    out: dict[str, tuple[str, str]] = {}
+    for name, meta in files.items():
+        if isinstance(meta, dict):
+            mirror = str(meta.get("mirror", name))
+            upstream = str(meta.get("upstream", name))
+        else:
+            mirror, upstream = str(name), str(name)
+        out[str(name)] = (mirror, upstream)
+    return out
+
+
 def _spec(row: dict[str, Any]) -> ModelSpec:
     guidance = row.get("guidance_scale")
     steps = row.get("steps")
     sources = tuple(Source(str(item["kind"]), str(item.get("uri") or "")) for item in row.get("sources", []))
+    files = dict(row.get("files") or {})
+    fallback_raw = row.get("fallback")
+    fallback: dict[str, Any] = fallback_raw if isinstance(fallback_raw, dict) else {}
+    fallback_files = dict(fallback.get("files") or {})
     return ModelSpec(
         id=str(row["id"]),
         role=str(row["role"]),
@@ -133,11 +156,17 @@ def _spec(row: dict[str, Any]) -> ModelSpec:
         vram_hint_gb=float(row.get("vram_hint_gb") or 0),
         min_vram_gb=float(row.get("min_vram_gb") or 0),
         device=str(row.get("device") or ""),
-        files=_sha_map(dict(row.get("files") or {})),
+        files=_sha_map(files),
         sources=sources,
         text_base=str(row.get("text_base") or ""),
         guidance_kind=str(row.get("guidance_kind") or ""),
         quality_gate=str(row.get("quality_gate") or ""),
+        revision=str(row.get("revision") or ""),
+        mirror_revision=str(row.get("mirror_revision") or ""),
+        mirror_status=str(row.get("mirror_status") or ""),
+        origins=_origins(files),
+        fallback_files=_sha_map(fallback_files),
+        fallback_revision=str(fallback.get("revision") or ""),
     )
 
 

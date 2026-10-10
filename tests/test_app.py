@@ -1,4 +1,6 @@
 """Startup commands. The window itself is not opened here."""
+import json
+
 from canvas.app.info import RELEASES_API
 from canvas.app.main import main
 from canvas.app.platform import OsCheck
@@ -10,7 +12,11 @@ from canvas.ui.backdrop import apply_backdrop
 
 
 def test_selftest_register_and_update(monkeypatch, tmp_path, capsys):
-    assert main(["--selftest"]) == 0
+    assert main(["--selftest", "--json"]) == 2
+    report = json.loads(capsys.readouterr().out)
+    assert report["ok"] is False
+    assert report["encoders"] == {"avif": True, "jxl": True, "webp": True}
+    assert isinstance(report["models"], list) and report["models"]
     monkeypatch.setenv("VOXPRINT_MODELS_DIR", str(tmp_path))
     assert main(["--register-models"]) == 0
     assert read_users(tmp_path)["canvas"] is True
@@ -58,6 +64,14 @@ def test_startup_refuses_or_launches(monkeypatch):
     monkeypatch.setattr("canvas.app.main._launch", lambda tier: launched.append(tier))
     assert main([]) == 0
     assert launched == [Tier.GB24]
+
+
+def test_generate_command_refuses_an_unsupported_machine(capsys):
+    code = main(["generate", "--prompt", "a red boat", "--aspect", "16:9", "--out", "out.avif", "--output-size", "4k", "--json"])
+    assert code == 2
+    body = json.loads(capsys.readouterr().out)
+    assert body["ok"] is False
+    assert body["error"]
 
 
 def test_backdrop_is_plain_off_windows():

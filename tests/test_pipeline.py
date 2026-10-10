@@ -11,19 +11,22 @@ from canvas.safety.classifiers import Face
 from canvas.safety.gate import GenerationBlocked
 from canvas.safety.image import RawImage, SafeImage, ScreenedInput
 from canvas.safety.inputs import ImageRole, PendingInput
-from tests.fakes import World, rgb
+from tests.fakes import World, avif_file, rgb
 
 
 class _Gen:
-    def __init__(self, image: RawImage | None = None) -> None:
+    def __init__(self, image: RawImage | None = None, *, reuse: bool = False) -> None:
         self.image = image if image is not None else rgb()
+        self.reuse = reuse
         self.calls = 0
         self.seen = ""
 
     def generate(self, screened: ScreenedInput) -> RawImage:
         self.calls += 1
         self.seen = screened.prompt
-        return self.image
+        if self.reuse:
+            return self.image
+        return RawImage(self.image.width, self.image.height, self.image.to_bytes())
 
 
 def test_blocked_prompt_never_calls_the_generator_or_writes(tmp_path):
@@ -74,7 +77,7 @@ def test_allowed_job_saves_only_a_released_image_and_wipes_the_request(tmp_path)
     assert gen.calls == 1
     assert world.calls.count("faces") == 3  # two inputs and the output
     pipeline.export("a red boat", Mode.TEXT, (), path)
-    assert path.read_bytes().startswith(b"VOXPRINT avif\n")
+    assert avif_file(path.read_bytes())
 
 
 def test_blocked_output_is_wiped_and_not_saved(tmp_path):
@@ -83,7 +86,7 @@ def test_blocked_output_is_wiped_and_not_saved(tmp_path):
     world.faces = [Face(0, 0, 1, 1)]
     world.ages = [8.0]
     raw = rgb(color=(9, 9, 9))
-    gen = _Gen(raw)
+    gen = _Gen(raw, reuse=True)
     pipeline = Pipeline(world.gate(), gen, Tier.GB24)
     path = tmp_path / "out.avif"
     try:

@@ -7,6 +7,11 @@ from canvas.safety.gate import AgeGate, SafetyStack
 from canvas.safety.image import RawImage
 
 
+def avif_file(body: bytes) -> bool:
+    """True when the bytes are an AVIF container."""
+    return len(body) >= 12 and body[4:8] == b"ftyp" and b"avif" in body[:32]
+
+
 def rgb(width: int = 2, height: int = 2, color: tuple[int, int, int] = (10, 20, 30)) -> RawImage:
     pixel = bytes(color)
     return RawImage(width, height, pixel * (width * height))

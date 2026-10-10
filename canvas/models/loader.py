@@ -1,15 +1,17 @@
 """Open a generator and the check stack from the registry.
 
-Weights are not downloaded here. A missing pin, a missing file or a bad hash
-refuses the stack. The generator stub records the diffusers plan and refuses
-until inference is wired.
+A missing pin, a missing file or a bad hash refuses the stack. Generation runs
+when the pinned snapshot is already on disk. Downloading is a separate call.
 """
 from pathlib import Path
 
+from canvas.infra.paths import models_dir
 from canvas.models.modes import Mode, Tier
-from canvas.models.pin import PinError, require_pin, verify_bytes
+from canvas.models.pin import PinError, require_pin, verify_file
 from canvas.models.plan import CallPlan, build_plan
 from canvas.models.registry import Catalog, ModelSpec, load_catalog
+from canvas.models.runtime import render
+from canvas.models.snapshots import download_snapshot, snapshot_ready, weight_dir
 from canvas.pipeline.bf16_schedule import EmbeddingCache, GpuLedger, run_bf16_16gb, uses_bf16_16gb
 from canvas.pipeline.vram_probe import PeakVramProbe
 from canvas.safety.adapters import FairFaceAge, NsfwViT, Qwen3GuardGen, SiglipZeroShot, YuNetFaces
@@ -44,19 +46,27 @@ def ensure_weights(spec: ModelSpec, root: Path) -> None:
         if not path.is_file():
             raise SafetyUnavailable("missing_model")
         try:
-            verify_bytes(path.read_bytes(), digest)
+            verify_file(path, digest)
         except PinError as exc:
             raise SafetyUnavailable("hash_mismatch") from exc
 
 
 def load_safety_stack(catalog: Catalog, root: Path) -> SafetyStack:
     """Open the check stack after every weight file is verified."""
+    bound: dict[str, ModelSpec] = {}
     for role in _SAFETY_ROLES:
         found = catalog.by_role(role)
         if len(found) != 1:
             raise SafetyUnavailable("missing_model")
         ensure_weights(found[0], root)
-    return SafetyStack(Qwen3GuardGen(), SiglipZeroShot(), YuNetFaces(), FairFaceAge(), NsfwViT())
+        bound[role] = found[0]
+    return SafetyStack(
+        Qwen3GuardGen(weight_dir(root, bound["prompt-guard"].repo)),
+        SiglipZeroShot(weight_dir(root, bound["zero-shot"].repo)),
+        YuNetFaces(weight_dir(root, bound["face-detector"].repo)),
+        FairFaceAge(weight_dir(root, bound["age"].repo)),
+        NsfwViT(weight_dir(root, bound["nsfw"].repo)),
+    )
 
 
 def load_catalog_stack(root: Path, catalog: Catalog | None = None) -> SafetyStack:
@@ -65,7 +75,7 @@ def load_catalog_stack(root: Path, catalog: Catalog | None = None) -> SafetyStac
 
 
 class ZImageGenerator:
-    """Diffusers generator stub. ``generate`` accepts only a ``ScreenedInput``."""
+    """Diffusers generator. ``generate`` accepts only a ``ScreenedInput``."""
 
     def __init__(self, catalog: Catalog, tier: Tier, ledger: GpuLedger | None = None) -> None:
         self.catalog = catalog
@@ -76,6 +86,8 @@ class ZImageGenerator:
         self.ledger = ledger if ledger is not None else GpuLedger(16.0)
         self.embeddings = EmbeddingCache()
         self.probe: PeakVramProbe | None = None
+        self.seed = 0
+        self.models: Path | None = None
 
     def attach_probe(self, probe: PeakVramProbe | None) -> None:
         """Stage marks land on this probe. The pipeline calls it before ``generate``."""
@@ -87,7 +99,7 @@ class ZImageGenerator:
         self.ledger.drop_all()
 
     def generate(self, screened: ScreenedInput, width: int | None = None, height: int | None = None) -> RawImage:
-        """Record the plan. A 16 GB BF16 job schedules memory, then generation still stops."""
+        """Run the plan when the pinned snapshot is on disk. A 16 GB BF16 job schedules memory first."""
         if type(screened) is not ScreenedInput:
             raise TypeError("the generator only accepts a ScreenedInput")
         if width is not None and height is not None:
@@ -104,4 +116,77 @@ class ZImageGenerator:
                 cache=self.embeddings,
                 probe=self.probe,
             )
-        raise ModelNotReady(plan)
+        root = self.models if self.models is not None else models_dir()
+        spec = _spec_for(self.catalog, plan)
+        folder = snapshot_ready(spec, root)
+        if folder is None or width is None or height is None:
+            raise ModelNotReady(plan)
+        control_file = _control_file(self.catalog, plan, root)
+        try:
+            return render(
+                plan, folder, screened, width, height, self.tier, seed=self.seed, control_file=control_file,
+            )
+        except ImportError as exc:
+            raise ModelNotReady(plan) from exc
+
+
+def download_safety(catalog: Catalog, root: Path) -> None:
+    """Download every content-check snapshot. A bad hash raises ``SnapshotError``."""
+    for role in _SAFETY_ROLES:
+        found = catalog.by_role(role)
+        if len(found) != 1:
+            raise SafetyUnavailable("missing_model")
+        download_snapshot(found[0], root)
+
+
+def download_generator(catalog: Catalog, plan: CallPlan, root: Path) -> None:
+    """Download the generator snapshot for one plan, including a control file when the plan needs one."""
+    download_snapshot(_spec_for(catalog, plan), root)
+    control = _control_spec(catalog, plan)
+    if control is not None:
+        download_snapshot(control, root)
+
+
+def _spec_for(catalog: Catalog, plan: CallPlan) -> ModelSpec:
+    repo = plan.repos[0]
+    ranked = [
+        spec for spec in catalog.models
+        if spec.repo == repo and plan.pipeline_class in spec.pipeline_classes
+    ]
+    for spec in ranked:
+        if spec.tier == plan.tier:
+            return spec
+    if ranked:
+        return ranked[0]
+    for spec in catalog.models:
+        if spec.repo == repo:
+            return spec
+    raise ModelNotReady(plan)
+
+
+def _control_spec(catalog: Catalog, plan: CallPlan) -> ModelSpec | None:
+    if len(plan.repos) < 2:
+        return None
+    repo = plan.repos[1]
+    matches = [spec for spec in catalog.models if spec.repo == repo and spec.role == "control"]
+    for spec in matches:
+        if spec.tier == plan.tier:
+            return spec
+    if matches:
+        return matches[0]
+    return None
+
+
+def _control_file(catalog: Catalog, plan: CallPlan, root: Path) -> Path | None:
+    spec = _control_spec(catalog, plan)
+    if spec is None:
+        return None
+    folder = snapshot_ready(spec, root)
+    if folder is None:
+        return None
+    for name in spec.files:
+        if name.endswith(".safetensors"):
+            path = folder / name
+            if path.is_file():
+                return path
+    return None

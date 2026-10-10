@@ -11,20 +11,13 @@ from canvas.models.modes import Mode
 from canvas.models.plan import BaseNotSelected
 from canvas.models.registry import Catalog, FrameSize, RegistryError
 
-UI_ASPECTS = ("1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9")
+ASPECT_GROUPS = (
+    ("Landscape", ("16:9", "21:9", "3:2", "4:3")),
+    ("Square", ("1:1",)),
+    ("Portrait", ("9:16", "2:3", "3:4")),
+)
+UI_ASPECTS = tuple(aspect for _group, aspects in ASPECT_GROUPS for aspect in aspects)
 FOUR_K_LONG = 3840
-
-_PAIR = {
-    "1:1": "1:1",
-    "16:9": "9:16",
-    "9:16": "16:9",
-    "4:3": "3:4",
-    "3:4": "4:3",
-    "3:2": "2:3",
-    "2:3": "3:2",
-    "21:9": "9:21",
-    "9:21": "21:9",
-}
 
 
 def family_for(mode: Mode, catalog: Catalog) -> str:
@@ -65,26 +58,14 @@ def upscale_factor(frame: FrameSize) -> int:
     return factor
 
 
-def is_portrait(aspect: str) -> bool:
-    width, height = _ratio(aspect)
-    return height > width
-
-
-def paired_aspect(aspect: str) -> str:
-    """The other orientation. Square stays square."""
-    if aspect not in _PAIR:
-        raise RegistryError(f"unknown aspect {aspect}")
-    return _PAIR[aspect]
-
-
 def closest_aspect(width: int, height: int) -> str:
-    """The listed ratio nearest to an input image, including portrait 21:9."""
+    """The picker ratio nearest to an input image."""
     if width < 1 or height < 1:
         raise RegistryError("image size must be positive")
     target = width / height
     best = "1:1"
     best_gap = abs(target - 1.0)
-    for aspect in (*UI_ASPECTS, "9:21"):
+    for aspect in UI_ASPECTS:
         ratio_w, ratio_h = _ratio(aspect)
         gap = abs(target - (ratio_w / ratio_h))
         if gap < best_gap:

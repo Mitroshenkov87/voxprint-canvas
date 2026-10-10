@@ -3,7 +3,10 @@ from __future__ import annotations
 
 from typing import Callable
 
+from PySide6.QtCore import Qt, QRectF
+from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QCheckBox,
     QComboBox,
     QHBoxLayout,
@@ -18,8 +21,8 @@ from PySide6.QtWidgets import (
 from canvas.app.info import APP_NAME, ENLARGE_HINT, RESPONSIBILITY, THIRD_PARTY_NOTICE
 from canvas.core.formats import DEFAULT_FORMAT, OutputFormat
 from canvas.models.modes import Mode, Tier, mode_group, visible_modes
-from canvas.models.sizes import UI_ASPECTS, closest_aspect, is_portrait, paired_aspect
-from canvas.ui.theme import build_style
+from canvas.models.sizes import ASPECT_GROUPS, closest_aspect
+from canvas.ui.theme import TEXT, build_style
 
 _LABELS = {
     Mode.TEXT: "Text to image",
@@ -42,7 +45,6 @@ class MainWindow(QWidget):
         super().__init__()
         self.on_generate = on_generate
         self.tier = tier
-        self._sync = False
         self._aspect_touched = False
         self._input_size: tuple[int, int] | None = None
         self.setObjectName("root")
@@ -66,15 +68,11 @@ class MainWindow(QWidget):
             self.creative.addItem(_LABELS[Mode.TEXT_CREATIVE], Mode.TEXT_CREATIVE)
         self.status = QLabel("")
         self.status.setObjectName("status")
-        self.aspect_box = QComboBox()
-        self.aspect_box.setObjectName("aspect")
-        for aspect in UI_ASPECTS:
-            self.aspect_box.addItem(aspect, aspect)
-        self.orientation = QPushButton("Landscape")
-        self.orientation.setObjectName("orientation")
-        self.orientation.setCheckable(True)
-        self.aspect_box.currentIndexChanged.connect(self._aspect_changed)
-        self.orientation.toggled.connect(self._orientation_changed)
+        self.aspects = QButtonGroup(self)
+        self.aspects.setExclusive(True)
+        self._aspect_buttons: dict[str, QPushButton] = {}
+        self.aspect_row = self._aspect_picker()
+        self.aspects.idClicked.connect(self._aspect_picked)
         self.fourk = QCheckBox("Output size: 4K")
         self.fourk.setObjectName("fourk")
         self.fourk_hint = QLabel(ENLARGE_HINT)
@@ -103,11 +101,7 @@ class MainWindow(QWidget):
         layout.addWidget(title)
         layout.addWidget(tabs)
         layout.addWidget(self.prompt)
-        aspect_row = QHBoxLayout()
-        aspect_row.addWidget(QLabel("Aspect"))
-        aspect_row.addWidget(self.aspect_box)
-        aspect_row.addWidget(self.orientation)
-        layout.addLayout(aspect_row)
+        layout.addWidget(self.aspect_row)
         layout.addWidget(self.fourk)
         layout.addWidget(self.fourk_hint)
         row = QHBoxLayout()
@@ -145,53 +139,52 @@ class MainWindow(QWidget):
         self._input_size = (width, height)
         if self._aspect_touched:
             return
-        self._show_aspect(closest_aspect(width, height))
+        self._select_aspect(closest_aspect(width, height))
 
     def current_aspect(self) -> str:
-        selected = str(self.aspect_box.currentData())
-        if selected == "21:9" and self.orientation.isChecked():
-            return "9:21"
-        return selected
+        button = self.aspects.checkedButton()
+        if button is None:
+            return "1:1"
+        return str(button.property("ratio"))
 
-    def _show_aspect(self, aspect: str) -> None:
-        self._sync = True
-        shown = "21:9" if aspect == "9:21" else aspect
-        index = self.aspect_box.findData(shown)
-        if index >= 0:
-            self.aspect_box.setCurrentIndex(index)
-        portrait = aspect == "9:21" or is_portrait(shown)
-        self.orientation.setChecked(portrait)
-        self.orientation.setText("Portrait" if portrait else "Landscape")
-        self._sync = False
+    def _aspect_picker(self) -> QWidget:
+        row = QWidget()
+        row.setObjectName("aspect-picker")
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        for name, aspects in ASPECT_GROUPS:
+            group = QWidget()
+            group_layout = QVBoxLayout(group)
+            group_layout.setContentsMargins(0, 0, 0, 0)
+            group_layout.setSpacing(4)
+            label = QLabel(name)
+            label.setObjectName("aspect-group")
+            buttons = QHBoxLayout()
+            buttons.setSpacing(4)
+            for aspect in aspects:
+                button = QPushButton(aspect)
+                button.setObjectName("aspect")
+                button.setProperty("ratio", aspect)
+                button.setIcon(_shape_icon(aspect))
+                button.setCheckable(True)
+                self.aspects.addButton(button)
+                self._aspect_buttons[aspect] = button
+                buttons.addWidget(button)
+            group_layout.addWidget(label)
+            group_layout.addLayout(buttons)
+            layout.addWidget(group)
+        layout.addStretch(1)
+        self._aspect_buttons["1:1"].setChecked(True)
+        return row
 
-    def _aspect_changed(self) -> None:
-        if self._sync:
-            return
+    def _select_aspect(self, aspect: str) -> None:
+        button = self._aspect_buttons[aspect]
+        self.aspects.blockSignals(True)
+        button.setChecked(True)
+        self.aspects.blockSignals(False)
+
+    def _aspect_picked(self, _button_id: int) -> None:
         self._aspect_touched = True
-        selected = str(self.aspect_box.currentData())
-        self._sync = True
-        portrait = is_portrait(selected)
-        self.orientation.setChecked(portrait)
-        self.orientation.setText("Portrait" if portrait else "Landscape")
-        self._sync = False
-
-    def _orientation_changed(self, checked: bool) -> None:
-        if self._sync:
-            return
-        self._aspect_touched = True
-        self.orientation.setText("Portrait" if checked else "Landscape")
-        selected = str(self.aspect_box.currentData())
-        if selected in {"1:1", "21:9"}:
-            return
-        target = paired_aspect(selected)
-        want_portrait = is_portrait(target)
-        if want_portrait != checked:
-            return
-        self._sync = True
-        index = self.aspect_box.findData(target)
-        if index >= 0:
-            self.aspect_box.setCurrentIndex(index)
-        self._sync = False
 
     def current_mode(self, tab_index: int) -> Mode:
         if tab_index == 0:
@@ -207,3 +200,29 @@ class MainWindow(QWidget):
             self.status.setText(self.on_generate(self.prompt.toPlainText(), mode, fmt))
         except Exception as exc:
             self.status.setText(str(exc))
+
+
+def _shape_icon(aspect: str) -> QIcon:
+    """A small outline in the ratio's own proportions."""
+    width_part, _, height_part = aspect.partition(":")
+    ratio_w = int(width_part)
+    ratio_h = int(height_part)
+    long_side = 16
+    if ratio_w >= ratio_h:
+        shape_w = long_side
+        shape_h = max(4, round(long_side * ratio_h / ratio_w))
+    else:
+        shape_h = long_side
+        shape_w = max(4, round(long_side * ratio_w / ratio_h))
+    canvas = 22
+    pixmap = QPixmap(canvas, canvas)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setPen(QPen(QColor(TEXT), 1.5))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    left = (canvas - shape_w) / 2
+    top = (canvas - shape_h) / 2
+    painter.drawRoundedRect(QRectF(left, top, shape_w, shape_h), 1.5, 1.5)
+    painter.end()
+    return QIcon(pixmap)

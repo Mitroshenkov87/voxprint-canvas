@@ -30,6 +30,10 @@ Tests do not download weights and do not need a GPU. Image encoding and the diff
 
 Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE). Models downloaded by the app keep their own licences.
 
+## Roadmap
+
+The next version, and the plans after it, are in [ROADMAP.md](ROADMAP.md).
+
 ## ☕ Support the Project
 
 If you find this project useful and would like to support its development, you can buy me a coffee!

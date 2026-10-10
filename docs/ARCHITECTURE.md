@@ -32,7 +32,7 @@ Both tabs offer the same aspect picker, grouped as Landscape (16:9, 21:9, 3:2, 4
 
 Third-party add-ons are off until you turn them on. The curated list has one model, Chroma1-HD, fetched from its upstream address when you ask. Files are stored in a `third-party` folder under the shared models directory. Voxprint does not host or redistribute those files.
 
-Weight files in the main registry stay unpinned until their SHA-256 values are frozen. The loader and the downloader refuse an empty pin. Inference through diffusers is not wired yet: the generator records the plan and stops.
+Weight files in the main registry are pinned by SHA-256. The loader refuses a missing file or a bad hash. A picture uses the pinned snapshot through diffusers 0.41.0 when those files are already on disk. The first run downloads them. Z-Image-Turbo is taken from the public mirror first, then from the upstream repository.
 
 ## Content safety checks
 
@@ -56,4 +56,4 @@ Save, download and export use the approved icons in `canvas/ui/icons`. A row mar
 
 ## What is still a stub
 
-SHA-256 pins, the diffusers call itself, and the AVIF / JPEG XL / WebP bitstream encoders. The next step is to freeze those pins and wire diffusers 0.41.0.
+HEIC still needs a system codec on the machine. A 16 GB job still runs its memory schedule, then offloads the real model. The official upstream transformer remains a fallback and is larger than the mirror pack.

@@ -6,13 +6,14 @@ import pytest
 
 from canvas.models.downloader import DownloadError, attempt_sources, download_file
 from canvas.models.registry import Source, load_catalog
+from canvas.models.snapshots import SnapshotError, _stream
 
 
 def test_source_order_and_unpinned_skip(tmp_path):
     catalog = load_catalog()
     turbo = catalog.by_id("z-image-turbo-bf16-16gb")
     assert [source.kind for source in turbo.sources] == [
-        "local", "huggingface", "huggingface-mirror", "kaggle", "torrent",
+        "local", "huggingface-mirror", "huggingface", "kaggle", "torrent",
     ]
     yunet = catalog.by_id("yunet-face")
     assert [source.kind for source in yunet.sources][:2] == ["local", "upstream"]
@@ -56,3 +57,8 @@ def test_failover_keeps_the_first_matching_body(tmp_path):
     path = download_file(spec, "weights", tmp_path, transport)
     assert seen == ["huggingface", "huggingface-mirror", "kaggle"]
     assert path.read_bytes() == payload
+
+
+def test_snapshot_download_rejects_a_non_https_address(tmp_path):
+    with pytest.raises(SnapshotError):
+        _stream("file:///etc/passwd", tmp_path / "weights", "ab" * 32)

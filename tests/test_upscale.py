@@ -18,7 +18,7 @@ from canvas.safety.gate import GenerationBlocked
 from canvas.safety.image import RawImage, ScreenedInput
 from canvas.safety.inputs import ImageRole, PendingInput
 from canvas.core.exchange import read_rgb, write_rgb
-from tests.fakes import World, rgb
+from tests.fakes import World, avif_file, rgb
 
 
 class _Gen:
@@ -91,7 +91,7 @@ def test_fourk_chain_unloads_on_16gb_and_screens_the_upscale(tmp_path, monkeypat
     assert read_lock(lock_path()) is None
     path = tmp_path / "out.avif"
     pipeline.export("a red boat", Mode.TEXT, (), path, aspect="1:1", output="4k")
-    assert path.read_bytes().startswith(b"VOXPRINT avif\n")
+    assert avif_file(path.read_bytes())
 
 
 def test_fourk_cli_runs_inside_the_held_lock(tmp_path, monkeypatch):

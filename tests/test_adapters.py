@@ -17,6 +17,7 @@ from tests.fakes import rgb
 def test_fairface_lower_bound_and_guard_parse():
     assert apparent_age_from_bucket("20-29") == 20.0
     assert apparent_age_from_bucket("30-39") == 30.0
+    assert apparent_age_from_bucket("more than 70") == 70.0
     with pytest.raises(SafetyUnavailable):
         apparent_age_from_bucket("unknown")
     verdict = parse_qwen3guard("Safety: Controversial\nCategories: Sexual Content or Sexual Acts\n")

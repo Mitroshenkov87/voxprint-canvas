@@ -1,9 +1,18 @@
-"""Output containers. AVIF is the default. PNG is not an output format."""
+"""Output containers. AVIF is the default. PNG is not an output format.
+
+Pillow 11.3 and newer writes AVIF and WebP. Pillow itself is HPND. Its wheels
+include libavif (BSD-2-Clause) for AVIF. JPEG XL goes through imagecodecs
+(BSD-3-Clause). pillow-jxl-plugin is not used.
+"""
 from __future__ import annotations
 
 from enum import Enum
 from pathlib import Path
 from typing import assert_never
+
+import numpy as np
+from PIL import Image
+from imagecodecs import jpegxl_encode
 
 from canvas.safety.image import SafeImage
 
@@ -67,7 +76,24 @@ def save_image(image: SafeImage, path: Path, fmt: OutputFormat = DEFAULT_FORMAT)
         raise UnsupportedFormat("PNG output is not available")
     if path.suffix.lower() != extension(fmt):
         raise UnsupportedFormat("the file extension does not match the format")
-    # Container encoding (libavif, imagecodecs/libjxl, Pillow WebP) is not wired yet.
-    # The bytes are the screened RGB plus a small header so a test can see the format.
-    header = f"VOXPRINT {fmt.value}\n".encode("ascii")
-    path.write_bytes(header + image.data)
+    picture = Image.frombytes("RGB", (image.width, image.height), image.data)
+    if fmt is OutputFormat.AVIF:
+        picture.save(path, format="AVIF")
+        return
+    if fmt is OutputFormat.WEBP:
+        picture.save(path, format="WEBP", quality=95)
+        return
+    if fmt is OutputFormat.JPEG:
+        picture.save(path, format="JPEG", quality=95)
+        return
+    if fmt is OutputFormat.JXL:
+        pixels = np.frombuffer(image.data, dtype=np.uint8).reshape(image.height, image.width, 3)
+        path.write_bytes(jpegxl_encode(pixels))
+        return
+    if fmt is OutputFormat.HEIC:
+        try:
+            picture.save(path, format="HEIF")
+        except (KeyError, OSError) as exc:
+            raise UnsupportedFormat("HEIC needs a system codec") from exc
+        return
+    assert_never(fmt)

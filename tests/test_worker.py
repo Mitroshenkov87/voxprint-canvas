@@ -9,7 +9,7 @@ from canvas.pipeline.worker import handle_message, main, release_worker_image, w
 from canvas.safety.classifiers import Face
 from canvas.safety.gate import GenerationBlocked
 from canvas.safety.image import ScreenedInput
-from tests.fakes import World, rgb
+from tests.fakes import World, avif_file, rgb
 
 
 class _Gen:
@@ -46,7 +46,7 @@ def test_parent_reviews_worker_bytes_before_anything_is_kept(tmp_path):
     released = release_worker_image(world.gate(), payload)
     path = tmp_path / "out.avif"
     save_image(released, path)
-    assert path.read_bytes().startswith(b"VOXPRINT avif\n")
+    assert avif_file(path.read_bytes())
     world.nsfw = 0.99
     world.faces = [Face(0, 0, 1, 1)]
     world.ages = [6.0]

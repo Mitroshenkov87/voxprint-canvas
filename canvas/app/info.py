@@ -1,0 +1,17 @@
+"""Version and the one responsibility line shown to users."""
+from __future__ import annotations
+
+APP_NAME = "Voxprint AI Canvas"
+APP_VERSION = "0.1.0"
+APP_ID = "canvas"
+# Windows 11 24H2.
+MIN_WINDOWS_BUILD = 26100
+MIN_LINUX_YEAR = 2025
+MIN_COMPUTE_CAPABILITY = (8, 9)
+
+RESPONSIBILITY = (
+    "Do not use the app to create content that is illegal or socially unacceptable; "
+    "you are responsible for what you create."
+)
+
+RELEASES_API = "https://api.github.com/repos/Mitroshenkov87/voxprint-canvas/releases/latest"

@@ -11,8 +11,8 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-# Models and weights
-models/
+# Downloaded weights. The registry under canvas/models stays in git.
+/models/
 *.safetensors
 *.ckpt
 *.gguf
@@ -31,3 +31,7 @@ scripts/_*.json
 Thumbs.db
 .vscode/
 .idea/
+# Local audit and tool environments
+audit-report.txt
+.app/
+.tools/

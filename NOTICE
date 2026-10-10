@@ -3,3 +3,8 @@ Copyright 2026 Aleksandr Mitroshenkov
 
 Licensed under the Apache License, Version 2.0.
 Third-party components and models keep their own licences.
+
+The GPU lock, model-user file, VRAM policy, thermal pause, palette, backdrop
+and audit script are adapted from other Voxprint programs, also Apache-2.0,
+Copyright Aleksandr Mitroshenkov: Voxprint AI Audiobook Builder and Voxprint AI
+Movie Dubber.

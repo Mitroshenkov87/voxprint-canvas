@@ -1,0 +1,7 @@
+# Tools for tools/audit.py. Installed into their own environment so they are not mixed with the app's dependencies.
+ruff
+mypy
+bandit
+pip-audit
+vulture
+radon

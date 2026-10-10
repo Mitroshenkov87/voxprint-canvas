@@ -67,13 +67,13 @@ def default_arms() -> dict[str, Arm]:
     return {
         "z_bf16": Arm("z_bf16", "z", "bf16", False, 1024, 1024, 9, 0.0, max_min=10),
         "z_fp8": Arm("z_fp8", "z", "fp8-forge", False, 1024, 1024, 9, 0.0, max_min=10,
-                     notes=["Forge voxprint-fp8-v1 weights dequantized to BF16 (A100 has no FP8 tensor cores): quality of the 16 GB tier, not its speed"]),
+                     notes=["Forge voxprint-fp8-v1 dequantized to BF16. Quality gate rejected Z-Image FP8 (LPIPS 0.14-0.22 vs BF16). The 16 GB tier ships BF16."]),
         "q_bf16": Arm("q_bf16", "q", "bf16", False, 1328, 1328, 50, 4.0, Q_NEG_OFFICIAL, max_min=80,
                       notes=["native BF16 on A100 80GB: quality upper bound for the 24 GB tier"]),
         "q_tuned": Arm("q_tuned", "q", "bf16", True, 1328, 1328, 50, 4.5, Q_NEG_TUNED, max_min=28,
                        notes=["true CFG 4.5 + official negative + English anatomy terms"]),
         "q_fp8": Arm("q_fp8", "q", "fp8-forge", False, 1328, 1328, 50, 4.0, Q_NEG_OFFICIAL, max_min=80,
-                     notes=["Forge FP8 dequantized to BF16 on A100: 24 GB tier quality"]),
+                     notes=["Forge FP8 dequantized to BF16 on A100. Quality gate is still pending, so this arm is not a confirmed 24 GB quant."]),
         "q_int4": Arm("q_int4", "q", "int4", False, 1328, 1328, 50, 4.0, Q_NEG_OFFICIAL, max_min=60,
                       notes=["SVDQuant INT4 via Nunchaku: 16 GB tier"]),
     }
@@ -590,11 +590,19 @@ def summarise(out: Path, prompts: list[dict[str, Any]], notes: list[str], args: 
     def status(name: str) -> str:
         return arms_out.get(name, {}).get("status", "absent")
 
+    q_fp8_ready = status("q_fp8") in ("done", "partial")
     tiers = {
-        "24gb": {"z": "z_bf16", "q": "q_fp8" if status("q_fp8") in ("done", "partial") else "q_bf16",
-                 "q_note": None if status("q_fp8") in ("done", "partial") else "q_fp8 absent: q_bf16 is an upper bound"},
-        "16gb": {"z": "z_fp8", "q": "q_int4" if status("q_int4") in ("done", "partial") else None,
-                 "q_note": None if status("q_int4") in ("done", "partial") else "Qwen 16 GB tier deferred (no INT4 build)"},
+        "24gb": {
+            "z": "z_bf16",
+            "q": "q_fp8" if q_fp8_ready else "q_bf16",
+            "q_note": "Qwen FP8 is listed with the quality gate still pending" if q_fp8_ready else "q_fp8 absent: q_bf16 is an upper bound; Qwen FP8 quality gate is still pending",
+        },
+        "16gb": {
+            "z": "z_bf16",
+            "z_note": "Forge rejected Z-Image FP8 (LPIPS 0.14-0.22 vs BF16). The 16 GB tier is BF16.",
+            "q": "q_int4" if status("q_int4") in ("done", "partial") else None,
+            "q_note": None if status("q_int4") in ("done", "partial") else "Qwen 16 GB tier deferred (no INT4 build)",
+        },
     }
     summary = {
         "schema": SCHEMA,

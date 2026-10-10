@@ -103,6 +103,9 @@ class Pipeline:
                     raise EnlargeMissing()
                 if probe is not None:
                     probe.mark("generate-start")
+                attach = getattr(self.generator, "attach_probe", None)
+                if attach is not None:
+                    attach(probe)
                 raw = run_generator(self.generator, screened, width=width, height=height)
                 image = self._reviewed(raw)
                 if probe is not None:

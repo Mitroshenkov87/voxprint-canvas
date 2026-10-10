@@ -17,6 +17,7 @@ from canvas.models.loader import ZImageGenerator, load_catalog_stack
 from canvas.models.modes import Mode, Tier
 from canvas.models.plan import BaseNotSelected, ModeUnavailable
 from canvas.models.registry import load_catalog
+from canvas.pipeline.bf16_schedule import VramRefused
 from canvas.pipeline.pipeline import CoolingDown, EnlargeMissing, JobError, Pipeline
 from canvas.safety.gate import AgeGate, SafetyError
 from canvas.ui.main_window import MainWindow
@@ -50,7 +51,7 @@ def _callback(tier: Tier, window_box: list[MainWindow | None], enlarge: EnlargeC
         )
         try:
             pipeline.generate(prompt, mode, aspect=aspect, output=output)
-        except (SafetyError, ModeUnavailable, BaseNotSelected, JobError, CoolingDown, EnlargeMissing, EnlargeError) as exc:
+        except (SafetyError, ModeUnavailable, BaseNotSelected, JobError, CoolingDown, EnlargeMissing, EnlargeError, VramRefused) as exc:
             return str(exc)
         return "Done"
 

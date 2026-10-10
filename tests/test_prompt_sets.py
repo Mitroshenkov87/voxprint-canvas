@@ -87,11 +87,16 @@ def test_lint_minimum_is_20_and_youth_terms_still_fail():
     assert lint_text("a boyfriend waiting at a cafe") == []
 
 
+def _sha256_lf(path: Path) -> str:
+    """Hash prompt bytes with Windows CRLF folded to LF."""
+    return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+
+
 def test_v1_prompt_files_are_unchanged_and_pass_the_lint():
     root = Path("bakeoff/prompts")
     for name, digest in _V1_SHA256.items():
         path = root / name
-        assert hashlib.sha256(path.read_bytes()).hexdigest() == digest
+        assert _sha256_lf(path) == digest
         assert lint_jsonl(path) == []
 
 

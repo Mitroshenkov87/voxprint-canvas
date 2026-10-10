@@ -4,7 +4,7 @@ Local text-to-image and image-to-image generation for the Voxprint AI Media Suit
 
 > Status: early development. No releases yet.
 
-Text to image can use Z-Image-Turbo or Qwen-Image-2512. The default is unset until a comparison on a supported GPU chooses one. Image to image covers restyle, inpaint, outpaint, pose, depth, and edge. On a 24 GB GPU, Creative and instruction edit are available as well. An optional third-party model is downloaded from its author only when you ask for it. Output defaults to AVIF, with JPEG XL and WebP beside it.
+Text to image can use Z-Image-Turbo or Qwen-Image-2512. The default is unset until a comparison on a supported GPU chooses one. Image to image covers restyle, inpaint, outpaint, pose, depth, and edge. On a 24 GB GPU, Creative and instruction edit are available as well. Third-party add-ons are off until you turn them on. Third-party weights are provided by their authors, who are responsible for the licence and training data. Voxprint does not host or redistribute them. Output defaults to AVIF, with JPEG XL and WebP beside it.
 
 ## Requirements
 

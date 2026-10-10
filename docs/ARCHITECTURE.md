@@ -28,7 +28,7 @@ The registry pins diffusers 0.41.0. A 16 GB card uses the FP8 turbo weights and 
 
 `tools/bakeoff.py` runs the same prompts and seeds for each text base and records time and peak VRAM. It writes images only in the operating system's temp directory.
 
-Opt-in third-party weights are a separate list. A download starts only when you ask, and it uses the author's upstream address.
+Third-party add-ons are off until you turn them on. The curated list ships empty. A download uses only the upstream address on an entry and is stored in a `third-party` folder under the shared models directory. Voxprint does not host or redistribute those files.
 
 Weight files in the main registry stay unpinned until their SHA-256 values are frozen. The loader and the downloader refuse an empty pin. Inference through diffusers is not wired yet: the generator records the plan and stops.
 

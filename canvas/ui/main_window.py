@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Callable
 
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QHBoxLayout,
     QLabel,
@@ -14,7 +15,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from canvas.app.info import APP_NAME, RESPONSIBILITY
+from canvas.app.info import APP_NAME, RESPONSIBILITY, THIRD_PARTY_NOTICE
 from canvas.core.formats import DEFAULT_FORMAT, OutputFormat
 from canvas.models.modes import Mode, Tier, mode_group, visible_modes
 from canvas.ui.theme import build_style
@@ -66,6 +67,13 @@ class MainWindow(QWidget):
         tabs = QTabWidget()
         tabs.addTab(self._text_tab(), "Text to image")
         tabs.addTab(self._image_tab(), "Image to image")
+        self.addons_box = QCheckBox("Third-party add-ons")
+        self.addons_box.setChecked(False)
+        self.addons_notice = QLabel(THIRD_PARTY_NOTICE)
+        self.addons_notice.setObjectName("third-party-notice")
+        self.addons_notice.setWordWrap(True)
+        self.addons_notice.setVisible(False)
+        self.addons_box.toggled.connect(self.addons_notice.setVisible)
         footer = QLabel(RESPONSIBILITY)
         footer.setObjectName("footer")
         footer.setWordWrap(True)
@@ -80,6 +88,8 @@ class MainWindow(QWidget):
         row.addWidget(self.generate_button)
         layout.addLayout(row)
         layout.addWidget(self.status)
+        layout.addWidget(self.addons_box)
+        layout.addWidget(self.addons_notice)
         layout.addWidget(footer)
 
     def _text_tab(self) -> QWidget:

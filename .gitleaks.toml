@@ -13,6 +13,7 @@ condition = "AND"
 paths = [
   '''(^|/)canvas/models/catalog\.json$''',
   '''(^|/)canvas/models/third_party\.json$''',
+  '''(^|/)canvas/models/excluded_weights\.py$''',
 ]
 regexTarget = "line"
 regexes = ['''(?i)[0-9a-f]{64}''']

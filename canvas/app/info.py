@@ -14,4 +14,9 @@ RESPONSIBILITY = (
     "you are responsible for what you create."
 )
 
+THIRD_PARTY_NOTICE = (
+    "Third-party weights are provided by their authors, who are responsible for the licence and training data. "
+    "Voxprint does not host or redistribute them."
+)
+
 RELEASES_API = "https://api.github.com/repos/Mitroshenkov87/voxprint-canvas/releases/latest"

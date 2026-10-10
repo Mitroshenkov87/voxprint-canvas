@@ -8,7 +8,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication, QTabWidget
 
-from canvas.app.info import APP_NAME, RESPONSIBILITY
+from canvas.app.info import APP_NAME, RESPONSIBILITY, THIRD_PARTY_NOTICE
 from canvas.core.formats import OutputFormat
 from canvas.models.modes import Mode, Tier
 from canvas.safety.gate import GenerationBlocked
@@ -40,6 +40,14 @@ def test_16gb_hides_creative_and_instruction(app):
     assert window.windowTitle() == APP_NAME
     footer = window.findChild(type(window.status), "footer")
     assert footer is not None and footer.text() == RESPONSIBILITY
+    window.show()
+    assert window.addons_box.isChecked() is False
+    assert window.addons_notice.isHidden()
+    window.addons_box.setChecked(True)
+    assert window.addons_notice.isVisible()
+    assert window.addons_notice.text() == THIRD_PARTY_NOTICE
+    window.addons_box.setChecked(False)
+    assert window.addons_notice.isHidden()
     window.close()
 
 

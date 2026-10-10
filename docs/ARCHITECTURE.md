@@ -48,6 +48,12 @@ Do not use the app to create content that is illegal or socially unacceptable; y
 - After 2.5 hours at full speed, work pauses while the 5-minute median temperature is at least 83 °C, or while a throttle has lasted more than 60 seconds. It resumes at 75 °C or below once the throttle has cleared.
 - The only network call besides model downloads is `https://api.github.com/repos/Mitroshenkov87/voxprint-canvas/releases/latest`.
 
+## Release identity
+
+`BUILD.json` is the only copy of the version, the channel, the build offset and the codename. The build number is the GitHub Actions run number plus that offset. The release title template, the About dialog, the splash and `voxprint-canvas --version` all show `X.Y.Z RC · build N "Yotzer"` from that file.
+
+Save, download and export use the approved icons in `canvas/ui/icons`. A row marked PENDING is not loaded. Icons are recoloured with a palette token. The floppy-disk drawing and the theme name `document-save` are not used.
+
 ## What is still a stub
 
 SHA-256 pins, the diffusers call itself, and the AVIF / JPEG XL / WebP bitstream encoders. The next step is to freeze those pins and wire diffusers 0.41.0.

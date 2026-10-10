@@ -4,6 +4,7 @@ import sys
 
 from PySide6.QtWidgets import QApplication
 
+from canvas.app.identity import version_label
 from canvas.app.info import APP_VERSION
 from canvas.app.platform import GpuCheck, check_gpu, current_os_check
 from canvas.app.updates import check_for_update
@@ -19,6 +20,7 @@ from canvas.models.registry import load_catalog
 from canvas.pipeline.pipeline import CoolingDown, EnlargeMissing, JobError, Pipeline
 from canvas.safety.gate import AgeGate, SafetyError
 from canvas.ui.main_window import MainWindow
+from canvas.ui.splash import show_splash
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -27,6 +29,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--unregister-models", action="store_true", help="remove Canvas from the shared models folder")
     parser.add_argument("--check-update", action="store_true", help="print a newer GitHub release tag, if one exists")
     parser.add_argument("--selftest", action="store_true", help="import the app and exit")
+    parser.add_argument("--version", action="store_true", help="print the release identity and exit")
     return parser
 
 
@@ -56,18 +59,23 @@ def _callback(tier: Tier, window_box: list[MainWindow | None], enlarge: EnlargeC
 
 def _launch(tier: Tier) -> None:
     app = QApplication.instance() or QApplication(sys.argv)
+    splash = show_splash()
     enlarge = EnlargeClient()
     window_box: list[MainWindow | None] = [None]
     window = MainWindow(_callback(tier, window_box, enlarge), tier, glass=False, enlarge_ready=enlarge.installed())
     window_box[0] = window
     window.resize(960, 720)
     window.show()
+    splash.finish(window)
     app.exec()
 
 
 def main(argv: list[str] | None = None) -> int:
     """Register the shared model folder, check for a release, or open the window."""
     args = _parser().parse_args(argv)
+    if args.version:
+        print(version_label())
+        return 0
     if args.selftest:
         return 0
     if args.register_models:

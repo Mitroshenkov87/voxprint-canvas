@@ -1,0 +1,39 @@
+"""The release identity is read from BUILD.json."""
+import json
+from pathlib import Path
+
+from canvas.app.identity import build_number, release_title, version, version_label
+from canvas.app.main import main
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_version_label_and_release_title_come_from_build_json():
+    assert version() == "0.1.0"
+    assert version_label({}) == '0.1.0 RC · build 0 "Yotzer"'
+    assert release_title({}) == 'Voxprint AI Canvas 0.1.0 RC · build 0 "Yotzer"'
+    template = (ROOT / "docs" / "RELEASE-NOTES-TEMPLATE.md").read_text(encoding="utf-8")
+    assert 'Voxprint AI Canvas X.Y.Z RC · build N "Yotzer"' in template
+    data = json.loads((ROOT / "BUILD.json").read_text(encoding="utf-8"))
+    assert data["version"] == "0.1.0"
+    assert data["channel"] == "RC"
+    assert data["codename"] == "Yotzer"
+    assert f'version = "{data["version"]}"' in (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    iss = (ROOT / "installer" / "windows" / "voxprint-canvas.iss").read_text(encoding="utf-8")
+    assert f'#define MyAppVersion "{data["version"]}"' in iss
+
+
+def test_build_number_is_the_run_plus_offset(monkeypatch):
+    monkeypatch.setattr(
+        "canvas.app.identity.load_build",
+        lambda: {"version": "0.1.0", "channel": "RC", "offset": 5, "codename": "Yotzer"},
+    )
+    assert build_number({"GITHUB_RUN_NUMBER": "3"}) == 8
+    assert build_number({"VOXPRINT_BUILD": "9", "GITHUB_RUN_NUMBER": "3"}) == 9
+    assert build_number({}) == 0
+    assert version_label({}) == '0.1.0 RC · build 0 "Yotzer"'
+
+
+def test_version_flag_prints_the_release_identity(capsys):
+    assert main(["--version"]) == 0
+    assert capsys.readouterr().out.strip() == version_label()

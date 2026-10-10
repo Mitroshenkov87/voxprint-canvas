@@ -8,12 +8,15 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication, QTabWidget
 
+from canvas.app.identity import version_label
 from canvas.app.info import APP_NAME, ENLARGE_HINT, RESPONSIBILITY, THIRD_PARTY_NOTICE
 from canvas.core.formats import OutputFormat
 from canvas.models.modes import Mode, Tier
 from canvas.models.sizes import ASPECT_GROUPS
 from canvas.safety.gate import GenerationBlocked
+from canvas.ui.about import AboutDialog
 from canvas.ui.main_window import MainWindow
+from canvas.ui.splash import Splash
 
 
 @pytest.fixture(scope="module")
@@ -157,3 +160,24 @@ def test_aspect_groups_and_input_default_and_fourk_when_enlarge_is_installed(app
     assert fresh.current_aspect() == "1:1"
     window.close()
     fresh.close()
+
+
+def test_about_and_splash_show_the_release_identity(app, monkeypatch):
+    del app
+    window = MainWindow(lambda prompt, mode, fmt: "ok", Tier.GB24)
+    opened: list[str] = []
+
+    def _exec(dialog: AboutDialog) -> int:
+        opened.append(dialog.version.text())
+        return 0
+
+    monkeypatch.setattr(AboutDialog, "exec", _exec)
+    window.about_button.click()
+    assert opened == [version_label()]
+    dialog = AboutDialog(window)
+    assert dialog.version.text() == version_label()
+    assert dialog.version.objectName() == "about-version"
+    splash = Splash()
+    assert splash.version_line == version_label()
+    splash.close()
+    window.close()

@@ -26,6 +26,8 @@ v1 has two tabs.
 
 The registry pins diffusers 0.41.0. A 16 GB card uses the FP8 turbo weights and the lite FP8 controlnet. A 24 GB card uses BF16 turbo weights and the full BF16 controlnet. Creative and instruction edit stay hidden on 16 GB.
 
+Both tabs offer the same aspect list: 1:1, 16:9, 9:16, 4:3, 3:4, 3:2, 2:3, and 21:9, plus a portrait/landscape toggle. Each model has its own native frame in the registry, a multiple of 16, around 1–2 megapixels. Image to image starts from the input image's aspect. Output size 4K does not generate at 4K. It generates the model's ~2K frame for that aspect, then asks Voxprint AI Enlarge (suite IPC protocol 1, or `voxprint-enlarge --json-progress` if the socket is down) to make the long side 3840. The option is disabled, with an install hint, when Enlarge is absent. On a 16 GB card the generator is unloaded before the upscale. The chain holds the suite GPU lock and hands it to Enlarge when Enlarge reports it is waiting. The enlarged image goes through the content safety checks before it is shown. A peak-VRAM probe marks generate, unload, and upscale so the chain can be measured on a 16 GB card.
+
 `tools/bakeoff.py` runs the same prompts and seeds for each text base and records time and peak VRAM. It writes images only in the operating system's temp directory.
 
 Third-party add-ons are off until you turn them on. The curated list has one model, Chroma1-HD, fetched from its upstream address when you ask. Files are stored in a `third-party` folder under the shared models directory. Voxprint does not host or redistribute those files.

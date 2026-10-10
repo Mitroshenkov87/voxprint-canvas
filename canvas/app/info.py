@@ -19,4 +19,6 @@ THIRD_PARTY_NOTICE = (
     "Voxprint does not host or redistribute them."
 )
 
+ENLARGE_HINT = "Install Voxprint AI Enlarge to use this."
+
 RELEASES_API = "https://api.github.com/repos/Mitroshenkov87/voxprint-canvas/releases/latest"

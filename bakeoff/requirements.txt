@@ -1,0 +1,9 @@
+# Install into the Model Forge venv (torch + CUDA already present). Licences in README.
+diffusers>=0.36.0
+transformers>=4.56.0
+accelerate
+safetensors
+pillow
+opencv-python-headless
+easyocr
+# optional, only for the q_int4 arm (Apache-2.0): nunchaku

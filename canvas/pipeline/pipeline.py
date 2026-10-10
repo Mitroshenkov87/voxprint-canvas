@@ -5,7 +5,6 @@ import tempfile
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
 
 from canvas.app.info import ENLARGE_HINT
 from canvas.core.exchange import read_rgb, write_rgb
@@ -15,8 +14,8 @@ from canvas.infra.thermal import Guard
 from canvas.models.loader import ModelNotReady
 from canvas.models.modes import Mode, Tier, required_roles, visible_modes
 from canvas.models.plan import BaseNotSelected, ModeUnavailable
-from canvas.models.registry import Catalog, FrameSize
-from canvas.models.sizes import frame_size, family_for, upscale_factor
+from canvas.models.registry import Catalog
+from canvas.models.sizes import FOUR_K_LONG, frame_size, family_for, upscale_factor
 from canvas.pipeline.engine import run_generator
 from canvas.pipeline.vram_probe import PeakVramProbe
 from canvas.safety.gate import AgeGate, SafetyError
@@ -46,7 +45,7 @@ class EnlargeMissing(Exception):
 
 
 class _Hold:
-    """The suite GPU lock for one chain. A peer waiting on it can be given the file."""
+    """The suite GPU lock, held for the whole generate and upscale chain."""
 
     def __init__(self, enabled: bool) -> None:
         self.enabled = enabled
@@ -61,12 +60,6 @@ class _Hold:
             raise GpuLockTimeout("the GPU is busy")
         self.held = True
         return self
-
-    def release_for_peer(self) -> None:
-        """Enlarge is waiting on this file. Drop it so the upscale can take the GPU."""
-        if self.held:
-            release(self.path)
-            self.held = False
 
     def __exit__(self, *exc: object) -> None:
         if self.held:
@@ -98,7 +91,7 @@ class Pipeline:
         have = {item.role for item in inputs}
         if any(role not in have for role in needed):
             raise JobError()
-        with self._hold() as hold:
+        with self._hold():
             if self.thermal is not None and self.thermal.should_pause():
                 self.paused = True
                 raise CoolingDown()
@@ -116,7 +109,7 @@ class Pipeline:
                     probe.mark("generate-end")
                 if output == "native":
                     return image
-                return self._upscale(image, hold, probe)
+                return self._upscale(image, probe)
             except ModelNotReady as exc:
                 raise SafetyError("model_not_ready") from exc
             finally:
@@ -145,14 +138,13 @@ class Pipeline:
             upscale_factor(frame)
         return frame.width, frame.height
 
-    def _upscale(self, image: SafeImage, hold: _Hold, probe: PeakVramProbe | None) -> SafeImage:
+    def _upscale(self, image: SafeImage, probe: PeakVramProbe | None) -> SafeImage:
         if self.tier is Tier.GB16:
             unload = getattr(self.generator, "unload", None)
             if unload is not None:
                 unload()
             if probe is not None:
                 probe.mark("unload")
-        factor = upscale_factor_from_image(image)
         with tempfile.TemporaryDirectory(prefix="voxprint-canvas-") as folder:
             root = Path(folder)
             source = root / "native.avif"
@@ -160,13 +152,8 @@ class Pipeline:
             write_rgb(source, image.width, image.height, image.data)
             if probe is not None:
                 probe.mark("upscale-start")
-
-            def on_event(message: dict[str, Any]) -> None:
-                if message.get("type") == "progress" and message.get("stage") == "waiting_gpu":
-                    hold.release_for_peer()
-
             enlarge = getattr(self.enlarge, "enlarge")
-            result = enlarge(source, scale=factor, output=dest, format_name="avif", on_event=on_event)
+            result = enlarge(source, output=dest, format_name="avif", long_side=FOUR_K_LONG)
             out_path = Path(result.output)
             upscaled = read_rgb(out_path)
             if probe is not None:
@@ -188,13 +175,12 @@ class Pipeline:
             yield hold
 
 
-def upscale_factor_from_image(image: SafeImage) -> int:
-    return upscale_factor(FrameSize(image.width, image.height))
-
-
 def _enlarge_ready(enlarge: object | None) -> bool:
     if enlarge is None:
         return False
+    ready = getattr(enlarge, "ready", None)
+    if ready is not None:
+        return bool(ready())
     installed = getattr(enlarge, "installed", None)
     if installed is None:
         return True

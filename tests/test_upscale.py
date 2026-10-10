@@ -1,12 +1,16 @@
 """4K is an upscale of the ~2K frame, then the output checks run again."""
+import sys
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
+
+from canvas.infra.enlarge import EnlargeClient
 
 from canvas.infra.gpu_lock import lock_path, read_lock
 from canvas.models.modes import Mode, Tier
 from canvas.models.registry import load_catalog
-from canvas.models.sizes import frame_size
+from canvas.models.sizes import frame_size, upscale_factor
 from canvas.pipeline.pipeline import EnlargeMissing, Pipeline
 from canvas.pipeline.vram_probe import PeakVramProbe
 from canvas.safety.classifiers import Face
@@ -38,26 +42,25 @@ class _Gen:
 class _Enlarge:
     def __init__(self, world: World | None = None) -> None:
         self.world = world
-        self.scale = 0
-        self.unlocked = False
+        self.long_side = 0
+        self.lock_held = False
         self.source_long = 0
 
     def installed(self) -> bool:
         return True
 
-    def enlarge(self, source, *, scale, output, format_name="avif", on_event=None):
-        del format_name
+    def enlarge(self, source, *, output, format_name="avif", long_side=3840, on_event=None):
+        del format_name, on_event
         raw = read_rgb(source)
-        self.scale = scale
+        self.long_side = long_side
         self.source_long = max(raw.width, raw.height)
-        if on_event is not None:
-            on_event({"protocol": 1, "type": "progress", "stage": "waiting_gpu", "pct": 1})
-        self.unlocked = read_lock(lock_path()) is None
+        self.lock_held = (read_lock(lock_path()) or {}).get("owner") == "canvas"
         if self.world is not None:
             self.world.nsfw = 0.95
             self.world.faces = [Face(0, 0, 1, 1)]
             self.world.ages = [8.0]
-        width, height = raw.width * scale, raw.height * scale
+        factor = long_side // self.source_long
+        width, height = raw.width * factor, raw.height * factor
         write_rgb(output, width, height, bytes((4, 5, 6)) * (width * height))
         return type("Result", (), {"output": output})()
 
@@ -72,14 +75,16 @@ def test_fourk_chain_unloads_on_16gb_and_screens_the_upscale(tmp_path, monkeypat
     pipeline = Pipeline(world.gate(), gen, Tier.GB16, use_gpu_lock=True, catalog=catalog, enlarge=enlarge)
     image = pipeline.generate("a red boat", Mode.TEXT, aspect="16:9", output="4k", probe=probe)
     expected = frame_size(catalog, "qwen-image-2512", "16:9", twok=True)
+    factor = upscale_factor(expected)
     assert gen.sizes == [(expected.width, expected.height)]
-    assert max(expected.width, expected.height) * enlarge.scale == 3840
+    assert enlarge.long_side == 3840
+    assert max(expected.width, expected.height) * factor == 3840
     assert enlarge.source_long < 3840
     assert gen.order == ["generate", "unload"]
     assert gen.lock_held is True
-    assert enlarge.unlocked is True
-    assert image.width == expected.width * enlarge.scale
-    assert image.height == expected.height * enlarge.scale
+    assert enlarge.lock_held is True
+    assert image.width == expected.width * factor
+    assert image.height == expected.height * factor
     assert [mark for mark, _used in probe.marks] == [
         "generate-start", "generate-end", "unload", "upscale-start", "upscale-end",
     ]
@@ -87,6 +92,26 @@ def test_fourk_chain_unloads_on_16gb_and_screens_the_upscale(tmp_path, monkeypat
     path = tmp_path / "out.avif"
     pipeline.export("a red boat", Mode.TEXT, (), path, aspect="1:1", output="4k")
     assert path.read_bytes().startswith(b"VOXPRINT avif\n")
+
+
+def test_fourk_cli_runs_inside_the_held_lock(tmp_path, monkeypatch):
+    monkeypatch.setenv("VOXPRINT_GPU_LOCK", str(tmp_path / "voxprint-gpu.lock"))
+    monkeypatch.setenv("CANVAS_CACHE", str(tmp_path / "cache"))
+    catalog = replace(load_catalog(), default_text_base="qwen-image-2512")
+    world = World()
+    gen = _Gen(catalog)
+    fake = Path(__file__).resolve().parent / "fixtures" / "enlarge_fake.py"
+    client = EnlargeClient([sys.executable, str(fake)])
+    pipeline = Pipeline(world.gate(), gen, Tier.GB16, use_gpu_lock=True, catalog=catalog, enlarge=client)
+    image = pipeline.generate("a red boat", Mode.TEXT, aspect="16:9", output="4k")
+    expected = frame_size(catalog, "qwen-image-2512", "16:9", twok=True)
+    factor = upscale_factor(expected)
+    assert client.ready()
+    assert gen.order == ["generate", "unload"]
+    assert image.width == expected.width * factor
+    assert image.height == expected.height * factor
+    assert read_lock(lock_path()) is None
+    assert world.calls.count("image-score") == 2
 
 
 def test_24gb_keeps_the_generator_and_image_modes_use_zimage_frames(monkeypatch, tmp_path):

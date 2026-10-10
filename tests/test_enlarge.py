@@ -1,15 +1,35 @@
-"""The Enlarge CLI is the only inter-app contract."""
+"""The Enlarge CLI contract v1 is the only inter-app contract."""
+import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
 from canvas.infra.discovery import find_app, _split_windows_command
-from canvas.infra.enlarge import EnlargeClient, EnlargeError, enlarge_argv, loads
+from canvas.infra.enlarge import EnlargeClient, EnlargeError, capabilities_ready, enlarge_argv, exit_error, loads
+
+FAKE = Path(__file__).resolve().parent / "fixtures" / "enlarge_fake.py"
+_EXIT_CODES = (1, 2, 3, 4, 5, 6, 7, 8, 130)
+
+
+def _events(text: str) -> list[dict]:
+    return [json.loads(line) for line in text.splitlines() if line.strip()]
+
+
+def _shape(events: list[dict]) -> list[dict]:
+    shaped = []
+    for event in events:
+        if event.get("type") == "done":
+            shaped.append({key: event[key] for key in ("type", "id", "width", "height", "format", "ms")})
+        else:
+            shaped.append(event)
+    return shaped
 
 
 def test_progress_lines_are_protocol_1_json():
-    message = loads('{"protocol": 1, "type": "progress", "stage": "waiting_gpu"}\n')
+    message = loads('{"protocol": 1, "type": "progress", "id": "1", "pct": 5, "stage": "waiting_gpu", "eta_s": 1.5}\n')
     assert message["type"] == "progress"
     assert message["stage"] == "waiting_gpu"
     with pytest.raises(EnlargeError):
@@ -19,52 +39,119 @@ def test_progress_lines_are_protocol_1_json():
 def test_enlarge_argv_is_the_only_command_line(tmp_path):
     source = tmp_path / "in.avif"
     dest = tmp_path / "out.avif"
-    argv = enlarge_argv(["voxprint-enlarge"], source=source, output=dest, scale=2, format_name="avif")
-    assert argv[0] == "voxprint-enlarge"
-    assert argv[argv.index("--input") + 1] == str(source.resolve())
-    assert argv[argv.index("--output") + 1] == str(dest)
-    assert argv[argv.index("--scale") + 1] == "2"
-    assert argv[-1] == "--json-progress"
-    assert "--serve" not in argv
-    text = (Path(__file__).resolve().parents[1] / "canvas" / "infra" / "enlarge.py").read_text(encoding="utf-8")
-    assert "QLocalSocket" not in text
-    assert "--serve" not in text
-
-
-def test_cli_streams_json_progress_and_a_failed_exit(tmp_path, monkeypatch):
-    script = tmp_path / "enlarge_stub.py"
-    script.write_text(
-        "import json, sys\n"
-        "args = sys.argv[1:]\n"
-        "output = args[args.index('--output') + 1]\n"
-        "scale = args[args.index('--scale') + 1]\n"
-        "Path = __import__('pathlib').Path\n"
-        "Path(output).write_bytes(b'ok')\n"
-        "print(json.dumps({'protocol': 1, 'type': 'accepted', 'id': '1'}))\n"
-        "print(json.dumps({'protocol': 1, 'type': 'progress', 'id': '1', 'pct': 10, 'stage': 'waiting_gpu'}))\n"
-        "print(json.dumps({'protocol': 1, 'type': 'done', 'id': '1', 'output': output, 'width': 3840, 'height': 2160, 'format': 'avif'}))\n",
-        encoding="utf-8",
+    argv = enlarge_argv(
+        ["voxprint-enlarge"], source=source, output=dest, long_side=3840, format_name="avif", parent_pid=4242,
     )
+    assert argv == [
+        "voxprint-enlarge",
+        "upscale",
+        "--input",
+        str(source.resolve()),
+        "--output",
+        str(dest),
+        "--long-side",
+        "3840",
+        "--format",
+        "avif",
+        "--json-progress",
+        "--parent-lock-pid",
+        "4242",
+    ]
+    root = Path(__file__).resolve().parents[1]
+    enlarge_text = (root / "canvas" / "infra" / "enlarge.py").read_text(encoding="utf-8")
+    pipeline_text = (root / "canvas" / "pipeline" / "pipeline.py").read_text(encoding="utf-8")
+    assert "QLocalSocket" not in enlarge_text
+    assert "--serve" not in enlarge_text
+    assert "release_for_peer" not in pipeline_text
+    assert "def enlarge_argv" in enlarge_text
+
+
+def test_fake_cli_mirrors_dry_run_and_captures_stderr(tmp_path):
     source = tmp_path / "in.avif"
     source.write_bytes(b"in")
     dest = tmp_path / "out.avif"
-    seen = []
-    client = EnlargeClient([sys.executable, str(script)])
-    result = client.enlarge(source, scale=2, output=dest, on_event=seen.append)
+    dry_dest = tmp_path / "dry.avif"
+    parent = "42"
+    env = os.environ.copy()
+    env["VOXPRINT_GPU_PARENT_PID"] = parent
+    dry = subprocess.run(
+        [
+            sys.executable,
+            str(FAKE),
+            "upscale",
+            "--input",
+            str(source),
+            "--output",
+            str(dry_dest),
+            "--long-side",
+            "3840",
+            "--format",
+            "avif",
+            "--json-progress",
+            "--parent-lock-pid",
+            parent,
+            "--dry-run",
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    assert dry.returncode == 0
+    assert "enlarge: log" in dry.stderr
+    assert "raw cli detail" not in dry.stdout
+    seen: list[dict] = []
+    client = EnlargeClient([sys.executable, str(FAKE)])
+    result = client.enlarge(source, output=dest, on_event=seen.append)
     assert result.output == dest
     assert result.width == 3840
-    assert [item["type"] for item in seen] == ["accepted", "progress", "done"]
-    assert seen[1]["stage"] == "waiting_gpu"
-    assert dest.read_bytes() == b"ok"
-    monkeypatch.setenv("CANVAS_ENLARGE_EXE", f"{sys.executable} {script}")
-    found = find_app("Enlarge", "enlarge")
-    assert found is not None and found.command[0] == sys.executable
-    monkeypatch.setenv("CANVAS_ENLARGE_EXE", str(tmp_path / "missing-enlarge"))
-    assert find_app("Enlarge", "enlarge") is None
-    broken = tmp_path / "fail.py"
-    broken.write_text("import sys\nsys.exit(1)\n", encoding="utf-8")
-    with pytest.raises(EnlargeError):
-        EnlargeClient([sys.executable, str(broken)]).enlarge(source, scale=2, output=dest)
+    assert result.height == 2160
+    assert result.format == "avif"
+    assert _shape(seen) == _shape(_events(dry.stdout))
+    assert [item["stage"] for item in seen if item["type"] == "progress"] == [
+        "queued", "waiting_gpu", "loading", "tiles", "encoding",
+    ]
+    accepted = seen[0]
+    assert accepted["type"] == "accepted"
+    assert accepted["id"] == "1"
+    assert accepted["queue_pos"] == 0
+    done = seen[-1]
+    assert done["ms"] == 12
+    call = json.loads(Path(str(dest) + ".call.json").read_text(encoding="utf-8"))
+    assert call["parent_env"] == str(os.getpid())
+    assert call["argv"][call["argv"].index("--parent-lock-pid") + 1] == str(os.getpid())
+    assert call["argv"][call["argv"].index("--long-side") + 1] == "3840"
+    assert "--scale" not in call["argv"]
+    assert "enlarge: log" not in str(result)
+
+
+@pytest.mark.parametrize("code", _EXIT_CODES)
+def test_exit_codes_map_to_user_messages(tmp_path, monkeypatch, code):
+    source = tmp_path / "in.avif"
+    source.write_bytes(b"in")
+    dest = tmp_path / f"out-{code}.avif"
+    monkeypatch.setenv("ENLARGE_FAKE_EXIT", str(code))
+    expected = exit_error(code)
+    with pytest.raises(EnlargeError) as caught:
+        EnlargeClient([sys.executable, str(FAKE)]).enlarge(source, output=dest)
+    assert caught.value.code == expected.code
+    assert str(caught.value) == str(expected)
+    assert caught.value.retryable is expected.retryable
+    assert "raw cli detail" not in str(caught.value)
+    assert "foo" not in str(caught.value)
+    assert "enlarge: log" not in str(caught.value)
+    if code == 7:
+        assert "Download the upscale model in Voxprint AI Enlarge" in str(caught.value)
+
+
+def test_unknown_exit_uses_the_internal_message(tmp_path, monkeypatch):
+    source = tmp_path / "in.avif"
+    source.write_bytes(b"in")
+    monkeypatch.setenv("ENLARGE_FAKE_EXIT", "99")
+    with pytest.raises(EnlargeError) as caught:
+        EnlargeClient([sys.executable, str(FAKE)]).enlarge(source, output=tmp_path / "out.avif")
+    assert str(caught.value) == str(exit_error(1))
+    assert caught.value.code == "internal"
 
 
 def test_windows_enlarge_override_keeps_backslashes(monkeypatch):
@@ -103,3 +190,35 @@ def test_capabilities_probe_is_cached(tmp_path, monkeypatch):
     cached = client.capabilities()
     assert cached is not None and cached["version"] == "0.1.0"
     assert Path(tmp_path / "cache" / "voxprint" / "enlarge-capabilities.json").is_file()
+
+
+@pytest.mark.parametrize(
+    ("protocol", "gpu", "enabled"),
+    [
+        (1, "ok", True),
+        (1, "warn", True),
+        (1, "none", False),
+        (0, "ok", False),
+    ],
+)
+def test_capabilities_json_is_the_enable_state(tmp_path, monkeypatch, protocol, gpu, enabled):
+    monkeypatch.setenv("CANVAS_ENLARGE_EXE", f"{sys.executable} {FAKE}")
+    monkeypatch.setenv("CANVAS_ENLARGE_VERSION", f"{protocol}-{gpu}")
+    monkeypatch.setenv("CANVAS_CACHE", str(tmp_path / "cache" / f"{protocol}-{gpu}"))
+    monkeypatch.setenv("ENLARGE_FAKE_PROTOCOL", str(protocol))
+    monkeypatch.setenv("ENLARGE_FAKE_GPU", gpu)
+    client = EnlargeClient()
+    assert client.installed()
+    assert client.ready() is enabled
+    assert capabilities_ready(client.capabilities()) is enabled
+
+
+def test_missing_capabilities_disables_fourk(tmp_path, monkeypatch):
+    script = tmp_path / "down.py"
+    script.write_text("import sys\nsys.exit(1)\n", encoding="utf-8")
+    monkeypatch.setenv("CANVAS_ENLARGE_EXE", f"{sys.executable} {script}")
+    monkeypatch.setenv("CANVAS_CACHE", str(tmp_path / "cache"))
+    client = EnlargeClient()
+    assert client.installed()
+    assert client.ready() is False
+    assert client.capabilities() is None

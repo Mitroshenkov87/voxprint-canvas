@@ -8,11 +8,15 @@ from canvas.safety.inputs import ImageRole
 
 
 class Tier(Enum):
+    """16 GB, or 24 GB and above."""
+
     GB16 = "16gb"
     GB24 = "24gb"
 
 
 class Mode(Enum):
+    """One picture operation the window can run."""
+
     TEXT = "text"
     TEXT_CREATIVE = "text-creative"
     RESTYLE = "restyle"

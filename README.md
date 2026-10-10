@@ -34,6 +34,10 @@ Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE). Models downloaded by th
 
 The next version, and the plans after it, are in [ROADMAP.md](ROADMAP.md).
 
+## Documentation
+
+The docs site is published from this repository: <https://mitroshenkov87.github.io/voxprint-canvas/>.
+
 ## ☕ Support the Project
 
 If you find this project useful and would like to support its development, you can buy me a coffee!

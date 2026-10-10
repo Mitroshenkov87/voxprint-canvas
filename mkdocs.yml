@@ -1,0 +1,41 @@
+site_name: Voxprint AI Canvas
+site_url: https://mitroshenkov87.github.io/voxprint-canvas/
+repo_url: https://github.com/Mitroshenkov87/voxprint-canvas
+repo_name: Mitroshenkov87/voxprint-canvas
+docs_dir: docs
+exclude_docs: |
+  ARCHITECTURE.md
+  RELEASE-NOTES-TEMPLATE.md
+theme:
+  name: material
+nav:
+  - Home: index.md
+  - Command line: cli.md
+  - API:
+      - App: api/app.md
+      - Core: api/core.md
+      - Infrastructure: api/infra.md
+      - Models: api/models.md
+      - Pipeline: api/pipeline.md
+      - Window: api/ui.md
+      - Checks: api/safety.md
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [.]
+          options:
+            docstring_style: google
+            show_source: false
+            show_root_heading: true
+            show_root_full_path: false
+            members_order: source
+            filters:
+              - "!^_"
+            merge_init_into_class: true
+            show_if_no_docstring: false
+            summary: true
+markdown_extensions:
+  - admonition
+  - pymdownx.superfences

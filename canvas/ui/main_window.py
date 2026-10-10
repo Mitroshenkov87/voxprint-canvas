@@ -145,6 +145,7 @@ class MainWindow(QWidget):
         return page
 
     def set_enlarge_ready(self, ready: bool) -> None:
+        """Enable 4K when Enlarge can run, and show the install hint otherwise."""
         self.fourk.setEnabled(ready)
         self.fourk_hint.setVisible(not ready)
         self.fourk.setToolTip("" if ready else ENLARGE_HINT)
@@ -163,6 +164,7 @@ class MainWindow(QWidget):
         self._select_aspect(closest_aspect(width, height))
 
     def current_aspect(self) -> str:
+        """The selected aspect ratio, or ``1:1`` when none is selected."""
         button = self.aspects.checkedButton()
         if button is None:
             return "1:1"
@@ -208,6 +210,7 @@ class MainWindow(QWidget):
         self._aspect_touched = True
 
     def current_mode(self, tab_index: int) -> Mode:
+        """The mode selected on the text tab or the image tab."""
         if tab_index == 0:
             return self.creative.currentData()
         return self.image_mode.currentData()

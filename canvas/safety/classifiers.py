@@ -15,6 +15,8 @@ class GuardVerdict:
 
 @dataclass(frozen=True)
 class Face:
+    """One face box in image pixels."""
+
     x: int
     y: int
     width: int
@@ -22,11 +24,15 @@ class Face:
 
 
 class PromptGuard(Protocol):
+    """Reads one prompt."""
+
     def assess(self, text: str) -> GuardVerdict:
         """Classify one prompt. Raising refuses generation."""
 
 
 class ZeroShot(Protocol):
+    """Scores text and pictures against a fixed label list."""
+
     def score_text(self, text: str, labels: Sequence[str]) -> dict[str, float]:
         """SigLIP2 text scores for the fixed labels."""
 
@@ -35,15 +41,21 @@ class ZeroShot(Protocol):
 
 
 class FaceDetector(Protocol):
+    """Finds face boxes in one picture."""
+
     def detect(self, image: RawImage) -> Sequence[Face]:
         """YuNet boxes. An empty sequence means no face, not a failure."""
 
 
 class AgeEstimator(Protocol):
+    """Estimates one age for each face box."""
+
     def estimate(self, image: RawImage, faces: Sequence[Face]) -> Sequence[float]:
         """Apparent age in years, one float per face, lower-bound conservative."""
 
 
 class NsfwDetector(Protocol):
+    """Scores one picture."""
+
     def sexual_score(self, image: RawImage) -> float:
         """Probability that the image is sexual, from 0 to 1."""

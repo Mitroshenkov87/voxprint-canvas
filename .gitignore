@@ -36,3 +36,6 @@ audit-report.txt
 .enlarge-release/
 .app/
 .tools/
+# MkDocs output and the CLI page written at docs build time
+/site/
+docs/cli.md

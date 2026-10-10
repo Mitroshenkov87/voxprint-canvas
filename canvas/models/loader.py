@@ -1,4 +1,4 @@
-"""Open a generator and the classifier stack from the registry.
+"""Open a generator and the check stack from the registry.
 
 Weights are not downloaded here. A missing pin, a missing file or a bad hash
 refuses the stack. The generator stub records the diffusers plan and refuses
@@ -50,7 +50,7 @@ def ensure_weights(spec: ModelSpec, root: Path) -> None:
 
 
 def load_safety_stack(catalog: Catalog, root: Path) -> SafetyStack:
-    """Build the five adapters after every safety weight has been checked."""
+    """Open the check stack after every weight file is verified."""
     for role in _SAFETY_ROLES:
         found = catalog.by_role(role)
         if len(found) != 1:
@@ -60,6 +60,7 @@ def load_safety_stack(catalog: Catalog, root: Path) -> SafetyStack:
 
 
 def load_catalog_stack(root: Path, catalog: Catalog | None = None) -> SafetyStack:
+    """Open the check stack from the registry after every weight file is verified."""
     return load_safety_stack(catalog or load_catalog(), root)
 
 
@@ -86,6 +87,7 @@ class ZImageGenerator:
         self.ledger.drop_all()
 
     def generate(self, screened: ScreenedInput, width: int | None = None, height: int | None = None) -> RawImage:
+        """Record the plan. A 16 GB BF16 job schedules memory, then generation still stops."""
         if type(screened) is not ScreenedInput:
             raise TypeError("the generator only accepts a ScreenedInput")
         if width is not None and height is not None:

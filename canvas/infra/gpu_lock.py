@@ -32,10 +32,11 @@ _ERROR_INVALID_PARAMETER = 87
 
 
 class GpuLockTimeout(TimeoutError):
-    pass
+    """Another suite app holds the GPU lock."""
 
 
 def lock_path() -> Path:
+    """The suite lock file. ``VOXPRINT_GPU_LOCK`` overrides the temp path."""
     override = os.environ.get("VOXPRINT_GPU_LOCK", "").strip()
     if override:
         return Path(override)
@@ -111,6 +112,7 @@ def _pid_alive(pid: object) -> bool:
 
 
 def read_lock(path: Path) -> dict[str, Any] | None:
+    """The lock object, None when the file is absent, or ``{}`` when it is unreadable."""
     try:
         text = path.read_text(encoding="utf-8-sig")
     except FileNotFoundError:
@@ -171,6 +173,7 @@ def try_acquire(job: str, eta_s: float, path: Path, owner: str = OWNER) -> dict[
 
 
 def release(path: Path, owner: str = OWNER) -> None:
+    """Remove the lock when this process owns it."""
     current = read_lock(path)
     if current is not None and current.get("owner") == owner and current.get("pid") in (None, os.getpid()):
         try:

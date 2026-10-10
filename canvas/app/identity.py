@@ -21,6 +21,7 @@ def build_file() -> Path:
 
 
 def load_build() -> dict[str, Any]:
+    """The ``BUILD.json`` object."""
     data = json.loads(build_file().read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ValueError("BUILD.json must be an object")

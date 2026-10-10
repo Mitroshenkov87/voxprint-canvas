@@ -3,8 +3,8 @@
 Adapted from Voxprint AI Audiobook Builder ``tools/audit.py``
 (Apache-2.0, Copyright Aleksandr Mitroshenkov).
 
-Runs ruff, mypy, bandit, pip-audit, vulture, radon and gitleaks. Prints one summary (and, on GitHub Actions, writes
-that same summary to the job summary) and the full text to ``audit-report.txt``.
+Runs ruff, mypy, bandit, pip-audit, vulture, radon, interrogate and gitleaks. Prints one summary (and, on GitHub
+Actions, writes that same summary to the job summary) and the full text to ``audit-report.txt``.
 
     python -m pip install -r requirements-audit.txt
     python tools/audit.py --python <app venv python> [--gitleaks-mode diff|full] [--gitleaks-range A..B]
@@ -13,9 +13,10 @@ that same summary to the job summary) and the full text to ``audit-report.txt``.
 checks that environment. The other tools run with the interpreter that launches this script.
 
 Exit code 1 when a blocking finding exists: a ruff error, a mypy error, a bandit issue of high severity, a gitleaks
-finding, or a pip-audit advisory of high or critical severity that is not listed in ``tools/audit-allowlist.toml``.
-An advisory whose severity cannot be read is treated as high, so a parser miss cannot hide it. Vulture and radon
-are report-only and never change the exit code. A blocking tool that is not installed also fails the run.
+finding, public docstring coverage under 65%, or a pip-audit advisory of high or critical severity that is not listed
+in ``tools/audit-allowlist.toml``. An advisory whose severity cannot be read is treated as high, so a parser miss
+cannot hide it. Vulture and radon are report-only and never change the exit code. A blocking tool that is not
+installed also fails the run.
 """
 from __future__ import annotations
 
@@ -40,6 +41,7 @@ ROOT = Path(__file__).resolve().parent.parent
 REPORT = ROOT / "audit-report.txt"
 ALLOWLIST = ROOT / "tools" / "audit-allowlist.toml"
 TARGETS = ["canvas", "tools", "main.py"]
+INTERROGATE_MIN = 65.0
 BLOCKING_SEVERITY = {"high", "critical", "unknown"}
 _CVSS_V3 = {
     "AV": {"N": 0.85, "A": 0.62, "L": 0.55, "P": 0.2},
@@ -54,6 +56,8 @@ _FINDING_LINE = re.compile(r":\d+:\d+: ")
 
 @dataclass(frozen=True)
 class Advisory:
+    """One accepted pip-audit id, with the reason it stays listed."""
+
     id: str
     reason: str
     package: str = ""
@@ -61,6 +65,8 @@ class Advisory:
 
 @dataclass
 class Check:
+    """One audit tool: a short summary, the full text, and whether it blocks."""
+
     name: str
     summary: str
     detail: str
@@ -176,6 +182,7 @@ def cvss_v3_base(vector: str) -> Optional[float]:
 
 
 def score_band(score: float) -> str:
+    """CVSS band for a numeric base score."""
     if score >= 9.0:
         return "critical"
     if score >= 7.0:
@@ -254,6 +261,7 @@ def lookup_severity(ids: Sequence[str], fetch: Callable[[str], Optional[Mapping[
 
 
 def fetch_osv(ident: str, timeout: float = 20.0) -> Optional[Mapping[str, Any]]:
+    """One OSV document, or None when the lookup fails."""
     url = "https://api.osv.dev/v1/vulns/" + urllib.parse.quote(ident)
     req = urllib.request.Request(url, headers={"User-Agent": "voxprint-audiobook-audit", "Accept": "application/json"})
     try:
@@ -274,6 +282,8 @@ def _vuln_ids(vuln: Mapping[str, Any]) -> List[str]:
 
 @dataclass
 class PipFinding:
+    """One advisory from pip-audit, with the severity used by the gate."""
+
     package: str
     version: str
     ident: str
@@ -284,6 +294,7 @@ class PipFinding:
 
     @property
     def blocks(self) -> bool:
+        """True for a high or critical advisory that is not allowlisted."""
         return self.severity in BLOCKING_SEVERITY and not self.accepted
 
 
@@ -347,6 +358,7 @@ def classify_pip(payload: Mapping[str, Any], allow: Sequence[Advisory],
 
 
 def ruff_check(py: str) -> Check:
+    """Ruff errors only. Style findings do not count."""
     # Real errors only: pyflakes (F, including undefined names) and syntax (E9). Style (E501) and pyupgrade (UP) are out.
     code, out, err = _run([py, "-m", "ruff", "check", "--select", "F,E9", "--ignore", "E501,UP",
                            "--output-format", "concise", "--no-cache", *TARGETS])
@@ -359,6 +371,7 @@ def ruff_check(py: str) -> Check:
 
 
 def mypy_check(py: str) -> Check:
+    """Non-strict mypy on the public modules."""
     cache = os.path.join(tempfile.gettempdir(), "vx-mypy")
     code, out, err = _run([py, "-m", "mypy", "--config-file", str(ROOT / "mypy.ini"), "--no-error-summary",
                            "--hide-error-context", "--no-color-output", "--cache-dir", cache, *TARGETS], timeout=1200)
@@ -371,6 +384,7 @@ def mypy_check(py: str) -> Check:
 
 
 def bandit_check(py: str) -> Check:
+    """Bandit medium and high. Only a high finding blocks."""
     # -ll: medium and high (low is the usual subprocess-import noise). Only HIGH blocks.
     code, out, err = _run([py, "-m", "bandit", "-r", *TARGETS, "-q", "-f", "json", "-ll", "-ii", "-x", "tests"])
     if code == 127 or _missing(err):
@@ -418,6 +432,7 @@ def _freeze(app_py: str) -> Tuple[Optional[str], str]:
 
 def pip_audit_check(py: str, app_py: str, allow: Sequence[Advisory],
                     fetch: Callable[[str], Optional[Mapping[str, Any]]] = fetch_osv) -> Check:
+    """Advisories in the app environment. High and critical block unless allowlisted."""
     frozen, err = _freeze(app_py)
     if frozen is None:
         return Check("pip-audit", "failed to list packages", err, True)
@@ -460,6 +475,7 @@ def pip_audit_check(py: str, app_py: str, allow: Sequence[Advisory],
 
 
 def vulture_check(py: str) -> Check:
+    """Unused-code report. It never blocks."""
     code, out, err = _run([py, "-m", "vulture", *TARGETS, "--min-confidence", "80"])
     if code == 127 or _missing(err):
         return Check("vulture (report)", "skipped (not installed)", err.strip(), False)
@@ -468,6 +484,7 @@ def vulture_check(py: str) -> Check:
 
 
 def radon_check(py: str) -> Check:
+    """Functions at cyclomatic rank D or worse. It never blocks."""
     code, out, err = _run([py, "-m", "radon", "cc", "-n", "D", "-s", "-j", *TARGETS])
     if code == 127 or _missing(err):
         return Check("radon (report)", "skipped (not installed)", err.strip(), False)
@@ -499,6 +516,7 @@ def _parse_gitleaks(text: str) -> List[dict]:
 
 
 def gitleaks_check(mode: str, rev_range: str) -> Check:
+    """Secret scan of the whole history, or of one git range."""
     binary = shutil.which("gitleaks")
     if not binary:
         return Check("gitleaks", "not installed", "gitleaks is not on PATH", True)
@@ -533,6 +551,29 @@ def gitleaks_check(mode: str, rev_range: str) -> Check:
     return Check(label, f"{len(rows)} finding(s)", "\n".join(lines), bool(rows))
 
 
+def interrogate_check(py: str) -> Check:
+    """Public docstring coverage. Below 65% blocks. Private names are not counted."""
+    cmd = [
+        py, "-m", "interrogate", *TARGETS,
+        "--config", str(ROOT / "pyproject.toml"),
+        "--fail-under", str(int(INTERROGATE_MIN)),
+        "--ignore-private", "--ignore-semiprivate", "--ignore-magic",
+        "--ignore-nested-functions", "--ignore-init-method",
+        "--no-color", "--omit-covered-files", "-v",
+    ]
+    code, out, err = _run(cmd, timeout=600)
+    text = (out + "\n" + err).strip()
+    if code == 127 or _missing(err):
+        return Check("interrogate (public, 65%)", "not installed", err.strip(), True)
+    if code not in (0, 1):
+        return Check("interrogate (public, 65%)", "failed to run", text, True)
+    found = re.search(r"actual:\s*([0-9]+(?:\.[0-9]+)?)%", text)
+    if found is None:
+        return Check("interrogate (public, 65%)", "failed to run", text, True)
+    actual = float(found.group(1))
+    return Check("interrogate (public, 65%)", f"{actual:.1f}%", text, actual < INTERROGATE_MIN)
+
+
 def _summary_text(checks: Sequence[Check]) -> str:
     width = max(len(item.name) for item in checks)
     lines = ["Voxprint audit", ""]
@@ -559,6 +600,7 @@ def _write_summary(text: str) -> None:
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
+    """Run every check and return 1 when a blocking finding exists."""
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     parser.add_argument("--python", default=sys.executable, help="interpreter with the app's dependencies (for pip-audit)")
     parser.add_argument("--gitleaks-mode", choices=("full", "diff"), default="full",
@@ -579,6 +621,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             pip_audit_check(py, args.python, allow),
             vulture_check(py),
             radon_check(py),
+            interrogate_check(py),
             gitleaks_check(args.gitleaks_mode, args.gitleaks_range),
         ]
     parts = [f"===== {item.name}: {item.summary}\n{item.detail.strip()}\n" for item in checks]

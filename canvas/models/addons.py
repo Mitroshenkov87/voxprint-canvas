@@ -35,6 +35,8 @@ Transport = Callable[[str], bytes]
 
 @dataclass(frozen=True)
 class Addon:
+    """One opt-in third-party model. It stays off until you ask for it."""
+
     id: str
     kind: str
     base: str
@@ -48,9 +50,12 @@ class Addon:
 
 @dataclass(frozen=True)
 class AddonCatalog:
+    """The curated add-on list."""
+
     addons: tuple[Addon, ...]
 
     def by_id(self, addon_id: str) -> Addon:
+        """The add-on with this id."""
         for addon in self.addons:
             if addon.id == addon_id:
                 return addon

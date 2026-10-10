@@ -9,6 +9,8 @@ from canvas.safety.image import SafeImage
 
 
 class OutputFormat(Enum):
+    """Containers the app can write."""
+
     AVIF = "avif"
     JXL = "jxl"
     WEBP = "webp"
@@ -43,6 +45,7 @@ def parse_format(name: str) -> OutputFormat:
 
 
 def extension(fmt: OutputFormat) -> str:
+    """File suffix for one output format, including the dot."""
     if fmt is OutputFormat.AVIF:
         return _EXTENSION[fmt]
     if fmt is OutputFormat.JXL:

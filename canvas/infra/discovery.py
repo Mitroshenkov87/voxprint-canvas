@@ -29,6 +29,8 @@ _CACHE_SECONDS = 24 * 60 * 60
 
 @dataclass(frozen=True)
 class AppInstall:
+    """A discovered suite app: command, version, and IPC base name."""
+
     command: list[str]
     version: str
     ipc_base: str

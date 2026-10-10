@@ -20,6 +20,7 @@ def _download(url: str, dest: Path) -> None:
 
 
 def main() -> int:
+    """Download the pinned Enlarge release, check its hash, and run the client checks."""
     # The checkout is executable. /tmp is not, on some runners, so the bundled interpreter cannot live there.
     root = Path.cwd() / ".enlarge-release"
     if root.exists():

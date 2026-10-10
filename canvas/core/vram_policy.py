@@ -16,6 +16,8 @@ from canvas.models.modes import headroom_gb
 
 @dataclass(frozen=True)
 class VramPlan:
+    """How many items fit in the memory that is free now."""
+
     batch: int
     budget_gb: float
     free_gb: float

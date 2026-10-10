@@ -8,6 +8,8 @@ from canvas.app.info import APP_NAME
 
 
 class AboutDialog(QDialog):
+    """Shows the app name and the release identity."""
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("About")

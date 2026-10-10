@@ -36,6 +36,8 @@ class BaseNotSelected(Exception):
 
 @dataclass(frozen=True)
 class CallPlan:
+    """The diffusers call selected for one request. No weights are loaded."""
+
     diffusers: str
     pipeline_class: str
     repos: tuple[str, ...]

@@ -13,6 +13,8 @@ SIDE = 360
 
 
 class Splash(QSplashScreen):
+    """The start-up window."""
+
     def __init__(self) -> None:
         self.version_line = version_label()
         pixmap = QPixmap(SIDE, SIDE)
@@ -20,6 +22,7 @@ class Splash(QSplashScreen):
         super().__init__(pixmap)
 
     def drawContents(self, painter: QPainter) -> None:  # noqa: N802 - Qt name
+        """Paint the app name and the release identity."""
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         font = QFont(self.font())
         font.setPixelSize(22)
@@ -42,6 +45,7 @@ class Splash(QSplashScreen):
 
 
 def show_splash() -> Splash:
+    """Show the splash and return it so the window can finish it."""
     splash = Splash()
     splash.show()
     QApplication.processEvents()

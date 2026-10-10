@@ -1,4 +1,4 @@
-# Code audit (tools/audit.py): ruff, mypy, bandit, pip-audit, vulture, radon, gitleaks.
+# Code audit (tools/audit.py): ruff, mypy, bandit, pip-audit, vulture, radon, interrogate, gitleaks.
 # Generation extras (torch, diffusers) are not installed. Vulture and radon never fail the job.
 name: audit
 on:

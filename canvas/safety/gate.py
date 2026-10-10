@@ -39,7 +39,7 @@ log = logging.getLogger("voxprint.canvas.safety")
 
 
 class SafetyError(Exception):
-    """Generation did not produce a releasable image. ``str`` is the neutral UI message."""
+    """The request stopped. The message is safe to show."""
 
     user_message = UNAVAILABLE_MESSAGE
 
@@ -52,20 +52,20 @@ class SafetyError(Exception):
 
 
 class GenerationBlocked(SafetyError):
-    """The prompt or the image is sexual or suggestive and involves a minor."""
+    """The request cannot be completed."""
 
     user_message = BLOCKED_MESSAGE
 
 
 class SafetyUnavailable(SafetyError):
-    """A classifier could not be trusted, so generation is refused."""
+    """A check could not finish, so the request stops."""
 
     user_message = UNAVAILABLE_MESSAGE
 
 
 @dataclass(frozen=True)
 class SafetyStack:
-    """The five classifiers. All of them must succeed on every generation."""
+    """What the gate needs before it can run."""
 
     guard: PromptGuard
     zeroshot: ZeroShot
@@ -125,13 +125,13 @@ def _guard_sexual(safety: str, categories: Sequence[str]) -> bool:
 
 
 class AgeGate:
-    """Hard gate. Construct it with a stack; there is no off switch."""
+    """Decides whether a request may continue. There is no off switch."""
 
     def __init__(self, stack: SafetyStack) -> None:
         self._stack = stack
 
     def review_prompt(self, text: str) -> None:
-        """Refuse before the generator runs. Raises ``GenerationBlocked`` or ``SafetyUnavailable``."""
+        """Decide whether a prompt may continue."""
         signals = scan(text)
         verdict = _wait(lambda: self._stack.guard.assess(text), timeout=CLASSIFIER_TIMEOUT_S)
         if verdict.safety not in ("safe", "controversial", "unsafe"):
@@ -145,10 +145,7 @@ class AgeGate:
             raise GenerationBlocked("prompt")
 
     def release_request(self, prompt: str, mode: str, inputs: Sequence[PendingInput] = ()) -> ScreenedInput:
-        """Screen the prompt and every input image, then issue a ``ScreenedInput``.
-
-        The generator is not called from here. On any refusal the input buffers are wiped.
-        """
+        """Accept a prompt and its images, or stop the request."""
         staged: list[bytearray] = []
         try:
             self.review_prompt(prompt)
@@ -168,7 +165,7 @@ class AgeGate:
                 item.image.wipe()
 
     def review_image(self, raw: RawImage) -> SafeImage:
-        """Release one output image, or wipe it and refuse."""
+        """Decide whether a finished picture may be kept."""
         try:
             self._check_image(raw, "image")
             return issue(raw)
@@ -176,6 +173,13 @@ class AgeGate:
             raw.wipe()
 
     def _check_image(self, raw: RawImage, code: str) -> None:
+        """Run the image checks in a fixed order.
+
+        Faces and ages are read together and must agree in count. A young face
+        combined with a sexual score, or a score that already joins those two,
+        raises ``GenerationBlocked``. A missing, non-numeric, or timed-out result
+        raises ``SafetyUnavailable``. The caller wipes the picture either way.
+        """
         faces = _wait(lambda: self._stack.faces.detect(raw), timeout=IMAGE_TIMEOUT_S)
         ages = _wait(lambda: self._stack.ages.estimate(raw, faces), timeout=IMAGE_TIMEOUT_S)
         if len(tuple(ages)) != len(tuple(faces)):

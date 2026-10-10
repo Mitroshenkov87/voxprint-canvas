@@ -1,3 +1,20 @@
 {
-  "addons": []
+  "addons": [
+    {
+      "id": "chroma1-hd",
+      "kind": "model",
+      "author": "lodestones",
+      "licence": "Apache-2.0 (as stated upstream)",
+      "revision": "0e0c60ece1e82b17cb7f77342d765ba5024c40c0",
+      "upstream": "https://huggingface.co/lodestones/Chroma1-HD/resolve/0e0c60ece1e82b17cb7f77342d765ba5024c40c0",
+      "sha256": {
+        "Chroma1-HD.safetensors": "d446d9695d08276f61e53653e025289dd96f7a489c27982a1fa54ecabc06642a",
+        "text_encoder/model-00001-of-00002.safetensors": "ec87bffd1923e8b2774a6d240c922a41f6143081d52cf83b8fe39e9d838c893e",
+        "text_encoder/model-00002-of-00002.safetensors": "a5640855b301fcdbceddfa90ae8066cd9414aff020552a201a255ecf2059da00",
+        "transformer/diffusion_pytorch_model-00001-of-00002.safetensors": "59f0b26eccaabb8301e4166e653f1bcdebd7c46a4a07b02fe33d7a2c46d78eba",
+        "transformer/diffusion_pytorch_model-00002-of-00002.safetensors": "65e6541afdabbb96568a3f8975eeef929f0a7e0eef3d2c4741b1bf911ac3a6d5",
+        "vae/diffusion_pytorch_model.safetensors": "f5b59a26851551b67ae1fe58d32e76486e1e812def4696a4bea97f16604d40a3"
+      }
+    }
+  ]
 }

@@ -1,4 +1,4 @@
-"""Third-party add-ons stay off, empty, and unable to change the content checks."""
+"""Chroma is opt-in. One CivitAI model stays excluded. Mirrors cannot be attached."""
 import hashlib
 import inspect
 import json
@@ -8,7 +8,7 @@ import pytest
 
 from canvas.models.addons import download_addon, load_addons, refuse_excluded, release_addon_request
 from canvas.models.downloader import DownloadError
-from canvas.models.excluded_weights import EXCLUDED_REPOS, EXCLUDED_SHA256
+from canvas.models.excluded_weights import EXCLUDED_MODEL_IDS, EXCLUDED_SHA256
 from canvas.models.registry import RegistryError
 from canvas.safety.constants import APPARENT_AGE_UNCERTAIN_UNDER, SEXUAL_SCORE_BLOCK_AT
 from canvas.safety.classifiers import Face
@@ -16,9 +16,9 @@ from canvas.safety.gate import GenerationBlocked, SafetyUnavailable
 from canvas.safety.inputs import ImageRole, PendingInput
 from tests.fakes import World, rgb
 
+REVISION = "0e0c60ece1e82b17cb7f77342d765ba5024c40c0"
 CHROMA_SHA = "d446d9695d08276f61e53653e025289dd96f7a489c27982a1fa54ecabc06642a"
-VAE_SHA = "f5b59a26851551b67ae1fe58d32e76486e1e812def4696a4bea97f16604d40a3"
-CHROMA_URL = "https://huggingface.co/lodestones/Chroma1-HD/resolve/0e0c60ece1e82b17cb7f77342d765ba5024c40c0/Chroma1-HD.safetensors"
+EXCLUDED_URL = "https://civarchive.com/models/2299623"
 
 
 def _entry(**overrides) -> dict:
@@ -43,28 +43,43 @@ def _write(tmp_path: Path, rows: list[dict]) -> Path:
     return path
 
 
-def test_the_shipped_list_is_empty_and_chroma_is_hard_coded():
+def test_chroma_is_curated_and_one_civitai_model_is_excluded():
     catalog = load_addons()
-    assert catalog.addons == ()
-    assert "lodestones/Chroma1-HD" in EXCLUDED_REPOS
-    assert "lodestones/Chroma" in EXCLUDED_REPOS
-    assert CHROMA_SHA in EXCLUDED_SHA256
-    assert VAE_SHA not in EXCLUDED_SHA256
+    assert [addon.id for addon in catalog.addons] == ["chroma1-hd"]
+    chroma = catalog.by_id("chroma1-hd")
+    assert chroma.kind == "model" and chroma.base == ""
+    assert chroma.author == "lodestones"
+    assert chroma.licence == "Apache-2.0 (as stated upstream)"
+    assert chroma.revision == REVISION and chroma.revision.startswith("0e0c60ec")
+    assert chroma.upstream == f"https://huggingface.co/lodestones/Chroma1-HD/resolve/{REVISION}"
+    assert chroma.files["Chroma1-HD.safetensors"] == CHROMA_SHA
+    assert chroma.sha256 == CHROMA_SHA
+    assert len(chroma.files) == 6
+    assert EXCLUDED_MODEL_IDS == frozenset({"2299623"})
+    assert CHROMA_SHA not in EXCLUDED_SHA256
+    assert "03930710409f6cf19c2cf543d76f522feab9d7197a9a6f98e854561912fabf7e" in EXCLUDED_SHA256
+    assert "3b13d8cd7cc3fcfe86725b0ad01ee5acf7f5cefeedd747a557d321520af2e01f" in EXCLUDED_SHA256
     with pytest.raises(RegistryError, match="excluded"):
-        refuse_excluded(CHROMA_URL, "ab" * 32)
+        refuse_excluded(EXCLUDED_URL, "ab" * 32)
     with pytest.raises(RegistryError, match="excluded"):
-        refuse_excluded("https://example.com/weights.safetensors", CHROMA_SHA)
+        refuse_excluded("https://civitai.com/models/2299623", "ab" * 32)
+    with pytest.raises(RegistryError, match="excluded"):
+        refuse_excluded("https://example.com/weights.safetensors", next(iter(EXCLUDED_SHA256)))
+    refuse_excluded(chroma.upstream, chroma.sha256)
 
 
-def test_a_mirror_source_cannot_be_attached(tmp_path: Path):
+@pytest.mark.parametrize("kind", ["huggingface-mirror", "kaggle", "torrent"])
+def test_a_third_party_entry_can_never_get_a_mirror_source(tmp_path: Path, kind: str):
     row = _entry()
-    row["sources"] = [{"kind": "huggingface-mirror", "uri": "https://hf-mirror.com/example/lora"}]
+    row["sources"] = [{"kind": kind, "uri": "https://example.invalid/mirror"}]
     with pytest.raises(RegistryError, match="mirror"):
         load_addons(_write(tmp_path, [row]))
-    with pytest.raises(RegistryError, match="upstream"):
-        load_addons(_write(tmp_path, [_entry(upstream="https://hf-mirror.com/example/lora/weights.safetensors")]))
+    chroma = json.loads(Path("canvas/models/third_party.json").read_text(encoding="utf-8"))
+    chroma["addons"][0]["sources"] = [{"kind": kind, "uri": "https://example.invalid/mirror"}]
+    with pytest.raises(RegistryError, match="mirror"):
+        load_addons(_write(tmp_path, chroma["addons"]))
     with pytest.raises(RegistryError, match="excluded"):
-        load_addons(_write(tmp_path, [_entry(upstream=CHROMA_URL, sha256="cd" * 32)]))
+        load_addons(_write(tmp_path, [_entry(upstream=EXCLUDED_URL, sha256="cd" * 32)]))
 
 
 def test_download_is_opt_in_upstream_and_lands_in_the_third_party_folder(tmp_path: Path):

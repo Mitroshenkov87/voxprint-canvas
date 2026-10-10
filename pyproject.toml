@@ -19,10 +19,12 @@ dev = ["pytest>=8.3", "ruff>=0.8", "mypy>=1.13", "opencv-python-headless>=4.11"]
 docs = ["mkdocs>=1.6,<2", "mkdocs-material>=9.5,<10", "mkdocstrings[python]>=0.26,<2"]
 # Generation and safety weights are not installed in CI. The worker imports them only when a pinned model is ready.
 gen = [
-    "torch>=2.5",
+    "torch>=2.6",
+    "torchvision>=0.21",
+    "accelerate>=0.31",
     "diffusers==0.41.0",
     "transformers>=4.51",
-    "torchao>=0.6",
+    "torchao>=0.15",
     "opencv-python-headless>=4.11",
     "pillow>=11",
     "imagecodecs>=2024.12",

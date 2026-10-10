@@ -7,6 +7,7 @@ from canvas.safety.adapters import (
     Qwen3GuardGen,
     SiglipZeroShot,
     YuNetFaces,
+    _pooled_features,
     apparent_age_from_bucket,
     parse_qwen3guard,
 )
@@ -25,6 +26,23 @@ def test_fairface_lower_bound_and_guard_parse():
     assert verdict.categories == ("Sexual Content or Sexual Acts",)
     with pytest.raises(SafetyUnavailable):
         parse_qwen3guard("Safety: maybe\n")
+
+
+def test_pooled_features_accepts_a_tensor_or_a_pooling_output():
+    class Tensor:
+        def norm(self, dim: int, keepdim: bool):
+            return self
+
+    tensor = Tensor()
+    assert _pooled_features(tensor) is tensor
+
+    class Output:
+        pooler_output = object()
+
+    assert _pooled_features(Output()) is Output.pooler_output
+    with pytest.raises(SafetyUnavailable) as empty:
+        _pooled_features(object())
+    assert empty.value.code == "classifier_error"
 
 
 def test_unwired_adapters_refuse():

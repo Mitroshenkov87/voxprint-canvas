@@ -70,6 +70,19 @@ def _rgb(image: RawImage) -> Image.Image:
     return Image.frombytes("RGB", (image.width, image.height), image.to_bytes())
 
 
+def _pooled_features(out: Any) -> Any:
+    """Tensor from ``get_*_features``.
+
+    Transformers 5 returns ``BaseModelOutputWithPooling``. Older releases return a tensor, which has ``norm``.
+    """
+    if hasattr(out, "norm"):
+        return out
+    pooled = getattr(out, "pooler_output", None)
+    if pooled is not None:
+        return pooled
+    raise SafetyUnavailable("classifier_error")
+
+
 class Qwen3GuardGen:
     """``Qwen/Qwen3Guard-Gen-0.6B`` prompt classifier."""
 
@@ -141,14 +154,14 @@ class SiglipZeroShot:
         label_list = list(labels)
         text_inputs = processor(text=label_list, padding="max_length", return_tensors="pt")
         with torch.no_grad():
-            text_embeds = model.get_text_features(**text_inputs)
+            text_embeds = _pooled_features(model.get_text_features(**text_inputs))
             text_embeds = text_embeds / text_embeds.norm(dim=-1, keepdim=True)
             if image is not None:
                 image_inputs = processor(images=_rgb(image), return_tensors="pt")
-                image_embeds = model.get_image_features(**image_inputs)
+                image_embeds = _pooled_features(model.get_image_features(**image_inputs))
             else:
                 image_inputs = processor(text=[text or ""], padding="max_length", return_tensors="pt")
-                image_embeds = model.get_text_features(**image_inputs)
+                image_embeds = _pooled_features(model.get_text_features(**image_inputs))
             image_embeds = image_embeds / image_embeds.norm(dim=-1, keepdim=True)
             scale = model.logit_scale.exp()
             bias = getattr(model, "logit_bias", None)

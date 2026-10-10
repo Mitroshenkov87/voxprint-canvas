@@ -1,6 +1,6 @@
 # Install into the Model Forge venv (torch + CUDA already present). Licences in README.
 diffusers>=0.36.0
-transformers>=4.56.0
+transformers>=5.14.0,<6  # CVE-2026-9856 path traversal is fixed in 5.10.1; stay on 5.14 or newer.
 accelerate
 safetensors
 pillow

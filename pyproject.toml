@@ -23,7 +23,7 @@ gen = [
     "torchvision>=0.21",
     "accelerate>=0.31",
     "diffusers==0.41.0",
-    "transformers>=4.51",
+    "transformers>=5.14.0,<6",  # CVE-2026-9856 path traversal is fixed in 5.10.1; stay on 5.14 or newer.
     "torchao>=0.15",
     "opencv-python-headless>=4.11",
     "pillow>=11",

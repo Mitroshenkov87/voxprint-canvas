@@ -8,9 +8,10 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication, QTabWidget
 
-from canvas.app.info import APP_NAME, RESPONSIBILITY, THIRD_PARTY_NOTICE
+from canvas.app.info import APP_NAME, ENLARGE_HINT, RESPONSIBILITY, THIRD_PARTY_NOTICE
 from canvas.core.formats import OutputFormat
 from canvas.models.modes import Mode, Tier
+from canvas.models.sizes import ASPECT_GROUPS
 from canvas.safety.gate import GenerationBlocked
 from canvas.ui.main_window import MainWindow
 
@@ -22,6 +23,37 @@ def app():
 
 def _labels(box):
     return [box.itemText(index) for index in range(box.count())]
+
+
+def _aspect_buttons(window):
+    return {
+        button.property("ratio"): button
+        for button in window.findChildren(type(window.generate_button), "aspect")
+    }
+
+
+def _aspect_groups(window):
+    groups = []
+    for label in window.findChildren(type(window.status), "aspect-group"):
+        parent = label.parentWidget()
+        ratios = tuple(
+            button.property("ratio")
+            for button in parent.findChildren(type(window.generate_button), "aspect")
+        )
+        groups.append((label.text(), ratios))
+    return groups
+
+
+def _ink_span(icon) -> tuple[int, int]:
+    image = icon.pixmap(22, 22).toImage()
+    xs = []
+    ys = []
+    for y in range(image.height()):
+        for x in range(image.width()):
+            if image.pixelColor(x, y).alpha() > 0:
+                xs.append(x)
+                ys.append(y)
+    return max(xs) - min(xs), max(ys) - min(ys)
 
 
 def test_16gb_hides_creative_and_instruction(app):
@@ -48,6 +80,23 @@ def test_16gb_hides_creative_and_instruction(app):
     assert window.addons_notice.text() == THIRD_PARTY_NOTICE
     window.addons_box.setChecked(False)
     assert window.addons_notice.isHidden()
+    assert _aspect_groups(window) == list(ASPECT_GROUPS)
+    buttons = _aspect_buttons(window)
+    assert all(not button.icon().isNull() for button in buttons.values())
+    wide_w, wide_h = _ink_span(buttons["16:9"].icon())
+    tall_w, tall_h = _ink_span(buttons["9:16"].icon())
+    square_w, square_h = _ink_span(buttons["1:1"].icon())
+    assert wide_w > wide_h
+    assert tall_h > tall_w
+    assert abs(square_w - square_h) <= 1
+    assert window.current_aspect() == "1:1"
+    assert window.findChild(type(window.generate_button), "orientation") is None
+    assert window.fourk.text() == "Output size: 4K"
+    assert window.fourk.isEnabled() is False
+    assert window.fourk_hint.text() == ENLARGE_HINT
+    assert window.fourk_hint.isHidden() is False
+    tabs.setCurrentIndex(1)
+    assert window.aspect_row.isEnabled()
     window.close()
 
 
@@ -82,3 +131,29 @@ def test_24gb_offers_creative_and_instruction_and_reports_status(app):
     window.generate_button.click()
     assert window.status.text() == "This request cannot be completed."
     window.close()
+
+
+def test_aspect_groups_and_input_default_and_fourk_when_enlarge_is_installed(app):
+    del app
+    window = MainWindow(lambda prompt, mode, fmt: "ok", Tier.GB24, enlarge_ready=True)
+    window.show()
+    assert window.fourk.isEnabled() is True
+    assert window.fourk_hint.isHidden() is True
+    buttons = _aspect_buttons(window)
+    buttons["16:9"].click()
+    assert window.current_aspect() == "16:9"
+    assert buttons["16:9"].isChecked()
+    buttons["9:16"].click()
+    assert window.current_aspect() == "9:16"
+    assert buttons["16:9"].isChecked() is False
+    buttons["21:9"].click()
+    assert window.current_aspect() == "21:9"
+    fresh = MainWindow(lambda prompt, mode, fmt: "ok", Tier.GB16)
+    fresh.set_input_size(928, 1664)
+    assert fresh.current_aspect() == "9:16"
+    fresh_buttons = _aspect_buttons(fresh)
+    fresh_buttons["1:1"].click()
+    fresh.set_input_size(1664, 928)
+    assert fresh.current_aspect() == "1:1"
+    window.close()
+    fresh.close()

@@ -55,11 +55,27 @@ class ModelSpec:
 
 
 @dataclass(frozen=True)
+class FrameSize:
+    width: int
+    height: int
+
+
+@dataclass(frozen=True)
+class SizeTable:
+    """Native and ~2K frames for one model family. Both axes are multiples of ``multiple``."""
+
+    multiple: int
+    native: dict[str, FrameSize]
+    twok: dict[str, FrameSize]
+
+
+@dataclass(frozen=True)
 class Catalog:
     diffusers: str
     models: tuple[ModelSpec, ...]
     default_text_base: str | None = None
     text_bases: tuple[str, ...] = ()
+    sizes: dict[str, SizeTable] | None = None
 
     def by_id(self, model_id: str) -> ModelSpec:
         for spec in self.models:
@@ -141,7 +157,51 @@ def load_catalog(path: Path | None = None) -> Catalog:
         tiers = {spec.tier for spec in models if spec.text_base == family}
         if "16gb" not in tiers or "24gb" not in tiers:
             raise RegistryError("a text model is missing a tier")
-    return Catalog(diffusers, models, default_text_base, text_bases)
+    sizes = _sizes(raw.get("sizes"), text_bases)
+    return Catalog(diffusers, models, default_text_base, text_bases, sizes)
+
+
+_ASPECTS = ("1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9", "9:21")
+_FOUR_K_LONG = 3840
+
+
+def _frame(value: object, multiple: int, aspect: str) -> FrameSize:
+    if not isinstance(value, list) or len(value) != 2:
+        raise RegistryError(f"{aspect} needs a width and a height")
+    width, height = int(value[0]), int(value[1])
+    if width < 1 or height < 1 or width % multiple or height % multiple:
+        raise RegistryError(f"{aspect} is not a multiple of {multiple}")
+    return FrameSize(width, height)
+
+
+def _band(raw: object, multiple: int, kind: str) -> dict[str, FrameSize]:
+    if not isinstance(raw, dict):
+        raise RegistryError(f"the {kind} size table is missing")
+    frames = {aspect: _frame(raw.get(aspect), multiple, aspect) for aspect in _ASPECTS}
+    if kind == "twok":
+        for aspect, frame in frames.items():
+            long_side = max(frame.width, frame.height)
+            if long_side >= _FOUR_K_LONG or _FOUR_K_LONG % long_side:
+                raise RegistryError(f"{aspect} does not upscale to 4K")
+            factor = _FOUR_K_LONG // long_side
+            if factor not in (2, 4):
+                raise RegistryError(f"{aspect} does not upscale to 4K")
+    return frames
+
+
+def _sizes(raw: object, families: tuple[str, ...]) -> dict[str, SizeTable]:
+    if not isinstance(raw, dict):
+        raise RegistryError("the size table is missing")
+    tables: dict[str, SizeTable] = {}
+    for family in families:
+        row = raw.get(family)
+        if not isinstance(row, dict):
+            raise RegistryError(f"{family} has no sizes")
+        multiple = int(row.get("multiple") or 0)
+        if multiple not in (16, 64):
+            raise RegistryError(f"{family} needs a 16 or 64 size step")
+        tables[family] = SizeTable(multiple, _band(row.get("native"), multiple, "native"), _band(row.get("twok"), multiple, "twok"))
+    return tables
 
 
 def source_order(spec: ModelSpec) -> tuple[str, ...]:

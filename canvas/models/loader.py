@@ -68,10 +68,18 @@ class ZImageGenerator:
         self.catalog = catalog
         self.tier = tier
         self.last_plan: CallPlan | None = None
+        self.last_size: tuple[int, int] | None = None
+        self.unloaded = False
 
-    def generate(self, screened: ScreenedInput) -> RawImage:
+    def unload(self) -> None:
+        """Drop a loaded pipeline. The stub records the call so a 16 GB chain can be checked."""
+        self.unloaded = True
+
+    def generate(self, screened: ScreenedInput, width: int | None = None, height: int | None = None) -> RawImage:
         if type(screened) is not ScreenedInput:
             raise TypeError("the generator only accepts a ScreenedInput")
+        if width is not None and height is not None:
+            self.last_size = (width, height)
         plan = build_plan(self.catalog, screened, self.tier)
         self.last_plan = plan
         raise ModelNotReady(plan)

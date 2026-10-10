@@ -64,6 +64,9 @@ QFrame#card {{ background: {card_bg}; border: 1px solid {border}; border-radius:
 QPushButton {{ background: {control}; border: 1px solid {border}; border-radius: 8px; padding: 6px 14px; }}
 QPushButton:hover {{ background: {hover}; }}
 QPushButton:disabled {{ color: {disabled}; background: #1f1f28; border-color: #34343f; }}
+QPushButton#aspect {{ padding: 4px 8px; }}
+QPushButton#aspect:checked {{ background: {menu_sel}; border-color: {splash}; }}
+QLabel#aspect-group {{ color: {faint}; font-size: 12px; }}
 QPushButton#primary {{ background: {primary}; border: 1px solid {primary_border}; font-size: 16px; font-weight: 600; padding: 10px 18px; color: {on_primary}; }}
 QPushButton#primary:hover {{ background: {primary_hover}; }}
 QPushButton#primary:disabled {{ background: {primary_dis_bg}; color: {primary_dis_text}; border-color: #4a4430; }}

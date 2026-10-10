@@ -8,6 +8,7 @@ from canvas.app.info import APP_VERSION
 from canvas.app.platform import GpuCheck, check_gpu, current_os_check
 from canvas.app.updates import check_for_update
 from canvas.core.formats import OutputFormat
+from canvas.infra.enlarge import EnlargeClient
 from canvas.infra.gpu import probe_gpu
 from canvas.infra.models_users import register, unregister
 from canvas.infra.paths import models_dir
@@ -15,7 +16,7 @@ from canvas.models.loader import ZImageGenerator, load_catalog_stack
 from canvas.models.modes import Mode, Tier
 from canvas.models.plan import BaseNotSelected, ModeUnavailable
 from canvas.models.registry import load_catalog
-from canvas.pipeline.pipeline import CoolingDown, JobError, Pipeline
+from canvas.pipeline.pipeline import CoolingDown, EnlargeMissing, JobError, Pipeline
 from canvas.safety.gate import AgeGate, SafetyError
 from canvas.ui.main_window import MainWindow
 
@@ -29,19 +30,24 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _callback(tier: Tier):
+def _callback(tier: Tier, window_box: list[MainWindow | None], enlarge: EnlargeClient):
     catalog = load_catalog()
 
     def on_generate(prompt: str, mode: Mode, fmt: OutputFormat) -> str:
         del fmt
+        window = window_box[0]
+        aspect = "1:1" if window is None else window.current_aspect()
+        output = "4k" if window is not None and window.fourk.isChecked() else "native"
         try:
             stack = load_catalog_stack(models_dir(), catalog)
         except SafetyError as exc:
             return str(exc)
-        pipeline = Pipeline(AgeGate(stack), ZImageGenerator(catalog, tier), tier, use_gpu_lock=True)
+        pipeline = Pipeline(
+            AgeGate(stack), ZImageGenerator(catalog, tier), tier, use_gpu_lock=True, catalog=catalog, enlarge=enlarge,
+        )
         try:
-            pipeline.generate(prompt, mode)
-        except (SafetyError, ModeUnavailable, BaseNotSelected, JobError, CoolingDown) as exc:
+            pipeline.generate(prompt, mode, aspect=aspect, output=output)
+        except (SafetyError, ModeUnavailable, BaseNotSelected, JobError, CoolingDown, EnlargeMissing) as exc:
             return str(exc)
         return "Done"
 
@@ -50,7 +56,10 @@ def _callback(tier: Tier):
 
 def _launch(tier: Tier) -> None:
     app = QApplication.instance() or QApplication(sys.argv)
-    window = MainWindow(_callback(tier), tier, glass=False)
+    enlarge = EnlargeClient()
+    window_box: list[MainWindow | None] = [None]
+    window = MainWindow(_callback(tier, window_box, enlarge), tier, glass=False, enlarge_ready=enlarge.installed())
+    window_box[0] = window
     window.resize(960, 720)
     window.show()
     app.exec()

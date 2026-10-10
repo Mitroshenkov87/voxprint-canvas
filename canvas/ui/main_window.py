@@ -3,7 +3,10 @@ from __future__ import annotations
 
 from typing import Callable
 
+from PySide6.QtCore import Qt, QRectF
+from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QCheckBox,
     QComboBox,
     QHBoxLayout,
@@ -15,10 +18,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from canvas.app.info import APP_NAME, RESPONSIBILITY, THIRD_PARTY_NOTICE
+from canvas.app.info import APP_NAME, ENLARGE_HINT, RESPONSIBILITY, THIRD_PARTY_NOTICE
 from canvas.core.formats import DEFAULT_FORMAT, OutputFormat
 from canvas.models.modes import Mode, Tier, mode_group, visible_modes
-from canvas.ui.theme import build_style
+from canvas.models.sizes import ASPECT_GROUPS, closest_aspect
+from canvas.ui.theme import TEXT, build_style
 
 _LABELS = {
     Mode.TEXT: "Text to image",
@@ -36,10 +40,13 @@ _LABELS = {
 class MainWindow(QWidget):
     """Prompt, mode and format. Generation is delegated to ``on_generate``."""
 
-    def __init__(self, on_generate: Callable[[str, Mode, OutputFormat], str], tier: Tier, glass: bool = False) -> None:
+    def __init__(self, on_generate: Callable[[str, Mode, OutputFormat], str], tier: Tier, glass: bool = False,
+                 enlarge_ready: bool = False) -> None:
         super().__init__()
         self.on_generate = on_generate
         self.tier = tier
+        self._aspect_touched = False
+        self._input_size: tuple[int, int] | None = None
         self.setObjectName("root")
         self.setWindowTitle(APP_NAME)
         self.setStyleSheet(build_style(glass))
@@ -61,6 +68,17 @@ class MainWindow(QWidget):
             self.creative.addItem(_LABELS[Mode.TEXT_CREATIVE], Mode.TEXT_CREATIVE)
         self.status = QLabel("")
         self.status.setObjectName("status")
+        self.aspects = QButtonGroup(self)
+        self.aspects.setExclusive(True)
+        self._aspect_buttons: dict[str, QPushButton] = {}
+        self.aspect_row = self._aspect_picker()
+        self.aspects.idClicked.connect(self._aspect_picked)
+        self.fourk = QCheckBox("Output size: 4K")
+        self.fourk.setObjectName("fourk")
+        self.fourk_hint = QLabel(ENLARGE_HINT)
+        self.fourk_hint.setObjectName("fourk-hint")
+        self.fourk_hint.setWordWrap(True)
+        self.set_enlarge_ready(enlarge_ready)
         self.generate_button = QPushButton("Generate")
         self.generate_button.setObjectName("primary")
         self.generate_button.clicked.connect(self._generate)
@@ -83,6 +101,9 @@ class MainWindow(QWidget):
         layout.addWidget(title)
         layout.addWidget(tabs)
         layout.addWidget(self.prompt)
+        layout.addWidget(self.aspect_row)
+        layout.addWidget(self.fourk)
+        layout.addWidget(self.fourk_hint)
         row = QHBoxLayout()
         row.addWidget(self.format_box)
         row.addWidget(self.generate_button)
@@ -106,6 +127,65 @@ class MainWindow(QWidget):
         layout.addWidget(self.image_mode)
         return page
 
+    def set_enlarge_ready(self, ready: bool) -> None:
+        self.fourk.setEnabled(ready)
+        self.fourk_hint.setVisible(not ready)
+        self.fourk.setToolTip("" if ready else ENLARGE_HINT)
+        if not ready:
+            self.fourk.setChecked(False)
+
+    def set_input_size(self, width: int, height: int) -> None:
+        """Image-to-image starts from the input's aspect until the picker is used."""
+        self._input_size = (width, height)
+        if self._aspect_touched:
+            return
+        self._select_aspect(closest_aspect(width, height))
+
+    def current_aspect(self) -> str:
+        button = self.aspects.checkedButton()
+        if button is None:
+            return "1:1"
+        return str(button.property("ratio"))
+
+    def _aspect_picker(self) -> QWidget:
+        row = QWidget()
+        row.setObjectName("aspect-picker")
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        for name, aspects in ASPECT_GROUPS:
+            group = QWidget()
+            group_layout = QVBoxLayout(group)
+            group_layout.setContentsMargins(0, 0, 0, 0)
+            group_layout.setSpacing(4)
+            label = QLabel(name)
+            label.setObjectName("aspect-group")
+            buttons = QHBoxLayout()
+            buttons.setSpacing(4)
+            for aspect in aspects:
+                button = QPushButton(aspect)
+                button.setObjectName("aspect")
+                button.setProperty("ratio", aspect)
+                button.setIcon(_shape_icon(aspect))
+                button.setCheckable(True)
+                self.aspects.addButton(button)
+                self._aspect_buttons[aspect] = button
+                buttons.addWidget(button)
+            group_layout.addWidget(label)
+            group_layout.addLayout(buttons)
+            layout.addWidget(group)
+        layout.addStretch(1)
+        self._aspect_buttons["1:1"].setChecked(True)
+        return row
+
+    def _select_aspect(self, aspect: str) -> None:
+        button = self._aspect_buttons[aspect]
+        self.aspects.blockSignals(True)
+        button.setChecked(True)
+        self.aspects.blockSignals(False)
+
+    def _aspect_picked(self, _button_id: int) -> None:
+        self._aspect_touched = True
+
     def current_mode(self, tab_index: int) -> Mode:
         if tab_index == 0:
             return self.creative.currentData()
@@ -120,3 +200,29 @@ class MainWindow(QWidget):
             self.status.setText(self.on_generate(self.prompt.toPlainText(), mode, fmt))
         except Exception as exc:
             self.status.setText(str(exc))
+
+
+def _shape_icon(aspect: str) -> QIcon:
+    """A small outline in the ratio's own proportions."""
+    width_part, _, height_part = aspect.partition(":")
+    ratio_w = int(width_part)
+    ratio_h = int(height_part)
+    long_side = 16
+    if ratio_w >= ratio_h:
+        shape_w = long_side
+        shape_h = max(4, round(long_side * ratio_h / ratio_w))
+    else:
+        shape_h = long_side
+        shape_w = max(4, round(long_side * ratio_w / ratio_h))
+    canvas = 22
+    pixmap = QPixmap(canvas, canvas)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setPen(QPen(QColor(TEXT), 1.5))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    left = (canvas - shape_w) / 2
+    top = (canvas - shape_h) / 2
+    painter.drawRoundedRect(QRectF(left, top, shape_w, shape_h), 1.5, 1.5)
+    painter.end()
+    return QIcon(pixmap)

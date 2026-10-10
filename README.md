@@ -2,7 +2,7 @@
 
 Local text-to-image and image-to-image generation for the Voxprint AI Media Suite. Everything runs on your own GPU; no cloud service is required.
 
-> Status: early development. No releases yet.
+> Status: 0.1.0 release candidate.
 
 Text to image uses Z-Image-Turbo in BF16 on every tier. Image to image covers restyle, inpaint, outpaint, pose, depth, and edge. On a 24 GB GPU, Creative and instruction edit are available as well. Third-party add-ons are off until you turn them on. Third-party weights are provided by their authors, who are responsible for the licence and training data. Voxprint does not host or redistribute them. Output defaults to AVIF, with JPEG XL and WebP beside it.
 
@@ -24,7 +24,7 @@ python -m pytest
 python tools/audit.py --python python
 ```
 
-Tests do not download weights and do not need a GPU. AVIF, JPEG XL, WebP and JPEG are written by the installed libraries. HEIC still needs a system codec. The Windows installer and the Linux packaging stub select a VRAM tier and register the shared models folder; they do not download weights. The first picture on a supported GPU downloads the pinned models.
+Tests do not download weights and do not need a GPU. AVIF, JPEG XL, WebP and JPEG are written by the installed libraries. HEIC still needs a system codec. The Windows setup and the Linux archive install the app and register the shared models folder. GPU libraries and model files download on the PC. The first picture on a supported GPU downloads the pinned models.
 
 ## License
 

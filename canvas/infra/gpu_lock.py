@@ -9,12 +9,15 @@ in the past.
 """
 from __future__ import annotations
 
+import ctypes
 import json
 import os
+import sys
 import tempfile
 import time
 import uuid
 from contextlib import contextmanager
+from ctypes import wintypes
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator
@@ -22,6 +25,10 @@ from typing import Any, Iterator
 OWNER = "canvas"
 LOCK_NAME = "voxprint-gpu.lock"
 STALE_AFTER = timedelta(hours=2)
+_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+_STILL_ACTIVE = 259
+_ERROR_ACCESS_DENIED = 5
+_ERROR_INVALID_PARAMETER = 87
 
 
 class GpuLockTimeout(TimeoutError):
@@ -53,6 +60,34 @@ def _parse(value: object) -> datetime | None:
     return moment
 
 
+def _windows_pid_alive(pid: int) -> bool:
+    """Ask the kernel whether ``pid`` is running.
+
+    ``os.kill(pid, 0)`` is Ctrl+C on Windows, not an existence probe, and it
+    raises ``WinError 87`` for a process outside this console.
+    """
+    if sys.platform != "win32":
+        return False
+    kernel32 = ctypes.windll.kernel32
+    kernel32.OpenProcess.restype = ctypes.c_void_p
+    kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    kernel32.GetExitCodeProcess.argtypes = (ctypes.c_void_p, ctypes.POINTER(wintypes.DWORD))
+    kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = (ctypes.c_void_p,)
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    kernel32.GetLastError.restype = wintypes.DWORD
+    handle = kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return int(kernel32.GetLastError()) == _ERROR_ACCESS_DENIED
+    try:
+        code = wintypes.DWORD()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+            return int(kernel32.GetLastError()) != _ERROR_INVALID_PARAMETER
+        return int(code.value) == _STILL_ACTIVE
+    finally:
+        kernel32.CloseHandle(handle)
+
+
 def _pid_alive(pid: object) -> bool:
     if isinstance(pid, bool) or not isinstance(pid, (int, str)):
         return False
@@ -62,6 +97,8 @@ def _pid_alive(pid: object) -> bool:
         return False
     if value <= 0:
         return False
+    if sys.platform == "win32":
+        return _windows_pid_alive(value)
     try:
         os.kill(value, 0)
     except ProcessLookupError:

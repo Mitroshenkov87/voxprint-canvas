@@ -7,7 +7,7 @@ import pytest
 
 from canvas.core.vram_policy import budget_gb, halve_on_spill, plan
 from canvas.infra.gpu import probe_gpu
-from canvas.infra.gpu_lock import gpu_job, is_stale, read_lock, release, try_acquire
+from canvas.infra.gpu_lock import _pid_alive, gpu_job, is_stale, read_lock, release, try_acquire
 from canvas.infra.models_users import read_users, register, unregister
 from canvas.infra.paths import models_dir
 from canvas.infra.thermal import FULL_SPEED_S, THROTTLE_HOLD_S, Guard
@@ -44,12 +44,8 @@ def test_fake_probe(monkeypatch):
 def _dead_pid() -> int:
     pid = 2
     while pid < 100000:
-        try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
+        if not _pid_alive(pid):
             return pid
-        except PermissionError:
-            pass
         pid += 1
     raise RuntimeError("no unused pid")
 

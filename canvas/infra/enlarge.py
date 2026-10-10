@@ -35,6 +35,8 @@ _EXITS: dict[int, tuple[str, str, bool]] = {
 
 
 class EnlargeError(RuntimeError):
+    """Enlarge stopped. ``str`` is the message to show."""
+
     def __init__(self, code: str, message: str, retryable: bool) -> None:
         super().__init__(message)
         self.code = code
@@ -43,6 +45,8 @@ class EnlargeError(RuntimeError):
 
 @dataclass(frozen=True)
 class EnlargeResult:
+    """The file Enlarge wrote, and its size."""
+
     output: Path
     width: int
     height: int
@@ -90,6 +94,7 @@ def enlarge_argv(
 
 
 def loads(line: bytes | bytearray | str) -> dict[str, Any]:
+    """One protocol-1 JSON object from Enlarge's stdout."""
     text = line if isinstance(line, str) else bytes(line).decode("utf-8")
     data = json.loads(text)
     if not isinstance(data, dict) or data.get("protocol") != PROTOCOL:
@@ -129,14 +134,17 @@ class EnlargeClient:
         self.command = list(self.install.command) if self.install is not None else []
 
     def installed(self) -> bool:
+        """True when an Enlarge command was found."""
         return self.install is not None
 
     def capabilities(self) -> dict[str, Any] | None:
+        """The ``--capabilities --json`` body, or None when Enlarge is absent."""
         if self.install is None:
             return None
         return probe_capabilities(self.install, "enlarge")
 
     def ready(self) -> bool:
+        """True when 4K may be offered."""
         return capabilities_ready(self.capabilities())
 
     def enlarge(
@@ -149,6 +157,7 @@ class EnlargeClient:
         dry_run: bool = False,
         on_event: Callable[[dict[str, Any]], None] | None = None,
     ) -> EnlargeResult:
+        """Run one upscale and return the written file."""
         if long_side != FOUR_K_LONG:
             raise exit_error(2)
         if format_name != "avif":

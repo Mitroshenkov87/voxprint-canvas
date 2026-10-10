@@ -9,6 +9,8 @@ from canvas.models.registry import ModelSpec, Source
 
 
 class DownloadError(Exception):
+    """A model file was not saved. ``detail`` is for logs, not the window."""
+
     def __init__(self, detail: str) -> None:
         super().__init__("The model could not be downloaded.")
         self.detail = detail

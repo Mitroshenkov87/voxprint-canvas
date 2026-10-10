@@ -6,6 +6,7 @@ from canvas.models.modes import select_tier
 
 
 def main() -> int:
+    """Print ``16gb``, ``24gb``, or ``none`` for the installer."""
     info = probe_gpu()
     if info is None or not info.supported:
         print("none")

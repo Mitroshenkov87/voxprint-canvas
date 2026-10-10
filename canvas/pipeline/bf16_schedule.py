@@ -48,12 +48,15 @@ class StageCost:
     vae_tiled_gb: float = VAE_TILED_GB
 
     def denoise_gb(self, width: int, height: int) -> float:
+        """Transformer weights plus activation cost for this frame."""
         return self.transformer_gb + self.denoise_per_mp_gb * _megapixels(width, height)
 
     def vae_full_gb(self, width: int, height: int) -> float:
+        """VAE weights plus a full-frame decode."""
         return self.vae_weight_gb + self.vae_full_per_mp_gb * _megapixels(width, height)
 
     def vae_tiled_cost_gb(self) -> float:
+        """VAE weights plus one tile. The frame size does not change this."""
         return self.vae_weight_gb + self.vae_tiled_gb
 
 
@@ -72,6 +75,7 @@ class GpuLedger:
         self.history.append(self.used_gb)
 
     def free_gb(self) -> float:
+        """GB not currently reserved on this card."""
         return max(0.0, self.total_gb - self.used_gb)
 
     def room_gb(self) -> float:
@@ -94,11 +98,13 @@ class GpuLedger:
         return True
 
     def drop(self, name: str) -> None:
+        """Free one named stage. A missing name changes nothing."""
         cost = self.held.pop(name, 0.0)
         self.used_gb = max(0.0, self.used_gb - cost)
         self.history.append(self.used_gb)
 
     def drop_all(self) -> None:
+        """Free every stage this job reserved."""
         for name in list(self.held):
             self.drop(name)
 
@@ -110,9 +116,11 @@ class EmbeddingCache:
         self._items: dict[str, str] = {}
 
     def get(self, prompt: str) -> str | None:
+        """The cached embedding for this prompt, or None."""
         return self._items.get(prompt)
 
     def put(self, prompt: str, value: str) -> None:
+        """Store an embedding. The key is the prompt text."""
         self._items[prompt] = value
 
     def __contains__(self, prompt: str) -> bool:
@@ -124,6 +132,8 @@ class EmbeddingCache:
 
 @dataclass(frozen=True)
 class ScheduleTrace:
+    """How one 16 GB job used the GPU."""
+
     device: str
     tiled: bool
     peak_gb: float

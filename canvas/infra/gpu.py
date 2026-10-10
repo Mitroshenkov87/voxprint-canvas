@@ -10,6 +10,8 @@ from canvas.app.info import MIN_COMPUTE_CAPABILITY
 
 @dataclass(frozen=True)
 class GpuInfo:
+    """The first NVIDIA GPU this process can see."""
+
     name: str
     total_gb: float
     free_gb: float
@@ -19,6 +21,7 @@ class GpuInfo:
 
     @property
     def supported(self) -> bool:
+        """True for RTX 40 series (compute capability 8.9) or newer."""
         return (self.compute_major, self.compute_minor) >= MIN_COMPUTE_CAPABILITY
 
 

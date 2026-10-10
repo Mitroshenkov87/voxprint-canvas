@@ -10,11 +10,14 @@ from collections.abc import Callable
 
 
 class PeakVramProbe:
+    """Named samples of GPU memory along one generate-then-upscale job."""
+
     def __init__(self, sample: Callable[[], int | None] | None = None) -> None:
         self.sample = sample
         self.marks: list[tuple[str, int | None]] = []
 
     def mark(self, stage: str) -> None:
+        """Record ``stage`` and the current sample, if a sampler was given."""
         used = None if self.sample is None else self.sample()
         self.marks.append((stage, used))
 

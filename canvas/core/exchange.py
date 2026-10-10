@@ -9,12 +9,14 @@ _PREFIX = b"VOXPRINT rgb "
 
 
 def write_rgb(path: Path, width: int, height: int, data: bytes) -> None:
+    """Write one RGB image for Enlarge to read."""
     if len(data) != width * height * 3:
         raise ValueError("RGB byte count does not match the image size")
     path.write_bytes(_PREFIX + f"{width} {height}\n".encode("ascii") + data)
 
 
 def read_rgb(path: Path) -> RawImage:
+    """Read an RGB image written by ``write_rgb``."""
     raw = path.read_bytes()
     if not raw.startswith(_PREFIX):
         raise ValueError("the enlarged image could not be read")

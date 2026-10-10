@@ -11,12 +11,16 @@ from canvas.models.modes import Tier, select_tier
 
 @dataclass(frozen=True)
 class OsCheck:
+    """Whether this operating system can run Canvas."""
+
     ok: bool
     message: str
 
 
 @dataclass(frozen=True)
 class GpuCheck:
+    """Whether the GPU meets the tier rules."""
+
     ok: bool
     message: str
     tier: Tier | None

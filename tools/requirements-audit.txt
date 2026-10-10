@@ -5,3 +5,4 @@ bandit
 pip-audit
 vulture
 radon
+interrogate>=1.7

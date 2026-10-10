@@ -22,12 +22,16 @@ class RegistryError(ValueError):
 
 @dataclass(frozen=True)
 class Source:
+    """One place a weight file may be fetched from."""
+
     kind: str
     uri: str
 
 
 @dataclass(frozen=True)
 class ModelSpec:
+    """One registry row: repo, tier, quant, and source order."""
+
     id: str
     role: str
     tier: str
@@ -53,11 +57,14 @@ class ModelSpec:
     quality_gate: str = ""
 
     def pinned(self) -> bool:
+        """True when every listed file has a 64-character SHA-256."""
         return bool(self.files) and all(len(value) == 64 for value in self.files.values())
 
 
 @dataclass(frozen=True)
 class FrameSize:
+    """Width and height of one output frame."""
+
     width: int
     height: int
 
@@ -73,6 +80,8 @@ class SizeTable:
 
 @dataclass(frozen=True)
 class Catalog:
+    """The loaded registry."""
+
     diffusers: str
     models: tuple[ModelSpec, ...]
     default_text_base: str | None = None
@@ -80,12 +89,14 @@ class Catalog:
     sizes: dict[str, SizeTable] | None = None
 
     def by_id(self, model_id: str) -> ModelSpec:
+        """The model with this id."""
         for spec in self.models:
             if spec.id == model_id:
                 return spec
         raise RegistryError(f"unknown model {model_id}")
 
     def by_role(self, role: str) -> tuple[ModelSpec, ...]:
+        """Every model with this role."""
         return tuple(spec for spec in self.models if spec.role == role)
 
 

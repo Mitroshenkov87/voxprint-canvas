@@ -38,6 +38,8 @@ Probe = Callable[[], int | None]
 
 @dataclass(frozen=True)
 class BakeoffRow:
+    """One measured prompt and seed."""
+
     base: str
     prompt: str
     seed: int

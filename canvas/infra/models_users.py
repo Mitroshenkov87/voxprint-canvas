@@ -17,10 +17,12 @@ USERS_FILE = ".users.json"
 
 
 def users_path(root: Path) -> Path:
+    """``.users.json`` inside the shared models folder."""
     return root / USERS_FILE
 
 
 def read_users(root: Path) -> dict[str, bool]:
+    """Keys in ``.users.json``. A missing or broken file is an empty map."""
     try:
         data = json.loads(users_path(root).read_text(encoding="utf-8-sig"))
     except (OSError, ValueError):
@@ -49,6 +51,7 @@ def _write(users: dict[str, bool], root: Path) -> None:
 
 
 def register(root: Path, key: str = USER_KEY) -> dict[str, bool]:
+    """Mark Canvas as a user of the shared models folder."""
     users = read_users(root)
     if users.get(key) is True:
         return users
@@ -58,6 +61,7 @@ def register(root: Path, key: str = USER_KEY) -> dict[str, bool]:
 
 
 def unregister(root: Path, key: str = USER_KEY) -> list[str]:
+    """Remove Canvas from the shared models folder. Returns the keys still in use."""
     users = read_users(root)
     if key in users:
         users.pop(key)

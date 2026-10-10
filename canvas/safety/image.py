@@ -47,9 +47,11 @@ class RawImage:
         self._buf = bytearray(data)
 
     def to_bytes(self) -> bytes:
+        """A copy of the pixel bytes."""
         return bytes(self._buf)
 
     def wipe(self) -> None:
+        """Zero the pixel buffer."""
         _wipe(self._buf)
         self.width = 0
         self.height = 0
@@ -67,9 +69,11 @@ class ScreenedFrame:
         self._buf = bytearray(data)
 
     def to_bytes(self) -> bytes:
+        """A copy of the pixel bytes."""
         return bytes(self._buf)
 
     def wipe(self) -> None:
+        """Zero the pixel buffer."""
         _wipe(self._buf)
         self.width = 0
         self.height = 0
@@ -88,9 +92,11 @@ class ScreenedInput:
         self.frames = frames
 
     def roles(self) -> tuple[str, ...]:
+        """Role name of each input image."""
         return tuple(frame.role for frame in self.frames)
 
     def wipe(self) -> None:
+        """Clear the prompt and the input images."""
         self.prompt = ""
         self.mode = ""
         for frame in self.frames:

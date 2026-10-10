@@ -31,9 +31,11 @@ class Guard:
         self._throttle_since: float | None = None
 
     def elapsed(self) -> float:
+        """Seconds since this guard was created."""
         return self._now() - self.t0
 
     def observe(self, temp_c: float | None, throttling: bool) -> None:
+        """Record one temperature sample and whether the GPU is throttling."""
         moment = self._now()
         if temp_c is not None:
             self.samples.append((moment, float(temp_c)))
@@ -45,6 +47,7 @@ class Guard:
             self._throttle_since = None
 
     def median_c(self) -> float | None:
+        """Median temperature over the last five minutes, or None when samples are few."""
         moment = self._now()
         window = [temp for stamp, temp in self.samples if moment - WINDOW_S <= stamp <= moment]
         if len(window) < MIN_SAMPLES:
@@ -52,11 +55,13 @@ class Guard:
         return float(statistics.median(window))
 
     def throttle_seconds(self) -> float:
+        """How long the current throttle has lasted."""
         if self._throttle_since is None:
             return 0.0
         return max(0.0, self._now() - self._throttle_since)
 
     def should_pause(self) -> bool:
+        """True when the next job should wait for the GPU to cool."""
         if self.elapsed() < FULL_SPEED_S:
             return False
         median = self.median_c()
@@ -65,6 +70,7 @@ class Guard:
         return self.throttle_seconds() > THROTTLE_HOLD_S
 
     def cool_enough(self) -> bool:
+        """True when work may resume."""
         throttling = self._throttle_since is not None
         median = self.median_c()
         if median is None:

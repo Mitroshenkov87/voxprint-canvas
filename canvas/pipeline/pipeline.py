@@ -83,6 +83,14 @@ class Pipeline:
 
     def generate(self, prompt: str, mode: Mode, inputs: Sequence[PendingInput] = (), *,
                  aspect: str = "1:1", output: str = "native", probe: PeakVramProbe | None = None) -> SafeImage:
+        """Run one request and return a picture the window may show.
+
+        The suite GPU lock stays held for the whole job. Native output uses the
+        model's frame for the aspect. 4K output generates the model's ~2K frame,
+        unloads the generator on a 16 GB card, then asks Voxprint AI Enlarge to
+        make the long side 3840. The enlarged picture is released before it is
+        returned. A stage that does not fit the memory budget stops the job.
+        """
         if output not in {"native", "4k"}:
             raise ValueError("output is native or 4k")
         if mode not in visible_modes(self.tier):

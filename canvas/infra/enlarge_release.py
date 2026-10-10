@@ -9,6 +9,7 @@ LINUX_SHA256 = "0ae52900a3a8940e094ce51d481a94e6cef7837c2b7aaaca04e382198151a8f2
 
 
 def asset_url(name: str) -> str:
+    """Download URL for one file of the pinned Enlarge release."""
     return f"https://github.com/{REPO}/releases/download/{TAG}/{name}"
 
 

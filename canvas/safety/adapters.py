@@ -62,6 +62,7 @@ class Qwen3GuardGen(_Unwired):
     model_id = REPO_GUARD
 
     def assess(self, text: str) -> GuardVerdict:
+        """Not wired yet."""
         del text
         self._refuse()
         raise SafetyUnavailable("model_not_ready")
@@ -73,11 +74,13 @@ class SiglipZeroShot(_Unwired):
     model_id = REPO_SIGLIP
 
     def score_text(self, text: str, labels: Sequence[str]) -> dict[str, float]:
+        """Not wired yet."""
         del text, labels
         self._refuse()
         return {}
 
     def score_image(self, image: RawImage, labels: Sequence[str]) -> dict[str, float]:
+        """Not wired yet."""
         del image, labels
         self._refuse()
         return {}
@@ -89,6 +92,7 @@ class YuNetFaces(_Unwired):
     model_id = REPO_YUNET
 
     def detect(self, image: RawImage) -> Sequence[Face]:
+        """Not wired yet."""
         del image
         self._refuse()
         return ()
@@ -100,6 +104,7 @@ class FairFaceAge(_Unwired):
     model_id = REPO_AGE
 
     def estimate(self, image: RawImage, faces: Sequence[Face]) -> Sequence[float]:
+        """Not wired yet."""
         del image, faces
         self._refuse()
         return ()
@@ -111,6 +116,7 @@ class NsfwViT(_Unwired):
     model_id = REPO_NSFW
 
     def sexual_score(self, image: RawImage) -> float:
+        """Not wired yet."""
         del image
         self._refuse()
         return 0.0

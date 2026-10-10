@@ -27,8 +27,8 @@ _EXITS: dict[int, tuple[str, str, bool]] = {
     3: ("unsupported_format", "Enlarge cannot write this format.", False),
     4: ("gpu_unsupported", "This computer cannot run Enlarge.", False),
     5: ("gpu_busy", "The GPU is busy.", True),
-    6: ("oom", "Enlarge ran out of memory.", True),
-    7: ("model_missing", "Download the upscale model in Voxprint AI Enlarge, then try again.", False),
+    6: ("oom", "Enlarge ran out of memory.", False),
+    7: ("model_missing", "Download the upscale model in Voxprint AI Enlarge, then try again.", True),
     8: ("io_error", "Enlarge could not write the picture.", False),
     130: ("cancelled", "Enlarge was cancelled.", False),
 }
@@ -63,9 +63,11 @@ def enlarge_argv(
     long_side: int,
     format_name: str,
     parent_pid: int,
+    preset: str = "photo",
+    dry_run: bool = False,
 ) -> list[str]:
     """The only Enlarge command line Canvas builds."""
-    return [
+    argv = [
         *program,
         "upscale",
         "--input",
@@ -76,10 +78,15 @@ def enlarge_argv(
         str(long_side),
         "--format",
         format_name,
+        "--preset",
+        preset,
         "--json-progress",
         "--parent-lock-pid",
         str(parent_pid),
     ]
+    if dry_run:
+        argv.append("--dry-run")
+    return argv
 
 
 def loads(line: bytes | bytearray | str) -> dict[str, Any]:
@@ -88,6 +95,17 @@ def loads(line: bytes | bytearray | str) -> dict[str, Any]:
     if not isinstance(data, dict) or data.get("protocol") != PROTOCOL:
         raise EnlargeError("internal", "Enlarge sent a message this app does not understand.", False)
     return data
+
+
+def message_kind(message: dict[str, Any]) -> str:
+    """``type`` when it is set, otherwise ``op``. The release sends both."""
+    kind = message.get("type")
+    if isinstance(kind, str) and kind.strip():
+        return kind.strip()
+    kind = message.get("op")
+    if isinstance(kind, str):
+        return kind.strip()
+    return ""
 
 
 def capabilities_ready(body: dict[str, Any] | None) -> bool:
@@ -128,6 +146,7 @@ class EnlargeClient:
         output: Path,
         format_name: str = "avif",
         long_side: int = FOUR_K_LONG,
+        dry_run: bool = False,
         on_event: Callable[[dict[str, Any]], None] | None = None,
     ) -> EnlargeResult:
         if long_side != FOUR_K_LONG:
@@ -144,6 +163,7 @@ class EnlargeClient:
             long_side=long_side,
             format_name=format_name,
             parent_pid=parent_pid,
+            dry_run=dry_run,
         )
         env = os.environ.copy()
         env["VOXPRINT_GPU_PARENT_PID"] = str(parent_pid)
@@ -172,7 +192,7 @@ class EnlargeClient:
                     break
                 if on_event is not None:
                     on_event(message)
-                kind = message.get("type")
+                kind = message_kind(message)
                 if kind == "done":
                     result = _result(message, output)
                 elif kind == "error":

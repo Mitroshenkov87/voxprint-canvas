@@ -8,7 +8,15 @@ from pathlib import Path
 import pytest
 
 from canvas.infra.discovery import find_app, _split_windows_command
-from canvas.infra.enlarge import EnlargeClient, EnlargeError, capabilities_ready, enlarge_argv, exit_error, loads
+from canvas.infra.enlarge import (
+    EnlargeClient,
+    EnlargeError,
+    capabilities_ready,
+    enlarge_argv,
+    exit_error,
+    loads,
+    message_kind,
+)
 
 FAKE = Path(__file__).resolve().parent / "fixtures" / "enlarge_fake.py"
 _EXIT_CODES = (1, 2, 3, 4, 5, 6, 7, 8, 130)
@@ -53,6 +61,8 @@ def test_enlarge_argv_is_the_only_command_line(tmp_path):
         "3840",
         "--format",
         "avif",
+        "--preset",
+        "photo",
         "--json-progress",
         "--parent-lock-pid",
         "4242",
@@ -75,23 +85,15 @@ def test_fake_cli_mirrors_dry_run_and_captures_stderr(tmp_path):
     env = os.environ.copy()
     env["VOXPRINT_GPU_PARENT_PID"] = parent
     dry = subprocess.run(
-        [
-            sys.executable,
-            str(FAKE),
-            "upscale",
-            "--input",
-            str(source),
-            "--output",
-            str(dry_dest),
-            "--long-side",
-            "3840",
-            "--format",
-            "avif",
-            "--json-progress",
-            "--parent-lock-pid",
-            parent,
-            "--dry-run",
-        ],
+        enlarge_argv(
+            [sys.executable, str(FAKE)],
+            source=source,
+            output=dry_dest,
+            long_side=3840,
+            format_name="avif",
+            parent_pid=int(parent),
+            dry_run=True,
+        ),
         capture_output=True,
         text=True,
         env=env,
@@ -121,7 +123,9 @@ def test_fake_cli_mirrors_dry_run_and_captures_stderr(tmp_path):
     assert call["parent_env"] == str(os.getpid())
     assert call["argv"][call["argv"].index("--parent-lock-pid") + 1] == str(os.getpid())
     assert call["argv"][call["argv"].index("--long-side") + 1] == "3840"
+    assert call["argv"][call["argv"].index("--preset") + 1] == "photo"
     assert "--scale" not in call["argv"]
+    assert seen[0]["op"] == "accepted"
     assert "enlarge: log" not in str(result)
 
 
@@ -142,6 +146,36 @@ def test_exit_codes_map_to_user_messages(tmp_path, monkeypatch, code):
     assert "enlarge: log" not in str(caught.value)
     if code == 7:
         assert "Download the upscale model in Voxprint AI Enlarge" in str(caught.value)
+
+
+def test_message_kind_accepts_type_or_op():
+    assert message_kind({"protocol": 1, "type": "done"}) == "done"
+    assert message_kind({"protocol": 1, "op": "accepted"}) == "accepted"
+    assert message_kind({"protocol": 1, "type": "progress", "op": "progress"}) == "progress"
+    assert message_kind({"protocol": 1, "type": "done", "op": "error"}) == "done"
+    assert message_kind({"protocol": 1}) == ""
+
+
+def test_shipped_retryable_flags():
+    assert exit_error(7).retryable is True
+    assert exit_error(6).retryable is False
+    assert exit_error(8).retryable is False
+    assert exit_error(1).retryable is False
+    assert exit_error(5).retryable is True
+
+
+def test_op_only_progress_still_finishes(tmp_path, monkeypatch):
+    monkeypatch.setenv("ENLARGE_FAKE_KIND", "op")
+    source = tmp_path / "in.avif"
+    source.write_bytes(b"in")
+    seen: list[dict] = []
+    result = EnlargeClient([sys.executable, str(FAKE)]).enlarge(
+        source, output=tmp_path / "out.avif", on_event=seen.append,
+    )
+    assert result.output.name == "out.avif"
+    assert all("type" not in item for item in seen)
+    assert [message_kind(item) for item in seen][0] == "accepted"
+    assert message_kind(seen[-1]) == "done"
 
 
 def test_unknown_exit_uses_the_internal_message(tmp_path, monkeypatch):

@@ -185,12 +185,25 @@ def dequant_files(paths: list[Path]) -> dict[str, Any]:
     return out
 
 
+def _alias_key(key: str, current: dict[str, Any]) -> str | None:
+    """Match a text-encoder name with or without a leading ``model.`` prefix."""
+    if key in current:
+        return key
+    if key.startswith("model.") and key[len("model.") :] in current:
+        return key[len("model.") :]
+    prefixed = "model." + key
+    if prefixed in current:
+        return prefixed
+    return None
+
+
 def apply_state(module: Any, state: dict[str, Any]) -> int:
     current = module.state_dict()
     device = next(module.parameters()).device
     mapped = {}
-    for name, value in state.items():
-        target = current.get(name)
+    for raw_name, value in state.items():
+        name = _alias_key(raw_name, current)
+        target = current.get(name) if name is not None else None
         if target is None or tuple(value.shape) != tuple(target.shape):
             continue
         mapped[name] = value.to(device=device, dtype=target.dtype)

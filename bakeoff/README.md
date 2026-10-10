@@ -11,10 +11,10 @@ same summary.
 | arm | model | weights | prompts | settings | cap (min) |
 |---|---|---|---|---|---|
 | `z_bf16` | Z-Image-Turbo `f332072` | stock BF16 (24 GB tier) | all 105 | 1024x1024, 9 steps (8 NFE), CFG 0 | 10 |
-| `z_fp8` | Z-Image-Turbo | Forge part A FP8 (`--z-fp8`, `--z-encoder-fp8`; default: search `~/forge-out`) (16 GB tier) | all 105 | same | 10 |
+| `z_fp8` | Z-Image-Turbo | Forge part A FP8 (`--z-fp8`, `--z-encoder-fp8`; default: search `~/forge-out`). Quality gate rejected it (LPIPS 0.14–0.22 vs BF16); the 16 GB tier is `z_bf16` | all 105 | same | 10 |
 | `q_bf16` | Qwen-Image-2512 `25468b9` | native BF16, fully on GPU (main Qwen arm) | all 105 | 1328x1328, 50 steps, true CFG 4.0, official negative | 80 |
 | `q_tuned` | Qwen-Image-2512 | native BF16 | first 40 (`--subset-n`) | true CFG 4.5, official negative + English anatomy terms | 28 |
-| `q_fp8` | Qwen-Image-2512 | Forge part D FP8 (`--q-fp8-dir`, default `~/forge-out/canvas/qwen-image-2512/fp8`) | all 105 | as `q_bf16` | 80 |
+| `q_fp8` | Qwen-Image-2512 | Forge part D FP8 (`--q-fp8-dir`, default `~/forge-out/canvas/qwen-image-2512/fp8`). Quality gate is still pending | all 105 | as `q_bf16` | 80 |
 | `q_int4` | Qwen-Image-2512 | official SVDQuant INT4 via Nunchaku (`--q-int4-dir`) | all 105 | as `q_bf16` | 60 |
 
 FP8 files use the Forge `voxprint-fp8-v1` format (float8_e4m3fn + `<name>.scale_weight`)

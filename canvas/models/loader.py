@@ -6,10 +6,12 @@ until inference is wired.
 """
 from pathlib import Path
 
-from canvas.models.modes import Tier
+from canvas.models.modes import Mode, Tier
 from canvas.models.pin import PinError, require_pin, verify_bytes
 from canvas.models.plan import CallPlan, build_plan
 from canvas.models.registry import Catalog, ModelSpec, load_catalog
+from canvas.pipeline.bf16_schedule import EmbeddingCache, GpuLedger, run_bf16_16gb, uses_bf16_16gb
+from canvas.pipeline.vram_probe import PeakVramProbe
 from canvas.safety.adapters import FairFaceAge, NsfwViT, Qwen3GuardGen, SiglipZeroShot, YuNetFaces
 from canvas.safety.gate import SafetyStack, SafetyUnavailable
 from canvas.safety.image import RawImage, ScreenedInput
@@ -64,16 +66,24 @@ def load_catalog_stack(root: Path, catalog: Catalog | None = None) -> SafetyStac
 class ZImageGenerator:
     """Diffusers generator stub. ``generate`` accepts only a ``ScreenedInput``."""
 
-    def __init__(self, catalog: Catalog, tier: Tier) -> None:
+    def __init__(self, catalog: Catalog, tier: Tier, ledger: GpuLedger | None = None) -> None:
         self.catalog = catalog
         self.tier = tier
         self.last_plan: CallPlan | None = None
         self.last_size: tuple[int, int] | None = None
         self.unloaded = False
+        self.ledger = ledger if ledger is not None else GpuLedger(16.0)
+        self.embeddings = EmbeddingCache()
+        self.probe: PeakVramProbe | None = None
+
+    def attach_probe(self, probe: PeakVramProbe | None) -> None:
+        """Stage marks land on this probe. The pipeline calls it before ``generate``."""
+        self.probe = probe
 
     def unload(self) -> None:
-        """Drop a loaded pipeline. The stub records the call so a 16 GB chain can be checked."""
+        """Drop GPU weights. Encoder embeddings stay, so a later seed can skip the encoder."""
         self.unloaded = True
+        self.ledger.drop_all()
 
     def generate(self, screened: ScreenedInput, width: int | None = None, height: int | None = None) -> RawImage:
         if type(screened) is not ScreenedInput:
@@ -82,4 +92,14 @@ class ZImageGenerator:
             self.last_size = (width, height)
         plan = build_plan(self.catalog, screened, self.tier)
         self.last_plan = plan
+        if uses_bf16_16gb(self.tier.value, plan):
+            run_bf16_16gb(
+                prompt=screened.prompt,
+                mode=Mode(plan.mode),
+                width=1024 if width is None else width,
+                height=1024 if height is None else height,
+                ledger=self.ledger,
+                cache=self.embeddings,
+                probe=self.probe,
+            )
         raise ModelNotReady(plan)

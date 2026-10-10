@@ -10,7 +10,7 @@ from canvas.models.registry import Source, load_catalog
 
 def test_source_order_and_unpinned_skip(tmp_path):
     catalog = load_catalog()
-    turbo = catalog.by_id("z-image-turbo-fp8")
+    turbo = catalog.by_id("z-image-turbo-bf16-16gb")
     assert [source.kind for source in turbo.sources] == [
         "local", "huggingface", "huggingface-mirror", "kaggle", "torrent",
     ]

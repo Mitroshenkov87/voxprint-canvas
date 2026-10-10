@@ -47,19 +47,21 @@ def test_pin_and_visibility():
     assert Mode.TEXT_CREATIVE not in visible_modes(Tier.GB16)
     assert Mode.INSTRUCTION in visible_modes(Tier.GB24)
     assert Mode.TEXT_CREATIVE in visible_modes(Tier.GB24)
-    lite = catalog.by_id("z-image-turbo-fun-controlnet-union-fp8")
+    lite = catalog.by_id("z-image-turbo-fun-controlnet-union-bf16-lite")
     full = catalog.by_id("z-image-turbo-fun-controlnet-union-bf16")
-    assert lite.repo == REPO_CONTROL and lite.variant == "lite" and lite.quant == "fp8-e4m3"
-    assert full.variant == "full" and full.quant == "bf16"
+    assert lite.repo == REPO_CONTROL and lite.variant == "lite" and lite.quant == "bf16"
+    assert lite.tier == "16gb" and lite.quality_gate == "passed"
+    assert full.variant == "full" and full.quant == "bf16" and full.quality_gate == "passed"
     edit = catalog.by_id("qwen-image-edit-2511-fp8")
     assert edit.repo == REPO_EDIT and edit.tier == "24gb"
-    assert edit.text_encoder == ENCODER_VL
+    assert edit.text_encoder == ENCODER_VL and edit.quality_gate == "pending"
     small = catalog.by_id("qwen-image-2512-int4")
     large = catalog.by_id("qwen-image-2512-fp8")
     assert small.repo == REPO_QWEN and small.quant == "int4"
     assert small.quant_backend == "nunchaku" and small.variant == "svdquant"
     assert small.text_encoder == ENCODER_VL and small.guidance_kind == "true_cfg_scale"
     assert large.quant == "fp8" and large.tier == "24gb" and large.text_encoder == ENCODER_VL
+    assert large.quality_gate == "pending"
     assert "diffusers==0.41.0" in open("pyproject.toml", encoding="utf-8").read()
 
 
@@ -75,9 +77,10 @@ def test_text_and_restyle_plans():
     assert text.diffusers == "0.41.0"
     assert text.pipeline_class == PIPELINE_TEXT
     assert text.repos == (REPO_TURBO,)
-    assert text.quant == "fp8-e4m3"
+    assert text.quant == "bf16"
     assert text.steps == 8 and text.guidance_scale == 0.0
-    assert text.text_encoder_offload == "cpu-after-encode"
+    assert text.text_encoder == "Qwen/Qwen3-4B"
+    assert text.text_encoder_offload == "free-after-encode"
     larger = build_plan(catalog, _screened(Mode.TEXT), Tier.GB24)
     assert larger.quant == "bf16" and larger.text_encoder_offload == ""
     restyle = build_plan(catalog, _screened(Mode.RESTYLE, ImageRole.INIT), Tier.GB16)

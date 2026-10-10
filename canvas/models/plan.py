@@ -61,8 +61,8 @@ def build_plan(catalog: Catalog, screened: ScreenedInput, tier: Tier) -> CallPla
     roles = set(screened.roles())
     has_mask = ImageRole.MASK.value in roles
     if tier is Tier.GB16:
-        turbo_id = "z-image-turbo-fp8"
-        control_id = "z-image-turbo-fun-controlnet-union-fp8"
+        turbo_id = "z-image-turbo-bf16-16gb"
+        control_id = "z-image-turbo-fun-controlnet-union-bf16-lite"
     elif tier is Tier.GB24:
         turbo_id = "z-image-turbo-bf16"
         control_id = "z-image-turbo-fun-controlnet-union-bf16"
@@ -108,7 +108,7 @@ def _text_model(catalog: Catalog, tier: Tier) -> tuple[ModelSpec, str]:
         raise RegistryError("the default text model is not in the registry")
     if tier is Tier.GB16:
         if family == "z-image-turbo":
-            return _one(catalog, "z-image-turbo-fp8"), PIPELINE_TEXT
+            return _one(catalog, "z-image-turbo-bf16-16gb"), PIPELINE_TEXT
         if family == "qwen-image-2512":
             return _one(catalog, "qwen-image-2512-int4"), PIPELINE_QWEN
         raise RegistryError("the default text model has no plan")

@@ -13,6 +13,7 @@ _CATALOG = Path(__file__).with_name("catalog.json")
 _ALLOWED_LICENCES = {"apache-2.0", "mit"}
 _SOURCE_KINDS = ("local", "upstream", "huggingface", "huggingface-mirror", "kaggle", "torrent")
 _GUIDANCE_KINDS = {"", "guidance_scale", "true_cfg_scale"}
+_QUALITY_GATES = {"", "pending", "passed"}
 
 
 class RegistryError(ValueError):
@@ -49,6 +50,7 @@ class ModelSpec:
     sources: tuple[Source, ...]
     text_base: str
     guidance_kind: str
+    quality_gate: str = ""
 
     def pinned(self) -> bool:
         return bool(self.files) and all(len(value) == 64 for value in self.files.values())
@@ -124,6 +126,7 @@ def _spec(row: dict[str, Any]) -> ModelSpec:
         sources=sources,
         text_base=str(row.get("text_base") or ""),
         guidance_kind=str(row.get("guidance_kind") or ""),
+        quality_gate=str(row.get("quality_gate") or ""),
     )
 
 
@@ -142,6 +145,13 @@ def load_catalog(path: Path | None = None) -> Catalog:
             raise RegistryError("a listed model is not Apache-2.0 or MIT")
         if spec.guidance_kind not in _GUIDANCE_KINDS:
             raise RegistryError("unknown guidance kind")
+        if spec.quality_gate not in _QUALITY_GATES:
+            raise RegistryError("unknown quality gate")
+        if "fp8" in spec.quant.casefold():
+            if _is_z_image(spec):
+                raise RegistryError("Z-Image is BF16 only")
+            if spec.quality_gate == "":
+                raise RegistryError("an fp8 model needs a quality gate")
         kinds = [source.kind for source in spec.sources]
         if any(kind not in _SOURCE_KINDS for kind in kinds):
             raise RegistryError("unknown model source")
@@ -202,6 +212,11 @@ def _sizes(raw: object, families: tuple[str, ...]) -> dict[str, SizeTable]:
             raise RegistryError(f"{family} needs a 16 or 64 size step")
         tables[family] = SizeTable(multiple, _band(row.get("native"), multiple, "native"), _band(row.get("twok"), multiple, "twok"))
     return tables
+
+
+def _is_z_image(spec: ModelSpec) -> bool:
+    blob = f"{spec.id} {spec.repo} {spec.text_base}".casefold()
+    return "z-image" in blob
 
 
 def source_order(spec: ModelSpec) -> tuple[str, ...]:

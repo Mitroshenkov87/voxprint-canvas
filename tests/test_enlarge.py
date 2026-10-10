@@ -1,19 +1,37 @@
-"""Protocol 1 messages and the CLI fallback."""
+"""The Enlarge CLI is the only inter-app contract."""
 import sys
 from pathlib import Path
 
+import pytest
+
 from canvas.infra.discovery import find_app, _split_windows_command
-from canvas.infra.enlarge import EnlargeClient, dumps, loads
+from canvas.infra.enlarge import EnlargeClient, EnlargeError, enlarge_argv, loads
 
 
-def test_messages_carry_protocol_1():
-    encoded = dumps({"type": "hello", "client": "canvas", "version": "0.1.0", "protocol": 9})
-    message = loads(encoded)
-    assert message["protocol"] == 1
-    assert message["client"] == "canvas"
+def test_progress_lines_are_protocol_1_json():
+    message = loads('{"protocol": 1, "type": "progress", "stage": "waiting_gpu"}\n')
+    assert message["type"] == "progress"
+    assert message["stage"] == "waiting_gpu"
+    with pytest.raises(EnlargeError):
+        loads('{"type": "done"}')
 
 
-def test_cli_fallback_streams_json_progress(tmp_path, monkeypatch):
+def test_enlarge_argv_is_the_only_command_line(tmp_path):
+    source = tmp_path / "in.avif"
+    dest = tmp_path / "out.avif"
+    argv = enlarge_argv(["voxprint-enlarge"], source=source, output=dest, scale=2, format_name="avif")
+    assert argv[0] == "voxprint-enlarge"
+    assert argv[argv.index("--input") + 1] == str(source.resolve())
+    assert argv[argv.index("--output") + 1] == str(dest)
+    assert argv[argv.index("--scale") + 1] == "2"
+    assert argv[-1] == "--json-progress"
+    assert "--serve" not in argv
+    text = (Path(__file__).resolve().parents[1] / "canvas" / "infra" / "enlarge.py").read_text(encoding="utf-8")
+    assert "QLocalSocket" not in text
+    assert "--serve" not in text
+
+
+def test_cli_streams_json_progress_and_a_failed_exit(tmp_path, monkeypatch):
     script = tmp_path / "enlarge_stub.py"
     script.write_text(
         "import json, sys\n"
@@ -32,7 +50,7 @@ def test_cli_fallback_streams_json_progress(tmp_path, monkeypatch):
     dest = tmp_path / "out.avif"
     seen = []
     client = EnlargeClient([sys.executable, str(script)])
-    result = client.enlarge(source, scale=2, output=dest, transport="cli", on_event=seen.append)
+    result = client.enlarge(source, scale=2, output=dest, on_event=seen.append)
     assert result.output == dest
     assert result.width == 3840
     assert [item["type"] for item in seen] == ["accepted", "progress", "done"]
@@ -43,6 +61,10 @@ def test_cli_fallback_streams_json_progress(tmp_path, monkeypatch):
     assert found is not None and found.command[0] == sys.executable
     monkeypatch.setenv("CANVAS_ENLARGE_EXE", str(tmp_path / "missing-enlarge"))
     assert find_app("Enlarge", "enlarge") is None
+    broken = tmp_path / "fail.py"
+    broken.write_text("import sys\nsys.exit(1)\n", encoding="utf-8")
+    with pytest.raises(EnlargeError):
+        EnlargeClient([sys.executable, str(broken)]).enlarge(source, scale=2, output=dest)
 
 
 def test_windows_enlarge_override_keeps_backslashes(monkeypatch):

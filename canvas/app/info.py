@@ -25,5 +25,6 @@ THIRD_PARTY_NOTICE = (
 )
 
 ENLARGE_HINT = "Install Voxprint AI Enlarge to use this."
+ENLARGE_RELEASES = "https://github.com/Mitroshenkov87/voxprint-enlarge/releases"
 
 RELEASES_API = "https://api.github.com/repos/Mitroshenkov87/voxprint-canvas/releases/latest"

@@ -36,11 +36,76 @@ while a run is using them.
   v1 or v2. Non-explicit and explicit prompts of adults who state an age from 20 to 25.
   The summary reports the age gate's false-block rate per age and per content level.
   It does not change the gate.
+- `showcase` (`prompts/v2/showcase.jsonl`): the 15-prompt review set. It is not mixed
+  into the v2 metrics files. See Lean testing below.
 - Every renderable prompt is linted: no age-ambiguous or youth term (girl, boy, teen,
   young, petite, schoolgirl, student, and the same idea in Russian), and no stated age
   under 20.
 - Prompts are interleaved round-robin across categories, so a time-capped arm still
   covers every category evenly. On v1 and v2 the 40-prompt subset is 10/10/10/10.
+
+## Lean testing
+
+Four rules for every bake-off question (`showcase`, `metrics` for v1 and v2,
+`gate-measurement` for `fp_young_adults`).
+
+1. **Look at a small set at full size.** `prompts/v2/showcase.jsonl` has 15 hard
+   prompts: 3 English text, 3 Russian text, 3 multi-subject scenes, 2 hand studies,
+   2 strict-adherence scenes, and 2 portraits. Every stated person age in the file
+   is 25-30, including both portraits. The file has no adult category and no
+   explicit prompts. Each image uses that model's catalog `native` frame for the
+   prompt's aspect (WebP quality 95, no resize). Those frames differ between
+   Z-Image-Turbo and Qwen-Image-2512. The shared catalog `twok` sizes are the 4K
+   Enlarge source, so the showcase leaves them alone. Metrics arms stay on the
+   square native frames, 1024 and 1328.
+
+   | aspect | Z-Image-Turbo | Qwen-Image-2512 |
+   |---|---|---|
+   | 1:1 | 1024×1024 | 1328×1328 |
+   | 16:9 | 1280×720 | 1664×928 |
+   | 9:16 | 720×1280 | 928×1664 |
+   | 4:3 | 1152×864 | 1472×1104 |
+   | 3:4 | 864×1152 | 1104×1472 |
+   | 3:2 | 1248×832 | 1584×1056 |
+   | 2:3 | 832×1248 | 1056×1584 |
+   | 21:9 | 1344×576 | 2016×864 |
+   | 9:21 | 576×1344 | 864×2016 |
+
+   Files are `{id}_s{seed}_{width}x{height}.webp`. A showcase run with the default
+   `--arms` list keeps `z_bf16` and `q_bf16`. Name any extra arm on `--arms` when
+   you want it. Scoring and the blind review pack are skipped, so the GPU time
+   goes to the review images. `--score-only` still scores when you ask for it.
+   After a real run, `results/showcase/index.html` is one file with no external
+   assets: one full-size image per page, Prev/Next buttons, and Left/Right arrow
+   keys. The image keeps its pixel size (`max-width: none`; scroll to see it).
+   The label on each page is
+   `model {name} · arm {arm} · prompt {id} · seed {n} · size {w}×{h}`.
+
+2. **Keep the large set for metrics.** v2 (`general.jsonl`, `text.jsonl`,
+   `adult.jsonl`, 105 prompts) stays the automated metrics set. Showcase ids are
+   not added to those files. v1 is unchanged.
+
+3. **Run the cheap checks before any GPU work.** Prompt lint, the dry-run plan,
+   and the plan schema all run before `results/` is created and before a model
+   loads. The log line is `checks ok: prompt-lint, dry-run, schema`. A failure
+   exits 2. `--dry-run` exits 0 after that line and writes no images.
+
+4. **Size the run with `--budget-min`.** `0` (the default) keeps every selected
+   arm and the `--deadline-min` clock (150 unless you change it). A positive
+   value replaces that clock and keeps the arms plus a category-balanced prompt
+   slice that fit. Arms that do not fit are stored as `skipped` with reason
+   `outside the budget`. Planning estimates, used only to size the run: Z-Image
+   3 s at 1024×1024, Qwen 50 s at 1328×1328, then scaled by pixels; a family load
+   is 180 s for Z and 240 s for Qwen; FP8 adds 60 s and INT4 adds 180 s. The same
+   family and quant does not reload. Showcase scoring reserve is 0. A 25-minute
+   showcase budget fits both full arms (estimate 19.44 min). A 12-minute budget
+   keeps all 15 Z-Image prompts and 5 Qwen prompts, still spread across categories.
+
+```bash
+python bakeoff/run_bakeoff.py --prompt-set showcase --budget-min 25 --dry-run
+python bakeoff/run_bakeoff.py --prompt-set showcase --budget-min 25
+python bakeoff/run_bakeoff.py --prompt-set v2 --dry-run
+```
 
 ## Time math (150 min)
 
@@ -101,7 +166,7 @@ from all of them each run.
 `results/summary.json` (schema `voxprint-canvas-bakeoff/1`):
 
 ```
-{schema, generated_utc, models{z,q}{repo,revision}, scorers{}, gate_rule, prompt_set, prompt_sets{}, subset_n,
+{schema, generated_utc, models{z,q}{repo,revision}, scorers{}, gate_rule, prompt_set, question, budget_min, prompt_sets{}, subset_n,
  arms{<arm>: {status: done|partial|skipped|not-run, reason?, quant, load_s, peak_vram_gb, gpu, settings{}, notes[],
               metrics{images, by_category{}, seconds_per_image, clip_t, clip_t_adult,
                       ocr_exact_en, ocr_cer_en, ocr_exact_ru, ocr_cer_ru,

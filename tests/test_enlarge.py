@@ -2,7 +2,7 @@
 import sys
 from pathlib import Path
 
-from canvas.infra.discovery import find_app
+from canvas.infra.discovery import find_app, _split_windows_command
 from canvas.infra.enlarge import EnlargeClient, dumps, loads
 
 
@@ -43,6 +43,23 @@ def test_cli_fallback_streams_json_progress(tmp_path, monkeypatch):
     assert found is not None and found.command[0] == sys.executable
     monkeypatch.setenv("CANVAS_ENLARGE_EXE", str(tmp_path / "missing-enlarge"))
     assert find_app("Enlarge", "enlarge") is None
+
+
+def test_windows_enlarge_override_keeps_backslashes(monkeypatch):
+    raw = r"C:\hostedtoolcache\windows\Python\3.12.10\x64\python.exe C:\temp\caps.py"
+    assert _split_windows_command(raw) == [
+        r"C:\hostedtoolcache\windows\Python\3.12.10\x64\python.exe",
+        r"C:\temp\caps.py",
+    ]
+    quoted = r'"C:\Program Files\Voxprint\voxprint-enlarge.exe"'
+    assert _split_windows_command(quoted) == [r"C:\Program Files\Voxprint\voxprint-enlarge.exe"]
+    monkeypatch.setattr("canvas.infra.discovery.sys.platform", "win32")
+    monkeypatch.setenv("CANVAS_ENLARGE_EXE", raw)
+    monkeypatch.setattr("canvas.infra.discovery.Path.is_file", lambda self: True)
+    found = find_app("Enlarge", "enlarge")
+    assert found is not None
+    assert found.command[0].endswith(r"python.exe")
+    assert found.command[1] == r"C:\temp\caps.py"
 
 
 def test_capabilities_probe_is_cached(tmp_path, monkeypatch):

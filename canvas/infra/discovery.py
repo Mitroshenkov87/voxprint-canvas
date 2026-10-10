@@ -54,7 +54,7 @@ def find_app(pascal: str, kebab: str) -> AppInstall | None:
     """Registry or desktop entry, then PATH. The executable must exist."""
     override = os.environ.get("CANVAS_ENLARGE_EXE", "").strip() if kebab == "enlarge" else ""
     if override:
-        parts = shlex.split(override)
+        parts = _split_command(override)
         if not parts:
             return None
         head = parts[0]
@@ -162,6 +162,32 @@ def _from_desktop_dirs(pascal: str, kebab: str) -> AppInstall | None:
             continue
         return AppInstall(command, version, ipc or f"voxprint-{kebab}")
     return None
+
+
+def _split_command(text: str) -> list[str]:
+    """Split an executable command. On Windows a backslash is a path separator."""
+    if sys.platform == "win32":
+        return _split_windows_command(text)
+    return shlex.split(text)
+
+
+def _split_windows_command(text: str) -> list[str]:
+    args: list[str] = []
+    buf: list[str] = []
+    quoted = False
+    for char in text:
+        if char == '"':
+            quoted = not quoted
+            continue
+        if char in " \t" and not quoted:
+            if buf:
+                args.append("".join(buf))
+                buf = []
+            continue
+        buf.append(char)
+    if buf:
+        args.append("".join(buf))
+    return args
 
 
 def _desktop_fields(text: str) -> tuple[list[str], str, str] | None:

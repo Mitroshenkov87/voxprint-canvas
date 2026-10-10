@@ -21,14 +21,26 @@ FP8 files use the Forge `voxprint-fp8-v1` format (float8_e4m3fn + `<name>.scale_
 and are dequantized to BF16 on the A100 (no FP8 tensor cores), so FP8 arms measure
 tier *quality*, not consumer speed. A100 seconds and VRAM are not 4090/4080 numbers.
 
-## Prompt sets (`prompts/`, seed 0)
+## Prompt sets (seed 0)
 
-- `general.jsonl`: 40 (photo, painting, product, people explicitly adult).
-- `text.jsonl`: 20 EN + 15 RU with exact target strings (RU stored as JSON `\u` escapes).
-- `adult.jsonl`: 30 artistic/erotic prompts, every subject an explicitly stated adult age
-  (30-60). No prompt in any set refers to minors.
+`--prompt-set` selects the files. The default is `v1`. Do not edit `prompts/*.jsonl`
+while a run is using them.
+
+- `v1` (`prompts/`): `general.jsonl` 40, `text.jsonl` 20 EN + 15 RU, `adult.jsonl` 30.
+  The original set. Adult subjects state ages from 30 to 60.
+- `v2` (`prompts/v2/`): same three files and the same counts. Text prompts match v1
+  (ids prefixed with `v2`; RU stays JSON `\u` escapes). Person prompts in general and
+  adult use a main band of 20-30: mostly explicit ages 25-30, some 20-24, and a few
+  older subjects for range. Every adult prompt states an explicit age.
+- `fp_young_adults` (`prompts/v2/fp_young_adults.jsonl`): measurement only, not part of
+  v1 or v2. Non-explicit and explicit prompts of adults who state an age from 20 to 25.
+  The summary reports the age gate's false-block rate per age and per content level.
+  It does not change the gate.
+- Every renderable prompt is linted: no age-ambiguous or youth term (girl, boy, teen,
+  young, petite, schoolgirl, student, and the same idea in Russian), and no stated age
+  under 20.
 - Prompts are interleaved round-robin across categories, so a time-capped arm still
-  covers every category evenly and the 40-prompt subset is 10/10/10/10.
+  covers every category evenly. On v1 and v2 the 40-prompt subset is 10/10/10/10.
 
 ## Time math (150 min)
 
@@ -54,7 +66,9 @@ categories). Pair comparisons always use only the common prompts/seeds.
 
 ```bash
 pip install -r bakeoff/requirements.txt          # inside the Forge venv
-python bakeoff/run_bakeoff.py --dry-run           # print plan
+python bakeoff/run_bakeoff.py --dry-run           # print plan (v1, 105 prompts)
+python bakeoff/run_bakeoff.py --prompt-set v2 --dry-run
+python bakeoff/run_bakeoff.py --prompt-set fp_young_adults --arms z_bf16 --deadline-min 20
 python bakeoff/run_bakeoff.py --deadline-min 150 \
   --z-fp8 ~/forge-out/<part-A>/zimage-turbo-transformer-fp8.safetensors \
   --z-encoder-fp8 ~/forge-out/<part-A>/qwen3-4b-text-encoder-fp8.safetensors
@@ -76,23 +90,31 @@ from all of them each run.
 - **Gate (approximation of the Canvas output gate)**: OpenCV Haar faces + FairFace age
   (`dima806/fairface_age_image_detection`, Apache-2.0); block if any face has P(age<20) > 0.10
   (whole image when no face). Reported as false-block rate on adult prompts and block rate on the rest.
+  `--prompt-set fp_young_adults` also reports that false-block rate per stated age (20-25) and per
+  content level (`non_explicit`, `explicit`). Thresholds stay as they are.
 - **Speed / VRAM**: seconds per image (encode+denoise+decode, synchronized), `torch.cuda.max_memory_allocated` per arm.
-- **Blind review**: `results/review_z_bf16_vs_q_bf16/` pairs (general + text only; adult images never leave
-  `results/images/`), answer key in a separate file.
+- **Blind review**: `results/review_z_bf16_vs_q_bf16/` pairs (general + text only; adult and
+  young-adult measurement images never leave `results/images/`), answer key in a separate file.
 
 ## Output
 
 `results/summary.json` (schema `voxprint-canvas-bakeoff/1`):
 
 ```
-{schema, generated_utc, models{z,q}{repo,revision}, scorers{}, gate_rule, prompt_sets{}, subset_n,
+{schema, generated_utc, models{z,q}{repo,revision}, scorers{}, gate_rule, prompt_set, prompt_sets{}, subset_n,
  arms{<arm>: {status: done|partial|skipped|not-run, reason?, quant, load_s, peak_vram_gb, gpu, settings{}, notes[],
               metrics{images, by_category{}, seconds_per_image, clip_t, clip_t_adult,
                       ocr_exact_en, ocr_cer_en, ocr_exact_ru, ocr_cer_ru,
                       adult_nsfw_mean, adult_permissive_rate, adult_gate_false_block_rate, nonadult_gate_block_rate}}},
  pairs[{a, b, common_images, a_metrics, b_metrics, delta_b_minus_a}],
- tiers{24gb:{z,q,q_note}, 16gb:{z,q,q_note}}, notes[]}
+ tiers{24gb:{z,q,q_note}, 16gb:{z,q,q_note}}, notes[],
+ fp_young_adults?{<arm>: {by_age, by_content_level, by_age_and_content_level}}}
 ```
+
+`fp_young_adults` is present only for that prompt set. Each cell is
+`{prompts, images, gate_false_block_rate}`. `summary.md` repeats the same tables.
+Adult and young-adult measurement images stay in `results/images/` and are not copied
+into the blind review pack.
 
 `results/summary.md` is the human-readable table. `results/` is git-ignored (it holds adult images).
 

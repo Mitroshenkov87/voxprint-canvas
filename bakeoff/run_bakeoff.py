@@ -108,18 +108,38 @@ def save_json(path: Path, data: Any) -> None:
     tmp.replace(path)
 
 
-def load_prompts() -> list[dict[str, Any]]:
+def prompt_paths(prompt_set: str) -> list[Path]:
+    """Files for ``v1``, ``v2`` or ``fp_young_adults``. ``v1`` is the original set."""
+    if prompt_set == "v1":
+        root = HERE / "prompts"
+        names = ("general.jsonl", "text.jsonl", "adult.jsonl")
+    elif prompt_set == "v2":
+        root = HERE / "prompts" / "v2"
+        names = ("general.jsonl", "text.jsonl", "adult.jsonl")
+    elif prompt_set == "fp_young_adults":
+        return [HERE / "prompts" / "v2" / "fp_young_adults.jsonl"]
+    else:
+        raise ValueError(prompt_set)
+    return [root / name for name in names]
+
+
+def load_prompts(prompt_set: str = "v1") -> list[dict[str, Any]]:
     """Round-robin interleave the categories so a time-capped arm still covers all of them."""
     buckets: dict[str, list[dict[str, Any]]] = {}
-    for name in ("general.jsonl", "text.jsonl", "adult.jsonl"):
-        for row in read_jsonl(HERE / "prompts" / name):
+    for path in prompt_paths(prompt_set):
+        if not path.exists():
+            raise FileNotFoundError(path)
+        for row in read_jsonl(path):
             buckets.setdefault(row["category"], []).append(row)
-    order = ["general", "text_en", "text_ru", "adult"]
+    order = ["general", "text_en", "text_ru", "adult", "fp_young_adult"]
     out: list[dict[str, Any]] = []
     while any(buckets.get(c) for c in order):
         for c in order:
             if buckets.get(c):
                 out.append(buckets[c].pop(0))
+    unknown = [name for name, rows in buckets.items() if name not in order and rows]
+    if unknown:
+        raise ValueError(f"unknown prompt categories: {unknown}")
     return out
 
 
@@ -361,12 +381,17 @@ class Runner:
                     rel = Path("images") / arm.name / f"{prompt['id']}_s{seed}.webp"
                     (self.out / rel).parent.mkdir(parents=True, exist_ok=True)
                     image.save(self.out / rel, "WEBP", quality=95)
-                    append_jsonl(self.records_path, {
+                    record = {
                         "arm": arm.name, "prompt_id": prompt["id"], "category": prompt["category"],
                         "seed": seed, "seconds": round(last_s, 3), "width": arm.width, "height": arm.height,
                         "steps": arm.steps, "guidance": arm.guidance, "image": str(rel),
                         "time_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                    })
+                    }
+                    if "content_level" in prompt:
+                        record["content_level"] = prompt["content_level"]
+                    if "ages" in prompt:
+                        record["ages"] = prompt["ages"]
+                    append_jsonl(self.records_path, record)
                     done.add(k)
                     made += 1
                     if made % 10 == 0:
@@ -529,6 +554,54 @@ def mean(xs: list[float]) -> float | None:
     return round(sum(xs) / len(xs), 4) if xs else None
 
 
+def _fp_cell(prompt_n: int, scored: list[dict[str, Any]]) -> dict[str, Any]:
+    flags = [1.0 if row["gate_block"] else 0.0 for row in scored]
+    return {"prompts": prompt_n, "images": len(scored), "gate_false_block_rate": mean(flags)}
+
+
+def young_adult_report(prompts: list[dict[str, Any]], items: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """False-block rates for the young-adult measurement set, by age and content level."""
+    fp = [prompt for prompt in prompts if prompt.get("category") == "fp_young_adult"]
+    if not fp:
+        return None
+    by_id = {prompt["id"]: prompt for prompt in fp}
+    scored = [row for row in items if row.get("prompt_id") in by_id and "gate_block" in row]
+    ages = sorted({str(prompt["ages"][0]) for prompt in fp}, key=int)
+    levels = ("non_explicit", "explicit")
+
+    def prompts_for(age: str | None, level: str | None) -> list[dict[str, Any]]:
+        chosen: list[dict[str, Any]] = []
+        for prompt in fp:
+            if age is not None and str(prompt["ages"][0]) != age:
+                continue
+            if level is not None and prompt.get("content_level") != level:
+                continue
+            chosen.append(prompt)
+        return chosen
+
+    def images_for(age: str | None, level: str | None) -> list[dict[str, Any]]:
+        chosen: list[dict[str, Any]] = []
+        for row in scored:
+            prompt = by_id[row["prompt_id"]]
+            if age is not None and str(prompt["ages"][0]) != age:
+                continue
+            if level is not None and prompt.get("content_level") != level:
+                continue
+            chosen.append(row)
+        return chosen
+
+    return {
+        "by_age": {age: _fp_cell(len(prompts_for(age, None)), images_for(age, None)) for age in ages},
+        "by_content_level": {
+            level: _fp_cell(len(prompts_for(None, level)), images_for(None, level)) for level in levels
+        },
+        "by_age_and_content_level": {
+            age: {level: _fp_cell(len(prompts_for(age, level)), images_for(age, level)) for level in levels}
+            for age in ages
+        },
+    }
+
+
 def summarise(out: Path, prompts: list[dict[str, Any]], notes: list[str], args: argparse.Namespace) -> dict[str, Any]:
     records = read_jsonl(out / "records.jsonl")
     scores = {key(r["arm"], r["prompt_id"], r["seed"]): r for r in read_jsonl(out / "scores.jsonl")}
@@ -611,6 +684,7 @@ def summarise(out: Path, prompts: list[dict[str, Any]], notes: list[str], args: 
         "scorers": {"clip_t": f"{SIGLIP_REPO}@{SIGLIP_REV[:8]}", "nsfw": f"{NSFW_REPO}@{NSFW_REV[:8]}",
                     "age": f"{AGE_REPO}@{AGE_REV[:8]} (+OpenCV Haar faces)", "ocr": "EasyOCR (en; ru+en)"},
         "gate_rule": "block if any face (or whole image when no face) has P(age<20) > 0.10; approximation of the Canvas gate (no prompt stage)",
+        "prompt_set": args.prompt_set,
         "prompt_sets": {c: sum(1 for p in prompts if p["category"] == c) for c in ("general", "text_en", "text_ru", "adult")},
         "subset_n": args.subset_n,
         "arms": arms_out,
@@ -618,6 +692,12 @@ def summarise(out: Path, prompts: list[dict[str, Any]], notes: list[str], args: 
         "tiers": tiers,
         "notes": notes,
     }
+    fp_count = sum(1 for prompt in prompts if prompt.get("category") == "fp_young_adult")
+    if fp_count:
+        summary["prompt_sets"]["fp_young_adult"] = fp_count
+        summary["fp_young_adults"] = {
+            name: young_adult_report(prompts, rows.get(name, [])) for name in arms_out
+        }
     save_json(out / "summary.json", summary)
     write_md(out / "summary.md", summary)
     return summary
@@ -634,7 +714,8 @@ def fmt(v: Any) -> str:
 def write_md(path: Path, s: dict[str, Any]) -> None:
     cols = ["images", "seconds_per_image", "clip_t", "ocr_exact_en", "ocr_cer_en", "ocr_exact_ru", "ocr_cer_ru",
             "adult_nsfw_mean", "adult_permissive_rate", "adult_gate_false_block_rate", "nonadult_gate_block_rate"]
-    lines = [f"# Canvas bake-off summary", "", f"Generated {s['generated_utc']}. Schema `{s['schema']}`.", "",
+    lines = ["# Canvas bake-off summary", "",
+             f"Generated {s['generated_utc']}. Schema `{s['schema']}`. Prompt set `{s.get('prompt_set', 'v1')}`.", "",
              "| arm | status | peak VRAM GiB | " + " | ".join(cols) + " |",
              "|---" * (len(cols) + 3) + "|"]
     for name, a in s["arms"].items():
@@ -651,17 +732,38 @@ def write_md(path: Path, s: dict[str, Any]) -> None:
     skipped = [f"- {n}: {a.get('reason')}" for n, a in s["arms"].items() if a.get("status") in ("skipped", "not-run")]
     if skipped:
         lines += ["", "## Skipped arms", ""] + skipped
+    fp = s.get("fp_young_adults") or {}
+    if fp:
+        lines += ["", "## Young-adult gate measurement", "",
+                  "Share of scored images the age gate blocked. Each subject states an adult age from 20 to 25.", ""]
+        for arm, report in fp.items():
+            lines += [f"### {arm}", "",
+                      "| age | content level | prompts | images | false-block rate |",
+                      "|---|---|---|---|---|"]
+            for age, levels in report["by_age_and_content_level"].items():
+                for level, cell in levels.items():
+                    lines.append(
+                        f"| {age} | {level} | {cell['prompts']} | {cell['images']} | {fmt(cell['gate_false_block_rate'])} |"
+                    )
+                cell = report["by_age"][age]
+                lines.append(f"| {age} | all | {cell['prompts']} | {cell['images']} | {fmt(cell['gate_false_block_rate'])} |")
+            for level, cell in report["by_content_level"].items():
+                lines.append(f"| all | {level} | {cell['prompts']} | {cell['images']} | {fmt(cell['gate_false_block_rate'])} |")
+            lines.append("")
     if s["notes"]:
         lines += ["", "## Notes", ""] + [f"- {n}" for n in s["notes"]]
     lines += ["", f"Gate rule: {s['gate_rule']}.", "A100 speed and VRAM are not consumer-GPU numbers; FP8 arms are dequantized to BF16."]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+_REVIEW_SKIP = {"adult", "fp_young_adult"}
+
+
 def review_pack(out: Path, a: str, b: str, seed: int = 1234) -> None:
-    """Blind pairwise pack for general + text prompts only (adult images never leave results/images)."""
+    """Blind pairwise pack for general and text prompts. Adult and measurement images stay in results/images."""
     recs = read_jsonl(out / "records.jsonl")
-    ka = {r["prompt_id"]: r for r in recs if r["arm"] == a and r["category"] != "adult"}
-    kb = {r["prompt_id"]: r for r in recs if r["arm"] == b and r["category"] != "adult"}
+    ka = {r["prompt_id"]: r for r in recs if r["arm"] == a and r["category"] not in _REVIEW_SKIP}
+    kb = {r["prompt_id"]: r for r in recs if r["arm"] == b and r["category"] not in _REVIEW_SKIP}
     pack = out / f"review_{a}_vs_{b}"
     shutil.rmtree(pack, ignore_errors=True)
     pack.mkdir(parents=True)
@@ -687,6 +789,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--arm-max-min", default="", help="override caps, e.g. q_bf16=80,q_tuned=28")
     p.add_argument("--subset-n", type=int, default=40, help="prompts used by subset arms (q_tuned)")
     p.add_argument("--seeds", default="0")
+    p.add_argument("--prompt-set", default="v1", choices=("v1", "v2", "fp_young_adults"),
+                   help="v1 reads prompts/; v2 and fp_young_adults read prompts/v2/")
     p.add_argument("--z-repo", default=Z_REPO)
     p.add_argument("--z-rev", default=Z_REV)
     p.add_argument("--q-repo", default=Q_REPO)
@@ -707,9 +811,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     clock = Clock(args.deadline_min, args.score_reserve_min)
+    try:
+        prompts = load_prompts(args.prompt_set)
+    except ValueError:
+        print(f"unknown prompt set: {args.prompt_set}", file=sys.stderr)
+        return 2
     out = Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
-    prompts = load_prompts()
     specs = default_arms()
     for item in filter(None, args.arm_max_min.split(",")):
         name, value = item.split("=")
@@ -720,7 +828,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"unknown arms: {unknown}", file=sys.stderr)
         return 2
     arms = [specs[a] for a in ALL_ARMS if a in chosen]
-    plan = {"prompts": len(prompts), "subset_n": args.subset_n, "deadline_min": args.deadline_min,
+    plan = {"prompt_set": args.prompt_set, "prompts": len(prompts), "subset_n": args.subset_n, "deadline_min": args.deadline_min,
             "arms": {a.name: {"max_min": a.max_min, "subset": a.subset, "steps": a.steps, "size": f"{a.width}x{a.height}"} for a in arms}}
     log("plan " + json.dumps(plan))
     if args.dry_run:

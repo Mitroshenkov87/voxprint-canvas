@@ -1,8 +1,13 @@
-"""Version and the one responsibility line shown to users."""
+"""Product name and the one responsibility line shown to users.
+
+The version string lives in ``BUILD.json`` and is read by ``canvas.app.identity``.
+"""
 from __future__ import annotations
 
+from canvas.app.identity import version
+
 APP_NAME = "Voxprint AI Canvas"
-APP_VERSION = "0.1.0"
+APP_VERSION = version()
 APP_ID = "canvas"
 # Windows 11 24H2.
 MIN_WINDOWS_BUILD = 26100

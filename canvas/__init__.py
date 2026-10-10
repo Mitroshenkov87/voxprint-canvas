@@ -1,3 +1,5 @@
 """Voxprint AI Canvas, the local text-to-image app of the Voxprint AI Media Suite."""
 
-__version__ = "0.1.0"
+from canvas.app.identity import version
+
+__version__ = version()

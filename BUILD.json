@@ -1,3 +1,8 @@
 {
-  "offset": 0
+  "version": "0.1.0",
+  "channel": "RC",
+  "offset": 0,
+  "offset_note": "The build number is the GitHub Actions run number plus this offset. VOXPRINT_BUILD overrides both. A local run with neither is build 0.",
+  "codename": "Yotzer",
+  "codename_meaning": "creator, the one who forms (Genesis 2:7)"
 }

@@ -19,6 +19,8 @@ from PySide6.QtWidgets import (
 )
 
 from canvas.app.info import APP_NAME, ENLARGE_HINT, RESPONSIBILITY, THIRD_PARTY_NOTICE
+from canvas.ui.about import AboutDialog
+from canvas.ui.icons import load_approved
 from canvas.core.formats import DEFAULT_FORMAT, OutputFormat
 from canvas.models.modes import Mode, Tier, mode_group, visible_modes
 from canvas.models.sizes import ASPECT_GROUPS, closest_aspect
@@ -82,6 +84,10 @@ class MainWindow(QWidget):
         self.generate_button = QPushButton("Generate")
         self.generate_button.setObjectName("primary")
         self.generate_button.clicked.connect(self._generate)
+        self.action_icons = load_approved()
+        self.about_button = QPushButton("About")
+        self.about_button.setObjectName("about")
+        self.about_button.clicked.connect(self._about)
         tabs = QTabWidget()
         tabs.addTab(self._text_tab(), "Text to image")
         tabs.addTab(self._image_tab(), "Image to image")
@@ -98,7 +104,11 @@ class MainWindow(QWidget):
         layout = QVBoxLayout(self)
         title = QLabel(APP_NAME)
         title.setObjectName("title")
-        layout.addWidget(title)
+        title_row = QHBoxLayout()
+        title_row.addWidget(title)
+        title_row.addStretch(1)
+        title_row.addWidget(self.about_button)
+        layout.addLayout(title_row)
         layout.addWidget(tabs)
         layout.addWidget(self.prompt)
         layout.addWidget(self.aspect_row)
@@ -190,6 +200,9 @@ class MainWindow(QWidget):
         if tab_index == 0:
             return self.creative.currentData()
         return self.image_mode.currentData()
+
+    def _about(self) -> None:
+        AboutDialog(self).exec()
 
     def _generate(self) -> None:
         tabs = self.findChild(QTabWidget)

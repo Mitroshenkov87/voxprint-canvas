@@ -1,0 +1,33 @@
+# Build output
+build/
+dist/
+out/
+*.egg-info/
+*.spec
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+# Models and weights
+models/
+*.safetensors
+*.ckpt
+*.gguf
+*.onnx
+*.pt
+*.bin
+# Generated images
+outputs/
+# Logs and debug dumps
+*.log
+logs/
+*.local.*
+scripts/_*.json
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

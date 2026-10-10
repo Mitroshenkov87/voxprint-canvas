@@ -9,7 +9,7 @@ from canvas.app.info import APP_VERSION
 from canvas.app.platform import GpuCheck, check_gpu, current_os_check
 from canvas.app.updates import check_for_update
 from canvas.core.formats import OutputFormat
-from canvas.infra.enlarge import EnlargeClient
+from canvas.infra.enlarge import EnlargeClient, EnlargeError
 from canvas.infra.gpu import probe_gpu
 from canvas.infra.models_users import register, unregister
 from canvas.infra.paths import models_dir
@@ -50,7 +50,7 @@ def _callback(tier: Tier, window_box: list[MainWindow | None], enlarge: EnlargeC
         )
         try:
             pipeline.generate(prompt, mode, aspect=aspect, output=output)
-        except (SafetyError, ModeUnavailable, BaseNotSelected, JobError, CoolingDown, EnlargeMissing) as exc:
+        except (SafetyError, ModeUnavailable, BaseNotSelected, JobError, CoolingDown, EnlargeMissing, EnlargeError) as exc:
             return str(exc)
         return "Done"
 
@@ -62,7 +62,7 @@ def _launch(tier: Tier) -> None:
     splash = show_splash()
     enlarge = EnlargeClient()
     window_box: list[MainWindow | None] = [None]
-    window = MainWindow(_callback(tier, window_box, enlarge), tier, glass=False, enlarge_ready=enlarge.installed())
+    window = MainWindow(_callback(tier, window_box, enlarge), tier, glass=False, enlarge_ready=enlarge.ready())
     window_box[0] = window
     window.resize(960, 720)
     window.show()

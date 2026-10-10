@@ -1,0 +1,633 @@
+{
+  "schema": 1,
+  "diffusers": "0.41.0",
+  "default_text_base": null,
+  "text_bases": [
+    "z-image-turbo",
+    "qwen-image-2512"
+  ],
+  "models": [
+    {
+      "id": "z-image-turbo-fp8",
+      "role": "generator",
+      "tier": "16gb",
+      "repo": "Tongyi-MAI/Z-Image-Turbo",
+      "revision": "",
+      "licence": "Apache-2.0",
+      "runtime": "diffusers",
+      "pipeline_classes": [
+        "ZImagePipeline",
+        "ZImageImg2ImgPipeline",
+        "ZImageInpaintPipeline",
+        "ZImageControlNetPipeline",
+        "ZImageControlNetInpaintPipeline"
+      ],
+      "quant": "fp8-e4m3",
+      "quant_backend": "torchao",
+      "min_compute_capability": "8.9",
+      "steps": 8,
+      "guidance_scale": 0.0,
+      "text_encoder": "Qwen/Qwen3-4B",
+      "text_encoder_offload": "cpu-after-encode",
+      "vram_hint_gb": 10,
+      "min_vram_gb": 16,
+      "status": "stub",
+      "files": {
+        "weights": {
+          "sha256": "",
+          "size": 0
+        }
+      },
+      "sources": [
+        {
+          "kind": "local",
+          "uri": ""
+        },
+        {
+          "kind": "huggingface",
+          "uri": "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo"
+        },
+        {
+          "kind": "huggingface-mirror",
+          "uri": ""
+        },
+        {
+          "kind": "kaggle",
+          "uri": ""
+        },
+        {
+          "kind": "torrent",
+          "uri": ""
+        }
+      ],
+      "text_base": "z-image-turbo"
+    },
+    {
+      "id": "z-image-turbo-bf16",
+      "role": "generator",
+      "tier": "24gb",
+      "repo": "Tongyi-MAI/Z-Image-Turbo",
+      "revision": "",
+      "licence": "Apache-2.0",
+      "runtime": "diffusers",
+      "pipeline_classes": [
+        "ZImagePipeline",
+        "ZImageImg2ImgPipeline",
+        "ZImageInpaintPipeline",
+        "ZImageControlNetPipeline",
+        "ZImageControlNetInpaintPipeline"
+      ],
+      "quant": "bf16",
+      "quant_backend": "",
+      "min_compute_capability": "8.9",
+      "steps": 8,
+      "guidance_scale": 0.0,
+      "text_encoder": "Qwen/Qwen3-4B",
+      "text_encoder_offload": "",
+      "vram_hint_gb": 16,
+      "min_vram_gb": 24,
+      "status": "stub",
+      "files": {
+        "weights": {
+          "sha256": "",
+          "size": 0
+        }
+      },
+      "sources": [
+        {
+          "kind": "local",
+          "uri": ""
+        },
+        {
+          "kind": "huggingface",
+          "uri": "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo"
+        },
+        {
+          "kind": "huggingface-mirror",
+          "uri": ""
+        },
+        {
+          "kind": "kaggle",
+          "uri": ""
+        },
+        {
+          "kind": "torrent",
+          "uri": ""
+        }
+      ],
+      "text_base": "z-image-turbo"
+    },
+    {
+      "id": "qwen-image-2512-int4",
+      "role": "generator",
+      "tier": "16gb",
+      "repo": "Qwen/Qwen-Image-2512",
+      "text_base": "qwen-image-2512",
+      "revision": "",
+      "licence": "Apache-2.0",
+      "runtime": "diffusers",
+      "pipeline_classes": [
+        "QwenImagePipeline"
+      ],
+      "quant": "int4",
+      "quant_backend": "nunchaku",
+      "variant": "svdquant",
+      "min_compute_capability": "8.9",
+      "steps": 50,
+      "guidance_scale": 4.0,
+      "guidance_kind": "true_cfg_scale",
+      "text_encoder": "Qwen/Qwen2.5-VL-7B-Instruct",
+      "text_encoder_offload": "",
+      "vram_hint_gb": 12,
+      "min_vram_gb": 16,
+      "status": "stub",
+      "files": {
+        "weights": {
+          "sha256": "",
+          "size": 0
+        }
+      },
+      "sources": [
+        {
+          "kind": "local",
+          "uri": ""
+        },
+        {
+          "kind": "huggingface",
+          "uri": "https://huggingface.co/Qwen/Qwen-Image-2512"
+        },
+        {
+          "kind": "huggingface-mirror",
+          "uri": ""
+        },
+        {
+          "kind": "kaggle",
+          "uri": ""
+        },
+        {
+          "kind": "torrent",
+          "uri": ""
+        }
+      ]
+    },
+    {
+      "id": "qwen-image-2512-fp8",
+      "role": "generator",
+      "tier": "24gb",
+      "repo": "Qwen/Qwen-Image-2512",
+      "text_base": "qwen-image-2512",
+      "revision": "",
+      "licence": "Apache-2.0",
+      "runtime": "diffusers",
+      "pipeline_classes": [
+        "QwenImagePipeline"
+      ],
+      "quant": "fp8",
+      "quant_backend": "",
+      "variant": "",
+      "min_compute_capability": "8.9",
+      "steps": 50,
+      "guidance_scale": 4.0,
+      "guidance_kind": "true_cfg_scale",
+      "text_encoder": "Qwen/Qwen2.5-VL-7B-Instruct",
+      "text_encoder_offload": "",
+      "vram_hint_gb": 18,
+      "min_vram_gb": 24,
+      "status": "stub",
+      "files": {
+        "weights": {
+          "sha256": "",
+          "size": 0
+        }
+      },
+      "sources": [
+        {
+          "kind": "local",
+          "uri": ""
+        },
+        {
+          "kind": "huggingface",
+          "uri": "https://huggingface.co/Qwen/Qwen-Image-2512"
+        },
+        {
+          "kind": "huggingface-mirror",
+          "uri": ""
+        },
+        {
+          "kind": "kaggle",
+          "uri": ""
+        },
+        {
+          "kind": "torrent",
+          "uri": ""
+        }
+      ]
+    },
+    {
+      "id": "z-image-creative-bf16",
+      "role": "generator",
+      "tier": "24gb",
+      "repo": "Tongyi-MAI/Z-Image",
+      "revision": "",
+      "licence": "Apache-2.0",
+      "runtime": "diffusers",
+      "pipeline_classes": [
+        "ZImagePipeline"
+      ],
+      "quant": "bf16",
+      "quant_backend": "",
+      "min_compute_capability": "8.9",
+      "steps": 50,
+      "guidance_scale": null,
+      "mode_name": "creative",
+      "text_encoder": "Qwen/Qwen3-4B",
+      "text_encoder_offload": "",
+      "vram_hint_gb": 18,
+      "min_vram_gb": 24,
+      "status": "stub",
+      "files": {
+        "weights": {
+          "sha256": "",
+          "size": 0
+        }
+      },
+      "sources": [
+        {
+          "kind": "local",
+          "uri": ""
+        },
+        {
+          "kind": "huggingface",
+          "uri": "https://huggingface.co/Tongyi-MAI/Z-Image"
+        },
+        {
+          "kind": "huggingface-mirror",
+          "uri": ""
+        },
+        {
+          "kind": "kaggle",
+          "uri": ""
+        },
+        {
+          "kind": "torrent",
+          "uri": ""
+        }
+      ]
+    },
+    {
+      "id": "z-image-turbo-fun-controlnet-union-fp8",
+      "role": "control",
+      "tier": "16gb",
+      "repo": "alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union-2.1",
+      "revision": "",
+      "licence": "Apache-2.0",
+      "runtime": "diffusers",
+      "variant": "lite",
+      "pipeline_classes": [
+        "ZImageInpaintPipeline",
+        "ZImageControlNetPipeline",
+        "ZImageControlNetInpaintPipeline"
+      ],
+      "quant": "fp8-e4m3",
+      "quant_backend": "torchao",
+      "min_compute_capability": "8.9",
+      "steps": 8,
+      "guidance_scale": 0.0,
+      "vram_hint_gb": 4,
+      "min_vram_gb": 16,
+      "status": "stub",
+      "files": {
+        "weights": {
+          "sha256": "",
+          "size": 0
+        }
+      },
+      "sources": [
+        {
+          "kind": "local",
+          "uri": ""
+        },
+        {
+          "kind": "huggingface",
+          "uri": "https://huggingface.co/alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union-2.1"
+        },
+        {
+          "kind": "huggingface-mirror",
+          "uri": ""
+        },
+        {
+          "kind": "kaggle",
+          "uri": ""
+        },
+        {
+          "kind": "torrent",
+          "uri": ""
+        }
+      ]
+    },
+    {
+      "id": "z-image-turbo-fun-controlnet-union-bf16",
+      "role": "control",
+      "tier": "24gb",
+      "repo": "alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union-2.1",
+      "revision": "",
+      "licence": "Apache-2.0",
+      "runtime": "diffusers",
+      "variant": "full",
+      "pipeline_classes": [
+        "ZImageInpaintPipeline",
+        "ZImageControlNetPipeline",
+        "ZImageControlNetInpaintPipeline"
+      ],
+      "quant": "bf16",
+      "quant_backend": "",
+      "min_compute_capability": "8.9",
+      "steps": 8,
+      "guidance_scale": 0.0,
+      "vram_hint_gb": 6,
+      "min_vram_gb": 24,
+      "status": "stub",
+      "files": {
+        "weights": {
+          "sha256": "",
+          "size": 0
+        }
+      },
+      "sources": [
+        {
+          "kind": "local",
+          "uri": ""
+        },
+        {
+          "kind": "huggingface",
+          "uri": "https://huggingface.co/alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union-2.1"
+        },
+        {
+          "kind": "huggingface-mirror",
+          "uri": ""
+        },
+        {
+          "kind": "kaggle",
+          "uri": ""
+        },
+        {
+          "kind": "torrent",
+          "uri": ""
+        }
+      ]
+    },
+    {
+      "id": "qwen-image-edit-2511-fp8",
+      "role": "edit",
+      "tier": "24gb",
+      "repo": "Qwen/Qwen-Image-Edit-2511",
+      "revision": "",
+      "licence": "Apache-2.0",
+      "runtime": "diffusers",
+      "pipeline_classes": [
+        "QwenImageEditPlusPipeline"
+      ],
+      "quant": "fp8",
+      "quant_backend": "",
+      "min_compute_capability": "8.9",
+      "steps": null,
+      "guidance_scale": null,
+      "vram_hint_gb": 18,
+      "min_vram_gb": 24,
+      "status": "stub",
+      "files": {
+        "weights": {
+          "sha256": "",
+          "size": 0
+        }
+      },
+      "sources": [
+        {
+          "kind": "local",
+          "uri": ""
+        },
+        {
+          "kind": "huggingface",
+          "uri": "https://huggingface.co/Qwen/Qwen-Image-Edit-2511"
+        },
+        {
+          "kind": "huggingface-mirror",
+          "uri": ""
+        },
+        {
+          "kind": "kaggle",
+          "uri": ""
+        },
+        {
+          "kind": "torrent",
+          "uri": ""
+        }
+      ],
+      "text_encoder": "Qwen/Qwen2.5-VL-7B-Instruct"
+    },
+    {
+      "id": "qwen3guard-gen-0.6b",
+      "role": "prompt-guard",
+      "tier": "any",
+      "repo": "Qwen/Qwen3Guard-Gen-0.6B",
+      "revision": "",
+      "licence": "Apache-2.0",
+      "runtime": "transformers",
+      "device": "cpu",
+      "vram_hint_gb": 1.5,
+      "status": "stub",
+      "files": {
+        "weights": {
+          "sha256": "",
+          "size": 0
+        }
+      },
+      "sources": [
+        {
+          "kind": "local",
+          "uri": ""
+        },
+        {
+          "kind": "huggingface",
+          "uri": "https://huggingface.co/Qwen/Qwen3Guard-Gen-0.6B"
+        },
+        {
+          "kind": "huggingface-mirror",
+          "uri": ""
+        },
+        {
+          "kind": "kaggle",
+          "uri": ""
+        },
+        {
+          "kind": "torrent",
+          "uri": ""
+        }
+      ]
+    },
+    {
+      "id": "siglip2-so400m-patch14-384",
+      "role": "zero-shot",
+      "tier": "any",
+      "repo": "google/siglip2-so400m-patch14-384",
+      "revision": "",
+      "licence": "Apache-2.0",
+      "runtime": "transformers",
+      "device": "cpu",
+      "vram_hint_gb": 2,
+      "status": "stub",
+      "files": {
+        "weights": {
+          "sha256": "",
+          "size": 0
+        }
+      },
+      "sources": [
+        {
+          "kind": "local",
+          "uri": ""
+        },
+        {
+          "kind": "huggingface",
+          "uri": "https://huggingface.co/google/siglip2-so400m-patch14-384"
+        },
+        {
+          "kind": "huggingface-mirror",
+          "uri": ""
+        },
+        {
+          "kind": "kaggle",
+          "uri": ""
+        },
+        {
+          "kind": "torrent",
+          "uri": ""
+        }
+      ]
+    },
+    {
+      "id": "yunet-face",
+      "role": "face-detector",
+      "tier": "any",
+      "repo": "opencv/face_detection_yunet",
+      "revision": "",
+      "licence": "MIT",
+      "runtime": "opencv",
+      "device": "cpu",
+      "vram_hint_gb": 0.2,
+      "status": "stub",
+      "files": {
+        "face_detection_yunet_2023mar.onnx": {
+          "sha256": "",
+          "size": 0
+        }
+      },
+      "sources": [
+        {
+          "kind": "local",
+          "uri": ""
+        },
+        {
+          "kind": "upstream",
+          "uri": "https://github.com/opencv/opencv_zoo"
+        },
+        {
+          "kind": "huggingface",
+          "uri": ""
+        },
+        {
+          "kind": "huggingface-mirror",
+          "uri": ""
+        },
+        {
+          "kind": "kaggle",
+          "uri": ""
+        },
+        {
+          "kind": "torrent",
+          "uri": ""
+        }
+      ]
+    },
+    {
+      "id": "fairface-age",
+      "role": "age",
+      "tier": "any",
+      "repo": "dima806/fairface_age_image_detection",
+      "revision": "",
+      "licence": "Apache-2.0",
+      "runtime": "transformers",
+      "device": "cpu",
+      "vram_hint_gb": 1,
+      "status": "stub",
+      "files": {
+        "weights": {
+          "sha256": "",
+          "size": 0
+        }
+      },
+      "sources": [
+        {
+          "kind": "local",
+          "uri": ""
+        },
+        {
+          "kind": "huggingface",
+          "uri": "https://huggingface.co/dima806/fairface_age_image_detection"
+        },
+        {
+          "kind": "huggingface-mirror",
+          "uri": ""
+        },
+        {
+          "kind": "kaggle",
+          "uri": ""
+        },
+        {
+          "kind": "torrent",
+          "uri": ""
+        }
+      ]
+    },
+    {
+      "id": "nsfw-image-detection",
+      "role": "nsfw",
+      "tier": "any",
+      "repo": "Falconsai/nsfw_image_detection",
+      "revision": "",
+      "licence": "MIT",
+      "runtime": "transformers",
+      "device": "cpu",
+      "vram_hint_gb": 1,
+      "status": "stub",
+      "files": {
+        "weights": {
+          "sha256": "",
+          "size": 0
+        }
+      },
+      "sources": [
+        {
+          "kind": "local",
+          "uri": ""
+        },
+        {
+          "kind": "huggingface",
+          "uri": "https://huggingface.co/Falconsai/nsfw_image_detection"
+        },
+        {
+          "kind": "huggingface-mirror",
+          "uri": ""
+        },
+        {
+          "kind": "kaggle",
+          "uri": ""
+        },
+        {
+          "kind": "torrent",
+          "uri": ""
+        }
+      ]
+    }
+  ]
+}

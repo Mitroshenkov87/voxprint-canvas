@@ -1,0 +1,19 @@
+# Extends the default gitleaks rules. SHA-256 pins of public model files are
+# content hashes, not credentials. Any other rule, and any other file, still
+# fails the audit. Pins land in canvas/models/catalog.json when they are frozen.
+title = "Voxprint AI Canvas"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "SHA-256 pins of public model files in the Canvas registry"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = [
+  '''(^|/)canvas/models/catalog\.json$''',
+  '''(^|/)canvas/models/third_party\.json$''',
+  '''(^|/)canvas/models/excluded_weights\.py$''',
+]
+regexTarget = "line"
+regexes = ['''(?i)[0-9a-f]{64}''']

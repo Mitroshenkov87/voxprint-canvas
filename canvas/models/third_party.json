@@ -1,0 +1,53 @@
+{
+  "exclusions": [
+    {
+      "kind": "model",
+      "url": "https://civarchive.com/models/2299623",
+      "reason": "advertises expanded ages"
+    }
+  ],
+  "addons": [
+    {
+      "id": "chroma1-hd",
+      "kind": "model",
+      "repo": "lodestones/Chroma1-HD",
+      "revision": "0e0c60ece1e82b17cb7f77342d765ba5024c40c0",
+      "author": "lodestones",
+      "licence": "Apache-2.0 (as stated upstream)",
+      "opt_in": true,
+      "gate": "always",
+      "files": {
+        "Chroma1-HD.safetensors": {
+          "sha256": "d446d9695d08276f61e53653e025289dd96f7a489c27982a1fa54ecabc06642a",
+          "size": 17800038288
+        },
+        "text_encoder/model-00001-of-00002.safetensors": {
+          "sha256": "ec87bffd1923e8b2774a6d240c922a41f6143081d52cf83b8fe39e9d838c893e",
+          "size": 4994582224
+        },
+        "text_encoder/model-00002-of-00002.safetensors": {
+          "sha256": "a5640855b301fcdbceddfa90ae8066cd9414aff020552a201a255ecf2059da00",
+          "size": 4530066360
+        },
+        "transformer/diffusion_pytorch_model-00001-of-00002.safetensors": {
+          "sha256": "59f0b26eccaabb8301e4166e653f1bcdebd7c46a4a07b02fe33d7a2c46d78eba",
+          "size": 9946193392
+        },
+        "transformer/diffusion_pytorch_model-00002-of-00002.safetensors": {
+          "sha256": "65e6541afdabbb96568a3f8975eeef929f0a7e0eef3d2c4741b1bf911ac3a6d5",
+          "size": 7853894360
+        },
+        "vae/diffusion_pytorch_model.safetensors": {
+          "sha256": "f5b59a26851551b67ae1fe58d32e76486e1e812def4696a4bea97f16604d40a3",
+          "size": 167666902
+        }
+      },
+      "sources": [
+        {
+          "kind": "upstream",
+          "uri": "https://huggingface.co/lodestones/Chroma1-HD/resolve/0e0c60ece1e82b17cb7f77342d765ba5024c40c0"
+        }
+      ]
+    }
+  ]
+}

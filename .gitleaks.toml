@@ -10,6 +10,9 @@ useDefault = true
 description = "SHA-256 pins of public model files in the Canvas registry"
 targetRules = ["generic-api-key"]
 condition = "AND"
-paths = ['''(^|/)canvas/models/catalog\.json$''']
+paths = [
+  '''(^|/)canvas/models/catalog\.json$''',
+  '''(^|/)canvas/models/third_party\.json$''',
+]
 regexTarget = "line"
 regexes = ['''(?i)[0-9a-f]{64}''']

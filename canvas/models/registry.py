@@ -12,6 +12,7 @@ from canvas.safety.constants import FORBIDDEN_MODEL_MARKERS
 _CATALOG = Path(__file__).with_name("catalog.json")
 _ALLOWED_LICENCES = {"apache-2.0", "mit"}
 _SOURCE_KINDS = ("local", "upstream", "huggingface", "huggingface-mirror", "kaggle", "torrent")
+_GUIDANCE_KINDS = {"", "guidance_scale", "true_cfg_scale"}
 
 
 class RegistryError(ValueError):
@@ -46,6 +47,8 @@ class ModelSpec:
     device: str
     files: dict[str, str]
     sources: tuple[Source, ...]
+    text_base: str
+    guidance_kind: str
 
     def pinned(self) -> bool:
         return bool(self.files) and all(len(value) == 64 for value in self.files.values())
@@ -55,6 +58,8 @@ class ModelSpec:
 class Catalog:
     diffusers: str
     models: tuple[ModelSpec, ...]
+    default_text_base: str | None = None
+    text_bases: tuple[str, ...] = ()
 
     def by_id(self, model_id: str) -> ModelSpec:
         for spec in self.models:
@@ -101,6 +106,8 @@ def _spec(row: dict[str, Any]) -> ModelSpec:
         device=str(row.get("device") or ""),
         files=_sha_map(dict(row.get("files") or {})),
         sources=sources,
+        text_base=str(row.get("text_base") or ""),
+        guidance_kind=str(row.get("guidance_kind") or ""),
     )
 
 
@@ -117,10 +124,24 @@ def load_catalog(path: Path | None = None) -> Catalog:
             raise RegistryError("a listed model is not allowed")
         if spec.licence.casefold() not in _ALLOWED_LICENCES:
             raise RegistryError("a listed model is not Apache-2.0 or MIT")
+        if spec.guidance_kind not in _GUIDANCE_KINDS:
+            raise RegistryError("unknown guidance kind")
         kinds = [source.kind for source in spec.sources]
         if any(kind not in _SOURCE_KINDS for kind in kinds):
             raise RegistryError("unknown model source")
-    return Catalog(diffusers, models)
+    text_bases = tuple(str(item) for item in raw.get("text_bases") or [])
+    default = raw.get("default_text_base")
+    default_text_base = None if default is None else str(default)
+    if default_text_base is not None and default_text_base not in text_bases:
+        raise RegistryError("the default text model is not in the registry")
+    for spec in models:
+        if spec.text_base and spec.text_base not in text_bases:
+            raise RegistryError("a text model is not listed")
+    for family in text_bases:
+        tiers = {spec.tier for spec in models if spec.text_base == family}
+        if "16gb" not in tiers or "24gb" not in tiers:
+            raise RegistryError("a text model is missing a tier")
+    return Catalog(diffusers, models, default_text_base, text_bases)
 
 
 def source_order(spec: ModelSpec) -> tuple[str, ...]:

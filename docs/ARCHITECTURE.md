@@ -15,17 +15,22 @@ Voxprint AI Canvas is a local image application. It runs on the machine's NVIDIA
 | `canvas/pipeline` | In-process job and the worker-process boundary |
 | `installer` | Windows installer and Linux packaging stub |
 | `tools/audit.py` | Release audit |
+| `tools/bakeoff.py` | Text-base comparison on a supported GPU |
 
 ## Modes
 
 v1 has two tabs.
 
-- Text to image uses Z-Image-Turbo (8 steps, guidance 0). Cards with 24 GB or more can also select the 50-step Z-Image Creative plan.
-- Image to image covers restyle, inpaint, outpaint, pose, depth, and edge through the Z-Image pipelines and `alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union-2.1`. Instruction edit uses `Qwen/Qwen-Image-Edit-2511` and is offered only on the 24 GB tier.
+- Text to image has two bases, Z-Image-Turbo (8 steps, guidance 0) and Qwen-Image-2512 (50 steps). A 16 GB card uses FP8 for Z-Image-Turbo and INT4 for Qwen-Image-2512. A 24 GB card uses BF16 for Z-Image-Turbo and FP8 for Qwen-Image-2512. The default base is a registry setting and stays unset until a comparison on a supported GPU. Cards with 24 GB or more can also select the 50-step Z-Image Creative plan.
+- Image to image covers restyle, inpaint, outpaint, pose, depth, and edge through the Z-Image pipelines and `alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union-2.1`. Instruction edit uses `Qwen/Qwen-Image-Edit-2511`, which shares its text encoder with Qwen-Image-2512, and is offered only on the 24 GB tier.
 
 The registry pins diffusers 0.41.0. A 16 GB card uses the FP8 turbo weights and the lite FP8 controlnet. A 24 GB card uses BF16 turbo weights and the full BF16 controlnet. Creative and instruction edit stay hidden on 16 GB.
 
-Weight files stay unpinned until their SHA-256 values are frozen. The loader and the downloader refuse an empty pin. Inference through diffusers is not wired yet: the generator records the plan and stops.
+`tools/bakeoff.py` runs the same prompts and seeds for each text base and records time and peak VRAM. It writes images only in the operating system's temp directory.
+
+Opt-in third-party weights are a separate list. A download starts only when you ask, and it uses the author's upstream address.
+
+Weight files in the main registry stay unpinned until their SHA-256 values are frozen. The loader and the downloader refuse an empty pin. Inference through diffusers is not wired yet: the generator records the plan and stops.
 
 ## Content safety checks
 

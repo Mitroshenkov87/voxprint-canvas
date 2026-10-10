@@ -13,7 +13,7 @@ from canvas.infra.models_users import register, unregister
 from canvas.infra.paths import models_dir
 from canvas.models.loader import ZImageGenerator, load_catalog_stack
 from canvas.models.modes import Mode, Tier
-from canvas.models.plan import ModeUnavailable
+from canvas.models.plan import BaseNotSelected, ModeUnavailable
 from canvas.models.registry import load_catalog
 from canvas.pipeline.pipeline import CoolingDown, JobError, Pipeline
 from canvas.safety.gate import AgeGate, SafetyError
@@ -41,7 +41,7 @@ def _callback(tier: Tier):
         pipeline = Pipeline(AgeGate(stack), ZImageGenerator(catalog, tier), tier, use_gpu_lock=True)
         try:
             pipeline.generate(prompt, mode)
-        except (SafetyError, ModeUnavailable, JobError, CoolingDown) as exc:
+        except (SafetyError, ModeUnavailable, BaseNotSelected, JobError, CoolingDown) as exc:
             return str(exc)
         return "Done"
 

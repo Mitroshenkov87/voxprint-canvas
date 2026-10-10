@@ -1,8 +1,10 @@
 """Screening happens before the generator, and a refusal writes nothing."""
+from dataclasses import replace
+
 from canvas.infra.thermal import FULL_SPEED_S, Guard
 from canvas.models.loader import ModelNotReady, ZImageGenerator
 from canvas.models.modes import Mode, Tier
-from canvas.models.plan import ModeUnavailable
+from canvas.models.plan import BaseNotSelected, ModeUnavailable
 from canvas.models.registry import load_catalog
 from canvas.pipeline.pipeline import CoolingDown, JobError, Pipeline
 from canvas.safety.classifiers import Face
@@ -96,8 +98,15 @@ def test_blocked_output_is_wiped_and_not_saved(tmp_path):
 
 def test_stub_generator_becomes_unavailable_after_the_plan():
     world = World()
-    catalog = load_catalog()
+    catalog = replace(load_catalog(), default_text_base="z-image-turbo")
     screened = world.gate().release_request("a red boat", Mode.TEXT.value, ())
+    waiting = ZImageGenerator(load_catalog(), Tier.GB16)
+    try:
+        waiting.generate(screened)
+    except BaseNotSelected as exc:
+        assert str(exc) == "The text model has not been selected yet."
+    else:
+        raise AssertionError("expected an unset text model")
     generator = ZImageGenerator(catalog, Tier.GB16)
     try:
         generator.generate(screened)

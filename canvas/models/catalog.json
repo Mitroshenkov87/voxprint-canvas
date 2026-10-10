@@ -1,10 +1,9 @@
 {
   "schema": 1,
   "diffusers": "0.41.0",
-  "default_text_base": null,
+  "default_text_base": "z-image-turbo",
   "text_bases": [
-    "z-image-turbo",
-    "qwen-image-2512"
+    "z-image-turbo"
   ],
   "sizes": {
     "qwen-image-2512": {
@@ -170,113 +169,6 @@
         }
       ],
       "text_base": "z-image-turbo"
-    },
-    {
-      "id": "qwen-image-2512-int4",
-      "role": "generator",
-      "tier": "16gb",
-      "repo": "Qwen/Qwen-Image-2512",
-      "text_base": "qwen-image-2512",
-      "revision": "",
-      "licence": "Apache-2.0",
-      "runtime": "diffusers",
-      "pipeline_classes": [
-        "QwenImagePipeline"
-      ],
-      "quant": "int4",
-      "quant_backend": "nunchaku",
-      "variant": "svdquant",
-      "min_compute_capability": "8.9",
-      "steps": 50,
-      "guidance_scale": 4.0,
-      "guidance_kind": "true_cfg_scale",
-      "text_encoder": "Qwen/Qwen2.5-VL-7B-Instruct",
-      "text_encoder_offload": "",
-      "vram_hint_gb": 12,
-      "min_vram_gb": 16,
-      "status": "stub",
-      "files": {
-        "weights": {
-          "sha256": "",
-          "size": 0
-        }
-      },
-      "sources": [
-        {
-          "kind": "local",
-          "uri": ""
-        },
-        {
-          "kind": "huggingface",
-          "uri": "https://huggingface.co/Qwen/Qwen-Image-2512"
-        },
-        {
-          "kind": "huggingface-mirror",
-          "uri": ""
-        },
-        {
-          "kind": "kaggle",
-          "uri": ""
-        },
-        {
-          "kind": "torrent",
-          "uri": ""
-        }
-      ]
-    },
-    {
-      "id": "qwen-image-2512-fp8",
-      "role": "generator",
-      "tier": "24gb",
-      "repo": "Qwen/Qwen-Image-2512",
-      "text_base": "qwen-image-2512",
-      "revision": "",
-      "licence": "Apache-2.0",
-      "runtime": "diffusers",
-      "pipeline_classes": [
-        "QwenImagePipeline"
-      ],
-      "quant": "fp8",
-      "quant_backend": "",
-      "quality_gate": "pending",
-      "variant": "",
-      "min_compute_capability": "8.9",
-      "steps": 50,
-      "guidance_scale": 4.0,
-      "guidance_kind": "true_cfg_scale",
-      "text_encoder": "Qwen/Qwen2.5-VL-7B-Instruct",
-      "text_encoder_offload": "",
-      "vram_hint_gb": 18,
-      "min_vram_gb": 24,
-      "status": "stub",
-      "files": {
-        "weights": {
-          "sha256": "",
-          "size": 0
-        }
-      },
-      "sources": [
-        {
-          "kind": "local",
-          "uri": ""
-        },
-        {
-          "kind": "huggingface",
-          "uri": "https://huggingface.co/Qwen/Qwen-Image-2512"
-        },
-        {
-          "kind": "huggingface-mirror",
-          "uri": ""
-        },
-        {
-          "kind": "kaggle",
-          "uri": ""
-        },
-        {
-          "kind": "torrent",
-          "uri": ""
-        }
-      ]
     },
     {
       "id": "z-image-creative-bf16",

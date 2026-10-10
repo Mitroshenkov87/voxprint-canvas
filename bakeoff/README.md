@@ -1,7 +1,9 @@
 # Canvas model bake-off (A100 80GB)
 
-Compares stock **Z-Image-Turbo** with **Qwen-Image-2512** for Canvas v1 on the rented
-A100 80GB, inside a hard time budget (`--deadline-min 150`). Runs after Model Forge
+Measures stock **Z-Image-Turbo** on the rented A100 80GB, inside a hard time budget
+(`--deadline-min 150`). The default `--arms` list is `z_bf16,z_fp8`. The
+Qwen-Image-2512 arms stay in the harness and run only when named on `--arms`.
+Canvas does not ship Qwen-Image-2512 as a generator. Runs after Model Forge
 parts A+B and before part D, so Forge Qwen FP8/INT4 builds are normally absent: those
 arms are skipped cleanly and can be re-run alone later; their results merge into the
 same summary.
@@ -72,8 +74,10 @@ Four rules for every bake-off question (`showcase`, `metrics` for v1 and v2,
    | 9:21 | 576×1344 | 864×2016 |
 
    Files are `{id}_s{seed}_{width}x{height}.webp`. A showcase run with the default
-   `--arms` list keeps `z_bf16` and `q_bf16`. Name any extra arm on `--arms` when
-   you want it. Scoring and the blind review pack are skipped, so the GPU time
+   `--arms` list keeps `z_bf16` and `z_fp8`. Name a Qwen arm on `--arms` when you
+   want it (`--arms z_bf16,q_bf16` is the old pair). Passing every arm name still
+   narrows a showcase run to `z_bf16` and `q_bf16`. Scoring and the blind review
+   pack are skipped, so the GPU time
    goes to the review images. `--score-only` still scores when you ask for it.
    After a real run, `results/showcase/index.html` is one file with no external
    assets: one full-size image per page, Prev/Next buttons, and Left/Right arrow
@@ -100,8 +104,10 @@ Four rules for every bake-off question (`showcase`, `metrics` for v1 and v2,
    3 s at 1024×1024, Qwen 50 s at 1328×1328, then scaled by pixels; a family load
    is 180 s for Z and 240 s for Qwen; FP8 adds 60 s and INT4 adds 180 s. The same
    family and quant does not reload. Showcase scoring reserve is 0. A 25-minute
-   showcase budget fits both full arms (estimate 19.44 min). A 12-minute budget
-   keeps all 15 Z-Image prompts and 5 Qwen prompts, still spread across categories.
+   showcase budget fits both default Z-Image arms. The same budget with
+   `--arms z_bf16,q_bf16` fits both full arms (estimate 19.44 min). A 12-minute
+   budget on that pair keeps all 15 Z-Image prompts and 5 Qwen prompts, still
+   spread across categories.
 
 ```bash
 python bakeoff/run_bakeoff.py --prompt-set showcase --budget-min 25 --dry-run
@@ -200,10 +206,9 @@ into the blind review pack.
 
 `results/summary.md` is the human-readable table. `results/` is git-ignored (it holds adult images).
 
-## Decision rule (from MODEL-DECISION.md s11)
+## Decision
 
-Qwen-Image-2512 becomes a v1.1 "Quality" mode on 24 GB if it wins quality or text
-rendering by a clear margin (Bradley-Terry p < 0.05 on the blind review, or OCR exact-match
-+15 points) at <= 90 s/image on a 4090; Z-Image-Turbo stays the default on all tiers unless
-Qwen also matches its adult permissiveness through the gate. 16 GB Qwen only if INT4 fits
-under the cap at <= 150 s/image (consumer speeds come from the 4090 follow-up, not the A100).
+Qwen-Image-2512 is not a Canvas generator. Z-Image-Turbo BF16 is the text-to-image
+generator on every tier. Z-Image base stays the 24 GB Creative mode. Qwen-Image-Edit-2511
+stays the 24 GB instruction editor. The `q_*` arms remain so an operator can still
+measure Qwen-Image-2512; they are not a product plan.

@@ -213,15 +213,19 @@ def _band(raw: object, multiple: int, kind: str) -> dict[str, FrameSize]:
 def _sizes(raw: object, families: tuple[str, ...]) -> dict[str, SizeTable]:
     if not isinstance(raw, dict):
         raise RegistryError("the size table is missing")
-    tables: dict[str, SizeTable] = {}
     for family in families:
-        row = raw.get(family)
+        if not isinstance(raw.get(family), dict):
+            raise RegistryError(f"{family} has no sizes")
+    tables: dict[str, SizeTable] = {}
+    for family, row in raw.items():
         if not isinstance(row, dict):
             raise RegistryError(f"{family} has no sizes")
         multiple = int(row.get("multiple") or 0)
         if multiple not in (16, 64):
             raise RegistryError(f"{family} needs a 16 or 64 size step")
-        tables[family] = SizeTable(multiple, _band(row.get("native"), multiple, "native"), _band(row.get("twok"), multiple, "twok"))
+        tables[str(family)] = SizeTable(
+            multiple, _band(row.get("native"), multiple, "native"), _band(row.get("twok"), multiple, "twok"),
+        )
     return tables
 
 

@@ -19,7 +19,6 @@ The next version of Voxprint AI Canvas is listed below. Items under Later are pl
 Plans, not promises.
 
 - Instruction-based editing on 16 GB cards.
-- A higher-quality mode for cards with 24 GB or more. A larger generator stays on the GPU while the text encoder runs from system memory.
 - Faster engines on your own GPU, with TensorRT.
 - A full command-line interface with JSON output.
 - More languages in the UI.

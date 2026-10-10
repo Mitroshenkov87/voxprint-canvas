@@ -221,20 +221,10 @@ def test_the_generator_schedules_16gb_bf16_then_stays_a_stub():
     assert generator.ledger.held == {}
 
 
-def test_qwen_int4_and_24gb_skip_the_16gb_sequence():
+def test_24gb_bf16_skips_the_16gb_sequence():
     world = World()
     screened = world.gate().release_request("a red boat", Mode.TEXT.value, ())
-    qwen = replace(load_catalog(), default_text_base="qwen-image-2512")
-    compact = ZImageGenerator(qwen, Tier.GB16)
-    probe = PeakVramProbe()
-    compact.attach_probe(probe)
-    with pytest.raises(ModelNotReady) as caught:
-        compact.generate(screened, 1024, 1024)
-    assert caught.value.plan.quant == "int4"
-    assert probe.marks == []
-    assert len(compact.embeddings) == 0
-
-    roomy = ZImageGenerator(replace(load_catalog(), default_text_base="z-image-turbo"), Tier.GB24)
+    roomy = ZImageGenerator(load_catalog(), Tier.GB24)
     roomy_probe = PeakVramProbe()
     roomy.attach_probe(roomy_probe)
     with pytest.raises(ModelNotReady) as caught:

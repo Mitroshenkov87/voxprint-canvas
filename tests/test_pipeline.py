@@ -98,9 +98,9 @@ def test_blocked_output_is_wiped_and_not_saved(tmp_path):
 
 def test_stub_generator_becomes_unavailable_after_the_plan():
     world = World()
-    catalog = replace(load_catalog(), default_text_base="z-image-turbo")
+    catalog = load_catalog()
     screened = world.gate().release_request("a red boat", Mode.TEXT.value, ())
-    waiting = ZImageGenerator(load_catalog(), Tier.GB16)
+    waiting = ZImageGenerator(replace(catalog, default_text_base=None), Tier.GB16)
     try:
         waiting.generate(screened)
     except BaseNotSelected as exc:

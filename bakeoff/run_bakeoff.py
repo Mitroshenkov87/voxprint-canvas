@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Voxprint AI Canvas model bake-off: Z-Image-Turbo vs Qwen-Image-2512.
+"""Voxprint AI Canvas model bake-off. Default arms are Z-Image-Turbo.
+
+Qwen-Image-2512 arms stay in the harness and run only when named on --arms.
 
 Runs on one A100 80GB inside a hard time budget. Every arm is resumable and
 time-capped; results from several runs (for example tier arms re-run after
@@ -65,6 +67,7 @@ Q_NEG_TUNED = Q_NEG_OFFICIAL + (
     " smooth doll-like body, missing nipples, covered body, censored, blurred, mosaic, deformed anatomy"
 )
 
+Z_ARMS = ["z_bf16", "z_fp8"]
 ALL_ARMS = ["z_bf16", "z_fp8", "q_bf16", "q_tuned", "q_fp8", "q_int4"]
 
 
@@ -866,7 +869,7 @@ def review_pack(out: Path, a: str, b: str, seed: int = 1234) -> None:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--out", default=str(HERE / "results"))
-    p.add_argument("--arms", default=",".join(ALL_ARMS), help="comma list from: " + ",".join(ALL_ARMS))
+    p.add_argument("--arms", default=",".join(Z_ARMS), help="comma list from: " + ",".join(ALL_ARMS))
     p.add_argument("--deadline-min", type=float, default=150.0, help="hard wall-clock budget for the whole run")
     p.add_argument("--score-reserve-min", type=float, default=15.0, help="minutes kept for scoring + summary")
     p.add_argument("--arm-max-min", default="", help="override caps, e.g. q_bf16=80,q_tuned=28")

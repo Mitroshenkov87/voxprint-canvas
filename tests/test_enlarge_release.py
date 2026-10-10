@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import struct
+import subprocess
 import zlib
 from pathlib import Path
 
@@ -34,6 +35,9 @@ def _client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> EnlargeClient:
     binary = os.environ.get("CANVAS_ENLARGE_BIN", "")
     if not binary:
         pytest.skip("set CANVAS_ENLARGE_BIN to the extracted voxprint-enlarge launcher")
+    probe = subprocess.run([binary, "--version"], capture_output=True, text=True)
+    if probe.returncode != 0:
+        pytest.fail(f"launcher exit {probe.returncode}\nstdout:\n{probe.stdout}\nstderr:\n{probe.stderr}")
     monkeypatch.setenv("CANVAS_CACHE", str(tmp_path / "cache"))
     return EnlargeClient([binary])
 

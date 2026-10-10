@@ -33,5 +33,6 @@ Thumbs.db
 .idea/
 # Local audit and tool environments
 audit-report.txt
+.enlarge-release/
 .app/
 .tools/

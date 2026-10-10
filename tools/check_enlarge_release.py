@@ -7,7 +7,6 @@ import shutil
 import subprocess
 import sys
 import tarfile
-import tempfile
 import urllib.request
 from pathlib import Path
 
@@ -21,7 +20,11 @@ def _download(url: str, dest: Path) -> None:
 
 
 def main() -> int:
-    root = Path(tempfile.mkdtemp(prefix="enlarge-release-"))
+    # The checkout is executable. /tmp is not, on some runners, so the bundled interpreter cannot live there.
+    root = Path.cwd() / ".enlarge-release"
+    if root.exists():
+        shutil.rmtree(root)
+    root.mkdir()
     sums_path = root / SUMS_ASSET
     archive = root / LINUX_ASSET
     print(f"Enlarge release {TAG}")

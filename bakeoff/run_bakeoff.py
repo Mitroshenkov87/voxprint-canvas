@@ -25,6 +25,25 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+_ROOT = Path(__file__).resolve().parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
+from bakeoff.lean import (
+    CHECKS,
+    PROMPT_ORDER,
+    QUESTION_ARMS,
+    native_frame,
+    image_name,
+    preflight_errors,
+    question_name,
+    render_size,
+    showcase_html,
+    size_run,
+    validate_plan,
+    validate_summary,
+)
+
 HERE = Path(__file__).resolve().parent
 SCHEMA = "voxprint-canvas-bakeoff/1"
 
@@ -109,13 +128,15 @@ def save_json(path: Path, data: Any) -> None:
 
 
 def prompt_paths(prompt_set: str) -> list[Path]:
-    """Files for ``v1``, ``v2`` or ``fp_young_adults``. ``v1`` is the original set."""
+    """Files for ``v1``, ``v2``, ``showcase`` or ``fp_young_adults``. ``v1`` is the original set."""
     if prompt_set == "v1":
         root = HERE / "prompts"
         names = ("general.jsonl", "text.jsonl", "adult.jsonl")
     elif prompt_set == "v2":
         root = HERE / "prompts" / "v2"
         names = ("general.jsonl", "text.jsonl", "adult.jsonl")
+    elif prompt_set == "showcase":
+        return [HERE / "prompts" / "v2" / "showcase.jsonl"]
     elif prompt_set == "fp_young_adults":
         return [HERE / "prompts" / "v2" / "fp_young_adults.jsonl"]
     else:
@@ -131,7 +152,7 @@ def load_prompts(prompt_set: str = "v1") -> list[dict[str, Any]]:
             raise FileNotFoundError(path)
         for row in read_jsonl(path):
             buckets.setdefault(row["category"], []).append(row)
-    order = ["general", "text_en", "text_ru", "adult", "fp_young_adult"]
+    order = list(PROMPT_ORDER)
     out: list[dict[str, Any]] = []
     while any(buckets.get(c) for c in order):
         for c in order:
@@ -316,12 +337,12 @@ class Runner:
             self.loaded_quant = "fp8-forge"
         return None
 
-    def generate(self, arm: Arm, prompt: dict[str, Any], seed: int) -> Any:
+    def generate(self, arm: Arm, prompt: dict[str, Any], seed: int, width: int, height: int) -> Any:
         import torch
 
         gen = torch.Generator(device="cuda").manual_seed(seed)
         kwargs: dict[str, Any] = dict(
-            prompt=prompt["prompt"], width=arm.width, height=arm.height,
+            prompt=prompt["prompt"], width=width, height=height,
             num_inference_steps=arm.steps, generator=gen,
         )
         if arm.family == "z":
@@ -361,7 +382,12 @@ class Runner:
             load_s = time.monotonic() - t0
             torch.cuda.reset_peak_memory_stats()
             arm_deadline = time.monotonic() + arm.max_min * 60 - load_s
-            todo = [p for p in prompts if not arm.subset or p["id"] in subset_ids]
+            allowed = getattr(self.args, "prompts_by_arm", None)
+            if allowed is not None:
+                ids = set(allowed.get(arm.name, []))
+                todo = [p for p in prompts if p["id"] in ids]
+            else:
+                todo = [p for p in prompts if not arm.subset or p["id"] in subset_ids]
             made, last_s = 0, 0.0
             status = "done"
             for prompt in todo:
@@ -373,20 +399,24 @@ class Runner:
                     if budget < max(last_s * 1.1, 5):
                         status = "partial"
                         break
+                    width, height = render_size(arm.family, prompt, (arm.width, arm.height))
                     torch.cuda.synchronize()
                     s0 = time.perf_counter()
-                    image = self.generate(arm, prompt, seed)
+                    image = self.generate(arm, prompt, seed, width, height)
                     torch.cuda.synchronize()
                     last_s = time.perf_counter() - s0
-                    rel = Path("images") / arm.name / f"{prompt['id']}_s{seed}.webp"
+                    rel = Path("images") / arm.name / image_name(prompt, seed, width, height)
                     (self.out / rel).parent.mkdir(parents=True, exist_ok=True)
                     image.save(self.out / rel, "WEBP", quality=95)
                     record = {
                         "arm": arm.name, "prompt_id": prompt["id"], "category": prompt["category"],
-                        "seed": seed, "seconds": round(last_s, 3), "width": arm.width, "height": arm.height,
-                        "steps": arm.steps, "guidance": arm.guidance, "image": str(rel),
+                        "seed": seed, "seconds": round(last_s, 3), "width": width, "height": height,
+                        "steps": arm.steps, "guidance": arm.guidance, "image": rel.as_posix(),
+                        "model": "Z-Image-Turbo" if arm.family == "z" else "Qwen-Image-2512",
                         "time_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                     }
+                    if prompt.get("aspect"):
+                        record["aspect"] = prompt["aspect"]
                     if "content_level" in prompt:
                         record["content_level"] = prompt["content_level"]
                     if "ages" in prompt:
@@ -399,12 +429,15 @@ class Runner:
                 if status == "partial":
                     break
             peak = torch.cuda.max_memory_allocated() / 2**30
+            settings: dict[str, Any] = {
+                "width": arm.width, "height": arm.height, "steps": arm.steps,
+                "guidance": arm.guidance, "negative": arm.negative is not None, "subset": arm.subset,
+            }
+            if any(prompt.get("aspect") for prompt in todo):
+                settings["frame"] = "native-aspect"
             meta.update(status=status, quant=arm.quant, load_s=round(load_s, 1),
                         peak_vram_gb=round(max(peak, meta.get("peak_vram_gb", 0) if not self.args.force else 0), 2),
-                        settings={"width": arm.width, "height": arm.height, "steps": arm.steps,
-                                  "guidance": arm.guidance, "negative": arm.negative is not None,
-                                  "subset": arm.subset}, notes=arm.notes,
-                        gpu=torch.cuda.get_device_name(0))
+                        settings=settings, notes=arm.notes, gpu=torch.cuda.get_device_name(0))
             meta.pop("reason", None)
             arm_meta[arm.name] = meta
             save_json(self.arms_path, arm_meta)
@@ -685,6 +718,8 @@ def summarise(out: Path, prompts: list[dict[str, Any]], notes: list[str], args: 
                     "age": f"{AGE_REPO}@{AGE_REV[:8]} (+OpenCV Haar faces)", "ocr": "EasyOCR (en; ru+en)"},
         "gate_rule": "block if any face (or whole image when no face) has P(age<20) > 0.10; approximation of the Canvas gate (no prompt stage)",
         "prompt_set": args.prompt_set,
+        "question": question_name(args.prompt_set),
+        "budget_min": args.budget_min,
         "prompt_sets": {c: sum(1 for p in prompts if p["category"] == c) for c in ("general", "text_en", "text_ru", "adult")},
         "subset_n": args.subset_n,
         "arms": arms_out,
@@ -789,8 +824,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--arm-max-min", default="", help="override caps, e.g. q_bf16=80,q_tuned=28")
     p.add_argument("--subset-n", type=int, default=40, help="prompts used by subset arms (q_tuned)")
     p.add_argument("--seeds", default="0")
-    p.add_argument("--prompt-set", default="v1", choices=("v1", "v2", "fp_young_adults"),
-                   help="v1 reads prompts/; v2 and fp_young_adults read prompts/v2/")
+    p.add_argument("--prompt-set", default="v1", choices=("v1", "v2", "showcase", "fp_young_adults"),
+                   help="v1 reads prompts/; v2, showcase and fp_young_adults read prompts/v2/")
+    p.add_argument("--budget-min", type=float, default=0.0,
+                   help="fit the selected question into this many minutes; 0 keeps the full run")
     p.add_argument("--z-repo", default=Z_REPO)
     p.add_argument("--z-rev", default=Z_REV)
     p.add_argument("--q-repo", default=Q_REPO)
@@ -808,16 +845,54 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
+def _build_plan(args: argparse.Namespace, prompts: list[dict[str, Any]], arms: list[Arm], sized: dict[str, Any]) -> dict[str, Any]:
+    by_arm = {str(row["arm"]): row for row in sized["kept"]}
+    plan: dict[str, Any] = {
+        "prompt_set": args.prompt_set,
+        "question": sized["question"],
+        "prompts": len(prompts),
+        "subset_n": args.subset_n,
+        "budget_min": args.budget_min,
+        "deadline_min": args.deadline_min,
+        "checks": list(CHECKS),
+        "estimate_min": sized["estimate_min"],
+        "dropped": list(sized["dropped"]),
+        "arms": {},
+    }
+    for arm in arms:
+        row = by_arm.get(arm.name)
+        plan["arms"][arm.name] = {
+            "max_min": arm.max_min,
+            "subset": arm.subset,
+            "steps": arm.steps,
+            "size": f"{arm.width}x{arm.height}",
+            "prompts": len(row["prompt_ids"]) if row else 0,
+            "estimate_min": row["estimate_min"] if row else 0,
+        }
+    if args.prompt_set == "showcase":
+        plan["frames"] = [{
+            "id": prompt["id"],
+            "aspect": prompt["aspect"],
+            "z": "{}x{}".format(*native_frame("z", prompt["aspect"])),
+            "q": "{}x{}".format(*native_frame("q", prompt["aspect"])),
+        } for prompt in prompts]
+    return plan
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    clock = Clock(args.deadline_min, args.score_reserve_min)
+    if args.budget_min < 0:
+        print("budget must be >= 0", file=sys.stderr)
+        return 2
     try:
         prompts = load_prompts(args.prompt_set)
-    except ValueError:
-        print(f"unknown prompt set: {args.prompt_set}", file=sys.stderr)
+    except (ValueError, FileNotFoundError) as exc:
+        print(str(exc), file=sys.stderr)
         return 2
-    out = Path(args.out).resolve()
-    out.mkdir(parents=True, exist_ok=True)
+    errors = preflight_errors(prompts, args.prompt_set)
+    if errors:
+        print("\n".join(errors), file=sys.stderr)
+        return 2
     specs = default_arms()
     for item in filter(None, args.arm_max_min.split(",")):
         name, value = item.split("=")
@@ -827,25 +902,69 @@ def main(argv: list[str] | None = None) -> int:
     if unknown:
         print(f"unknown arms: {unknown}", file=sys.stderr)
         return 2
-    arms = [specs[a] for a in ALL_ARMS if a in chosen]
-    plan = {"prompt_set": args.prompt_set, "prompts": len(prompts), "subset_n": args.subset_n, "deadline_min": args.deadline_min,
-            "arms": {a.name: {"max_min": a.max_min, "subset": a.subset, "steps": a.steps, "size": f"{a.width}x{a.height}"} for a in arms}}
+    selected = [name for name in ALL_ARMS if name in chosen]
+    if not selected:
+        print("no arms selected", file=sys.stderr)
+        return 2
+    if args.prompt_set == "showcase" and selected == list(ALL_ARMS):
+        selected = list(QUESTION_ARMS["showcase"])
+    showcase = args.prompt_set == "showcase"
+    do_score = bool(args.score_only or (not args.no_score and not showcase))
+    reserve = args.score_reserve_min if do_score else 0.0
+    if args.budget_min > 0:
+        args.deadline_min = args.budget_min
+    subset_ids = {prompt["id"] for prompt in prompts[: args.subset_n]}
+    defaults = {arm.name: (arm.width, arm.height) for arm in specs.values()}
+    sized = size_run(
+        args.prompt_set, prompts, selected, args.budget_min, len(args.seeds.split(",")),
+        reserve, subset_ids, defaults,
+    )
+    if args.budget_min > 0:
+        kept_ids = {str(row["arm"]) for row in sized["kept"]}
+        arms = [specs[name] for name in selected if name in kept_ids]
+        args.prompts_by_arm = {str(row["arm"]): list(row["prompt_ids"]) for row in sized["kept"]}
+    else:
+        arms = [specs[name] for name in selected]
+    plan = _build_plan(args, prompts, [specs[name] for name in selected], sized)
+    schema_errors = validate_plan(plan)
+    if schema_errors:
+        print("plan schema: " + "; ".join(schema_errors), file=sys.stderr)
+        return 2
+    log("checks ok: " + ", ".join(CHECKS))
     log("plan " + json.dumps(plan))
     if args.dry_run:
         return 0
-    notes: list[str] = []
+    out = Path(args.out).resolve()
+    out.mkdir(parents=True, exist_ok=True)
+    notes: list[str] = list(sized["notes"])
+    if args.budget_min > 0 and sized["dropped"]:
+        meta = load_json(out / "arms.json", {})
+        for name in sized["dropped"]:
+            meta.setdefault(name, {"status": "skipped", "reason": "outside the budget"})
+        save_json(out / "arms.json", meta)
+    clock = Clock(args.deadline_min, reserve)
     if not args.score_only:
         Runner(args).run(arms, prompts, clock)
-    if not args.no_score:
+    if do_score:
         notes += run_scoring(out, prompts, clock if not args.score_only else None)
-    if args.review:
+    if args.review and not showcase:
         a, b = args.review.split(":")
         try:
             review_pack(out, a, b)
         except Exception as exc:  # noqa: BLE001
             notes.append(f"review pack failed: {exc}")
+    if showcase:
+        page = showcase_html(read_jsonl(out / "records.jsonl"), prompts)
+        dest = out / "showcase" / "index.html"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(page, encoding="utf-8")
+        notes.append(f"showcase review: {dest}")
     prev = load_json(out / "summary.json", {}).get("notes", [])
     summary = summarise(out, prompts, sorted(set(prev + notes)), args)
+    schema_errors = validate_summary(summary)
+    if schema_errors:
+        print("summary schema: " + "; ".join(schema_errors), file=sys.stderr)
+        return 2
     log(f"summary written: {out / 'summary.md'} ({clock.elapsed_min():.1f} min)")
     return 0 if summary["arms"] else 1
 

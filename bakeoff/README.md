@@ -98,6 +98,8 @@ from all of them each run.
 
 ## Decision rule (from MODEL-DECISION.md s11)
 
-Per tier, Qwen replaces Z-Image as default only if it wins the blind review and does
-not lose more than 0.05 adult permissive rate; otherwise Qwen ships as an optional
-"Quality" mode on 24 GB+.
+Qwen-Image-2512 becomes a v1.1 "Quality" mode on 24 GB if it wins quality or text
+rendering by a clear margin (Bradley-Terry p < 0.05 on the blind review, or OCR exact-match
++15 points) at <= 90 s/image on a 4090; Z-Image-Turbo stays the default on all tiers unless
+Qwen also matches its adult permissiveness through the gate. 16 GB Qwen only if INT4 fits
+under the cap at <= 150 s/image (consumer speeds come from the 4090 follow-up, not the A100).

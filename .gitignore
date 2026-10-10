@@ -17,6 +17,7 @@ __pycache__/
 *.ckpt
 *.gguf
 *.onnx
+!bakeoff/models/face_detection_yunet_2023mar.onnx
 *.pt
 *.bin
 # Generated images

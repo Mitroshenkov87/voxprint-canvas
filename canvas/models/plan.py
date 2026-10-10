@@ -12,7 +12,6 @@ from canvas.models.pins import (
     PIPELINE_EDIT,
     PIPELINE_IMG2IMG,
     PIPELINE_INPAINT,
-    PIPELINE_QWEN,
     PIPELINE_TEXT,
 )
 from canvas.models.registry import Catalog, ModelSpec, RegistryError
@@ -102,24 +101,18 @@ def build_plan(catalog: Catalog, screened: ScreenedInput, tier: Tier) -> CallPla
 
 
 def _text_model(catalog: Catalog, tier: Tier) -> tuple[ModelSpec, str]:
-    """The text-to-image base named by the registry. Image modes do not call this."""
+    """Z-Image-Turbo BF16, the text-to-image generator on every tier."""
     family = catalog.default_text_base
     if family is None:
         raise BaseNotSelected()
     if family not in catalog.text_bases:
         raise RegistryError("the default text model is not in the registry")
+    if family != "z-image-turbo":
+        raise RegistryError("the default text model has no plan")
     if tier is Tier.GB16:
-        if family == "z-image-turbo":
-            return _one(catalog, "z-image-turbo-bf16-16gb"), PIPELINE_TEXT
-        if family == "qwen-image-2512":
-            return _one(catalog, "qwen-image-2512-int4"), PIPELINE_QWEN
-        raise RegistryError("the default text model has no plan")
+        return _one(catalog, "z-image-turbo-bf16-16gb"), PIPELINE_TEXT
     if tier is Tier.GB24:
-        if family == "z-image-turbo":
-            return _one(catalog, "z-image-turbo-bf16"), PIPELINE_TEXT
-        if family == "qwen-image-2512":
-            return _one(catalog, "qwen-image-2512-fp8"), PIPELINE_QWEN
-        raise RegistryError("the default text model has no plan")
+        return _one(catalog, "z-image-turbo-bf16"), PIPELINE_TEXT
     assert_never(tier)
 
 

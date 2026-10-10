@@ -1,7 +1,9 @@
 # Canvas model bake-off (A100 80GB)
 
-Compares stock **Z-Image-Turbo** with **Qwen-Image-2512** for Canvas v1 on the rented
-A100 80GB, inside a hard time budget (`--deadline-min 150`). Runs after Model Forge
+Measures stock **Z-Image-Turbo** on the rented A100 80GB, inside a hard time budget
+(`--deadline-min 150`). The default `--arms` list is `z_bf16,z_fp8`. The
+Qwen-Image-2512 arms stay in the harness and run only when named on `--arms`.
+Canvas does not ship Qwen-Image-2512 as a generator. Runs after Model Forge
 parts A+B and before part D, so Forge Qwen FP8/INT4 builds are normally absent: those
 arms are skipped cleanly and can be re-run alone later; their results merge into the
 same summary.
@@ -72,8 +74,10 @@ Four rules for every bake-off question (`showcase`, `metrics` for v1 and v2,
    | 9:21 | 576×1344 | 864×2016 |
 
    Files are `{id}_s{seed}_{width}x{height}.webp`. A showcase run with the default
-   `--arms` list keeps `z_bf16` and `q_bf16`. Name any extra arm on `--arms` when
-   you want it. Scoring and the blind review pack are skipped, so the GPU time
+   `--arms` list keeps `z_bf16` and `z_fp8`. Name a Qwen arm on `--arms` when you
+   want it (`--arms z_bf16,q_bf16` is the old pair). Passing every arm name still
+   narrows a showcase run to `z_bf16` and `q_bf16`. Scoring and the blind review
+   pack are skipped, so the GPU time
    goes to the review images. `--score-only` still scores when you ask for it.
    After a real run, `results/showcase/index.html` is one file with no external
    assets: one full-size image per page, Prev/Next buttons, and Left/Right arrow
@@ -85,10 +89,12 @@ Four rules for every bake-off question (`showcase`, `metrics` for v1 and v2,
    `adult.jsonl`, 105 prompts) stays the automated metrics set. Showcase ids are
    not added to those files. v1 is unchanged.
 
-3. **Run the cheap checks before any GPU work.** Prompt lint, the dry-run plan,
-   and the plan schema all run before `results/` is created and before a model
-   loads. The log line is `checks ok: prompt-lint, dry-run, schema`. A failure
-   exits 2. `--dry-run` exits 0 after that line and writes no images.
+3. **Run the cheap checks before any GPU work.** The face detector (see below),
+   prompt lint, the dry-run plan, and the plan schema all run before `results/`
+   is created and before a model loads. A missing detector prints
+   `face detector preflight failed:` and exits 2 before the plan. When it is
+   present, the log line is `checks ok: prompt-lint, dry-run, schema`. Any other
+   failure also exits 2. `--dry-run` exits 0 after that line and writes no images.
 
 4. **Size the run with `--budget-min`.** `0` (the default) keeps every selected
    arm and the `--deadline-min` clock (150 unless you change it). A positive
@@ -98,8 +104,10 @@ Four rules for every bake-off question (`showcase`, `metrics` for v1 and v2,
    3 s at 1024×1024, Qwen 50 s at 1328×1328, then scaled by pixels; a family load
    is 180 s for Z and 240 s for Qwen; FP8 adds 60 s and INT4 adds 180 s. The same
    family and quant does not reload. Showcase scoring reserve is 0. A 25-minute
-   showcase budget fits both full arms (estimate 19.44 min). A 12-minute budget
-   keeps all 15 Z-Image prompts and 5 Qwen prompts, still spread across categories.
+   showcase budget fits both default Z-Image arms. The same budget with
+   `--arms z_bf16,q_bf16` fits both full arms (estimate 19.44 min). A 12-minute
+   budget on that pair keeps all 15 Z-Image prompts and 5 Qwen prompts, still
+   spread across categories.
 
 ```bash
 python bakeoff/run_bakeoff.py --prompt-set showcase --budget-min 25 --dry-run
@@ -127,6 +135,19 @@ would be exceeded by the next image; the summary records `partial` and the count
 If Qwen runs at ~55 s/img, `q_bf16` covers ~85 of 105 prompts (balanced across
 categories). Pair comparisons always use only the common prompts/seeds.
 
+## Face detector
+
+Generation and scoring both refuse to start until two local checks pass. Neither check uses the GPU.
+
+- `opencv-python-headless` (>= 4.11) is installed. The GUI package `opencv-python` does not satisfy this.
+- `bakeoff/models/face_detection_yunet_2023mar.onnx` is present and its sha256 is
+  `8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4`
+  (OpenCV Zoo `face_detection_yunet_2023mar.onnx`, MIT). `BAKEOFF_YUNET` may point at another copy of those same bytes.
+
+If either check fails, the process prints `face detector preflight failed:` and exits 2 before it creates images or loads a generator. The age check then scores detected faces only. An image with no detected face is not sent to the age model as a whole image. Each score row records `faces` and `face_detector` (`yunet`).
+
+`summary.json` lists `face_counts` (`arm`, `prompt_id`, `seed`, `faces`) for every image. `faces` is null when that image was not scored with this detector. `gate_stats_valid` is false in that case, the age-gate rates are omitted, and `summary.md` says the gate stats are invalid. A run that scored the whole image because OpenCV was missing (face count stored as 0, no `face_detector`) is invalid.
+
 ## Run
 
 ```bash
@@ -152,9 +173,10 @@ from all of them each run.
 - **Text rendering**: EasyOCR (Apache-2.0; `en` and `ru+en` readers). `ocr_exact` = normalized target
   is a substring of OCR text (case-folded, punctuation stripped, Yo->Ye); `ocr_cer` = semi-global edit distance / target length.
 - **Adult permissiveness**: share of adult prompts with Falconsai NSFW (`Falconsai/nsfw_image_detection`, Apache-2.0) >= 0.5 **and** passing the age gate.
-- **Gate (approximation of the Canvas output gate)**: OpenCV Haar faces + FairFace age
-  (`dima806/fairface_age_image_detection`, Apache-2.0); block if any face has P(age<20) > 0.10
-  (whole image when no face). Reported as false-block rate on adult prompts and block rate on the rest.
+- **Gate (approximation of the Canvas output gate)**: OpenCV YuNet faces + FairFace age
+  (`dima806/fairface_age_image_detection`, Apache-2.0); block if any detected face has P(age<20) > 0.10.
+  Reported as false-block rate on adult prompts and block rate on the rest, and only when
+  `gate_stats_valid` is true.
   `--prompt-set fp_young_adults` also reports that false-block rate per stated age (20-25) and per
   content level (`non_explicit`, `explicit`). Thresholds stay as they are.
 - **Speed / VRAM**: seconds per image (encode+denoise+decode, synchronized), `torch.cuda.max_memory_allocated` per arm.
@@ -166,7 +188,8 @@ from all of them each run.
 `results/summary.json` (schema `voxprint-canvas-bakeoff/1`):
 
 ```
-{schema, generated_utc, models{z,q}{repo,revision}, scorers{}, gate_rule, prompt_set, question, budget_min, prompt_sets{}, subset_n,
+{schema, generated_utc, models{z,q}{repo,revision}, scorers{}, gate_rule, gate_stats_valid,
+ face_counts[{arm, prompt_id, seed, faces}], prompt_set, question, budget_min, prompt_sets{}, subset_n,
  arms{<arm>: {status: done|partial|skipped|not-run, reason?, quant, load_s, peak_vram_gb, gpu, settings{}, notes[],
               metrics{images, by_category{}, seconds_per_image, clip_t, clip_t_adult,
                       ocr_exact_en, ocr_cer_en, ocr_exact_ru, ocr_cer_ru,
@@ -183,10 +206,9 @@ into the blind review pack.
 
 `results/summary.md` is the human-readable table. `results/` is git-ignored (it holds adult images).
 
-## Decision rule (from MODEL-DECISION.md s11)
+## Decision
 
-Qwen-Image-2512 becomes a v1.1 "Quality" mode on 24 GB if it wins quality or text
-rendering by a clear margin (Bradley-Terry p < 0.05 on the blind review, or OCR exact-match
-+15 points) at <= 90 s/image on a 4090; Z-Image-Turbo stays the default on all tiers unless
-Qwen also matches its adult permissiveness through the gate. 16 GB Qwen only if INT4 fits
-under the cap at <= 150 s/image (consumer speeds come from the 4090 follow-up, not the A100).
+Qwen-Image-2512 is not a Canvas generator. Z-Image-Turbo BF16 is the text-to-image
+generator on every tier. Z-Image base stays the 24 GB Creative mode. Qwen-Image-Edit-2511
+stays the 24 GB instruction editor. The `q_*` arms remain so an operator can still
+measure Qwen-Image-2512; they are not a product plan.

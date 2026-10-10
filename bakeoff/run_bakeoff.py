@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Voxprint AI Canvas model bake-off: Z-Image-Turbo vs Qwen-Image-2512.
+"""Voxprint AI Canvas model bake-off. Default arms are Z-Image-Turbo.
+
+Qwen-Image-2512 arms stay in the harness and run only when named on --arms.
 
 Runs on one A100 80GB inside a hard time budget. Every arm is resumable and
 time-capped; results from several runs (for example tier arms re-run after
@@ -29,12 +31,13 @@ _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+from bakeoff.face_detector import FACE_DETECTOR_ID, face_crops, face_preflight, load_detector, yunet_boxes
 from bakeoff.lean import (
     CHECKS,
     PROMPT_ORDER,
     QUESTION_ARMS,
-    native_frame,
     image_name,
+    native_frame,
     preflight_errors,
     question_name,
     render_size,
@@ -64,6 +67,7 @@ Q_NEG_TUNED = Q_NEG_OFFICIAL + (
     " smooth doll-like body, missing nipples, covered body, censored, blurred, mosaic, deformed anatomy"
 )
 
+Z_ARMS = ["z_bf16", "z_fp8"]
 ALL_ARMS = ["z_bf16", "z_fp8", "q_bf16", "q_tuned", "q_fp8", "q_int4"]
 
 
@@ -469,6 +473,7 @@ def semiglobal_cer(target: str, text: str) -> float:
 
 class Scorer:
     def __init__(self, device: str = "cuda") -> None:
+        self.detector = load_detector()
         import torch
         from transformers import AutoModel, AutoProcessor, pipeline
 
@@ -479,15 +484,6 @@ class Scorer:
         self.clip_proc = AutoProcessor.from_pretrained(SIGLIP_REPO, revision=SIGLIP_REV)
         self.nsfw = pipeline("image-classification", model=NSFW_REPO, revision=NSFW_REV, device=0)
         self.age = pipeline("image-classification", model=AGE_REPO, revision=AGE_REV, device=0, top_k=None)
-        try:
-            import cv2  # type: ignore
-
-            self.cv2 = cv2
-            self.faces = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-        except Exception:  # noqa: BLE001
-            self.cv2 = None
-            self.faces = None
-            self.notes.append("opencv missing: age check runs on the whole image")
         self.ocr: dict[str, Any] = {}
         try:
             import easyocr  # type: ignore
@@ -514,29 +510,26 @@ class Scorer:
                 return float(row["score"])
         return 0.0
 
-    def minor_prob(self, image: Any) -> tuple[float, int]:
-        crops = [image]
-        n_faces = 0
-        if self.faces is not None:
-            import numpy as np
+    def face_boxes(self, image: Any) -> list[tuple[int, int, int, int]]:
+        return yunet_boxes(self.detector, image)
 
-            gray = self.cv2.cvtColor(np.array(image.convert("RGB")), self.cv2.COLOR_RGB2GRAY)
-            found = self.faces.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(48, 48))
-            n_faces = len(found)
-            if n_faces:
-                crops = []
-                for (x, y, w, h) in found:
-                    m = int(0.25 * max(w, h))
-                    crops.append(image.crop((max(0, x - m), max(0, y - m), x + w + m, y + h + m)))
+    def _minor_on_crop(self, crop: Any) -> float:
+        p = 0.0
+        for row in self.age(crop):
+            nums = [int(n) for n in re.findall(r"\d+", row["label"])]
+            if nums and max(nums) < 20:
+                p += float(row["score"])
+        return p
+
+    def minor_prob(self, image: Any) -> tuple[float, int]:
+        """Worst P(age<20) among detected faces. No face is not scored as the whole image."""
+        boxes = self.face_boxes(image)
+        if not boxes:
+            return 0.0, 0
         worst = 0.0
-        for crop in crops:
-            p = 0.0
-            for row in self.age(crop):
-                nums = [int(n) for n in re.findall(r"\d+", row["label"])]
-                if nums and max(nums) < 20:
-                    p += float(row["score"])
-            worst = max(worst, p)
-        return worst, n_faces
+        for crop in face_crops(image, boxes):
+            worst = max(worst, self._minor_on_crop(crop))
+        return worst, len(boxes)
 
     def score(self, record: dict[str, Any], prompt: dict[str, Any], out: Path) -> dict[str, Any]:
         from PIL import Image
@@ -548,6 +541,7 @@ class Scorer:
         mp, nf = self.minor_prob(image)
         row["minor_prob"] = round(mp, 4)
         row["faces"] = nf
+        row["face_detector"] = FACE_DETECTOR_ID
         row["gate_block"] = mp > 0.10
         if "target" in prompt and self.ocr:
             lang = "ru" if prompt["category"] == "text_ru" else "en"
@@ -585,6 +579,40 @@ def run_scoring(out: Path, prompts: list[dict[str, Any]], clock: Clock | None) -
 
 def mean(xs: list[float]) -> float | None:
     return round(sum(xs) / len(xs), 4) if xs else None
+
+
+def _face_count(row: dict[str, Any]) -> int | None:
+    """Face count from a score row the YuNet detector actually produced."""
+    value = row.get("faces")
+    if row.get("face_detector") == FACE_DETECTOR_ID and type(value) is int:
+        return value
+    return None
+
+
+def gate_stats_valid(rows: dict[str, list[dict[str, Any]]]) -> bool:
+    """False when no scored image has a YuNet face count, or any scored image lacks one."""
+    scored = [row for group in rows.values() for row in group if "gate_block" in row]
+    return bool(scored) and all(_face_count(row) is not None for row in scored)
+
+
+def face_count_rows(rows: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    """One face count per image. ``faces`` is null when the detector did not run."""
+    counts = [{
+        "arm": row.get("arm"),
+        "prompt_id": row.get("prompt_id"),
+        "seed": row.get("seed"),
+        "faces": _face_count(row),
+    } for group in rows.values() for row in group]
+    counts.sort(key=lambda item: (str(item["arm"]), str(item["prompt_id"]), int(item["seed"] or 0)))
+    return counts
+
+
+def _blank_gate_rates(report: dict[str, Any]) -> None:
+    buckets: list[dict[str, Any]] = [report["by_age"], report["by_content_level"]]
+    buckets.extend(report["by_age_and_content_level"].values())
+    for bucket in buckets:
+        for cell in bucket.values():
+            cell["gate_false_block_rate"] = None
 
 
 def _fp_cell(prompt_n: int, scored: list[dict[str, Any]]) -> dict[str, Any]:
@@ -645,11 +673,18 @@ def summarise(out: Path, prompts: list[dict[str, Any]], notes: list[str], args: 
         merged.update(scores.get(key(r["arm"], r["prompt_id"], r["seed"]), {}))
         rows.setdefault(r["arm"], []).append(merged)
 
+    valid = gate_stats_valid(rows)
+
     def metrics(items: list[dict[str, Any]]) -> dict[str, Any]:
         cat = lambda c: [x for x in items if x["category"] == c]  # noqa: E731
         adult = cat("adult")
         scored_adult = [x for x in adult if "nsfw" in x]
         nonadult = [x for x in items if x["category"] != "adult" and "gate_block" in x]
+        permissive = mean([1.0 if (not x["gate_block"] and x["nsfw"] >= 0.5) else 0.0 for x in scored_adult])
+        adult_block = mean([1.0 if x["gate_block"] else 0.0 for x in scored_adult])
+        other_block = mean([1.0 if x["gate_block"] else 0.0 for x in nonadult])
+        if not valid:
+            permissive = adult_block = other_block = None
         m: dict[str, Any] = {
             "images": len(items),
             "by_category": {c: len(cat(c)) for c in ("general", "text_en", "text_ru", "adult")},
@@ -657,9 +692,9 @@ def summarise(out: Path, prompts: list[dict[str, Any]], notes: list[str], args: 
             "clip_t": mean([x["clip_t"] for x in items if "clip_t" in x and x["category"] != "adult"]),
             "clip_t_adult": mean([x["clip_t"] for x in scored_adult]),
             "adult_nsfw_mean": mean([x["nsfw"] for x in scored_adult]),
-            "adult_permissive_rate": mean([1.0 if (not x["gate_block"] and x["nsfw"] >= 0.5) else 0.0 for x in scored_adult]),
-            "adult_gate_false_block_rate": mean([1.0 if x["gate_block"] else 0.0 for x in scored_adult]),
-            "nonadult_gate_block_rate": mean([1.0 if x["gate_block"] else 0.0 for x in nonadult]),
+            "adult_permissive_rate": permissive,
+            "adult_gate_false_block_rate": adult_block,
+            "nonadult_gate_block_rate": other_block,
         }
         for lang in ("en", "ru"):
             t = [x for x in cat(f"text_{lang}") if "ocr_exact" in x]
@@ -715,8 +750,10 @@ def summarise(out: Path, prompts: list[dict[str, Any]], notes: list[str], args: 
         "generated_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "models": {"z": {"repo": args.z_repo, "revision": args.z_rev}, "q": {"repo": args.q_repo, "revision": args.q_rev}},
         "scorers": {"clip_t": f"{SIGLIP_REPO}@{SIGLIP_REV[:8]}", "nsfw": f"{NSFW_REPO}@{NSFW_REV[:8]}",
-                    "age": f"{AGE_REPO}@{AGE_REV[:8]} (+OpenCV Haar faces)", "ocr": "EasyOCR (en; ru+en)"},
-        "gate_rule": "block if any face (or whole image when no face) has P(age<20) > 0.10; approximation of the Canvas gate (no prompt stage)",
+                    "age": f"{AGE_REPO}@{AGE_REV[:8]} (OpenCV YuNet {FACE_DETECTOR_ID})", "ocr": "EasyOCR (en; ru+en)"},
+        "gate_rule": "block if any detected face has P(age<20) > 0.10; a missing face is not scored as the whole image; approximation of the Canvas gate (no prompt stage)",
+        "gate_stats_valid": valid,
+        "face_counts": face_count_rows(rows),
         "prompt_set": args.prompt_set,
         "question": question_name(args.prompt_set),
         "budget_min": args.budget_min,
@@ -733,6 +770,18 @@ def summarise(out: Path, prompts: list[dict[str, Any]], notes: list[str], args: 
         summary["fp_young_adults"] = {
             name: young_adult_report(prompts, rows.get(name, [])) for name in arms_out
         }
+        if not valid:
+            for report in summary["fp_young_adults"].values():
+                if report:
+                    _blank_gate_rates(report)
+    if not valid:
+        scored = [row for group in rows.values() for row in group if "gate_block" in row]
+        if scored and any(_face_count(row) is None for row in scored):
+            message = "gate stats invalid: the face detector did not run on every scored image"
+        else:
+            message = "gate stats invalid: the face detector did not run"
+        if message not in summary["notes"]:
+            summary["notes"] = list(summary["notes"]) + [message]
     save_json(out / "summary.json", summary)
     write_md(out / "summary.md", summary)
     return summary
@@ -750,9 +799,11 @@ def write_md(path: Path, s: dict[str, Any]) -> None:
     cols = ["images", "seconds_per_image", "clip_t", "ocr_exact_en", "ocr_cer_en", "ocr_exact_ru", "ocr_cer_ru",
             "adult_nsfw_mean", "adult_permissive_rate", "adult_gate_false_block_rate", "nonadult_gate_block_rate"]
     lines = ["# Canvas bake-off summary", "",
-             f"Generated {s['generated_utc']}. Schema `{s['schema']}`. Prompt set `{s.get('prompt_set', 'v1')}`.", "",
-             "| arm | status | peak VRAM GiB | " + " | ".join(cols) + " |",
-             "|---" * (len(cols) + 3) + "|"]
+             f"Generated {s['generated_utc']}. Schema `{s['schema']}`. Prompt set `{s.get('prompt_set', 'v1')}`.", ""]
+    if not s.get("gate_stats_valid", False):
+        lines += ["Gate stats: invalid (face detector did not run). Age-gate rates are omitted.", ""]
+    lines += ["| arm | status | peak VRAM GiB | " + " | ".join(cols) + " |",
+              "|---" * (len(cols) + 3) + "|"]
     for name, a in s["arms"].items():
         m = a.get("metrics", {})
         lines.append(f"| {name} | {a.get('status', '-')} | {fmt(a.get('peak_vram_gb'))} | " + " | ".join(fmt(m.get(c)) for c in cols) + " |")
@@ -818,7 +869,7 @@ def review_pack(out: Path, a: str, b: str, seed: int = 1234) -> None:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--out", default=str(HERE / "results"))
-    p.add_argument("--arms", default=",".join(ALL_ARMS), help="comma list from: " + ",".join(ALL_ARMS))
+    p.add_argument("--arms", default=",".join(Z_ARMS), help="comma list from: " + ",".join(ALL_ARMS))
     p.add_argument("--deadline-min", type=float, default=150.0, help="hard wall-clock budget for the whole run")
     p.add_argument("--score-reserve-min", type=float, default=15.0, help="minutes kept for scoring + summary")
     p.add_argument("--arm-max-min", default="", help="override caps, e.g. q_bf16=80,q_tuned=28")
@@ -883,6 +934,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     if args.budget_min < 0:
         print("budget must be >= 0", file=sys.stderr)
+        return 2
+    errors = face_preflight()
+    if errors:
+        print("face detector preflight failed:", file=sys.stderr)
+        for line in errors:
+            print(line, file=sys.stderr)
         return 2
     try:
         prompts = load_prompts(args.prompt_set)

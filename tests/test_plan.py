@@ -12,17 +12,13 @@ from canvas.models.pins import (
     PIPELINE_EDIT,
     PIPELINE_IMG2IMG,
     PIPELINE_INPAINT,
-    PIPELINE_QWEN,
     PIPELINE_TEXT,
-    QWEN_STEPS,
-    QWEN_TRUE_CFG,
     REPO_CONTROL,
     REPO_EDIT,
-    REPO_QWEN,
     REPO_TURBO,
 )
 from canvas.models.plan import BaseNotSelected, ModeUnavailable, build_plan
-from canvas.models.registry import load_catalog
+from canvas.models.registry import RegistryError, load_catalog
 from canvas.safety.inputs import ImageRole, PendingInput
 from tests.fakes import World, rgb
 
@@ -33,15 +29,11 @@ def _screened(mode: Mode, *roles: ImageRole):
     return world.gate().release_request("a red boat", mode.value, inputs)
 
 
-def _with_base(family: str):
-    return replace(load_catalog(), default_text_base=family)
-
-
 def test_pin_and_visibility():
     catalog = load_catalog()
     assert catalog.diffusers == "0.41.0"
-    assert catalog.default_text_base is None
-    assert catalog.text_bases == ("z-image-turbo", "qwen-image-2512")
+    assert catalog.default_text_base == "z-image-turbo"
+    assert catalog.text_bases == ("z-image-turbo",)
     assert DIFFUSERS_PIN == "0.41.0"
     assert Mode.INSTRUCTION not in visible_modes(Tier.GB16)
     assert Mode.TEXT_CREATIVE not in visible_modes(Tier.GB16)
@@ -55,24 +47,22 @@ def test_pin_and_visibility():
     edit = catalog.by_id("qwen-image-edit-2511-fp8")
     assert edit.repo == REPO_EDIT and edit.tier == "24gb"
     assert edit.text_encoder == ENCODER_VL and edit.quality_gate == "pending"
-    small = catalog.by_id("qwen-image-2512-int4")
-    large = catalog.by_id("qwen-image-2512-fp8")
-    assert small.repo == REPO_QWEN and small.quant == "int4"
-    assert small.quant_backend == "nunchaku" and small.variant == "svdquant"
-    assert small.text_encoder == ENCODER_VL and small.guidance_kind == "true_cfg_scale"
-    assert large.quant == "fp8" and large.tier == "24gb" and large.text_encoder == ENCODER_VL
-    assert large.quality_gate == "pending"
+    ids = {spec.id for spec in catalog.models}
+    assert "qwen-image-2512-int4" not in ids
+    assert "qwen-image-2512-fp8" not in ids
+    creative = catalog.by_id("z-image-creative-bf16")
+    assert creative.repo == "Tongyi-MAI/Z-Image" and creative.tier == "24gb" and creative.steps == 50
     assert "diffusers==0.41.0" in open("pyproject.toml", encoding="utf-8").read()
 
 
 def test_text_plan_waits_until_a_base_is_chosen():
-    catalog = load_catalog()
+    catalog = replace(load_catalog(), default_text_base=None)
     with pytest.raises(BaseNotSelected):
         build_plan(catalog, _screened(Mode.TEXT), Tier.GB16)
 
 
 def test_text_and_restyle_plans():
-    catalog = _with_base("z-image-turbo")
+    catalog = load_catalog()
     text = build_plan(catalog, _screened(Mode.TEXT), Tier.GB16)
     assert text.diffusers == "0.41.0"
     assert text.pipeline_class == PIPELINE_TEXT
@@ -86,15 +76,15 @@ def test_text_and_restyle_plans():
     restyle = build_plan(catalog, _screened(Mode.RESTYLE, ImageRole.INIT), Tier.GB16)
     assert restyle.pipeline_class == PIPELINE_IMG2IMG
     assert restyle.repos == (REPO_TURBO,)
-    qwen = _with_base("qwen-image-2512")
-    compact = build_plan(qwen, _screened(Mode.TEXT), Tier.GB16)
-    assert compact.pipeline_class == PIPELINE_QWEN
-    assert compact.repos == (REPO_QWEN,)
-    assert compact.quant == "int4" and compact.steps == QWEN_STEPS
-    assert compact.guidance_scale == QWEN_TRUE_CFG and compact.guidance_kind == "true_cfg_scale"
-    assert compact.text_encoder == ENCODER_VL
-    roomy = build_plan(qwen, _screened(Mode.TEXT), Tier.GB24)
-    assert roomy.quant == "fp8" and roomy.pipeline_class == PIPELINE_QWEN
+    qwen = replace(
+        catalog,
+        default_text_base="qwen-image-2512",
+        text_bases=("z-image-turbo", "qwen-image-2512"),
+    )
+    with pytest.raises(RegistryError, match="has no plan"):
+        build_plan(qwen, _screened(Mode.TEXT), Tier.GB16)
+    with pytest.raises(RegistryError, match="has no plan"):
+        build_plan(qwen, _screened(Mode.TEXT), Tier.GB24)
     restyle_on_qwen = build_plan(qwen, _screened(Mode.RESTYLE, ImageRole.INIT), Tier.GB16)
     assert restyle_on_qwen.repos == (REPO_TURBO,) and restyle_on_qwen.pipeline_class == PIPELINE_IMG2IMG
 

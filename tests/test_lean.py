@@ -23,7 +23,7 @@ from bakeoff.lean import (
     validate_summary,
 )
 from bakeoff.prompt_lint import stated_ages
-from bakeoff.run_bakeoff import ALL_ARMS, default_arms, load_prompts, main, parse_args, summarise
+from bakeoff.run_bakeoff import ALL_ARMS, Z_ARMS, default_arms, load_prompts, main, parse_args, summarise
 
 _SHOWCASE_IDS = [
     "sc01", "sc04", "sc07", "sc10", "sc12", "sc14",
@@ -146,19 +146,29 @@ def test_dry_run_checks_the_plan_before_writing_images(tmp_path: Path, capsys):
     assert plan["question"] == "showcase"
     assert plan["prompts"] == 15
     assert plan["budget_min"] == 25.0
-    assert list(plan["arms"]) == ["z_bf16", "q_bf16"]
+    assert list(plan["arms"]) == Z_ARMS
     assert plan["arms"]["z_bf16"]["prompts"] == 15
-    assert plan["arms"]["q_bf16"]["prompts"] == 15
+    assert plan["arms"]["z_fp8"]["prompts"] == 15
+    assert "q_bf16" not in plan["arms"]
     assert plan["dropped"] == []
     assert plan["frames"][0] == {"id": "sc01", "aspect": "16:9", "z": "1280x720", "q": "1664x928"}
     assert all(row["z"] != row["q"] for row in plan["frames"])
+
+    code = main([
+        "--dry-run", "--prompt-set", "showcase", "--budget-min", "25",
+        "--arms", "z_bf16,q_bf16", "--out", str(tmp_path / "pair"),
+    ])
+    assert code == 0
+    pair = _plan(capsys.readouterr().out)
+    assert list(pair["arms"]) == ["z_bf16", "q_bf16"]
+    assert pair["arms"]["q_bf16"]["prompts"] == 15
 
     code = main(["--dry-run", "--prompt-set", "v2", "--out", str(tmp_path / "v2")])
     assert code == 0
     metrics = _plan(capsys.readouterr().out)
     assert metrics["question"] == "metrics"
     assert metrics["prompts"] == 105
-    assert list(metrics["arms"]) == ALL_ARMS
+    assert list(metrics["arms"]) == Z_ARMS
     assert "frames" not in metrics
     assert metrics["budget_min"] == 0.0
     assert metrics["deadline_min"] == 150.0

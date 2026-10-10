@@ -9,7 +9,7 @@ authors = [{ name = "Aleksandr Mitroshenkov" }]
 dependencies = ["PySide6>=6.8"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.3", "ruff>=0.8", "mypy>=1.13"]
+dev = ["pytest>=8.3", "ruff>=0.8", "mypy>=1.13", "opencv-python-headless>=4.11"]
 # MkDocs is BSD-2-Clause. Material is MIT. mkdocstrings and Griffe are ISC.
 docs = ["mkdocs>=1.6,<2", "mkdocs-material>=9.5,<10", "mkdocstrings[python]>=0.26,<2"]
 # Generation and safety weights are not installed in CI. The worker imports them only when a pinned model is ready.

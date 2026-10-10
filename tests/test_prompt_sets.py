@@ -181,6 +181,8 @@ def test_fp_summary_reports_false_blocks_by_age_and_level(tmp_path: Path):
             handle.write(json.dumps(row) + "\n")
         scored = dict(row)
         scored["gate_block"] = blocked
+        scored["faces"] = 1
+        scored["face_detector"] = "yunet"
         with score_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(scored) + "\n")
     args = parse_args(["--prompt-set", "fp_young_adults", "--out", str(tmp_path), "--review", ""])
@@ -200,6 +202,9 @@ def test_fp_summary_reports_false_blocks_by_age_and_level(tmp_path: Path):
     assert "| all | non_explicit |" in page
     assert "0.10" in summary["gate_rule"]
     assert "age<20" in summary["gate_rule"]
+    assert summary["gate_stats_valid"] is True
+    assert len(summary["face_counts"]) == 24
+    assert {item["faces"] for item in summary["face_counts"]} == {1}
     assert "fp_young_adult" in _REVIEW_SKIP
     assert "adult" in _REVIEW_SKIP
 

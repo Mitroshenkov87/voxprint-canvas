@@ -41,11 +41,9 @@ def test_same_prompts_and_seeds_and_kept_images_stay_in_temp(tmp_path: Path):
     by_base: dict[str, list[tuple[str, int]]] = {}
     for row in rows:
         by_base.setdefault(row.base, []).append((row.prompt, row.seed))
-    assert list(by_base) == ["z-image-turbo", "qwen-image-2512"]
-    assert by_base["z-image-turbo"] == by_base["qwen-image-2512"] == pairs
-    assert [(base, prompt, seed) for base, prompt, seed in seen] == [
-        (base, prompt, seed) for base in ("z-image-turbo", "qwen-image-2512") for prompt, seed in pairs
-    ]
+    assert list(by_base) == ["z-image-turbo"]
+    assert by_base["z-image-turbo"] == pairs
+    assert seen == [("z-image-turbo", prompt, seed) for prompt, seed in pairs]
     assert {row.status for row in rows} == {"kept"}
     assert {row.peak_vram_mb for row in rows} == {140}
     repo = Path(".").resolve()

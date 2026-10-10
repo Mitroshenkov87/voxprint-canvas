@@ -61,6 +61,7 @@ def test_closest_aspect_and_which_model_owns_the_frame():
     assert closest_aspect(928, 1664) == "9:16"
     assert closest_aspect(1024, 1024) == "1:1"
     assert closest_aspect(864, 2016) == "9:16"
+    assert family_for(Mode.TEXT, catalog) == "z-image-turbo"
     assert family_for(Mode.RESTYLE, catalog) == "z-image-turbo"
     assert family_for(Mode.INSTRUCTION, catalog) == "qwen-image-2512"
     assert Mode.RESTYLE in visible_modes(Tier.GB16)

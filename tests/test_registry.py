@@ -36,9 +36,11 @@ def test_catalog_loads_and_rejects_a_bad_pin_or_licence(tmp_path: Path):
         load_catalog(_rewrite(tmp_path, lambda raw: raw["models"][0]["sources"].append({"kind": "http", "uri": "https://example.invalid"})))
 
 
-def test_z_image_fp8_is_rejected_and_qwen_fp8_keeps_a_pending_gate(tmp_path: Path):
+def test_z_image_fp8_is_rejected_and_edit_fp8_keeps_a_pending_gate(tmp_path: Path):
     catalog = load_catalog()
-    assert catalog.by_id("qwen-image-2512-fp8").quality_gate == "pending"
+    ids = {spec.id for spec in catalog.models}
+    assert "qwen-image-2512-fp8" not in ids
+    assert "qwen-image-2512-int4" not in ids
     assert catalog.by_id("qwen-image-edit-2511-fp8").quality_gate == "pending"
 
     def as_fp8(raw: dict) -> None:
@@ -50,7 +52,7 @@ def test_z_image_fp8_is_rejected_and_qwen_fp8_keeps_a_pending_gate(tmp_path: Pat
 
     def drop_gate(raw: dict) -> None:
         for row in raw["models"]:
-            if row["id"] == "qwen-image-2512-fp8":
+            if row["id"] == "qwen-image-edit-2511-fp8":
                 row["quality_gate"] = ""
 
     with pytest.raises(RegistryError, match="quality gate"):

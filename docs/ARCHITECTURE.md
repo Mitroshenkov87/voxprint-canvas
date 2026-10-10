@@ -13,7 +13,7 @@ Voxprint AI Canvas is a local image application. It runs on the machine's NVIDIA
 | `canvas/models` | Registry, tier, diffusers plan, download pins |
 | `canvas/safety` | Content safety checks |
 | `canvas/pipeline` | In-process job and the worker-process boundary |
-| `installer` | Windows installer and Linux packaging stub |
+| `installer` | Windows setup and Linux archive |
 | `tools/audit.py` | Release audit |
 | `tools/bakeoff.py` | Text-base comparison on a supported GPU |
 

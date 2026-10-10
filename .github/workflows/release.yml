@@ -1,0 +1,99 @@
+# Pre-release on a version tag. The Windows setup and the Linux archive stay small.
+# GPU libraries and model files are downloaded on the PC, not stored in the release.
+name: release
+on:
+  push:
+    tags:
+      - "v*"
+permissions:
+  contents: write
+jobs:
+  linux-tarball:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pack the Linux archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          name="voxprint-canvas-${tag}-linux-x86_64"
+          root="dist/${name}"
+          mkdir -p "$root"
+          cp -a canvas pyproject.toml README.md LICENSE NOTICE BUILD.json "$root/"
+          cp installer/linux/install.sh "$root/install.sh"
+          chmod 755 "$root/install.sh"
+          find "$root" -type d -name __pycache__ -print0 | xargs -0r rm -rf
+          tar -C dist -czf "dist/${name}.tar.gz" "$name"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-tarball
+          path: dist/*.tar.gz
+  windows-installer:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inno Setup 6
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+      - name: Stage the app and compile the setup
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $stage = "installer\windows\staging"
+          New-Item -ItemType Directory -Force $stage | Out-Null
+          Copy-Item -Path canvas -Destination $stage -Recurse
+          foreach ($name in @("pyproject.toml", "README.md", "LICENSE", "NOTICE", "BUILD.json")) {
+            Copy-Item $name (Join-Path $stage $name)
+          }
+          Copy-Item installer\windows\install.ps1 (Join-Path $stage "install.ps1")
+          Copy-Item installer\windows\voxprint-canvas.cmd (Join-Path $stage "voxprint-canvas.cmd")
+          Get-ChildItem $stage -Recurse -Directory -Filter __pycache__ | Remove-Item -Recurse -Force
+          $iscc = @(
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+            "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $iscc) { throw "Inno Setup was not installed" }
+          New-Item -ItemType Directory -Force dist | Out-Null
+          & $iscc "/Odist" "installer\windows\voxprint-canvas.iss"
+          if ($LASTEXITCODE -ne 0) { throw "the setup compiler failed" }
+          $tag = $env:GITHUB_REF_NAME.Substring(1)
+          Move-Item -Force "dist\VoxprintCanvasSetup.exe" "dist\VoxprintCanvasSetup-$tag.exe"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: dist/*.exe
+  publish:
+    needs: [linux-tarball, windows-installer]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums and pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          notes="docs/release-notes/${tag}.md"
+          test -f "$notes"
+          (
+            cd dist
+            sha256sum -- *.tar.gz *.exe > SHA256SUMS
+          )
+          title=$(PYTHONPATH=. python -c "from canvas.app.identity import release_title; print(release_title())")
+          gh release create "$GITHUB_REF_NAME" \
+            --prerelease \
+            --title "$title" \
+            --notes-file "$notes" \
+            dist/*

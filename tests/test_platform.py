@@ -49,8 +49,11 @@ def test_installer_selects_a_tier_and_shares_the_voxprint_group(monkeypatch, cap
     assert "MinVersion=10.0.26100" in iss
     assert "DefaultGroupName=Voxprint" in iss
     assert "python -m canvas.models.tiers" in iss
+    assert "does not download model weights" in iss
+    windows = Path("installer/windows/install.ps1").read_text(encoding="utf-8")
+    assert "canvas.models.tiers" in windows
     script = Path("installer/linux/install.sh").read_text(encoding="utf-8")
     assert "voxprint.directory" in script
     assert "Name=Voxprint" in script
-    assert "python -m canvas.models.tiers" in script
+    assert "canvas.models.tiers" in script
     assert "does not download model weights" in script

@@ -44,15 +44,23 @@ def main(argv: list[str]) -> int:
     if len(argv) < 2 or argv[1] != "upscale":
         print("enlarge: expected upscale", file=sys.stderr)
         return 2
-    if "--scale" in argv or "--preset" in argv or "--quality" in argv:
+    if "--scale" in argv or "--quality" in argv:
         print("enlarge: old flags", file=sys.stderr)
         return 2
     source = _flag(argv, "--input")
     output = _flag(argv, "--output")
     long_side = _flag(argv, "--long-side")
     format_name = _flag(argv, "--format")
+    preset = _flag(argv, "--preset")
     parent = _flag(argv, "--parent-lock-pid")
-    if source is None or output is None or long_side != "3840" or format_name != "avif" or parent is None:
+    if (
+        source is None
+        or output is None
+        or long_side != "3840"
+        or format_name != "avif"
+        or preset != "photo"
+        or parent is None
+    ):
         print("enlarge: bad arguments", file=sys.stderr)
         return 2
     if "--json-progress" not in argv:
@@ -91,7 +99,7 @@ def main(argv: list[str]) -> int:
                 "id": job,
                 "code": _CODES.get(code, "internal"),
                 "message": "raw cli detail model-id foo",
-                "retryable": code in (5, 6),
+                "retryable": code in (5, 7),
             }
         )
         return code
@@ -122,7 +130,17 @@ def _flag(argv: list[str], name: str) -> str | None:
 
 
 def _emit(message: dict[str, object]) -> None:
-    print(json.dumps(message), flush=True)
+    body = dict(message)
+    name = body.get("type")
+    kind = os.environ.get("ENLARGE_FAKE_KIND", "both")
+    if kind == "op":
+        body.pop("type", None)
+        body["op"] = name
+    elif kind == "type":
+        pass
+    else:
+        body["op"] = name
+    print(json.dumps(body), flush=True)
 
 
 def _write_output(source: str, output: str) -> tuple[int, int]:

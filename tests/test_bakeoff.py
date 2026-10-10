@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from bakeoff.run_bakeoff import apply_state
 from canvas.models.loader import ModelNotReady
 from canvas.models.modes import Tier
 from canvas.models.plan import CallPlan
@@ -85,6 +86,65 @@ def test_a_missing_generator_records_not_ready(tmp_path: Path):
     rows = run_bakeoff(load_catalog(), world.gate(), Tier.GB24, runner=runner, out_dir=tmp_path)
     assert {row.status for row in rows} == {"not_ready"}
     assert list(tmp_path.glob("*.bin")) == []
+
+
+def test_text_encoder_keys_match_with_or_without_model_prefix():
+    class _Tensor:
+        def __init__(self, shape: tuple[int, ...], mark: str) -> None:
+            self.shape = shape
+            self.dtype = "bf16"
+            self.device = "cpu"
+            self.mark = mark
+
+        def to(self, *, device: str, dtype: str) -> "_Tensor":
+            moved = _Tensor(self.shape, self.mark)
+            moved.device = device
+            moved.dtype = dtype
+            return moved
+
+    class _Module:
+        def __init__(self, tensors: dict[str, _Tensor]) -> None:
+            self.tensors = tensors
+            self.loaded: dict[str, _Tensor] | None = None
+
+        def state_dict(self) -> dict[str, _Tensor]:
+            return self.tensors
+
+        def parameters(self):
+            yield type("Param", (), {"device": "cuda:0"})()
+
+        def load_state_dict(self, mapped: dict[str, _Tensor], strict: bool = False) -> None:
+            assert strict is False
+            self.loaded = mapped
+
+    module = _Module(
+        {
+            "layers.0.weight": _Tensor((2,), "exact"),
+            "layers.2.weight": _Tensor((2,), "bare"),
+            "model.layers.1.weight": _Tensor((2,), "prefixed"),
+            "layers.3.weight": _Tensor((2,), "shape"),
+        }
+    )
+    matched = apply_state(
+        module,
+        {
+            "layers.0.weight": _Tensor((2,), "from-exact"),
+            "model.layers.2.weight": _Tensor((2,), "from-prefixed"),
+            "layers.1.weight": _Tensor((2,), "from-unprefixed"),
+            "layers.3.weight": _Tensor((9,), "wrong-shape"),
+            "ghost.weight": _Tensor((2,), "unknown"),
+        },
+    )
+    assert matched == 3
+    assert module.loaded is not None
+    assert set(module.loaded) == {"layers.0.weight", "layers.2.weight", "model.layers.1.weight"}
+    assert module.loaded["layers.0.weight"].mark == "from-exact"
+    assert module.loaded["layers.2.weight"].mark == "from-prefixed"
+    assert module.loaded["model.layers.1.weight"].mark == "from-unprefixed"
+    assert {item.device for item in module.loaded.values()} == {"cuda:0"}
+    empty = _Module({"layers.0.weight": _Tensor((2,), "only")})
+    with pytest.raises(RuntimeError, match="matches only"):
+        apply_state(empty, {"ghost.weight": _Tensor((2,), "unknown")})
 
 
 def test_images_cannot_be_written_into_the_repo():

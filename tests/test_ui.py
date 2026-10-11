@@ -235,6 +235,9 @@ def test_enhance_rewrites_the_prompt_in_place_and_revert_restores_it(app):
     window.show()
     window.prompt.setPlainText("красная лодка")
     assert window.enhance_button.text() == "Enhance"
+    assert window.enhance_button.toolTip() == "Improve the prompt"
+    assert "translat" not in window.enhance_button.text().casefold()
+    assert "translat" not in window.enhance_button.toolTip().casefold()
     assert window.enhance_button.parentWidget() is window.prompt.parentWidget()
     assert window.findChild(QPlainTextEdit, "enhanced") is None
     assert window.findChild(type(window.enhance_button), "use-enhanced") is None

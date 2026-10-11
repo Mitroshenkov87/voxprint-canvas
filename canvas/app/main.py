@@ -56,7 +56,7 @@ def _parser() -> argparse.ArgumentParser:
     generate.add_argument(
         "--enhance",
         action="store_true",
-        help="translate the prompt into English and expand it before generating",
+        help="improve the prompt before generating",
     )
     generate.add_argument("--json", action="store_true")
     return parser

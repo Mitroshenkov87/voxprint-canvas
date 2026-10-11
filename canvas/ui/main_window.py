@@ -101,6 +101,7 @@ class MainWindow(QWidget):
         self.generate_button.clicked.connect(self._generate)
         self.enhance_button = QPushButton("Enhance")
         self.enhance_button.setObjectName("enhance")
+        self.enhance_button.setToolTip("Improve the prompt")
         self.enhance_button.clicked.connect(self._enhance)
         self.enhance_button.setEnabled(on_enhance is not None)
         self.revert_button = QPushButton()

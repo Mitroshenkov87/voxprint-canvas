@@ -41,6 +41,7 @@ def test_generate_help_offers_enhance(capsys):
     assert caught.value.code == 0
     text = capsys.readouterr().out.casefold()
     assert "--enhance" in text
+    assert "translat" not in text
     assert "nsfw" not in text
     assert "classifier" not in text
 

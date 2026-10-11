@@ -1,10 +1,12 @@
-"""Qwen-Image-Edit-2511 FP8 weights for the 24 GB tier.
+"""Qwen-Image-Edit-2511 FP8 weights for both VRAM tiers.
 
 The mirror stores linear weights as float8_e4m3fn plus a per-tensor BF16 scale
 (``voxprint-fp8-v1``). Embeddings, norms, and the layers the quantizer left
 alone stay BF16. Compute dequantizes one linear at a time to BF16, so the
-resident weights stay FP8 and the transformer fits a 24 GB card when the
-text encoder and VAE are off the GPU.
+stored weights stay FP8 in system RAM. On 16 GB, group offload brings one
+transformer block to the GPU and that block is upcast for the matmul. On
+24 GB, one whole component is on the GPU. The VAE is tiled, and on 16 GB it
+is sliced as well.
 
 torch, diffusers, transformers, accelerate, and safetensors are imported inside
 the functions that load weights. That is not a circular import. Those packages
@@ -18,6 +20,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from canvas.pipeline.offload import OffloadUnavailable, install_low_vram_offload
 
 _HEADER_MAX = 8_000_000
 _FP8_DTYPE = "F8_E4M3"
@@ -181,8 +185,13 @@ def install_fp8_files(
     return planned.fp8_count
 
 
-def load_edit_pipeline(folder: Path, dtype: Any) -> Any:
-    """Open the edit pipeline with FP8 weights and one component on the GPU."""
+def load_edit_pipeline(folder: Path, dtype: Any, *, low_vram: bool = False) -> Any:
+    """Open the edit pipeline with FP8 weights.
+
+    ``low_vram`` installs group offload (or sequential CPU offload) so the
+    encoder, the transformer blocks, and the VAE take turns. Otherwise one
+    component at a time is moved to the GPU, which is the 24 GB path.
+    """
     torch = _import_torch()
     diffusers = _import_diffusers()
     transformers = _import_transformers()
@@ -214,12 +223,22 @@ def load_edit_pipeline(folder: Path, dtype: Any) -> Any:
         raise
     except (OSError, ValueError) as exc:
         raise EditLoadError("the edit model could not be loaded") from exc
-    pipe.enable_model_cpu_offload()
-    tiling = getattr(pipe, "enable_vae_tiling", None)
-    if callable(tiling):
-        tiling()
+    if low_vram:
+        _install_low_vram(pipe)
+    else:
+        pipe.enable_model_cpu_offload()
+        tiling = getattr(pipe, "enable_vae_tiling", None)
+        if callable(tiling):
+            tiling()
     del torch
     return pipe
+
+
+def _install_low_vram(pipe: Any) -> None:
+    try:
+        install_low_vram_offload(pipe)
+    except OffloadUnavailable as exc:
+        raise EditLoadError("the edit model could not be offloaded") from exc
 
 
 def _empty(accelerate: Any, cls: Any, config: Any, dtype: Any = None) -> Any:
@@ -259,11 +278,17 @@ def _assign(module: Any, module_key: str, tensor: Any, scale: Any, torch: Any) -
 
 
 def _fp8_forward(self: Any, inputs: Any) -> Any:
-    # Optional gen extra, same reason as the other imports in this module.
+    """Upcast this linear to BF16 for the matmul. The stored FP8 weight is left in place.
+
+    Group offload has one block on the GPU when this runs, so the copy is that
+    block and not the whole transformer. Optional gen extra, same reason as
+    the other imports in this module.
+    """
     import torch
 
-    weight = self.weight.to(dtype=torch.bfloat16) * self.fp8_scale.to(dtype=torch.bfloat16)
-    bias = None if self.bias is None else self.bias.to(dtype=torch.bfloat16)
+    device = inputs.device
+    weight = self.weight.to(device=device, dtype=torch.bfloat16) * self.fp8_scale.to(device=device, dtype=torch.bfloat16)
+    bias = None if self.bias is None else self.bias.to(device=device, dtype=torch.bfloat16)
     return torch.nn.functional.linear(inputs.to(dtype=torch.bfloat16), weight, bias)
 
 

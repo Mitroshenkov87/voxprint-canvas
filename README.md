@@ -4,7 +4,7 @@ Local text-to-image and image-to-image generation for the Voxprint AI Media Suit
 
 > Status: 0.1.0 release candidate.
 
-Text to image uses Z-Image-Turbo in BF16 on every tier. Image to image covers restyle, inpaint, outpaint, pose, depth, and edge. On a 24 GB GPU, Creative and instruction edit are available as well. Instruction edit downloads the Qwen-Image-Edit-2511 pack when you choose it, after the size and estimated time are shown.
+Text to image uses Z-Image-Turbo in BF16 on every tier. Image to image covers restyle, inpaint, outpaint, pose, depth, and edge. Instruction edit runs on 16 GB and on 24 GB. It needs 40 GB of system memory and downloads the Qwen-Image-Edit-2511 pack when you choose it, after the size and estimated time are shown. On a 24 GB GPU, Creative is available as well.
 
 ```bash
 voxprint-canvas generate --edit-instruction "paint the door blue" --input in.png --out out.avif --json

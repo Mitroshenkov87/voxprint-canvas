@@ -2,6 +2,7 @@
 import argparse
 import json
 import sys
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -20,7 +21,9 @@ from canvas.infra.enlarge import EnlargeClient, EnlargeError
 from canvas.infra.gpu import probe_gpu
 from canvas.infra.models_users import register, unregister
 from canvas.infra.paths import models_dir, shared_dir
+from canvas.infra.vram import peak_allocated_bytes, set_vram_cap_gb
 from canvas.models.loader import ModelNotReady, ZImageGenerator, load_catalog_stack
+from canvas.models.nunchaku import NunchakuUnavailable
 from canvas.models.provision import DownloadDeclined, ensure_plan, install_defaults, install_supporting, repair
 from canvas.models.runtime import InferenceUnavailable
 from canvas.models.modes import Mode, Tier
@@ -29,6 +32,7 @@ from canvas.models.registry import load_catalog
 from canvas.models.snapshots import SnapshotError
 from canvas.pipeline.bf16_schedule import VramRefused
 from canvas.pipeline.enhance import EnhanceResult, fallback_message, open_rewriter, resolve_prompt, rewrite_text
+from canvas.pipeline.schedule import SystemMemoryRefused, last_image_seconds, reset_image_seconds
 from canvas.pipeline.pipeline import CoolingDown, EnlargeMissing, JobError, Pipeline
 from canvas.safety.gate import AgeGate, SafetyError
 from canvas.ui.main_window import EnhanceReply, MainWindow
@@ -43,6 +47,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--selftest", action="store_true", help="check the GPU, model files and encoders")
     parser.add_argument("--json", action="store_true", help="print a JSON document")
     parser.add_argument("--version", action="store_true", help="print the release identity and exit")
+    parser.add_argument(
+        "--vram-cap-gb",
+        type=float,
+        default=None,
+        help="plan as if the GPU had this many GB (CANVAS_VRAM_CAP_GB)",
+    )
     generate = parser.add_subparsers(dest="command", required=False).add_parser(
         "generate", help="generate one image and exit",
     )
@@ -51,7 +61,8 @@ def _parser() -> argparse.ArgumentParser:
     generate.add_argument("--input", default="", help="image to edit, used with --edit-instruction")
     generate.add_argument("--aspect", default="1:1")
     generate.add_argument("--out", required=True)
-    generate.add_argument("--output-size", default="native", choices=("native", "4k"))
+    generate.add_argument("--mask", default="", help="mask image for inpaint, used with --input")
+    generate.add_argument("--output-size", default="native", choices=("native", "2k", "4k"))
     generate.add_argument("--seed", type=int, default=0)
     generate.add_argument(
         "--enhance",
@@ -100,6 +111,7 @@ def _callback(tier: Tier, window_box: list[MainWindow | None], enlarge: EnlargeC
         except (
             SafetyError, SnapshotError, DownloadDeclined, InferenceUnavailable, ModelNotReady,
             ModeUnavailable, BaseNotSelected, JobError, CoolingDown, EnlargeMissing, EnlargeError, VramRefused,
+            SystemMemoryRefused, NunchakuUnavailable,
         ) as exc:
             return str(exc)
         if note:
@@ -176,6 +188,18 @@ def _pending_init(path: Path) -> PendingInput:
     return PendingInput(ImageRole.INIT, _load_rgb(path))
 
 
+def _inputs(args: argparse.Namespace, mode: Mode) -> tuple[PendingInput, ...]:
+    """Images the command supplied. Text has none. Inpaint adds the mask."""
+    if mode is Mode.INSTRUCTION:
+        return (_pending_init(Path(args.input)),)
+    if mode is Mode.INPAINT:
+        return (
+            _pending_init(Path(args.input)),
+            PendingInput(ImageRole.MASK, _load_rgb(Path(args.mask))),
+        )
+    return ()
+
+
 def _generate(args: argparse.Namespace) -> int:
     """Download what is missing, generate one image, and write it."""
     as_json = bool(args.json)
@@ -192,16 +216,22 @@ def _generate(args: argparse.Namespace) -> int:
         return _emit({"ok": False, "error": str(exc)}, as_json, 2)
     catalog = load_catalog()
     root = models_dir()
-    output = "4k" if args.output_size == "4k" else "native"
+    output = args.output_size if args.output_size in {"4k", "2k"} else "native"
     instruction = str(args.edit_instruction or "")
     prompt = str(args.prompt or "")
-    if instruction and prompt:
+    mask = str(args.mask or "")
+    if instruction and (prompt or mask):
         return _emit({"ok": False, "error": "Use a prompt or an edit instruction."}, as_json, 2)
     if instruction:
         if not args.input:
             return _emit({"ok": False, "error": "Instruction edit needs an input image."}, as_json, 2)
         mode = Mode.INSTRUCTION
         text = instruction
+    elif mask:
+        if not prompt or not args.input:
+            return _emit({"ok": False, "error": "Inpaint needs a prompt, an input image, and a mask."}, as_json, 2)
+        mode = Mode.INPAINT
+        text = prompt
     elif prompt:
         mode = Mode.TEXT
         text = prompt
@@ -211,9 +241,11 @@ def _generate(args: argparse.Namespace) -> int:
         return _emit({"ok": False, "error": "Enhance applies to a prompt."}, as_json, 2)
     outcome: EnhanceResult | None = None
     active = text
+    reset_image_seconds()
     progress = lambda message: print(message, file=sys.stderr)
+    started = time.perf_counter()
     try:
-        source = _pending_init(Path(args.input)) if mode is Mode.INSTRUCTION else None
+        source = _inputs(args, mode)
         install_supporting(catalog, progress)
         stack = load_catalog_stack(root, catalog)
         gate = AgeGate(stack)
@@ -222,7 +254,7 @@ def _generate(args: argparse.Namespace) -> int:
             rewritten = rewrite_text(open_rewriter(catalog, gpu.tier, root, progress), prompt)
             outcome = resolve_prompt(gate, prompt, rewritten)
             active = outcome.prompt
-        screened = gate.release_request(active, mode.value, () if source is None else (source,))
+        screened = gate.release_request(active, mode.value, source)
         try:
             plan = build_plan(catalog, screened, gpu.tier)
         finally:
@@ -232,21 +264,23 @@ def _generate(args: argparse.Namespace) -> int:
         generator.seed = args.seed
         generator.models = root
         pipeline = Pipeline(gate, generator, gpu.tier, use_gpu_lock=True, catalog=catalog, enlarge=EnlargeClient())
-        fresh = _pending_init(Path(args.input)) if mode is Mode.INSTRUCTION else None
-        pipeline.export(active, mode, () if fresh is None else (fresh,), path, fmt, aspect=args.aspect, output=output)
+        fresh = _inputs(args, mode)
+        pipeline.export(active, mode, fresh, path, fmt, aspect=args.aspect, output=output)
     except (
         SafetyError, SnapshotError, DownloadDeclined, InferenceUnavailable, ModelNotReady,
-        ModeUnavailable, BaseNotSelected, JobError, CoolingDown, EnlargeMissing, EnlargeError, VramRefused, OSError,
+        ModeUnavailable, BaseNotSelected, JobError, CoolingDown, EnlargeMissing, EnlargeError, VramRefused,
+        SystemMemoryRefused, NunchakuUnavailable, OSError,
     ) as exc:
         return _emit({"ok": False, "error": str(exc)}, as_json, 1)
     if outcome is not None and outcome.fallback and not as_json:
         print(fallback_message(outcome), file=sys.stderr)
-    return _emit(_generate_payload(path, text, outcome), as_json, 0)
+    return _emit(_generate_payload(path, text, outcome, time.perf_counter() - started), as_json, 0)
 
 
 def main(argv: list[str] | None = None) -> int:
     """Register the shared model folder, check for a release, or open the window."""
     args = _parser().parse_args(argv)
+    _apply_vram_cap(args)
     if args.version:
         print(version_label())
         return 0
@@ -288,10 +322,18 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def _generate_payload(path: Path, original: str, outcome: EnhanceResult | None) -> dict[str, object]:
+def _apply_vram_cap(args: argparse.Namespace) -> None:
+    """Store ``--vram-cap-gb`` where tier selection and the other cap reader look."""
+    cap = getattr(args, "vram_cap_gb", None)
+    if cap is None:
+        return
+    set_vram_cap_gb(float(cap))
+
+
+def _generate_payload(path: Path, original: str, outcome: EnhanceResult | None, seconds: float) -> dict[str, object]:
     """JSON body for one generate command. Both prompts are present when enhancing."""
     if outcome is None:
-        return {
+        body: dict[str, object] = {
             "ok": True,
             "path": str(path),
             "prompt": original,
@@ -299,14 +341,23 @@ def _generate_payload(path: Path, original: str, outcome: EnhanceResult | None) 
             "used_prompt": original,
             "fallback": "",
         }
-    return {
-        "ok": True,
-        "path": str(path),
-        "prompt": outcome.original,
-        "enhanced_prompt": outcome.rewritten,
-        "used_prompt": outcome.prompt,
-        "fallback": outcome.fallback,
-    }
+    else:
+        body = {
+            "ok": True,
+            "path": str(path),
+            "prompt": outcome.original,
+            "enhanced_prompt": outcome.rewritten,
+            "used_prompt": outcome.prompt,
+            "fallback": outcome.fallback,
+        }
+    body["seconds_per_image"] = round(float(seconds), 3)
+    diffusion = last_image_seconds()
+    if diffusion is not None:
+        body["diffusion_seconds"] = round(diffusion, 3)
+    peak = peak_allocated_bytes()
+    if peak is not None:
+        body["peak_allocated_bytes"] = peak
+    return body
 
 
 def _progress(message: str, window: MainWindow | None) -> None:

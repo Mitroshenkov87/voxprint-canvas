@@ -4,6 +4,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import assert_never
 
+from canvas.infra.vram import get_vram_budget_gb
 from canvas.safety.inputs import ImageRole
 
 
@@ -43,8 +44,13 @@ def headroom_gb(total_gb: float) -> float:
 
 
 def select_tier(total_gb: float) -> Tier | None:
-    """23.5 GB and above uses the larger tier. 15.5 GB uses the smaller one. Below 15.5 GB has no tier."""
-    total = float(total_gb)
+    """23.5 GB and above uses the larger tier. 15.5 GB uses the smaller one. Below 15.5 GB has no tier.
+
+    A VRAM cap from ``CANVAS_VRAM_CAP_GB`` or ``--vram-cap-gb`` replaces the
+    card size when it is lower. A 24 GB card capped at 16 GB takes the 16 GB schedule.
+    """
+    budget = get_vram_budget_gb(float(total_gb))
+    total = float(total_gb) if budget is None else float(budget)
     if total >= TIER_24_MIN_GB:
         return Tier.GB24
     if total >= TIER_16_MIN_GB:
@@ -53,7 +59,7 @@ def select_tier(total_gb: float) -> Tier | None:
 
 
 def visible_modes(tier: Tier) -> tuple[Mode, ...]:
-    """Modes the UI may offer. Instruction edit and Creative stay hidden on 16 GB."""
+    """Modes the UI may offer. Creative stays on 24 GB. Instruction edit is on both tiers."""
     shared = (
         Mode.TEXT,
         Mode.RESTYLE,
@@ -62,11 +68,12 @@ def visible_modes(tier: Tier) -> tuple[Mode, ...]:
         Mode.POSE,
         Mode.DEPTH,
         Mode.EDGE,
+        Mode.INSTRUCTION,
     )
     if tier is Tier.GB16:
         return shared
     if tier is Tier.GB24:
-        return shared + (Mode.TEXT_CREATIVE, Mode.INSTRUCTION)
+        return shared + (Mode.TEXT_CREATIVE,)
     assert_never(tier)
 
 

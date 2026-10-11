@@ -12,10 +12,13 @@ from typing import Any
 
 from canvas.infra.paths import models_dir
 from canvas.models.loader import ModelNotReady, ZImageGenerator, load_catalog_stack
+from canvas.infra.gpu import probe_gpu
+from canvas.models.nunchaku import NunchakuUnavailable
 from canvas.models.plan import BaseNotSelected
-from canvas.models.modes import Tier
+from canvas.models.modes import Tier, select_tier
 from canvas.models.registry import load_catalog
 from canvas.pipeline.bf16_schedule import VramRefused
+from canvas.pipeline.schedule import SystemMemoryRefused
 from canvas.pipeline.engine import run_generator
 from canvas.safety.gate import AgeGate, SafetyError, SafetyUnavailable
 from canvas.safety.image import RawImage, SafeImage
@@ -39,7 +42,7 @@ def handle_message(payload: dict[str, Any], gate: AgeGate, generator: object) ->
             raw = RawImage(int(item["width"]), int(item["height"]), base64.b64decode(item["data_b64"]))
             inputs.append(PendingInput(ImageRole(str(item["role"])), raw))
         image = worker_generate(gate, generator, str(payload.get("prompt") or ""), str(payload.get("mode") or ""), inputs)
-    except (SafetyError, ModelNotReady, BaseNotSelected, VramRefused) as exc:
+    except (SafetyError, ModelNotReady, BaseNotSelected, VramRefused, SystemMemoryRefused, NunchakuUnavailable) as exc:
         for item in inputs:
             item.image.wipe()
         return {"ok": False, "message": str(exc)}
@@ -64,6 +67,17 @@ def release_worker_image(gate: AgeGate, payload: dict[str, Any], prompt: str = "
     return image
 
 
+def _worker_tier() -> Tier:
+    """The tier for a worker process, including a VRAM cap set by the parent."""
+    info = probe_gpu()
+    if info is None:
+        return Tier.GB24
+    tier = select_tier(info.total_gb)
+    if tier is None:
+        return Tier.GB24
+    return tier
+
+
 def main() -> int:
     """Read one JSON job from stdin and write one JSON result to stdout."""
     try:
@@ -74,7 +88,7 @@ def main() -> int:
         stack = load_catalog_stack(models_dir())
         gate = AgeGate(stack)
         catalog = load_catalog()
-        generator = ZImageGenerator(catalog, Tier.GB24)
+        generator = ZImageGenerator(catalog, _worker_tier())
         result = handle_message(payload if isinstance(payload, dict) else {}, gate, generator)
     except SafetyUnavailable as exc:
         result = {"ok": False, "message": str(exc)}

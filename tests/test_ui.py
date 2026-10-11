@@ -8,7 +8,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication, QLabel, QMessageBox, QTabWidget
 
-from canvas.app.identity import version_label
+from canvas.app.identity import splash_line, version_label
 from canvas.app.info import APP_NAME, ENLARGE_HINT, ENLARGE_RELEASES, RESPONSIBILITY, THIRD_PARTY_NOTICE
 from canvas.core.formats import OutputFormat
 from canvas.models.modes import Mode, Tier
@@ -201,7 +201,8 @@ def test_about_and_splash_show_the_release_identity(app, monkeypatch):
     assert dialog.version.text() == version_label()
     assert dialog.version.objectName() == "about-version"
     splash = Splash()
-    assert splash.version_line == version_label()
+    assert splash.version_line == splash_line()
+    assert splash.version_line != version_label()
     splash.close()
     window.close()
 

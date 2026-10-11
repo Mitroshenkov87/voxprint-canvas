@@ -2,7 +2,7 @@
 import json
 from pathlib import Path
 
-from canvas.app.identity import build_number, release_title, version, version_label
+from canvas.app.identity import build_number, release_title, splash_line, version, version_label
 from canvas.app.main import main
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_version_label_and_release_title_come_from_build_json():
     assert version() == "0.1.0"
     assert version_label({}) == '0.1.0 RC · build 2 "Yotzer"'
+    assert splash_line({}) == '0.1.0 RC build 2 "Yotzer"'
     assert release_title({}) == 'Voxprint AI Canvas 0.1.0 RC · build 2 "Yotzer"'
     template = (ROOT / "docs" / "RELEASE-NOTES-TEMPLATE.md").read_text(encoding="utf-8")
     assert 'Voxprint AI Canvas X.Y.Z RC · build N "Yotzer"' in template

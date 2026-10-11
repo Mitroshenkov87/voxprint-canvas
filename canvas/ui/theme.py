@@ -42,6 +42,14 @@ MENU_SELECTION = "#2f4c78"
 RED = "#fca5a5"
 # Canvas splash identity uses the suite accent. The rest of the window uses the tokens above.
 SPLASH = ACCENT
+UI_FONT = (
+    "Segoe UI Variable Text",
+    "Segoe UI",
+    "Ubuntu",
+    "Noto Sans",
+    "Cantarell",
+    "DejaVu Sans",
+)
 
 CONTRAST_PAIRS = [
     (TEXT, ROOT_PLAIN), (TEXT, CARD_PLAIN), (TEXT, CONTROL_BG), (TEXT, CONTROL_HOVER),
@@ -54,8 +62,10 @@ CONTRAST_PAIRS = [
     (TEXT, MENU_BG), ("#ffffff", MENU_SELECTION),
 ]
 
+_FONT_CSS = ", ".join(f'"{name}"' for name in UI_FONT)
+
 _STYLE = """
-* {{ font-family: "Segoe UI Variable Text", "Segoe UI", "Ubuntu", "Noto Sans", "Cantarell", "DejaVu Sans", sans-serif; font-size: 14px; color: {text}; }}
+* {{ font-family: {font}, sans-serif; font-size: 14px; color: {text}; }}
 QWidget#root {{ background: {root_bg}; }}
 QLabel#title {{ font-size: 22px; font-weight: 600; }}
 QLabel#subtitle, QLabel#footer, QLabel#hint {{ color: {faint}; }}
@@ -90,6 +100,7 @@ def build_style(glass: bool, more: bool = False) -> str:
     else:
         root_bg, card_bg = ROOT_PLAIN, CARD_PLAIN
     return _STYLE.format(
+        font=_FONT_CSS,
         text=TEXT, faint=TEXT_FAINT, muted=TEXT_MUTED, disabled=TEXT_DISABLED,
         control=CONTROL_BG, hover=CONTROL_HOVER, border=CONTROL_BORDER,
         primary=PRIMARY, primary_border=PRIMARY_BORDER, primary_hover=PRIMARY_HOVER,

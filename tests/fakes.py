@@ -26,7 +26,7 @@ class World:
         self.text_scores = {label: 0.0 for label in PROMPT_LABELS}
         self.image_scores = {label: 0.0 for label in IMAGE_LABELS}
         self.faces: list[Face] = []
-        self.ages: list[float] = []
+        self.ages: list[float] = []  # P(age < 18) for each face, from 0 to 1
         self.nsfw = 0.0
         self.error = ""
         self.calls: list[str] = []

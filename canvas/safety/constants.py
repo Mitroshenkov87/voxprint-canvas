@@ -5,8 +5,13 @@ CLI flags or plugins to change them. Tests pin the values.
 """
 from __future__ import annotations
 
-# Apparent age below this is uncertain and blocks when the image is sexual or suggestive.
+# Pinned historical cutoff. The image gate does not compare an apparent age with this
+# value. A face in the 20-29 bucket used to be read as 20 and then stopped.
 APPARENT_AGE_UNCERTAIN_UNDER = 25
+
+# P(age < 18) at or above this, together with sexual content, blocks the image.
+# The 20-29 bucket contributes nothing to that probability.
+MINOR_FACE_PROBABILITY_AT = 0.50
 
 # Falconsai/nsfw_image_detection score at or above this counts as sexual content.
 SEXUAL_SCORE_BLOCK_AT = 0.50

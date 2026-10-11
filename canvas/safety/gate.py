@@ -10,11 +10,10 @@ import math
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeout
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Literal, Sequence, assert_never
 
 from canvas.safety.classifiers import AgeEstimator, FaceDetector, NsfwDetector, PromptGuard, ZeroShot
 from canvas.safety.constants import (
-    APPARENT_AGE_UNCERTAIN_UNDER,
     BLOCKED_MESSAGE,
     CLASSIFIER_TIMEOUT_S,
     GUARD_SEXUAL_CATEGORY,
@@ -23,6 +22,7 @@ from canvas.safety.constants import (
     IMAGE_MINOR,
     IMAGE_MINOR_SEXUAL,
     IMAGE_TIMEOUT_S,
+    MINOR_FACE_PROBABILITY_AT,
     SEXUAL_SCORE_BLOCK_AT,
     UNAVAILABLE_MESSAGE,
     ZERO_SHOT_BLOCK_AT,
@@ -109,6 +109,35 @@ def _score(scores: dict[str, float], label: str) -> float:
 
 def _at_least(value: float) -> bool:
     return value >= ZERO_SHOT_BLOCK_AT
+
+
+def image_block_reason(
+    nsfw: float,
+    under18: Sequence[float],
+    scores: dict[str, float],
+) -> Literal["allow", "minor-sexual", "under18-and-sexual"]:
+    """Why a picture would stop, or ``allow``.
+
+    Adult sexual content passes. A minor-sexual image score blocks on its own.
+    A face whose P(age < 18) is at or above the cutoff blocks only together with
+    sexual content. A 20-29 distribution is not under 18, and a child label on
+    its own does not make an adult sexual picture young.
+    """
+    for value in under18:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise SafetyUnavailable("classifier_error")
+        number = float(value)
+        if math.isnan(number) or math.isinf(number) or number < 0.0 or number > 1.0:
+            raise SafetyUnavailable("classifier_error")
+    minor_sexual = _at_least(_score(scores, IMAGE_MINOR_SEXUAL))
+    adult_sexual = _at_least(_score(scores, IMAGE_ADULT_SEXUAL))
+    _score(scores, IMAGE_MINOR)
+    sexual = float(nsfw) >= SEXUAL_SCORE_BLOCK_AT or adult_sexual or minor_sexual
+    if minor_sexual:
+        return "minor-sexual"
+    if sexual and any(float(value) >= MINOR_FACE_PROBABILITY_AT for value in under18):
+        return "under18-and-sexual"
+    return "allow"
 
 
 # Qwen3Guard has one sexual category for adult sexual content and for non-consent.
@@ -211,25 +240,25 @@ class AgeGate:
     def _check_image(self, raw: RawImage, code: str) -> None:
         """Run the image checks in a fixed order.
 
-        Faces and ages are read together and must agree in count. A young face
-        combined with a sexual score, or a score that already joins those two,
-        raises ``GenerationBlocked``. A missing, non-numeric, or timed-out result
-        raises ``SafetyUnavailable``. The caller wipes the picture either way.
+        Faces and P(age < 18) are read together and must agree in count. Sexual
+        content blocks only when a face is under 18 or the minor-sexual score
+        matches. A missing, non-numeric, out-of-range, or timed-out result raises
+        ``SafetyUnavailable``. The caller wipes the picture either way.
         """
         faces = _wait(lambda: self._stack.faces.detect(raw), timeout=IMAGE_TIMEOUT_S)
         ages = _wait(lambda: self._stack.ages.estimate(raw, faces), timeout=IMAGE_TIMEOUT_S)
         if len(tuple(ages)) != len(tuple(faces)):
             raise SafetyUnavailable("classifier_error")
-        for age in ages:
-            if isinstance(age, bool) or not isinstance(age, (int, float)) or math.isnan(float(age)):
-                raise SafetyUnavailable("classifier_error")
         nsfw = _wait(lambda: self._stack.nsfw.sexual_score(raw), timeout=IMAGE_TIMEOUT_S)
-        if isinstance(nsfw, bool) or not isinstance(nsfw, (int, float)) or math.isnan(float(nsfw)):
+        if isinstance(nsfw, bool) or not isinstance(nsfw, (int, float)) or math.isnan(float(nsfw)) or math.isinf(float(nsfw)):
             raise SafetyUnavailable("classifier_error")
         scores = _wait(lambda: self._stack.zeroshot.score_image(raw, IMAGE_LABELS), timeout=IMAGE_TIMEOUT_S)
-        minor_sexual = _at_least(_score(scores, IMAGE_MINOR_SEXUAL))
-        sexual = float(nsfw) >= SEXUAL_SCORE_BLOCK_AT or _at_least(_score(scores, IMAGE_ADULT_SEXUAL)) or minor_sexual
-        young = any(float(age) < APPARENT_AGE_UNCERTAIN_UNDER for age in ages) or _at_least(_score(scores, IMAGE_MINOR))
-        if minor_sexual or (sexual and young):
-            log.info("content check refused an image")
-            raise GenerationBlocked(code)
+        reason = image_block_reason(float(nsfw), ages, scores)
+        match reason:
+            case "allow":
+                return
+            case "minor-sexual" | "under18-and-sexual":
+                log.info("content check refused an image (%s)", reason)
+                raise GenerationBlocked(code)
+            case _ as unexpected:
+                assert_never(unexpected)

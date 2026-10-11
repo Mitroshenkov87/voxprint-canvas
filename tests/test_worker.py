@@ -49,7 +49,7 @@ def test_parent_reviews_worker_bytes_before_anything_is_kept(tmp_path):
     assert avif_file(path.read_bytes())
     world.nsfw = 0.99
     world.faces = [Face(0, 0, 1, 1)]
-    world.ages = [6.0]
+    world.ages = [1.0]
     secret = bytes([9, 1, 2])
     blocked = {
         "ok": True,

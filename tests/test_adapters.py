@@ -9,7 +9,9 @@ from canvas.safety.adapters import (
     YuNetFaces,
     _pooled_features,
     apparent_age_from_bucket,
+    fairface_under_18,
     parse_qwen3guard,
+    probability_under_18,
 )
 from canvas.safety.gate import SafetyUnavailable
 from tests.fakes import rgb
@@ -26,6 +28,48 @@ def test_fairface_lower_bound_and_guard_parse():
     assert verdict.categories == ("Sexual Content or Sexual Acts",)
     with pytest.raises(SafetyUnavailable):
         parse_qwen3guard("Safety: maybe\n")
+
+
+def _bucket_row(chosen: str) -> dict[str, float]:
+    labels = ("0-2", "3-9", "10-19", "20-29", "30-39", "40-49", "50-59", "60-69", "70+")
+    return {label: (1.0 if label == chosen else 0.0) for label in labels}
+
+
+def test_under_18_probability_ignores_the_20_29_bucket():
+    labels = ("0-2", "3-9", "10-19", "20-29", "30-39", "40-49", "50-59", "60-69", "70+")
+    assert probability_under_18(_bucket_row("20-29")) == 0.0
+    assert probability_under_18(_bucket_row("30-39")) == 0.0
+    assert probability_under_18(_bucket_row("10-19")) == pytest.approx(0.8)
+    older = {label: 0.0 for label in labels if label != "70+"}
+    older["more than 70"] = 1.0
+    assert probability_under_18(older) == 0.0
+    mixed = _bucket_row("30-39")
+    mixed["30-39"] = 0.25
+    mixed["0-2"] = 0.25
+    mixed["10-19"] = 0.50
+    assert probability_under_18(mixed) == pytest.approx(0.65)
+    with pytest.raises(SafetyUnavailable):
+        probability_under_18({"20-29": 0.5})
+    with pytest.raises(SafetyUnavailable):
+        probability_under_18({"nope": 1.0})
+    with pytest.raises(SafetyUnavailable):
+        probability_under_18({})
+    broken = _bucket_row("20-29")
+    broken["20-29"] = float("nan")
+    with pytest.raises(SafetyUnavailable):
+        probability_under_18(broken)
+    broken = _bucket_row("20-29")
+    broken["20-29"] = True  # type: ignore[assignment]
+    with pytest.raises(SafetyUnavailable):
+        probability_under_18(broken)
+    ids = {str(index): label for index, label in enumerate(labels)}
+    assert fairface_under_18(ids, [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0]) == 0.0
+    ints = {index: label for index, label in enumerate(labels)}
+    assert fairface_under_18(ints, [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]) == pytest.approx(0.8)
+    with pytest.raises(SafetyUnavailable):
+        fairface_under_18({}, [1.0])
+    with pytest.raises(SafetyUnavailable):
+        fairface_under_18({0: "20-29", 1: "20-29"}, [0.5, 0.5])
 
 
 def test_pooled_features_accepts_a_tensor_or_a_pooling_output():

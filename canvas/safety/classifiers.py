@@ -48,10 +48,10 @@ class FaceDetector(Protocol):
 
 
 class AgeEstimator(Protocol):
-    """Estimates one age for each face box."""
+    """Estimates P(age < 18) for each face box."""
 
     def estimate(self, image: RawImage, faces: Sequence[Face]) -> Sequence[float]:
-        """Apparent age in years, one float per face, lower-bound conservative."""
+        """One probability per face, from 0 to 1. An empty face list returns an empty sequence."""
 
 
 class NsfwDetector(Protocol):

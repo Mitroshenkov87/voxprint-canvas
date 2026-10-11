@@ -7,8 +7,9 @@ torch, transformers and opencv are imported inside the load methods. That is
 not a circular import. Those packages are optional so the unit tests can import
 this module without them.
 """
+import math
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 import numpy as np
 from PIL import Image
@@ -18,7 +19,8 @@ from canvas.safety.classifiers import Face, GuardVerdict
 from canvas.safety.gate import SafetyUnavailable
 from canvas.safety.image import RawImage
 
-# Lower edge of each FairFace age bucket. 20-29 is under 25, so it stays uncertain.
+# Lower edge of each FairFace age bucket. The image gate does not use this floor.
+# 20-29 maps to 20, which is how a twenty-year bucket used to be treated as under 25.
 FAIRFACE_AGE_LOW = {
     "0-2": 0.0,
     "3-9": 3.0,
@@ -32,13 +34,75 @@ FAIRFACE_AGE_LOW = {
     "more than 70": 70.0,
 }
 
+# Share of each bucket that is under 18. 10-19 covers ten years and eight of them
+# are under 18. 20-29 and every older bucket contribute 0, so they cannot leak.
+FAIRFACE_UNDER_18 = {
+    "0-2": 1.0,
+    "3-9": 1.0,
+    "10-19": 0.8,
+    "20-29": 0.0,
+    "30-39": 0.0,
+    "40-49": 0.0,
+    "50-59": 0.0,
+    "60-69": 0.0,
+    "70+": 0.0,
+    "more than 70": 0.0,
+}
+
+_PROBABILITY_SUM_LOW = 0.99
+_PROBABILITY_SUM_HIGH = 1.01
+
 
 def apparent_age_from_bucket(label: str) -> float:
-    """Map a FairFace bucket to a conservative age in years."""
+    """Map a FairFace bucket to its lower edge in years."""
     try:
         return FAIRFACE_AGE_LOW[label]
     except KeyError as exc:
         raise SafetyUnavailable("classifier_error") from exc
+
+
+def probability_under_18(probs: Mapping[str, float]) -> float:
+    """P(age < 18) from a full FairFace softmax.
+
+    An unknown label, a non-numeric weight, or a distribution that does not sum
+    to one refuses the request.
+    """
+    if not probs:
+        raise SafetyUnavailable("classifier_error")
+    total = 0.0
+    under = 0.0
+    for label, value in probs.items():
+        try:
+            weight = FAIRFACE_UNDER_18[str(label)]
+        except KeyError as exc:
+            raise SafetyUnavailable("classifier_error") from exc
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise SafetyUnavailable("classifier_error")
+        number = float(value)
+        if math.isnan(number) or math.isinf(number) or number < 0.0:
+            raise SafetyUnavailable("classifier_error")
+        total += number
+        under += weight * number
+    if total < _PROBABILITY_SUM_LOW or total > _PROBABILITY_SUM_HIGH:
+        raise SafetyUnavailable("classifier_error")
+    return under
+
+
+def fairface_under_18(id2label: Mapping[int | str, str], values: Sequence[float]) -> float:
+    """P(age < 18) for one face. ``values`` aligns with class ids ``0 .. n-1``."""
+    mapped: dict[str, float] = {}
+    for index, value in enumerate(values):
+        if index in id2label:
+            label = id2label[index]
+        elif str(index) in id2label:
+            label = id2label[str(index)]
+        else:
+            raise SafetyUnavailable("classifier_error")
+        name = str(label)
+        if name in mapped:
+            raise SafetyUnavailable("classifier_error")
+        mapped[name] = value
+    return probability_under_18(mapped)
 
 
 def parse_qwen3guard(text: str) -> GuardVerdict:
@@ -237,20 +301,20 @@ class FairFaceAge:
         )
 
     def estimate(self, image: RawImage, faces: Sequence[Face]) -> Sequence[float]:
-        """Apparent age in years, one float per face, lower-bound conservative."""
+        """P(age < 18) for each face, from the full FairFace distribution."""
         self.load()
         import torch
         picture = _rgb(image)
-        ages: list[float] = []
+        under: list[float] = []
         for face in faces:
             crop = picture.crop((face.x, face.y, face.x + face.width, face.y + face.height))
             inputs = self._processor(images=crop, return_tensors="pt")
             with torch.no_grad():
                 logits = self._model(**inputs).logits
-            label_id = int(torch.argmax(logits, dim=-1)[0])
-            label = str(self._model.config.id2label[label_id])
-            ages.append(apparent_age_from_bucket(label))
-        return ages
+                probs = torch.softmax(logits, dim=-1)[0]
+            values = [float(probs[index]) for index in range(int(probs.shape[-1]))]
+            under.append(fairface_under_18(self._model.config.id2label, values))
+        return under
 
 
 class NsfwViT:

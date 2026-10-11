@@ -127,7 +127,7 @@ def test_a_third_party_lora_cannot_bypass_or_reconfigure_the_gate(tmp_path: Path
     world.text_scores = {label: 0.0 for label in world.text_scores}
     world.nsfw = 0.95
     world.faces = [Face(0, 0, 1, 1)]
-    world.ages = [8.0]
+    world.ages = [1.0]
     with pytest.raises(GenerationBlocked):
         release_addon_request(world.gate(), "a red boat", "text", (PendingInput(ImageRole.STYLE, rgb()),))
     world.nsfw = 0.0

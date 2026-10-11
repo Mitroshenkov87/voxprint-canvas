@@ -16,7 +16,8 @@ from canvas.infra.paths import models_dir
 from canvas.models.registry import load_catalog
 from canvas.models.snapshots import snapshot_ready
 from canvas.safety.adapters import FairFaceAge, NsfwViT, Qwen3GuardGen, SiglipZeroShot, YuNetFaces
-from canvas.safety.gate import AgeGate, GenerationBlocked, SafetyStack
+from canvas.safety.constants import IMAGE_LABELS
+from canvas.safety.gate import AgeGate, GenerationBlocked, SafetyStack, SafetyUnavailable
 from canvas.safety.image import RawImage, SafeImage
 
 REQUIRE = os.environ.get("VOXPRINT_REQUIRE_GATE") == "1"
@@ -24,6 +25,8 @@ pytestmark = pytest.mark.skipif(not REQUIRE, reason="real weights run in the gat
 
 ROOT = Path(__file__).resolve().parents[1]
 FACE = ROOT / "tests" / "fixtures" / "adult_face.jpg"
+ADULT_CC0 = ROOT / "tests" / "fixtures" / "adult_cc0"
+_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".avif"}
 
 _SHOWER = (
     "Эротическая художественная фотография: обнажённая женщина 30 лет с длинными тёмными волосами "
@@ -91,8 +94,53 @@ def test_real_prompt_gate_allows_adults_and_blocks_minor_sexual_content():
             gate.review_prompt(prompt)
 
 
-def test_real_image_gate_accepts_a_public_domain_adult_portrait():
-    picture = Image.open(FACE).convert("RGB")
-    raw = RawImage(picture.width, picture.height, picture.tobytes())
-    released = _gate().review_image(raw)
+def _raw(path: Path) -> RawImage:
+    picture = Image.open(path).convert("RGB")
+    return RawImage(picture.width, picture.height, picture.tobytes())
+
+
+def _trace(gate: AgeGate, raw: RawImage) -> str:
+    faces = list(gate._stack.faces.detect(raw))
+    under = [round(float(value), 4) for value in gate._stack.ages.estimate(raw, faces)]
+    nsfw = float(gate._stack.nsfw.sexual_score(raw))
+    scores = gate._stack.zeroshot.score_image(raw, IMAGE_LABELS)
+    shown = {label: round(float(scores[label]), 4) for label in IMAGE_LABELS}
+    return f"faces={len(faces)} nsfw={nsfw:.4f} under18={under} scores={shown}"
+
+
+def _must_pass(gate: AgeGate, path: Path) -> None:
+    raw = _raw(path)
+    backup = RawImage(raw.width, raw.height, raw.to_bytes())
+    try:
+        released = gate.review_image(raw)
+    except (GenerationBlocked, SafetyUnavailable) as exc:
+        detail = _trace(gate, backup)
+        raise AssertionError(f"{path.name} refused ({exc.code}): {detail}") from exc
     assert type(released) is SafeImage
+
+
+def test_real_image_gate_accepts_a_public_domain_adult_portrait():
+    _must_pass(_gate(), FACE)
+
+
+def test_real_image_gate_accepts_public_domain_adult_figures():
+    paths = sorted(path for path in ADULT_CC0.iterdir() if path.suffix.lower() in _IMAGE_SUFFIXES)
+    assert paths, "adult public-domain fixtures are missing"
+    gate = _gate()
+    for path in paths:
+        _must_pass(gate, path)
+
+
+def test_edit_outputs_pass_when_the_vm_provides_them():
+    given = os.environ.get("VOXPRINT_E1_OUTPUTS")
+    if not given:
+        pytest.skip("VOXPRINT_E1_OUTPUTS is not set")
+    root = Path(given)
+    if root.is_file():
+        paths = [root]
+    else:
+        paths = sorted(path for path in root.rglob("*") if path.suffix.lower() in _IMAGE_SUFFIXES)
+    assert paths, f"VOXPRINT_E1_OUTPUTS has no images: {given}"
+    gate = _gate()
+    for path in paths:
+        _must_pass(gate, path)

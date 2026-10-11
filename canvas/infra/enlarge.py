@@ -165,21 +165,20 @@ def declared_vram_gb(body: dict[str, Any] | None) -> float:
 def spawn_env(parent_pid: int) -> dict[str, str]:
     """Environment for one Enlarge process.
 
-    The child gets PATH, the home and temp variables, the suite lock path, and
-    its parent pid. PYTHONPATH, VIRTUAL_ENV, CUDA_VISIBLE_DEVICES, and torch
-    allocator variables are not copied. ``ENLARGE_FAKE_`` keys are copied so a
-    test stand-in can be configured.
+    The child gets PATH, the home and temp variables, ``VOXPRINT_`` settings
+    such as the lock path and ``VOXPRINT_CI_LANCZOS``, and its parent pid.
+    PYTHONPATH, VIRTUAL_ENV, CUDA_VISIBLE_DEVICES, and torch allocator
+    variables are not copied. ``ENLARGE_FAKE_`` keys are copied so a test
+    stand-in can be configured.
     """
     env: dict[str, str] = {}
     for key in _ENV_KEYS:
         value = os.environ.get(key)
         if value:
             env[key] = value
-    lock = os.environ.get("VOXPRINT_GPU_LOCK", "").strip()
-    if lock:
-        env["VOXPRINT_GPU_LOCK"] = lock
     for key, value in os.environ.items():
-        if key.upper().startswith("ENLARGE_FAKE_") and value:
+        upper = key.upper()
+        if value and (upper.startswith("VOXPRINT_") or upper.startswith("ENLARGE_FAKE_")):
             env[key] = value
     env["VOXPRINT_GPU_PARENT_PID"] = str(parent_pid)
     return env

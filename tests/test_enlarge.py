@@ -50,6 +50,7 @@ def test_spawn_env_keeps_only_the_suite_contract(monkeypatch):
     monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "0")
     monkeypatch.setenv("PYTORCH_CUDA_ALLOC_CONF", "max_split_size_mb:32")
     monkeypatch.setenv("VOXPRINT_GPU_LOCK", "/tmp/voxprint-gpu.lock")
+    monkeypatch.setenv("VOXPRINT_CI_LANCZOS", "1")
     monkeypatch.setenv("ENLARGE_FAKE_EXIT", "2")
     env = spawn_env(7)
     assert env["PATH"] == "/usr/bin"
@@ -57,6 +58,7 @@ def test_spawn_env_keeps_only_the_suite_contract(monkeypatch):
     assert env["TEMP"] == "/tmp"
     assert env["VOXPRINT_GPU_PARENT_PID"] == "7"
     assert env["VOXPRINT_GPU_LOCK"] == "/tmp/voxprint-gpu.lock"
+    assert env["VOXPRINT_CI_LANCZOS"] == "1"
     assert env["ENLARGE_FAKE_EXIT"] == "2"
     assert "PYTHONPATH" not in env
     assert "VIRTUAL_ENV" not in env

@@ -1,12 +1,12 @@
-# Enhance and translate
+# Enhance
 
-Z-Image-Turbo follows English prompts more closely than prompts in other languages. **Enhance & translate prompt** rewrites the text you typed into a concrete English description before the picture is made.
+Z-Image-Turbo follows English prompts more closely than prompts in other languages. **Enhance** improves the prompt you typed into a concrete English description before the picture is made. An English prompt is improved in English. A prompt in another language is improved and written in English.
 
 The rewrite names the subject, composition, lighting, lens, and style. It keeps every fact you stated. Ages stay as you wrote them. Adult markers stay as you wrote them. Quoted lettering stays in its original language and script, so a sign still reads the way you wrote it.
 
-The rewritten prompt appears in a box beside the original. **Use this prompt** sends that text to the picture. **Revert** goes back to the original. You can edit the rewrite before you use it.
+**Enhance**, beside the prompt, improves that text in the same field. Its tooltip is "Improve the prompt". The button shows a busy state while the rewrite runs. You can edit the result. **Revert** is an undo icon, enabled only after a rewrite is placed in the field. It puts back the exact text from before that enhancement, including when you have edited the field since. Ctrl+Z in the field undoes the last change there as well.
 
-A rewrite that drops or changes a stated age is discarded, and the original prompt is used. The same happens when quoted lettering is missing from the rewrite.
+A rewrite that drops or changes a stated age is discarded. The field keeps the text you had, and a short note appears under the prompt. The same happens when quoted lettering is missing from the rewrite.
 
 The same content check runs on the original prompt and on the rewrite. If either one is refused, nothing is generated.
 

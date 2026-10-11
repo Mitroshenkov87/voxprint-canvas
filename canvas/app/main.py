@@ -31,7 +31,7 @@ from canvas.pipeline.bf16_schedule import VramRefused
 from canvas.pipeline.enhance import EnhanceResult, fallback_message, open_rewriter, resolve_prompt, rewrite_text
 from canvas.pipeline.pipeline import CoolingDown, EnlargeMissing, JobError, Pipeline
 from canvas.safety.gate import AgeGate, SafetyError
-from canvas.ui.main_window import MainWindow
+from canvas.ui.main_window import EnhanceReply, MainWindow
 from canvas.ui.splash import Splash, show_splash
 
 
@@ -56,7 +56,7 @@ def _parser() -> argparse.ArgumentParser:
     generate.add_argument(
         "--enhance",
         action="store_true",
-        help="translate the prompt into English and expand it before generating",
+        help="improve the prompt before generating",
     )
     generate.add_argument("--json", action="store_true")
     return parser
@@ -106,12 +106,15 @@ def _callback(tier: Tier, window_box: list[MainWindow | None], enlarge: EnlargeC
             return note
         return "Done"
 
-    def on_enhance(text: str) -> str:
+    def on_enhance(text: str) -> EnhanceReply:
         progress = lambda message: _progress(message, window_box[0])
         install_supporting(catalog, progress)
         stack = load_catalog_stack(models_dir(), catalog)
-        AgeGate(stack).review_prompt(text)
-        return rewrite_text(open_rewriter(catalog, tier, models_dir(), progress), text)
+        gate = AgeGate(stack)
+        gate.review_prompt(text)
+        rewritten = rewrite_text(open_rewriter(catalog, tier, models_dir(), progress), text)
+        outcome = resolve_prompt(gate, text, rewritten)
+        return EnhanceReply(outcome.prompt, fallback_message(outcome))
 
     return on_generate, on_enhance
 

@@ -31,7 +31,7 @@ from canvas.safety.gate import SafetyError
 
 SYSTEM_PROMPT = """You rewrite image prompts for a text-to-image model that follows natural English best.
 
-Translate the user's prompt into natural English. Expand it into a concrete photographic or artistic description that names the subject, composition, lighting, lens, and style. You may add that photographic detail when it fits the prompt.
+Improve the user's prompt and write it in natural English. Expand it into a concrete photographic or artistic description that names the subject, composition, lighting, lens, and style. You may add that photographic detail when it fits the prompt.
 
 Rules:
 - Preserve every fact the user stated.

@@ -1,11 +1,12 @@
 """The two-mode window: text to image, and image to image."""
 from __future__ import annotations
 
-from typing import Callable
+from typing import Callable, NamedTuple
 
-from PySide6.QtCore import Qt, QRectF, QUrl
-from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPainter, QPen, QPixmap
+from PySide6.QtCore import Qt, QPointF, QRectF, QSize, QUrl
+from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPainter, QPainterPath, QPen, QPixmap, QTextCursor
 from PySide6.QtWidgets import (
+    QApplication,
     QButtonGroup,
     QCheckBox,
     QComboBox,
@@ -27,6 +28,13 @@ from canvas.models.modes import Mode, Tier, mode_group, visible_modes
 from canvas.models.sizes import ASPECT_GROUPS, closest_aspect
 from canvas.ui.theme import TEXT, build_style
 
+class EnhanceReply(NamedTuple):
+    """The prompt to show, and a note when the rewrite was not placed in the field."""
+
+    text: str
+    note: str
+
+
 _LABELS = {
     Mode.TEXT: "Text to image",
     Mode.TEXT_CREATIVE: "Creative",
@@ -44,12 +52,13 @@ class MainWindow(QWidget):
     """Prompt, mode and format. Generation is delegated to ``on_generate``."""
 
     def __init__(self, on_generate: Callable[..., str], tier: Tier, glass: bool = False,
-                 enlarge_ready: bool = False, on_enhance: Callable[[str], str] | None = None) -> None:
+                 enlarge_ready: bool = False, on_enhance: Callable[[str], EnhanceReply] | None = None) -> None:
         super().__init__()
         self.on_generate = on_generate
         self.on_enhance = on_enhance
         self.tier = tier
-        self._use_enhanced = False
+        self._original: str | None = None
+        self._busy = False
         self._aspect_touched = False
         self._input_size: tuple[int, int] | None = None
         self.setObjectName("root")
@@ -57,9 +66,6 @@ class MainWindow(QWidget):
         self.setStyleSheet(build_style(glass))
         self.prompt = QPlainTextEdit()
         self.prompt.setPlaceholderText("Describe the picture")
-        self.enhanced = QPlainTextEdit()
-        self.enhanced.setObjectName("enhanced")
-        self.enhanced.setPlaceholderText("Enhanced English prompt")
         self.format_box = QComboBox()
         for fmt, label in ((OutputFormat.AVIF, "AVIF"), (OutputFormat.JXL, "JPEG XL"), (OutputFormat.WEBP, "WebP")):
             self.format_box.addItem(label, fmt)
@@ -93,17 +99,19 @@ class MainWindow(QWidget):
         self.generate_button = QPushButton("Generate")
         self.generate_button.setObjectName("primary")
         self.generate_button.clicked.connect(self._generate)
-        self.enhance_button = QPushButton("Enhance & translate prompt")
+        self.enhance_button = QPushButton("Enhance")
         self.enhance_button.setObjectName("enhance")
+        self.enhance_button.setToolTip("Improve the prompt")
         self.enhance_button.clicked.connect(self._enhance)
         self.enhance_button.setEnabled(on_enhance is not None)
-        self.use_button = QPushButton("Use this prompt")
-        self.use_button.setObjectName("use-enhanced")
-        self.use_button.clicked.connect(self._use_rewrite)
-        self.use_button.setEnabled(False)
-        self.revert_button = QPushButton("Revert")
-        self.revert_button.setObjectName("revert-enhanced")
-        self.revert_button.clicked.connect(self._revert_rewrite)
+        self.revert_button = QPushButton()
+        self.revert_button.setObjectName("revert")
+        self.revert_button.setIcon(_undo_icon())
+        self.revert_button.setIconSize(QSize(18, 18))
+        self.revert_button.setFixedSize(36, 36)
+        self.revert_button.setToolTip("Revert")
+        self.revert_button.setAccessibleName("Revert")
+        self.revert_button.clicked.connect(self._revert)
         self.revert_button.setEnabled(False)
         self.action_icons = load_approved()
         self.about_button = QPushButton("About")
@@ -134,15 +142,14 @@ class MainWindow(QWidget):
         prompt_row = QWidget()
         prompts = QHBoxLayout(prompt_row)
         prompts.setContentsMargins(0, 0, 0, 0)
-        prompts.addWidget(self.prompt)
-        prompts.addWidget(self.enhanced)
+        prompts.addWidget(self.prompt, 1)
+        actions = QVBoxLayout()
+        actions.setContentsMargins(0, 0, 0, 0)
+        actions.addWidget(self.enhance_button)
+        actions.addWidget(self.revert_button)
+        actions.addStretch(1)
+        prompts.addLayout(actions)
         layout.addWidget(prompt_row)
-        enhance_row = QHBoxLayout()
-        enhance_row.addWidget(self.enhance_button)
-        enhance_row.addWidget(self.use_button)
-        enhance_row.addWidget(self.revert_button)
-        enhance_row.addStretch(1)
-        layout.addLayout(enhance_row)
         layout.addWidget(self.aspect_row)
         fourk_row = QHBoxLayout()
         fourk_row.addWidget(self.fourk)
@@ -260,44 +267,100 @@ class MainWindow(QWidget):
         )
         return answer == QMessageBox.StandardButton.Yes
 
+    def _set_busy(self, busy: bool) -> None:
+        self._busy = busy
+        self.enhance_button.setText("Enhancing…" if busy else "Enhance")
+        self.enhance_button.setEnabled((not busy) and self.on_enhance is not None)
+        self.prompt.setReadOnly(busy)
+        self.generate_button.setEnabled(not busy)
+        self.revert_button.setEnabled((not busy) and self._original is not None)
+        self.setCursor(Qt.CursorShape.WaitCursor if busy else Qt.CursorShape.ArrowCursor)
+
+    def _replace_prompt(self, text: str) -> None:
+        """Replace the field in one undo step, so Ctrl+Z restores the previous text."""
+        cursor = self.prompt.textCursor()
+        cursor.beginEditBlock()
+        cursor.select(QTextCursor.SelectionType.Document)
+        cursor.insertText(text)
+        cursor.endEditBlock()
+        self.prompt.setTextCursor(cursor)
+
     def _enhance(self) -> None:
-        if self.on_enhance is None:
+        if self.on_enhance is None or self._busy:
             return
+        source = self.prompt.toPlainText()
+        self._set_busy(True)
+        self.status.setText("Enhancing…")
+        app = QApplication.instance()
+        if app is not None:
+            app.processEvents()
+        reply: EnhanceReply | None = None
         try:
-            rewritten = self.on_enhance(self.prompt.toPlainText())
+            reply = self.on_enhance(source)
         except Exception as exc:
             self.status.setText(str(exc))
+        finally:
+            self._set_busy(False)
+        if reply is None:
             return
-        self.enhanced.setPlainText(rewritten)
-        self._use_enhanced = False
-        self.use_button.setEnabled(True)
-        self.revert_button.setEnabled(True)
-        self.status.setText("Review the enhanced prompt, then use it or revert.")
+        if reply.text != source:
+            self._original = source
+            self._replace_prompt(reply.text)
+            self.revert_button.setEnabled(True)
+        self.status.setText(reply.note)
 
-    def _use_rewrite(self) -> None:
-        self._use_enhanced = True
-        self.status.setText("Using the enhanced prompt.")
-
-    def _revert_rewrite(self) -> None:
-        self._use_enhanced = False
-        self.enhanced.clear()
-        self.use_button.setEnabled(False)
+    def _revert(self) -> None:
+        if self._original is None or self._busy:
+            return
+        original = self._original
+        self._original = None
         self.revert_button.setEnabled(False)
-        self.status.setText("Using the original prompt.")
+        self._replace_prompt(original)
+        self.status.setText("")
 
     def _generate(self) -> None:
+        if self._busy:
+            return
         tabs = self.findChild(QTabWidget)
         index = 0 if tabs is None else tabs.currentIndex()
         mode = self.current_mode(index)
         fmt = self.format_box.currentData()
-        original = self.prompt.toPlainText()
+        prompt = self.prompt.toPlainText()
         try:
-            if self._use_enhanced:
-                self.status.setText(self.on_generate(self.enhanced.toPlainText(), mode, fmt, original=original))
+            if self._original is None:
+                message = self.on_generate(prompt, mode, fmt)
             else:
-                self.status.setText(self.on_generate(original, mode, fmt))
+                message = self.on_generate(prompt, mode, fmt, original=self._original)
+            self.status.setText(message)
         except Exception as exc:
             self.status.setText(str(exc))
+
+
+def _undo_icon() -> QIcon:
+    """A counterclockwise arrow, the usual undo mark."""
+    pixmap = QPixmap(22, 22)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    pen = QPen(QColor(TEXT), 1.7)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    painter.setPen(pen)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    path = QPainterPath()
+    path.moveTo(16, 8)
+    path.arcTo(QRectF(6, 5, 11, 11), 20, 250)
+    painter.drawPath(path)
+    tip = path.currentPosition()
+    painter.setBrush(QColor(TEXT))
+    head = QPainterPath()
+    head.moveTo(tip)
+    head.lineTo(tip + QPointF(-1.2, 4.2))
+    head.lineTo(tip + QPointF(3.6, 2.2))
+    head.closeSubpath()
+    painter.drawPath(head)
+    painter.end()
+    return QIcon(pixmap)
 
 
 def _shape_icon(aspect: str) -> QIcon:

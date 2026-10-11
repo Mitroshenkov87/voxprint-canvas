@@ -19,6 +19,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from canvas.infra.manifest import ManifestError, load_manifest
+from canvas.infra.paths import shared_dir, voxprint_home
+
 if sys.platform == "win32":
     import winreg
 else:
@@ -53,7 +56,7 @@ def socket_path(app: str, ipc_base: str) -> str:
 
 
 def find_app(pascal: str, kebab: str) -> AppInstall | None:
-    """Registry or desktop entry, then PATH. The executable must exist."""
+    """Override, registry or desktop entry, shared manifest, install paths, then PATH."""
     override = os.environ.get("CANVAS_ENLARGE_EXE", "").strip() if kebab == "enlarge" else ""
     if override:
         parts = _split_command(override)
@@ -70,6 +73,12 @@ def find_app(pascal: str, kebab: str) -> AppInstall | None:
         found = _from_desktop_dirs(pascal, kebab)
     if found is not None:
         return found
+    found = _from_shared_manifest(kebab)
+    if found is not None:
+        return found
+    found = _from_install_paths(kebab)
+    if found is not None:
+        return found
     program = f"voxprint-{kebab}.exe" if sys.platform == "win32" else f"voxprint-{kebab}"
     which = shutil.which(program)
     if which is None and sys.platform == "win32":
@@ -77,6 +86,76 @@ def find_app(pascal: str, kebab: str) -> AppInstall | None:
     if which is None:
         return None
     return AppInstall([which], "", f"voxprint-{kebab}")
+
+
+def _program_names(kebab: str) -> tuple[str, ...]:
+    plain = f"voxprint-{kebab}"
+    if sys.platform == "win32":
+        return (f"{plain}.exe", plain)
+    return (plain,)
+
+
+def _as_install(path: Path, kebab: str) -> AppInstall | None:
+    if path.is_file():
+        return AppInstall([str(path)], "", f"voxprint-{kebab}")
+    return None
+
+
+def _from_shared_manifest(kebab: str) -> AppInstall | None:
+    """An Enlarge executable recorded in the suite manifest."""
+    try:
+        resources = load_manifest(shared_dir())
+    except (ManifestError, OSError):
+        return None
+    root = shared_dir()
+    names = _program_names(kebab)
+    for resource in resources.values():
+        base = root / resource.path
+        candidates = [base, *[base / name for name in names], *[base / "bin" / name for name in names]]
+        for candidate in candidates:
+            found = _as_install(candidate, kebab)
+            if found is not None:
+                return found
+    return None
+
+
+def _from_install_paths(kebab: str) -> AppInstall | None:
+    """Standard Enlarge install locations, then ``~/.local/bin``."""
+    names = _program_names(kebab)
+    home = voxprint_home()
+    candidates: list[Path] = []
+    for name in names:
+        candidates.extend((
+            home / "Enlarge" / name,
+            home / "enlarge" / name,
+            home / "Enlarge" / "venv" / "Scripts" / name,
+            home / "enlarge" / "venv" / "Scripts" / name,
+            home / "Enlarge" / "venv" / "bin" / name,
+            home / "enlarge" / "venv" / "bin" / name,
+            Path.home() / ".local" / "bin" / name,
+            Path.home() / ".local" / "share" / "voxprint" / "enlarge" / "venv" / "bin" / name,
+        ))
+    if sys.platform == "win32":
+        bases = (
+            os.environ.get("LOCALAPPDATA", ""),
+            os.environ.get("ProgramFiles", ""),
+            os.environ.get("ProgramFiles(x86)", ""),
+        )
+        for base in bases:
+            if not base:
+                continue
+            root = Path(base)
+            for name in names:
+                candidates.extend((
+                    root / "Voxprint" / "Enlarge" / name,
+                    root / "Voxprint" / "enlarge" / name,
+                    root / "Voxprint" / "Enlarge" / "venv" / "Scripts" / name,
+                ))
+    for candidate in candidates:
+        found = _as_install(candidate, kebab)
+        if found is not None:
+            return found
+    return None
 
 
 def probe_capabilities(install: AppInstall, app: str) -> dict[str, Any] | None:

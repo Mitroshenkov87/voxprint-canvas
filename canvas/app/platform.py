@@ -67,7 +67,7 @@ def check_platform(*, system: str, windows_build: int | None, linux_release: Map
 
 
 def check_gpu(info: GpuInfo | None) -> GpuCheck:
-    """RTX 40 series (compute capability 8.9) or newer, with a 16 GB or 24 GB tier."""
+    """RTX 40 series (compute capability 8.9) or newer, at 15.5 GB or 23.5 GB."""
     if info is None or not info.supported:
         return GpuCheck(False, "An NVIDIA RTX 40 series GPU or newer is required.", None)
     tier = select_tier(info.total_gb)

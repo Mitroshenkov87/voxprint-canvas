@@ -35,11 +35,15 @@ fi
 
 mkdir -p "$APP" "$APP_DIR" "$DIR_DIR" "$BIN_DIR" "$SHARED/wheels"
 "$PY" -m venv "$VENV"
+if [ ! -f "$SRC/constraints.txt" ]; then
+  echo "constraints.txt is missing from the setup. The install cannot continue." >&2
+  exit 1
+fi
 "$VENV/bin/python" -m pip install --upgrade pip
 echo "Installing PyTorch..."
-"$VENV/bin/python" -m pip download torch torchvision --index-url https://download.pytorch.org/whl/cu128 -d "$SHARED/wheels"
-"$VENV/bin/python" -m pip install --upgrade-strategy only-if-needed --find-links "$SHARED/wheels" torch torchvision
-"$VENV/bin/python" -m pip install --upgrade-strategy only-if-needed "$SRC[gen]"
+"$VENV/bin/python" -m pip download -c "$SRC/constraints.txt" torch torchvision --index-url https://download.pytorch.org/whl/cu128 -d "$SHARED/wheels"
+"$VENV/bin/python" -m pip install -c "$SRC/constraints.txt" --upgrade-strategy only-if-needed --find-links "$SHARED/wheels" torch torchvision
+"$VENV/bin/python" -m pip install -c "$SRC/constraints.txt" --upgrade-strategy only-if-needed "$SRC[gen]"
 echo "Installing the default image pack..."
 "$VENV/bin/python" -m canvas.app.provision
 "$VENV/bin/python" -m canvas.models.tiers > "$APP/tier.txt"

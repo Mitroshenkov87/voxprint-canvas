@@ -13,7 +13,7 @@ The setup installs anything that is missing before the first picture: a Python 3
 
 Optional packs stay out of the setup. ControlNet lite, Creative Z-Image, and Qwen-Image-Edit-2511 download only when a picture needs them. The window shows the size and an estimated time first.
 
-Every launch, and `voxprint-canvas --selftest`, reads the manifest, checks each recorded hash, and replaces a missing or corrupt file. Progress is printed while a file is repaired.
+The first launch and `voxprint-canvas --selftest` install the default pack when it is not on disk yet. Files that have not been downloaded are reported as not downloaded, which is not a failure. A hash that does not match, or a check that cannot load after its files are present, is a failure. Every launch also reads the manifest and replaces a missing or corrupt recorded file. Progress is printed while a file is repaired.
 
 ## Manifest
 

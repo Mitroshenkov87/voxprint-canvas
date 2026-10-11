@@ -47,3 +47,15 @@ def test_age_patterns_are_a_minor_signal_only():
     assert scan("5 лет").minor is True
     assert scan("teenager").minor is True
     assert scan("teenager").sexual is False
+    assert scan("два года").minor is True
+    assert scan("семнадцать лет").minor is True
+    assert scan("восемнадцать лет").minor is False
+    assert scan("возраст 16").minor is True
+    assert scan("aged 17").minor is True
+    assert scan("age 25").minor is False
+    kite = scan("a child flying a kite in a park")
+    assert kite.minor is True and kite.sexual is False and kite.minor_sexual is False
+    hard = scan("loli")
+    assert hard.minor_sexual is True and hard.sexual is False
+    assert scan("лоликон").minor_sexual is True
+    assert scan("schoolgirl").minor is True and scan("schoolgirl").minor_sexual is False

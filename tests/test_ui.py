@@ -6,7 +6,7 @@ import pytest
 pytest.importorskip("PySide6")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QMessageBox, QTabWidget
+from PySide6.QtWidgets import QApplication, QLabel, QMessageBox, QTabWidget
 
 from canvas.app.identity import version_label
 from canvas.app.info import APP_NAME, ENLARGE_HINT, ENLARGE_RELEASES, RESPONSIBILITY, THIRD_PARTY_NOTICE
@@ -100,6 +100,9 @@ def test_16gb_hides_creative_and_instruction(app):
     assert window.fourk_hint.isHidden() is False
     assert window.install_enlarge.text() == "Install Enlarge"
     assert window.install_enlarge.isHidden() is False
+    labels = [label.text() for label in tabs.widget(0).findChildren(QLabel)]
+    assert "Quality" not in labels
+    assert window.creative.isVisible() is False
     tabs.setCurrentIndex(1)
     assert window.aspect_row.isEnabled()
     window.close()
@@ -116,6 +119,10 @@ def test_24gb_offers_creative_and_instruction_and_reports_status(app):
         return "ready"
 
     window = MainWindow(on_generate, Tier.GB24)
+    tabs = window.findChild(QTabWidget)
+    assert tabs is not None
+    labels = [label.text() for label in tabs.widget(0).findChildren(QLabel)]
+    assert "Quality" not in labels
     assert "Creative" in _labels(window.creative)
     assert "Instruction edit" in _labels(window.image_mode)
     window.prompt.setPlainText("a red boat")

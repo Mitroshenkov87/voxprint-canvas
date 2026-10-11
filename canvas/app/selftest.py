@@ -12,9 +12,9 @@ from canvas.app.platform import check_gpu, current_os_check
 from canvas.core.formats import OutputFormat, save_image
 from canvas.infra.gpu import probe_gpu
 from canvas.infra.paths import models_dir
-from canvas.models.provision import repair
-from canvas.models.registry import ModelSpec, load_catalog
-from canvas.models.snapshots import SnapshotError, snapshot_ready
+from canvas.models.provision import install_defaults, repair
+from canvas.models.registry import ModelSpec, RegistryError, load_catalog
+from canvas.models.snapshots import SnapshotError, snapshot_ready, snapshot_status
 from canvas.safety.adapters import FairFaceAge, NsfwViT, Qwen3GuardGen, SiglipZeroShot, YuNetFaces
 from canvas.safety.gate import SafetyError, issue
 from canvas.safety.image import RawImage
@@ -24,6 +24,7 @@ def selftest_report(root: Path | None = None, progress: Callable[[str], None] | 
     """GPU, pinned files, model load, and the three output encoders."""
     if root is None:
         _repair(progress)
+        _install_default_pack(progress)
         folder = models_dir()
     else:
         folder = root
@@ -63,17 +64,27 @@ def _repair(progress: Callable[[str], None] | None) -> None:
         reporter(str(exc))
 
 
+def _install_default_pack(progress: Callable[[str], None] | None) -> None:
+    """Download the default pack. The prompt check still runs before a generator is fetched for a picture."""
+    reporter = progress or (lambda message: print(message, file=sys.stderr))
+    try:
+        install_defaults(load_catalog(), reporter)
+    except (SnapshotError, RegistryError, OSError) as exc:
+        reporter(str(exc))
+
+
 def selftest_json(root: Path | None = None) -> str:
     """The self-test report as one JSON document."""
     return json.dumps(selftest_report(root), indent=2)
 
 
 def _model_row(spec: ModelSpec, root: Path) -> dict[str, object]:
-    ready = snapshot_ready(spec, root) is not None
-    detail = "" if ready else "missing"
-    if spec.mirror_status:
-        detail = spec.mirror_status if not ready else ""
-    return {"id": spec.id, "ok": ready, "detail": detail}
+    state = snapshot_status(spec, root)
+    if state == "ready":
+        return {"id": spec.id, "ok": True, "detail": ""}
+    if state == "not_downloaded":
+        return {"id": spec.id, "ok": True, "detail": "not_downloaded"}
+    return {"id": spec.id, "ok": False, "detail": state}
 
 
 def _classifiers(catalog, root: Path) -> list[dict[str, object]]:
@@ -91,9 +102,16 @@ def _classifiers(catalog, root: Path) -> list[dict[str, object]]:
             rows.append({"id": role, "ok": False, "detail": "missing"})
             continue
         spec = found[0]
+        state = snapshot_status(spec, root)
+        if state == "not_downloaded":
+            rows.append({"id": spec.id, "ok": True, "detail": "not_downloaded"})
+            continue
+        if state != "ready":
+            rows.append({"id": spec.id, "ok": False, "detail": state})
+            continue
         folder = snapshot_ready(spec, root)
         if folder is None:
-            rows.append({"id": spec.id, "ok": False, "detail": "missing"})
+            rows.append({"id": spec.id, "ok": False, "detail": "hash_mismatch"})
             continue
         adapter = cls(folder)
         try:

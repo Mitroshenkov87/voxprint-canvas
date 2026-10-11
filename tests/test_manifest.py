@@ -61,9 +61,13 @@ def test_optional_pack_notice_includes_size_and_estimate():
     assert "Estimated time" in notice
     assert "Creative Z-Image" in pack_notice(creative)
     assert "Qwen-Image-Edit-2511" in pack_notice(edit)
-    ids = {spec.id for spec in default_specs(catalog)}
+    specs = default_specs(catalog)
+    ids = {spec.id for spec in specs}
     assert "z-image-turbo-bf16-16gb" in ids
     assert "z-image-creative-bf16" not in ids
+    roles = [spec.role for spec in specs]
+    assert roles[-1] == "generator"
+    assert roles.index("prompt-guard") < roles.index("generator")
 
 
 def test_repair_refetches_a_broken_pack(monkeypatch, tmp_path):

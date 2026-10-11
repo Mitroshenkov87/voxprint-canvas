@@ -6,7 +6,6 @@ $App = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Venv = Join-Path $App "venv"
 $Py = Join-Path $Venv "Scripts\python.exe"
 $Shared = Join-Path $env:LOCALAPPDATA "Voxprint\shared"
-$PyHome = Join-Path $Shared "python"
 $Wheels = Join-Path $Shared "wheels"
 $WindowsPythonUrl = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe"
 
@@ -19,26 +18,43 @@ function Invoke-Py([string[]]$ArgList) {
 
 Write-Host "Checking Python..."
 $Base = $null
-foreach ($spec in @("-3.12", "-3")) {
-    & py $spec -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 12) else 1)"
-    if ($LASTEXITCODE -eq 0) {
-        $Base = $spec
-        break
+$pyLauncher = Get-Command py -ErrorAction SilentlyContinue
+if ($pyLauncher) {
+    foreach ($spec in @("-3.12", "-3")) {
+        & py $spec -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 12) else 1)"
+        if ($LASTEXITCODE -eq 0) {
+            $Base = $spec
+            break
+        }
     }
 }
 if (-not $Base) {
-    $Installed = Join-Path $PyHome "python.exe"
-    if (-not (Test-Path $Installed)) {
-        Write-Host "Installing Python..."
-        New-Item -ItemType Directory -Force $PyHome | Out-Null
-        $exe = Join-Path $env:TEMP "voxprint-python-3.12.10-amd64.exe"
-        Invoke-WebRequest -Uri $WindowsPythonUrl -OutFile $exe
-        $proc = Start-Process -FilePath $exe -ArgumentList @(
-            "/quiet", "InstallAllUsers=0", "PrependPath=0", "Include_test=0", "Include_pip=1", "TargetDir=$PyHome"
-        ) -Wait -PassThru
-        if ($proc.ExitCode -ne 0) { throw "Python could not be installed." }
+    $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
+    if ($pythonCmd) {
+        & $pythonCmd.Source -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 12) else 1)"
+        if ($LASTEXITCODE -eq 0) {
+            $Base = $pythonCmd.Source
+        }
     }
-    $Base = $Installed
+}
+if (-not $Base) {
+    $uv = Join-Path $App "uv.exe"
+    if (-not (Test-Path $uv)) {
+        throw "Python 3.12 is not installed, and uv.exe is not bundled next to install.ps1. Install Python 3.12 from $WindowsPythonUrl and run this setup again."
+    }
+    Write-Host "Installing Python with uv..."
+    & $uv python install 3.12
+    if ($LASTEXITCODE -ne 0) {
+        throw "uv could not install Python 3.12. Install Python 3.12 from $WindowsPythonUrl and run this setup again."
+    }
+    $found = (& $uv python find 3.12 | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or -not $found) {
+        throw "uv installed Python 3.12 but the interpreter could not be found. Install Python 3.12 from $WindowsPythonUrl and run this setup again."
+    }
+    $Base = (($found -split '\r?\n') | Where-Object { $_.Trim() } | Select-Object -Last 1).Trim()
+    if (-not (Test-Path $Base)) {
+        throw "uv reported Python at '$Base', but that file does not exist. Install Python 3.12 from $WindowsPythonUrl and run this setup again."
+    }
 }
 
 if (-not (Test-Path $Py)) {
@@ -50,12 +66,16 @@ if (-not (Test-Path $Py)) {
     if ($LASTEXITCODE -ne 0) { throw "Python could not create the environment." }
 }
 
+$Constraints = Join-Path $App "constraints.txt"
+if (-not (Test-Path $Constraints)) {
+    throw "constraints.txt is missing from the setup. The install cannot continue."
+}
 Invoke-Py @("-m", "pip", "install", "--upgrade", "pip")
 Write-Host "Installing PyTorch..."
 New-Item -ItemType Directory -Force $Wheels | Out-Null
-Invoke-Py @("-m", "pip", "download", "torch", "torchvision", "--index-url", "https://download.pytorch.org/whl/cu128", "-d", $Wheels)
-Invoke-Py @("-m", "pip", "install", "--upgrade-strategy", "only-if-needed", "--find-links", $Wheels, "torch", "torchvision")
-Invoke-Py @("-m", "pip", "install", "--upgrade-strategy", "only-if-needed", "${App}[gen]")
+Invoke-Py @("-m", "pip", "download", "-c", $Constraints, "torch", "torchvision", "--index-url", "https://download.pytorch.org/whl/cu128", "-d", $Wheels)
+Invoke-Py @("-m", "pip", "install", "-c", $Constraints, "--upgrade-strategy", "only-if-needed", "--find-links", $Wheels, "torch", "torchvision")
+Invoke-Py @("-m", "pip", "install", "-c", $Constraints, "--upgrade-strategy", "only-if-needed", "${App}[gen]")
 
 Write-Host "Installing the default image pack..."
 Invoke-Py @("-m", "canvas.app.provision")

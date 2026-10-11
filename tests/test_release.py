@@ -11,6 +11,8 @@ def test_release_workflow_publishes_a_prerelease_from_the_build_file():
     assert "SHA256SUMS" in text
     assert "voxprint-canvas.iss" in text
     assert "installer/linux/install.sh" in text
+    assert "constraints.txt" in text
+    assert "uv.exe" in text
     notes = Path("docs/release-notes/0.1.0-rc.1.md").read_text(encoding="utf-8")
     assert notes.startswith("New:")
     assert "Fixed:" in notes

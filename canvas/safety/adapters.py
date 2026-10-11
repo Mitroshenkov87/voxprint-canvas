@@ -112,10 +112,14 @@ class Qwen3GuardGen:
         tokenizer = self._tokenizer
         model = self._model
         messages = [{"role": "user", "content": text}]
-        token_ids = tokenizer.apply_chat_template(messages, return_tensors="pt")
+        encoded = tokenizer.apply_chat_template(
+            messages, return_tensors="pt", return_dict=True, add_generation_prompt=True,
+        )
+        input_ids = encoded["input_ids"]
+        attention_mask = encoded["attention_mask"]
         with torch.no_grad():
-            output = model.generate(token_ids, max_new_tokens=128)
-        reply = tokenizer.decode(output[0][token_ids.shape[-1]:], skip_special_tokens=True)
+            output = model.generate(input_ids=input_ids, attention_mask=attention_mask, max_new_tokens=128)
+        reply = tokenizer.decode(output[0][input_ids.shape[-1]:], skip_special_tokens=True)
         return parse_qwen3guard(reply)
 
 

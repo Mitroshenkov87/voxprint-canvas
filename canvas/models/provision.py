@@ -51,13 +51,14 @@ class DownloadDeclined(Exception):
 
 
 def default_specs(catalog: Catalog) -> tuple[ModelSpec, ...]:
-    """Z-Image-Turbo, once, and the models installed with it."""
-    specs = [catalog.by_id("z-image-turbo-bf16-16gb")]
+    """The models installed with the default pack, then Z-Image-Turbo."""
+    specs: list[ModelSpec] = []
     for role in _SAFETY_ROLES:
         found = catalog.by_role(role)
         if len(found) != 1:
             raise RegistryError("a required model is missing")
         specs.append(found[0])
+    specs.append(catalog.by_id("z-image-turbo-bf16-16gb"))
     return tuple(specs)
 
 

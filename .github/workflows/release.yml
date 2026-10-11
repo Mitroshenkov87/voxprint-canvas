@@ -6,6 +6,8 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+  repository_dispatch:
+    types: [build-installers]
 permissions:
   contents: write
 jobs:
@@ -18,7 +20,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ] || [ "${GITHUB_EVENT_NAME}" = "repository_dispatch" ]; then
             tag="untagged"
           else
             tag="${GITHUB_REF_NAME#v}"
@@ -78,7 +80,7 @@ jobs:
           New-Item -ItemType Directory -Force dist | Out-Null
           & $iscc "/Odist" "installer\windows\voxprint-canvas.iss"
           if ($LASTEXITCODE -ne 0) { throw "the setup compiler failed" }
-          if ($env:GITHUB_EVENT_NAME -eq "workflow_dispatch") {
+          if ($env:GITHUB_EVENT_NAME -eq "workflow_dispatch" -or $env:GITHUB_EVENT_NAME -eq "repository_dispatch") {
             $tag = "untagged"
           } else {
             $tag = $env:GITHUB_REF_NAME.Substring(1)

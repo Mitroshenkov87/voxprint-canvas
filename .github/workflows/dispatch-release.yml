@@ -1,0 +1,18 @@
+# Start the release workflow without a version tag.
+# workflow_dispatch needs actions:write. A token that only has contents:write
+# can send repository_dispatch, and this job turns that into workflow_dispatch.
+name: dispatch-release
+on:
+  repository_dispatch:
+    types: [build-installers]
+permissions:
+  actions: write
+jobs:
+  start:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Start the untagged release build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run release.yml --ref main

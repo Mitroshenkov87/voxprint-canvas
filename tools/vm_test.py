@@ -202,8 +202,10 @@ def _selftest(
     if not isinstance(report, dict):
         checks.append({"name": "selftest", "ok": False, "detail": "selftest did not print JSON"})
         return 2, {}
-    gpu = report.get("gpu") if isinstance(report.get("gpu"), dict) else {}
-    system = report.get("os") if isinstance(report.get("os"), dict) else {}
+    gpu_value = report.get("gpu")
+    system_value = report.get("os")
+    gpu = gpu_value if isinstance(gpu_value, dict) else {}
+    system = system_value if isinstance(system_value, dict) else {}
     if not gpu.get("ok"):
         checks.append({"name": "selftest", "ok": False, "detail": str(gpu.get("message") or "no GPU")})
         return 3, report

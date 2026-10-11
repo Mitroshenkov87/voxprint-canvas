@@ -8,6 +8,8 @@ from pathlib import Path
 import pytest
 
 from canvas.infra.discovery import find_app, _split_windows_command
+from canvas.infra.manifest import register_resource
+from canvas.infra.paths import shared_dir
 from canvas.infra.enlarge import (
     EnlargeClient,
     EnlargeError,
@@ -245,6 +247,27 @@ def test_capabilities_json_is_the_enable_state(tmp_path, monkeypatch, protocol, 
     assert client.installed()
     assert client.ready() is enabled
     assert capabilities_ready(client.capabilities()) is enabled
+
+
+def test_enlarge_is_found_on_a_standard_path_and_in_the_manifest(tmp_path, monkeypatch):
+    monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
+    monkeypatch.delenv("CANVAS_ENLARGE_EXE", raising=False)
+    binary = tmp_path / "enlarge" / "venv" / "bin" / "voxprint-enlarge"
+    binary.parent.mkdir(parents=True)
+    binary.write_text("#!/bin/sh\n", encoding="utf-8")
+    binary.chmod(0o755)
+    found = find_app("Enlarge", "enlarge")
+    assert found is not None
+    assert found.command == [str(binary)]
+    binary.unlink()
+    recorded = tmp_path / "shared" / "apps" / "voxprint-enlarge"
+    recorded.parent.mkdir(parents=True)
+    recorded.write_text("#!/bin/sh\n", encoding="utf-8")
+    recorded.chmod(0o755)
+    register_resource(shared_dir(), "enlarge-cli", kind="suite", path="apps", nbytes=1, files={}, app="enlarge")
+    found = find_app("Enlarge", "enlarge")
+    assert found is not None
+    assert found.command == [str(recorded)]
 
 
 def test_missing_capabilities_disables_fourk(tmp_path, monkeypatch):

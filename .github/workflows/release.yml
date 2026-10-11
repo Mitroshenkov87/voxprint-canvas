@@ -21,7 +21,7 @@ jobs:
           name="voxprint-canvas-${tag}-linux-x86_64"
           root="dist/${name}"
           mkdir -p "$root"
-          cp -a canvas pyproject.toml README.md LICENSE NOTICE BUILD.json "$root/"
+          cp -a canvas pyproject.toml README.md LICENSE NOTICE BUILD.json constraints.txt "$root/"
           cp installer/linux/install.sh "$root/install.sh"
           chmod 755 "$root/install.sh"
           find "$root" -type d -name __pycache__ -print0 | xargs -0r rm -rf
@@ -45,9 +45,17 @@ jobs:
           $stage = "installer\windows\staging"
           New-Item -ItemType Directory -Force $stage | Out-Null
           Copy-Item -Path canvas -Destination $stage -Recurse
-          foreach ($name in @("pyproject.toml", "README.md", "LICENSE", "NOTICE", "BUILD.json")) {
+          foreach ($name in @("pyproject.toml", "README.md", "LICENSE", "NOTICE", "BUILD.json", "constraints.txt")) {
             Copy-Item $name (Join-Path $stage $name)
           }
+          $uvZip = Join-Path $env:TEMP "uv-windows.zip"
+          $uvDir = Join-Path $env:TEMP "uv-windows"
+          Invoke-WebRequest -Uri "https://github.com/astral-sh/uv/releases/download/0.13.0/uv-x86_64-pc-windows-msvc.zip" -OutFile $uvZip
+          if (Test-Path $uvDir) { Remove-Item -Recurse -Force $uvDir }
+          Expand-Archive -Path $uvZip -DestinationPath $uvDir -Force
+          $uvExe = Get-ChildItem -Path $uvDir -Recurse -Filter uv.exe | Select-Object -First 1
+          if (-not $uvExe) { throw "uv.exe was not in the download" }
+          Copy-Item $uvExe.FullName (Join-Path $stage "uv.exe")
           Copy-Item installer\windows\install.ps1 (Join-Path $stage "install.ps1")
           Copy-Item installer\windows\voxprint-canvas.cmd (Join-Path $stage "voxprint-canvas.cmd")
           Get-ChildItem $stage -Recurse -Directory -Filter __pycache__ | Remove-Item -Recurse -Force

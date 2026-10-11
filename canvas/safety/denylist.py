@@ -33,17 +33,25 @@ _TRANSLIT = {
 # mode "exact": the token is one of the needles. mode "prefix": token equals or starts with the needle.
 # mode "stem": the needle occurs inside a token (needles are long enough to stay distinctive).
 _MINOR: tuple[tuple[str, str, tuple[str, ...]], ...] = (
-    ("exact", "en", ("kid", "kids", "minor", "minors", "csam", "jailbait", "baby", "babies")),
-    ("prefix", "en", ("child", "underage", "preteen", "toddler", "infant", "newborn", "loli", "shota",
-                      "lolicon", "shotacon", "schoolgirl", "schoolboy", "pedo", "paedo", "paedophile")),
+    ("exact", "en", ("kid", "kids", "minor", "minors", "baby", "babies")),
+    ("prefix", "en", ("child", "underage", "preteen", "toddler", "infant", "newborn", "schoolgirl", "schoolboy")),
     ("exact", "en", ("teen", "teens", "teenager", "teenagers", "teenage")),
-    ("stem", "ru", ("ребенок", "ребенк", "малолет", "несовершеннолет", "подрост", "школьниц", "школьник",
-                    "младен", "педофил", "малыш")),
+    ("stem", "ru", ("ребенок", "ребенк", "дети", "детей", "детям", "детьми", "дитя", "малолет",
+                    "несовершеннолет", "подрост", "школьниц", "школьник", "младен", "малыш", "детск",
+                    "тинейджер")),
     ("stem", "ru-lat", ("rebenok", "rebyonok", "malolet", "nesovershennoletn", "podrostok", "shkolnits",
-                        "shkolnik", "mladen", "pedofil", "malysh")),
+                        "shkolnik", "mladen", "malysh", "deti", "tineidzher")),
     ("exact", "de", ("kind", "kinder", "kindes", "kindern", "kinds")),
     ("stem", "de", ("minderjaehrig", "kleinkind", "saeugling", "schulmaedchen", "schuljunge",
-                    "vorpubertaer", "unmuendig", "kindesmissbrauch", "kinderporn", "paedophil")),
+                    "vorpubertaer", "unmuendig")),
+)
+# These name sexual content involving a minor. They block on their own.
+_MINOR_SEXUAL: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("exact", "en", ("loli", "lolis", "lolita", "shota", "shotas", "csam", "jailbait", "pedo", "paedo")),
+    ("prefix", "en", ("lolicon", "shotacon", "pedophile", "paedophile", "pedophil")),
+    ("stem", "ru", ("лоли", "шота", "лоликон", "шотакон", "педофил")),
+    ("stem", "ru-lat", ("loli", "shota", "lolicon", "shotacon", "pedofil")),
+    ("stem", "de", ("kindesmissbrauch", "kinderporn", "paedophil")),
 )
 _SEXUAL: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("exact", "en", ("sex", "sexy", "nude", "naked", "porn", "porno", "nsfw", "erotic", "erotica",
@@ -67,14 +75,23 @@ _WORD_AGE = (
 _WORD_AGE_RE = re.compile(
     r"\b(?:" + "|".join(_WORD_AGE) + r")\s*(?:years?\s*old|year\s*old|jahre?\s*alt|jaehrig)\b"
 )
+_RU_WORD_AGE = (
+    "один", "два", "три", "четыре", "пять", "шесть", "семь", "восемь", "девять", "десять",
+    "одиннадцать", "двенадцать", "тринадцать", "четырнадцать", "пятнадцать", "шестнадцать", "семнадцать",
+)
+_RU_WORD_AGE_RE = re.compile(r"\b(?:" + "|".join(_RU_WORD_AGE) + r")\s*(?:лет|года|год)\b")
+_DECLARED_AGE = re.compile(
+    r"\b(?:age|aged|возраст)\s*(?:1[0-7]|[1-9])\b|\b(?:1[0-7]|[1-9])\s*летн"
+)
 
 
 @dataclass(frozen=True)
 class TextSignals:
-    """Whether the prompt names a minor and whether it is sexual or suggestive."""
+    """Whether the prompt names a minor, sexual content, or sexual content about a minor."""
 
     minor: bool
     sexual: bool
+    minor_sexual: bool = False
 
 
 def _cyrillic_count(token: str) -> int:
@@ -144,12 +161,20 @@ def _group_hit(tokens: list[str], groups: tuple[tuple[str, str, tuple[str, ...]]
 
 def _age_hit(text: str) -> bool:
     spaced = " ".join(re.findall(r"[0-9a-zа-я]+", _base(text)))
-    return bool(_AGE_DIGIT.search(spaced) or _AGE_COMPACT.search(spaced) or _UNDER.search(spaced) or _WORD_AGE_RE.search(spaced))
+    return bool(
+        _AGE_DIGIT.search(spaced)
+        or _AGE_COMPACT.search(spaced)
+        or _UNDER.search(spaced)
+        or _WORD_AGE_RE.search(spaced)
+        or _RU_WORD_AGE_RE.search(spaced)
+        or _DECLARED_AGE.search(spaced)
+    )
 
 
 def scan(text: str) -> TextSignals:
     """Return minor and sexual signals. A minor signal alone does not block."""
     tokens = tokenise(text)
-    minor = _group_hit(tokens, _MINOR) or _age_hit(text)
+    minor_sexual = _group_hit(tokens, _MINOR_SEXUAL)
+    minor = minor_sexual or _group_hit(tokens, _MINOR) or _age_hit(text)
     sexual = _group_hit(tokens, _SEXUAL)
-    return TextSignals(minor=minor, sexual=sexual)
+    return TextSignals(minor=minor, sexual=sexual, minor_sexual=minor_sexual)

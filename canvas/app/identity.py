@@ -1,4 +1,4 @@
-"""Release identity. ``BUILD.json`` is the only copy of version, channel, offset and codename."""
+"""Release identity. ``BUILD.json`` is the only copy of version, channel, build and codename."""
 from __future__ import annotations
 
 import json
@@ -9,11 +9,11 @@ from typing import Any
 
 
 def build_file() -> Path:
-    """Repository ``BUILD.json``, whether the package is imported from the tree or beside this file."""
+    """Packaged ``BUILD.json`` beside this module, then the repository copy."""
     here = Path(__file__).resolve()
     candidates = [here.parent / "BUILD.json"]
     if len(here.parents) > 2:
-        candidates.insert(0, here.parents[2] / "BUILD.json")
+        candidates.append(here.parents[2] / "BUILD.json")
     for path in candidates:
         if path.is_file():
             return path
@@ -34,20 +34,16 @@ def version() -> str:
 
 
 def build_number(env: Mapping[str, str] | None = None) -> int:
-    """GitHub run number plus ``offset``. ``VOXPRINT_BUILD`` wins. Local runs are 0."""
+    """``build`` from ``BUILD.json``. ``VOXPRINT_BUILD`` wins. The Actions run number is ignored."""
     source: Mapping[str, str] = os.environ if env is None else env
     override = str(source.get("VOXPRINT_BUILD", "")).strip()
     if override.isdigit():
         return int(override)
-    run = str(source.get("GITHUB_RUN_NUMBER", "")).strip()
-    if not run.isdigit():
-        return 0
-    raw = load_build().get("offset", 0)
+    raw = load_build().get("build", 0)
     try:
-        offset = int(raw)
+        return int(raw)
     except (TypeError, ValueError):
-        offset = 0
-    return int(run) + offset
+        return 0
 
 
 def version_label(env: Mapping[str, str] | None = None) -> str:

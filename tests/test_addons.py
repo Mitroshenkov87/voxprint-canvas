@@ -118,11 +118,10 @@ def test_a_third_party_lora_cannot_bypass_or_reconfigure_the_gate(tmp_path: Path
     params = inspect.signature(release_addon_request).parameters
     assert "skip" not in params and "bypass" not in params
     world = World()
-    world.safety = "unsafe"
-    world.categories = ("sexual content or sexual acts",)
-    world.text_scores = {**world.text_scores, "sexual or suggestive content involving a child or minor": 0.9}
+    world.safety = "safe"
+    world.categories = ()
     with pytest.raises(GenerationBlocked):
-        release_addon_request(world.gate(), "a picture", "text")
+        release_addon_request(world.gate(), "nude child", "text")
     world.safety = "safe"
     world.categories = ()
     world.text_scores = {label: 0.0 for label in world.text_scores}

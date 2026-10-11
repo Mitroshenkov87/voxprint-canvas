@@ -17,7 +17,7 @@ from canvas.infra.gpu import probe_gpu
 from canvas.infra.models_users import register, unregister
 from canvas.infra.paths import models_dir, shared_dir
 from canvas.models.loader import ModelNotReady, ZImageGenerator, load_catalog_stack
-from canvas.models.provision import DownloadDeclined, ensure_plan, install_supporting, repair
+from canvas.models.provision import DownloadDeclined, ensure_plan, install_defaults, install_supporting, repair
 from canvas.models.runtime import InferenceUnavailable
 from canvas.models.modes import Mode, Tier
 from canvas.models.plan import BaseNotSelected, ModeUnavailable, build_plan
@@ -86,6 +86,10 @@ def _callback(tier: Tier, window_box: list[MainWindow | None], enlarge: EnlargeC
 
 
 def _launch(tier: Tier) -> None:
+    try:
+        install_defaults(load_catalog(), lambda message: print(message, file=sys.stderr))
+    except (SnapshotError, OSError) as exc:
+        print(str(exc), file=sys.stderr)
     app = QApplication.instance() or QApplication(sys.argv)
     splash = show_splash()
     enlarge = EnlargeClient()

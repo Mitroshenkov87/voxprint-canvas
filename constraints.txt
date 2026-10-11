@@ -1,0 +1,21 @@
+# Exact runtime pins. Installers pass this file to pip with -c.
+# torch and torchvision resolve from https://download.pytorch.org/whl/cu128
+# (the newest CUDA 12.8 wheels are torch 2.11.0 and torchvision 0.26.0).
+# huggingface-hub stays on 1.x because diffusers 0.41.0 requires huggingface-hub<2.
+torch==2.11.0
+torchvision==0.26.0
+accelerate==1.15.0
+diffusers==0.41.0
+# CVE-2026-9856 floor is 5.14. 5.19.0 is the newest 5.x and includes the regex ReDoS fixes shipped in 5.14 and 5.15.
+transformers==5.19.0
+torchao==0.18.0
+safetensors==0.8.0
+tokenizers==0.23.3
+huggingface-hub==1.33.0
+pillow==12.3.0
+imagecodecs==2026.10.10
+opencv-python-headless==5.0.0.93
+PySide6==6.12.0
+onnxruntime==1.31.0
+numpy==2.5.4
+regex==2026.9.29

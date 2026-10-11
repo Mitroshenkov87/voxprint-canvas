@@ -35,6 +35,43 @@ def weight_dir(root: Path, repo: str, *, fallback: bool = False) -> Path:
     return root / name
 
 
+def snapshot_status(spec: ModelSpec, root: Path) -> str:
+    """``ready``, ``not_downloaded``, ``incomplete``, or ``hash_mismatch``."""
+    primary = _folder_status(weight_dir(root, spec.repo), spec.files)
+    fallback = "not_downloaded"
+    if spec.fallback_files:
+        fallback = _folder_status(weight_dir(root, spec.repo, fallback=True), spec.fallback_files)
+    if primary == "ready" or fallback == "ready":
+        return "ready"
+    for state in (primary, fallback):
+        if state == "hash_mismatch":
+            return "hash_mismatch"
+    for state in (primary, fallback):
+        if state == "incomplete":
+            return "incomplete"
+    return "not_downloaded"
+
+
+def _folder_status(folder: Path, files: dict[str, str]) -> str:
+    if not files:
+        return "not_downloaded"
+    present = 0
+    for name, digest in files.items():
+        path = folder / name
+        if not path.is_file():
+            continue
+        present += 1
+        try:
+            verify_file(path, digest)
+        except PinError:
+            return "hash_mismatch"
+    if present == 0:
+        return "not_downloaded"
+    if present == len(files):
+        return "ready"
+    return "incomplete"
+
+
 def snapshot_ready(spec: ModelSpec, root: Path) -> Path | None:
     """The local folder whose files match the pin, or None when none does."""
     primary = weight_dir(root, spec.repo)

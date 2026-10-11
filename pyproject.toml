@@ -7,10 +7,11 @@ license = "Apache-2.0"
 requires-python = ">=3.12"
 authors = [{ name = "Aleksandr Mitroshenkov" }]
 dependencies = [
-    "PySide6>=6.8",
-    "numpy>=2",
-    "pillow>=11.3",
-    "imagecodecs>=2024.12",
+    "PySide6==6.12.0",
+    "numpy==2.5.4",
+    "pillow==12.3.0",
+    "imagecodecs==2026.10.10",
+    "onnxruntime==1.31.0",
 ]
 
 [project.optional-dependencies]
@@ -19,15 +20,20 @@ dev = ["pytest>=8.3", "ruff>=0.8", "mypy>=1.13", "opencv-python-headless>=4.11"]
 docs = ["mkdocs>=1.6,<2", "mkdocs-material>=9.5,<10", "mkdocstrings[python]>=0.26,<2"]
 # Generation and safety weights are not installed in CI. The worker imports them only when a pinned model is ready.
 gen = [
-    "torch>=2.6",
-    "torchvision>=0.21",
-    "accelerate>=0.31",
+    "torch==2.11.0",
+    "torchvision==0.26.0",
+    "accelerate==1.15.0",
     "diffusers==0.41.0",
-    "transformers>=5.14.0,<6",  # CVE-2026-9856 path traversal is fixed in 5.10.1; stay on 5.14 or newer.
-    "torchao>=0.15",
-    "opencv-python-headless>=4.11",
-    "pillow>=11",
-    "imagecodecs>=2024.12",
+    # CVE-2026-9856 floor is 5.14. 5.19.0 is the newest 5.x and includes the regex ReDoS fixes from 5.14 and 5.15.
+    "transformers==5.19.0",
+    "torchao==0.18.0",
+    "safetensors==0.8.0",
+    "tokenizers==0.23.3",
+    "huggingface-hub==1.33.0",
+    "opencv-python-headless==5.0.0.93",
+    "pillow==12.3.0",
+    "imagecodecs==2026.10.10",
+    "onnxruntime==1.31.0",
 ]
 
 [project.scripts]
@@ -42,6 +48,7 @@ include = ["canvas*"]
 
 [tool.setuptools.package-data]
 "canvas.models" = ["catalog.json", "third_party.json", "turbo_transformer_index.json"]
+"canvas.app" = ["BUILD.json"]
 
 [tool.ruff]
 target-version = "py312"

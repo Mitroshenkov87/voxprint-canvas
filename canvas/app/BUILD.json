@@ -1,0 +1,9 @@
+{
+  "version": "0.1.0",
+  "channel": "RC",
+  "build": 1,
+  "offset": 0,
+  "offset_note": "The build number is the build field in this file. VOXPRINT_BUILD overrides it. GITHUB_RUN_NUMBER is not used.",
+  "codename": "Yotzer",
+  "codename_meaning": "creator, the one who forms (Genesis 2:7)"
+}

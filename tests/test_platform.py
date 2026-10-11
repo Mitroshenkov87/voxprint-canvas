@@ -33,6 +33,12 @@ def test_gpu_tier_requirements():
     assert mid.ok and mid.tier is Tier.GB16
     large = check_gpu(GpuInfo("large", 24, 20, 8, 9, "fake"))
     assert large.tier is Tier.GB24
+    reported = check_gpu(GpuInfo("4090", 23.99, 20, 8, 9, "fake"))
+    assert reported.ok and reported.tier is Tier.GB24
+    sixteen = check_gpu(GpuInfo("16", 15.5, 12, 8, 9, "fake"))
+    assert sixteen.ok and sixteen.tier is Tier.GB16
+    under = check_gpu(GpuInfo("15", 15.49, 10, 8, 9, "fake"))
+    assert under.ok is False
 
 
 def test_os_release_parser(tmp_path: Path):
@@ -54,6 +60,8 @@ def test_installer_selects_a_tier_and_shares_the_voxprint_group(monkeypatch, cap
     assert "canvas.models.tiers" in windows
     assert "canvas.app.provision" in windows
     assert "Checking Python..." in windows
+    assert "uv.exe" in windows
+    assert "could not install Python" in windows
     script = Path("installer/linux/install.sh").read_text(encoding="utf-8")
     assert "voxprint.directory" in script
     assert "Name=Voxprint" in script

@@ -23,10 +23,6 @@ from canvas.safety.constants import (
     IMAGE_MINOR,
     IMAGE_MINOR_SEXUAL,
     IMAGE_TIMEOUT_S,
-    PROMPT_LABELS,
-    PROMPT_MINOR,
-    PROMPT_MINOR_SEXUAL,
-    PROMPT_SEXUAL,
     SEXUAL_SCORE_BLOCK_AT,
     UNAVAILABLE_MESSAGE,
     ZERO_SHOT_BLOCK_AT,
@@ -136,11 +132,8 @@ class AgeGate:
         verdict = _wait(lambda: self._stack.guard.assess(text), timeout=CLASSIFIER_TIMEOUT_S)
         if verdict.safety not in ("safe", "controversial", "unsafe"):
             raise SafetyUnavailable("classifier_error")
-        scores = _wait(lambda: self._stack.zeroshot.score_text(text, PROMPT_LABELS), timeout=CLASSIFIER_TIMEOUT_S)
-        minor_sexual = _at_least(_score(scores, PROMPT_MINOR_SEXUAL))
-        sexual = signals.sexual or _guard_sexual(verdict.safety, verdict.categories) or _at_least(_score(scores, PROMPT_SEXUAL))
-        minor = signals.minor or minor_sexual or _at_least(_score(scores, PROMPT_MINOR))
-        if minor_sexual or (sexual and minor):
+        sexual = signals.sexual or _guard_sexual(verdict.safety, verdict.categories)
+        if signals.minor_sexual or (sexual and signals.minor):
             log.info("content check refused a prompt")
             raise GenerationBlocked("prompt")
 

@@ -12,7 +12,6 @@ from canvas.safety.constants import (
     IMAGE_MINOR,
     IMAGE_MINOR_SEXUAL,
     IMAGE_TIMEOUT_S,
-    PROMPT_MINOR_SEXUAL,
     SEXUAL_SCORE_BLOCK_AT,
     UNAVAILABLE_MESSAGE,
     ZERO_SHOT_BLOCK_AT,
@@ -77,24 +76,31 @@ def test_denylist_is_not_cleared_by_a_safe_verdict(caplog):
     assert "content check refused a prompt" in caplog.text
 
 
-def test_zero_shot_minor_sexual_label_blocks_on_its_own():
+def test_prompt_screening_ignores_text_zero_shot_scores():
     world = World()
-    world.text_scores[PROMPT_MINOR_SEXUAL] = 0.35
-    with pytest.raises(GenerationBlocked):
-        world.gate().review_prompt("a red boat")
-    world.text_scores[PROMPT_MINOR_SEXUAL] = 0.349
+    for label in world.text_scores:
+        world.text_scores[label] = 1.0
     world.gate().review_prompt("a red boat")
+    assert "text" not in world.calls
 
 
-def test_benign_prompt_still_requires_every_classifier():
+def test_explicit_minor_sexual_terms_block_without_a_second_word():
+    world = World()
+    with pytest.raises(GenerationBlocked):
+        world.gate().review_prompt("loli")
+    with pytest.raises(GenerationBlocked):
+        world.gate().review_prompt("лоликон")
+    world.gate().review_prompt("a child flying a kite in a park")
+
+
+def test_prompt_gate_fails_closed_on_the_guard():
     world = World()
     world.error = "guard"
     with pytest.raises(SafetyUnavailable) as caught:
         world.gate().review_prompt("a red boat")
     assert caught.value.code == "classifier_error"
     world.error = "zero-text"
-    with pytest.raises(SafetyUnavailable):
-        world.gate().review_prompt("a red boat")
+    world.gate().review_prompt("a red boat")
 
 
 def test_image_age_boundary_and_adult_sexual_image():

@@ -134,8 +134,11 @@ class MainWindow(QWidget):
     def _text_tab(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.addWidget(QLabel("Quality"))
-        layout.addWidget(self.creative)
+        if self.creative.count() > 1:
+            layout.addWidget(self.creative)
+        else:
+            self.creative.setParent(page)
+            self.creative.hide()
         return page
 
     def _image_tab(self) -> QWidget:

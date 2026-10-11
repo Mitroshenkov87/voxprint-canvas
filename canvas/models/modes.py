@@ -8,7 +8,7 @@ from canvas.safety.inputs import ImageRole
 
 
 class Tier(Enum):
-    """16 GB, or 24 GB and above."""
+    """15.5 GB, or 23.5 GB and above."""
 
     GB16 = "16gb"
     GB24 = "24gb"
@@ -32,8 +32,8 @@ class Mode(Enum):
 HEADROOM_FLOOR_GB = 2.0
 HEADROOM_CAP_GB = 3.0
 HEADROOM_RATIO = 0.08
-TIER_24_MIN_GB = 24.0
-TIER_16_MIN_GB = 16.0
+TIER_24_MIN_GB = 23.5
+TIER_16_MIN_GB = 15.5
 
 
 def headroom_gb(total_gb: float) -> float:
@@ -43,7 +43,7 @@ def headroom_gb(total_gb: float) -> float:
 
 
 def select_tier(total_gb: float) -> Tier | None:
-    """24 GB and above uses the larger tier. 16 GB uses the smaller one. Below 16 GB has no tier."""
+    """23.5 GB and above uses the larger tier. 15.5 GB uses the smaller one. Below 15.5 GB has no tier."""
     total = float(total_gb)
     if total >= TIER_24_MIN_GB:
         return Tier.GB24

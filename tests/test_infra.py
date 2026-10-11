@@ -22,10 +22,11 @@ def test_headroom_and_tiers():
     assert plan(10, 16, 3, 8).batch == 2
     assert halve_on_spill(5) == 2
     assert halve_on_spill(1) == 1
-    assert select_tier(15.9) is None
-    assert select_tier(16) is Tier.GB16
-    assert select_tier(23.9) is Tier.GB16
-    assert select_tier(24) is Tier.GB24
+    assert select_tier(15.49) is None
+    assert select_tier(15.5) is Tier.GB16
+    assert select_tier(23.49) is Tier.GB16
+    assert select_tier(23.5) is Tier.GB24
+    assert select_tier(23.99) is Tier.GB24
 
 
 def test_fake_probe(monkeypatch):

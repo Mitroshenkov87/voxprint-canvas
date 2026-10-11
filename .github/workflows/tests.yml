@@ -183,10 +183,6 @@ jobs:
             --extra-index-url https://pypi.org/simple \
             -c constraints.txt \
             -e ".[dev,gen]"
-      - name: Free disk for the text encoder
-        run: |
-          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /usr/local/.ghcup /opt/hostedtoolcache || true
-          df -h /
       - name: Download the text encoder
         env:
           VOXPRINT_HOME: /home/runner/.cache/voxprint-enhance

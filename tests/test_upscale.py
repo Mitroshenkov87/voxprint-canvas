@@ -4,8 +4,9 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
-from canvas.infra.enlarge import EnlargeClient
+from canvas.infra.enlarge import EnlargeClient, EnlargeError
 
 from canvas.infra.gpu_lock import lock_path, read_lock
 from canvas.models.modes import Mode, Tier
@@ -17,7 +18,6 @@ from canvas.safety.classifiers import Face
 from canvas.safety.gate import GenerationBlocked
 from canvas.safety.image import RawImage, ScreenedInput
 from canvas.safety.inputs import ImageRole, PendingInput
-from canvas.core.exchange import read_rgb, write_rgb
 from tests.fakes import World, avif_file, rgb
 
 
@@ -51,17 +51,18 @@ class _Enlarge:
 
     def enlarge(self, source, *, output, format_name="avif", long_side=3840, on_event=None):
         del format_name, on_event
-        raw = read_rgb(source)
+        with Image.open(source) as image:
+            raw_w, raw_h = image.size
         self.long_side = long_side
-        self.source_long = max(raw.width, raw.height)
+        self.source_long = max(raw_w, raw_h)
         self.lock_held = (read_lock(lock_path()) or {}).get("owner") == "canvas"
         if self.world is not None:
             self.world.nsfw = 0.95
             self.world.faces = [Face(0, 0, 1, 1)]
             self.world.ages = [8.0]
         factor = long_side // self.source_long
-        width, height = raw.width * factor, raw.height * factor
-        write_rgb(output, width, height, bytes((4, 5, 6)) * (width * height))
+        width, height = raw_w * factor, raw_h * factor
+        Image.new("RGB", (width, height), (4, 5, 6)).save(output, format="PNG")
         return type("Result", (), {"output": output})()
 
 
@@ -149,3 +150,15 @@ def test_missing_enlarge_does_not_generate_and_a_blocked_upscale_is_not_saved(tm
     with pytest.raises(GenerationBlocked):
         saving.export("a red boat", Mode.TEXT, (), path, output="4k")
     assert not path.exists()
+
+
+def test_fourk_cli_error_text_is_the_callee_message(tmp_path, monkeypatch):
+    monkeypatch.setenv("ENLARGE_FAKE_EXIT", "2")
+    catalog = replace(load_catalog(), default_text_base="z-image-turbo")
+    fake = Path(__file__).resolve().parent / "fixtures" / "enlarge_fake.py"
+    client = EnlargeClient([sys.executable, str(fake)])
+    pipeline = Pipeline(World().gate(), _Gen(catalog), Tier.GB24, catalog=catalog, enlarge=client)
+    with pytest.raises(EnlargeError) as caught:
+        pipeline.generate("a red boat", Mode.TEXT, output="4k")
+    assert caught.value.code == "bad_input"
+    assert "raw cli detail model-id foo" in str(caught.value)

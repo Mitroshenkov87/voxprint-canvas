@@ -1,5 +1,6 @@
 """Suite manifest v1: migration, coexistence, the lock, and ref removal."""
 import hashlib
+import importlib
 import json
 import multiprocessing
 import re
@@ -10,8 +11,11 @@ from pathlib import Path
 import pytest
 
 from canvas.infra.manifest import (
+    FUTURE_IMPORT,
     LOCK_TIMEOUT_S,
     ManifestError,
+    SCHEMA,
+    SHARED_RUNTIME_SCHEMA,
     load_manifest,
     manifest_lock,
     register_component,
@@ -21,6 +25,15 @@ from canvas.infra.paths import shared_dir
 from canvas.infra.runtime import LINUX_PYTHON_URL, TORCH_INDEX, WINDOWS_PYTHON_URL, refill_wheels
 from canvas.models.provision import default_specs, is_optional, pack_notice, repair
 from canvas.models.registry import load_catalog
+
+
+def test_shared_runtime_schema_stays_local_until_voxprint_common():
+    assert SHARED_RUNTIME_SCHEMA == 1
+    assert SCHEMA == SHARED_RUNTIME_SCHEMA
+    assert FUTURE_IMPORT == "voxprint_common.runtime"
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module(FUTURE_IMPORT)
+
 
 _ISO = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$")
 _SHA = "ab" * 32

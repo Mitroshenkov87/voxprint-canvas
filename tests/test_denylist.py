@@ -1,5 +1,12 @@
 """Deny-list normalisation for English, Russian and German."""
-from canvas.safety.denylist import scan
+from canvas.safety.denylist import explain, scan
+
+SHOWER = (
+    "Эротическая художественная фотография: обнажённая женщина 30 лет с длинными тёмными волосами "
+    "стоит под струями воды в душе из тёмного камня, капли на коже, пар, мягкий контровой свет, "
+    "уверенный взгляд взрослой женщины, реалистичная текстура кожи, кинематографичная цветокоррекция, "
+    "среднеформатная камера, 85 мм"
+)
 
 
 def test_plain_scene_has_no_signals():
@@ -59,3 +66,29 @@ def test_age_patterns_are_a_minor_signal_only():
     assert hard.minor_sexual is True and hard.sexual is False
     assert scan("лоликон").minor_sexual is True
     assert scan("schoolgirl").minor is True and scan("schoolgirl").minor_sexual is False
+
+
+def test_adult_russian_shower_prompt_is_sexual_and_not_a_minor():
+    detail = explain(SHOWER)
+    assert detail.minor is False
+    assert detail.minor_sexual is False
+    assert detail.age is False
+    assert detail.sexual is True
+    assert "эротич" in detail.sexual_terms
+    assert "обнаж" in detail.sexual_terms
+    assert detail.minor_terms == ()
+    for fragment in ("лет", "душ", "мягк", "средн"):
+        assert fragment not in detail.minor_terms
+        assert fragment not in detail.sexual_terms
+    assert scan("30 лет").minor is False
+    assert scan("85 мм").minor is False
+    assert scan("18 лет").minor is False
+    for age in (20, 25, 28, 32, 35):
+        assert scan(f"женщина {age} лет").minor is False
+    assert scan("17 лет").minor is True
+    assert scan("секстант").sexual is False
+    assert scan("sporn").sexual is False
+    assert scan("порнография").sexual is True
+    assert scan("малолетний").minor is True
+    assert scan("лолита").minor_sexual is True
+    assert scan("малышка").minor is True

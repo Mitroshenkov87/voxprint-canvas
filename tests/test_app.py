@@ -3,9 +3,10 @@ import json
 
 from canvas.app.info import RELEASES_API
 from canvas.app.main import main
-from canvas.app.platform import OsCheck
+from canvas.app.platform import GpuCheck, OsCheck
 from canvas.app.selftest import selftest_report
 from canvas.app.updates import check_for_update, fetch_release
+from canvas.infra.enlarge import EnlargeError
 from canvas.infra.gpu import GpuInfo
 from canvas.infra.models_users import read_users
 from canvas.models.modes import Tier
@@ -143,6 +144,54 @@ def test_generate_screens_the_prompt_before_the_generator(monkeypatch, tmp_path)
     assert code == 0
     assert order.index("review") < order.index("ensure")
     assert order.index("supporting") < order.index("review")
+
+
+def test_generate_json_reports_the_enlarge_error(monkeypatch, capsys, tmp_path):
+    monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
+    monkeypatch.setattr("canvas.app.main.current_os_check", lambda: OsCheck(True, ""))
+    monkeypatch.setattr(
+        "canvas.app.main.probe_gpu",
+        lambda: GpuInfo("RTX 4090", 23.99, 20, 8, 9, "fake"),
+    )
+    monkeypatch.setattr("canvas.app.main.check_gpu", lambda info: GpuCheck(True, "", Tier.GB24))
+    monkeypatch.setattr("canvas.app.main.install_supporting", lambda *args, **kwargs: None)
+    monkeypatch.setattr("canvas.app.main.load_catalog_stack", lambda *args, **kwargs: object())
+
+    class FakeScreened:
+        def wipe(self) -> None:
+            return None
+
+    class FakeGate:
+        def __init__(self, stack: object) -> None:
+            return None
+
+        def release_request(self, *args: object, **kwargs: object) -> FakeScreened:
+            return FakeScreened()
+
+    class FakePipeline:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            return None
+
+        def export(self, *args: object, **kwargs: object) -> None:
+            raise EnlargeError("bad_input", "bad_input: cannot identify image file", False)
+
+    class FakeGenerator:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            self.seed = 0
+            self.models = None
+
+    monkeypatch.setattr("canvas.app.main.AgeGate", FakeGate)
+    monkeypatch.setattr("canvas.app.main.build_plan", lambda *args, **kwargs: object())
+    monkeypatch.setattr("canvas.app.main.ensure_plan", lambda *args, **kwargs: None)
+    monkeypatch.setattr("canvas.app.main.ZImageGenerator", FakeGenerator)
+    monkeypatch.setattr("canvas.app.main.Pipeline", FakePipeline)
+    monkeypatch.setattr("canvas.app.main.EnlargeClient", lambda *args, **kwargs: object())
+    code = main(
+        ["generate", "--prompt", "a red boat", "--aspect", "1:1", "--out", str(tmp_path / "out.avif"), "--json"]
+    )
+    assert code == 1
+    body = json.loads(capsys.readouterr().out)
+    assert body == {"ok": False, "error": "bad_input: cannot identify image file"}
 
 
 def test_generate_command_refuses_an_unsupported_machine(capsys):

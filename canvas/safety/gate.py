@@ -111,6 +111,23 @@ def _at_least(value: float) -> bool:
     return value >= ZERO_SHOT_BLOCK_AT
 
 
+# Qwen3Guard has one sexual category for adult sexual content and for non-consent.
+# The category name itself does not name a minor. Only a category whose name names
+# a minor or non-consent blocks on its own. Adult sexual content stays a signal.
+_GUARD_RESTRICTED = (
+    "minor",
+    "child",
+    "underage",
+    "csam",
+    "pedo",
+    "non-consent",
+    "nonconsent",
+    "non-consensual",
+    "nonconsensual",
+    "rape",
+)
+
+
 def _guard_sexual(safety: str, categories: Sequence[str]) -> bool:
     if safety not in ("unsafe", "controversial"):
         return False
@@ -118,6 +135,33 @@ def _guard_sexual(safety: str, categories: Sequence[str]) -> bool:
         if GUARD_SEXUAL_CATEGORY in category.casefold():
             return True
     return False
+
+
+def _guard_restricted(categories: Sequence[str]) -> bool:
+    """True when a guard category names a minor or non-consent, not plain adult sexual content."""
+    for category in categories:
+        folded = category.casefold()
+        if any(marker in folded for marker in _GUARD_RESTRICTED):
+            return True
+    return False
+
+
+def refusal_stage(text: str, safety: str, categories: Sequence[str]) -> str:
+    """Why a prompt would stop, or ``allow``.
+
+    ``lexicon-minor-sexual`` and ``lexicon-minor`` come from the term list.
+    ``guard-restricted`` is a Qwen3Guard category that names a minor or non-consent.
+    Unsafe or controversial plus the plain sexual category is not a block.
+    """
+    signals = scan(text)
+    if signals.minor_sexual:
+        return "lexicon-minor-sexual"
+    if _guard_restricted(categories):
+        return "guard-restricted"
+    sexual = signals.sexual or _guard_sexual(safety, categories)
+    if sexual and signals.minor:
+        return "lexicon-minor"
+    return "allow"
 
 
 class AgeGate:
@@ -128,13 +172,12 @@ class AgeGate:
 
     def review_prompt(self, text: str) -> None:
         """Decide whether a prompt may continue."""
-        signals = scan(text)
         verdict = _wait(lambda: self._stack.guard.assess(text), timeout=CLASSIFIER_TIMEOUT_S)
         if verdict.safety not in ("safe", "controversial", "unsafe"):
             raise SafetyUnavailable("classifier_error")
-        sexual = signals.sexual or _guard_sexual(verdict.safety, verdict.categories)
-        if signals.minor_sexual or (sexual and signals.minor):
-            log.info("content check refused a prompt")
+        stage = refusal_stage(text, verdict.safety, verdict.categories)
+        if stage != "allow":
+            log.info("content check refused a prompt (%s)", stage)
             raise GenerationBlocked("prompt")
 
     def release_request(self, prompt: str, mode: str, inputs: Sequence[PendingInput] = ()) -> ScreenedInput:

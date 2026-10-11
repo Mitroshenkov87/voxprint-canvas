@@ -13,6 +13,7 @@ from canvas.app.info import APP_NAME, ENLARGE_HINT, ENLARGE_RELEASES, RESPONSIBI
 from canvas.core.formats import OutputFormat
 from canvas.models.modes import Mode, Tier
 from canvas.models.sizes import ASPECT_GROUPS
+from canvas.infra.enlarge import EnlargeError
 from canvas.safety.gate import GenerationBlocked
 from canvas.ui.about import AboutDialog
 from canvas.ui.main_window import MainWindow
@@ -142,6 +143,14 @@ def test_24gb_offers_creative_and_instruction_and_reports_status(app):
     window.on_generate = refuse
     window.generate_button.click()
     assert window.status.text() == "This request cannot be completed."
+
+    def enlarge_failed(prompt, mode, fmt):
+        del prompt, mode, fmt
+        raise EnlargeError("bad_input", "bad_input: cannot identify image file", False)
+
+    window.on_generate = enlarge_failed
+    window.generate_button.click()
+    assert window.status.text() == "bad_input: cannot identify image file"
     window.close()
 
 

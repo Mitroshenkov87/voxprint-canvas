@@ -3,7 +3,8 @@ from dataclasses import replace
 
 import pytest
 
-from canvas.core.exchange import write_rgb
+from PIL import Image
+
 from canvas.models.loader import ModelNotReady, ZImageGenerator
 from canvas.models.modes import Mode, Tier, headroom_gb
 from canvas.models.registry import load_catalog
@@ -269,7 +270,7 @@ class _Enlarge:
 
     def enlarge(self, source, *, output, format_name="avif", long_side=3840, on_event=None):
         del source, format_name, on_event
-        write_rgb(output, 8, 8, bytes((4, 5, 6)) * 64)
+        Image.new("RGB", (8, 8), (4, 5, 6)).save(output, format="PNG")
         return type("Result", (), {"output": output})()
 
 

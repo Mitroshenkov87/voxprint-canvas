@@ -16,10 +16,18 @@ from canvas.safety.constants import (
     UNAVAILABLE_MESSAGE,
     ZERO_SHOT_BLOCK_AT,
 )
-from canvas.safety.gate import GenerationBlocked, SafetyUnavailable, _wait
+from canvas.safety.denylist import explain
+from canvas.safety.gate import GenerationBlocked, SafetyUnavailable, _wait, refusal_stage
 from canvas.safety.image import SafeImage, ScreenedInput, _INPUT_TOKEN, _OUTPUT_TOKEN
 from canvas.safety.inputs import ImageRole, PendingInput
 from tests.fakes import World, rgb
+
+SHOWER = (
+    "Эротическая художественная фотография: обнажённая женщина 30 лет с длинными тёмными волосами "
+    "стоит под струями воды в душе из тёмного камня, капли на коже, пар, мягкий контровой свет, "
+    "уверенный взгляд взрослой женщины, реалистичная текстура кожи, кинематографичная цветокоррекция, "
+    "среднеформатная камера, 85 мм"
+)
 
 
 def test_thresholds_are_compile_time_constants():
@@ -65,6 +73,25 @@ def test_adult_sexual_prompt_is_allowed_and_a_minor_conjunction_is_not():
         world.gate().review_prompt("nude child")
     assert str(caught.value) == BLOCKED_MESSAGE
     assert caught.value.code == "prompt"
+
+
+def test_adult_russian_shower_prompt_stays_open_when_the_guard_says_sexual():
+    detail = explain(SHOWER)
+    assert detail.age is False and detail.minor is False and detail.sexual is True
+    world = World()
+    world.safety = "unsafe"
+    world.categories = ("Sexual Content or Sexual Acts",)
+    assert refusal_stage(SHOWER, world.safety, world.categories) == "allow"
+    world.gate().review_prompt(SHOWER)
+    world.safety = "controversial"
+    assert refusal_stage(SHOWER, world.safety, world.categories) == "allow"
+    world.gate().review_prompt(SHOWER)
+    world.categories = ("Non-consensual sexual acts",)
+    assert refusal_stage("a red boat", world.safety, world.categories) == "guard-restricted"
+    with pytest.raises(GenerationBlocked):
+        world.gate().review_prompt("a red boat")
+    assert refusal_stage("loli", "safe", ()) == "lexicon-minor-sexual"
+    assert refusal_stage("nude child", "safe", ()) == "lexicon-minor"
 
 
 def test_denylist_is_not_cleared_by_a_safe_verdict(caplog):

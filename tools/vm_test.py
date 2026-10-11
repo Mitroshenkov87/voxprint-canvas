@@ -23,7 +23,7 @@ KITE_BLOCK = "a child flying a kite in a park, nude"
 def main(argv: list[str] | None = None) -> int:
     """Run ``--smoke`` or ``--full`` and write a JSON report."""
     args = _parser().parse_args(argv)
-    tag = args.tag or os.environ.get("VOXPRINT_TAG", "").strip() or "v0.1.0-rc.3"
+    tag = args.tag or os.environ.get("VOXPRINT_TAG", "").strip() or "v0.1.0-rc.4"
     folder = results_dir(tag)
     if not _gpu_present():
         return _finish(folder, args, tag, 3, [{"name": "gpu", "ok": False, "detail": "no GPU"}])

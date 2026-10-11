@@ -1,50 +1,285 @@
-"""Shared manifest refcount, repair, and the install-time pack offer."""
+"""Suite manifest v1: migration, coexistence, the lock, and ref removal."""
 import hashlib
+import json
+import multiprocessing
+import re
+from multiprocessing.synchronize import Event as ProcessEvent
+from importlib import metadata
 from pathlib import Path
 
 import pytest
 
-from canvas.infra.manifest import ManifestError, load_manifest, register_resource, unregister_app
+from canvas.infra.manifest import (
+    LOCK_TIMEOUT_S,
+    ManifestError,
+    load_manifest,
+    manifest_lock,
+    register_component,
+    unregister_app,
+)
 from canvas.infra.paths import shared_dir
-from canvas.infra.runtime import LINUX_PYTHON_URL, WINDOWS_PYTHON_URL
+from canvas.infra.runtime import LINUX_PYTHON_URL, TORCH_INDEX, WINDOWS_PYTHON_URL
 from canvas.models.provision import default_specs, is_optional, pack_notice, repair
 from canvas.models.registry import load_catalog
 
+_ISO = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$")
+_SHA = "ab" * 32
+_MP = multiprocessing.get_context("spawn")
 
-def test_refcount_deletes_a_pack_only_at_zero(monkeypatch, tmp_path):
+
+def _lock_sha(files: dict[str, str]) -> str:
+    body = "".join(f"{name} {digest}\n" for name, digest in sorted(files.items()))
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+
+def _hold_lock(shared: str, started: ProcessEvent, release: ProcessEvent) -> None:
+    with manifest_lock(Path(shared)):
+        started.set()
+        if not release.wait(30):
+            raise TimeoutError("the lock holder was not released")
+
+
+def _register_named(shared: str, app: str) -> None:
+    register_component(
+        Path(shared),
+        "torch-2.11.0-cu130",
+        kind="wheels",
+        version="2.11.0+cu130",
+        path="wheels",
+        sha256=_SHA,
+        app=app,
+    )
+
+
+def test_old_canvas_shape_migrates_to_schema_1(monkeypatch, tmp_path):
+    monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
+    shared = shared_dir()
+    files = {"weights.bin": _SHA}
+    document = {
+        "version": 1,
+        "note": "keep-me",
+        "resources": {
+            "example-pack": {
+                "kind": "pack",
+                "path": "models/Example--Pack",
+                "bytes": 3,
+                "files": files,
+                "apps": ["canvas"],
+                "refcount": 1,
+                "source": "",
+            },
+            "suite": {
+                "kind": "suite",
+                "path": ".",
+                "bytes": 0,
+                "files": {},
+                "apps": ["canvas"],
+                "refcount": 1,
+                "source": "marker",
+            },
+        },
+    }
+    path = shared / "manifest.json"
+    path.write_text(json.dumps(document), encoding="utf-8")
+    loaded = load_manifest(shared)
+    pack = loaded["example-pack"]
+    assert pack.kind == "model"
+    assert pack.refs == ("canvas",)
+    assert pack.path == "models/Example--Pack"
+    assert pack.sha256 == _lock_sha(files)
+    assert pack.version == "0"
+    assert _ISO.match(pack.installed_at)
+    assert loaded["suite"].kind == "tool"
+    assert loaded["suite"].version == "marker"
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    assert raw["schema"] == 1
+    assert raw["note"] == "keep-me"
+    assert "version" not in raw
+    assert "resources" not in raw
+    assert set(raw) == {"schema", "components", "note"}
+
+
+def test_enlarge_manifest_keeps_its_refs_and_extra_keys(monkeypatch, tmp_path):
+    monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
+    shared = shared_dir()
+    enlarge_sha = "11" * 32
+    document = {
+        "schema": 1,
+        "owner": "enlarge",
+        "components": {
+            "python-3.14": {
+                "kind": "runtime",
+                "version": "3.14.8",
+                "path": "runtime/py314-torch2.11-cu130",
+                "sha256": enlarge_sha,
+                "installed_at": "2026-10-01T00:00:00+00:00",
+                "refs": ["enlarge"],
+                "vendor": "suite",
+            }
+        },
+    }
+    path = shared / "manifest.json"
+    path.write_text(json.dumps(document), encoding="utf-8")
+    loaded = load_manifest(shared)
+    assert loaded["python-3.14"].refs == ("enlarge",)
+    assert json.loads(path.read_text(encoding="utf-8"))["owner"] == "enlarge"
+
+    used = register_component(
+        shared, "torch-2.11.0-cu130", kind="wheels", version="2.11.0+cu130",
+        path="wheels", sha256=_SHA, app="canvas",
+    )
+    assert used == "torch-2.11.0-cu130"
+    register_component(
+        shared, "python-3.14", kind="runtime", version="3.14.8",
+        path="runtime/py314-torch2.11-cu130", sha256=enlarge_sha, app="canvas",
+    )
+    stored = json.loads(path.read_text(encoding="utf-8"))
+    assert stored["owner"] == "enlarge"
+    runtime = stored["components"]["python-3.14"]
+    assert runtime["refs"] == ["enlarge", "canvas"]
+    assert runtime["vendor"] == "suite"
+    assert runtime["path"] == "runtime/py314-torch2.11-cu130"
+    assert runtime["sha256"] == enlarge_sha
+
+    other_sha = "33" * 32
+    side = register_component(
+        shared, "python-3.14", kind="runtime", version="3.14.8",
+        path="runtime/py314-torch2.11-cu130", sha256=other_sha, app="canvas",
+    )
+    assert side != "python-3.14"
+    after = json.loads(path.read_text(encoding="utf-8"))
+    assert after["components"]["python-3.14"]["sha256"] == enlarge_sha
+    assert after["components"]["python-3.14"]["refs"] == ["enlarge", "canvas"]
+    assert after["components"][side]["sha256"] == other_sha
+    assert after["components"][side]["path"] != "runtime/py314-torch2.11-cu130"
+    assert after["components"][side]["refs"] == ["canvas"]
+
+
+def test_concurrent_writers_keep_every_ref(monkeypatch, tmp_path):
+    monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
+    shared = shared_dir()
+    names = [f"app{index}" for index in range(8)]
+    processes = [
+        _MP.Process(target=_register_named, args=(str(shared), name))
+        for name in names
+    ]
+    for process in processes:
+        process.start()
+    for process in processes:
+        process.join(30)
+        assert process.exitcode == 0
+    assert set(load_manifest(shared)["torch-2.11.0-cu130"].refs) == set(names)
+
+
+def test_lock_times_out_while_another_process_holds_it(monkeypatch, tmp_path):
+    monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
+    monkeypatch.setattr("canvas.infra.manifest.LOCK_TIMEOUT_S", 0.4)
+    assert LOCK_TIMEOUT_S == 30
+    shared = shared_dir()
+    started = _MP.Event()
+    release = _MP.Event()
+    holder = _MP.Process(target=_hold_lock, args=(str(shared), started, release))
+    holder.start()
+    assert started.wait(10)
+    try:
+        with pytest.raises(ManifestError):
+            register_component(
+                shared, "torch-2.11.0-cu130", kind="wheels", version="2.11.0+cu130",
+                path="wheels", sha256=_SHA, app="canvas",
+            )
+    finally:
+        release.set()
+        holder.join(10)
+    assert holder.exitcode == 0
+
+
+def test_write_fsyncs_then_renames_the_temp_file(monkeypatch, tmp_path):
+    monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
+    shared = shared_dir()
+    synced: list[int] = []
+
+    def spy(fd: int) -> None:
+        synced.append(fd)
+
+    monkeypatch.setattr("canvas.infra.manifest.os.fsync", spy)
+    register_component(
+        shared, "tensorrt-10", kind="runtime", version="10.16.1.11",
+        path="tensorrt-10", sha256=_SHA, app="canvas",
+    )
+    assert synced
+    assert not (shared / "manifest.json.tmp").exists()
+    raw = json.loads((shared / "manifest.json").read_text(encoding="utf-8"))
+    assert list(raw)[:2] == ["schema", "components"]
+    assert raw["schema"] == 1
+
+
+def test_refs_remove_a_component_only_when_empty(monkeypatch, tmp_path):
     monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
     shared = shared_dir()
     target = shared / "models" / "Example--Pack" / "weights.bin"
     target.parent.mkdir(parents=True)
     target.write_bytes(b"abc")
-    digest = hashlib.sha256(b"abc").hexdigest()
-    files = {"weights.bin": digest}
-    register_resource(
-        shared, "example-pack", kind="pack", path="models/Example--Pack",
-        nbytes=3, files=files, app="canvas",
+    register_component(
+        shared, "example-pack", kind="model", version="1",
+        path="models/Example--Pack", sha256=_SHA, app="canvas",
     )
-    register_resource(
-        shared, "example-pack", kind="pack", path="models/Example--Pack",
-        nbytes=3, files=files, app="other-app",
+    register_component(
+        shared, "example-pack", kind="model", version="1",
+        path="models/Example--Pack", sha256=_SHA, app="enlarge",
     )
-    stored = load_manifest(shared)["example-pack"]
-    assert stored.refcount == 2
-    assert stored.apps == ("canvas", "other-app")
+    assert load_manifest(shared)["example-pack"].refs == ("canvas", "enlarge")
     assert unregister_app(shared, "canvas") == []
     assert target.is_file()
-    assert load_manifest(shared)["example-pack"].refcount == 1
-    assert unregister_app(shared, "other-app") == ["example-pack"]
+    assert load_manifest(shared)["example-pack"].refs == ("enlarge",)
+    assert unregister_app(shared, "enlarge") == ["example-pack"]
     assert not target.exists()
     assert "example-pack" not in load_manifest(shared)
 
 
-def test_resource_path_cannot_escape_the_shared_folder(monkeypatch, tmp_path):
+def test_a_shared_directory_stays_while_another_component_refs_it(monkeypatch, tmp_path):
+    monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
+    shared = shared_dir()
+    runtime = shared / "runtime" / "py314-torch2.11-cu130"
+    marker = runtime / "py.marker"
+    marker.parent.mkdir(parents=True)
+    marker.write_text("runtime", encoding="utf-8")
+    register_component(
+        shared, "python-3.14", kind="runtime", version="3.14.8",
+        path="runtime/py314-torch2.11-cu130", sha256=_SHA, app="enlarge",
+    )
+    register_component(
+        shared, "torch-2.11.0-cu130", kind="wheels", version="2.11.0+cu130",
+        path="runtime/py314-torch2.11-cu130", sha256="44" * 32, app="canvas",
+    )
+    assert unregister_app(shared, "canvas") == ["torch-2.11.0-cu130"]
+    assert marker.is_file()
+    assert "python-3.14" in load_manifest(shared)
+
+
+def test_component_path_cannot_escape_the_shared_folder(monkeypatch, tmp_path):
     monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
     with pytest.raises(ManifestError):
-        register_resource(
-            shared_dir(), "escape", kind="pack", path="../outside",
-            nbytes=0, files={}, app="canvas",
+        register_component(
+            shared_dir(), "escape", kind="model", version="1",
+            path="../outside", sha256=_SHA, app="canvas",
         )
+
+
+def test_cpu_onnxruntime_dist_is_not_installed():
+    names = {dist.metadata["Name"].lower() for dist in metadata.distributions()}
+    assert "onnxruntime" not in names
+    try:
+        requires = metadata.requires("opencv-python-headless") or []
+    except metadata.PackageNotFoundError:
+        requires = []
+    for requirement in requires:
+        name = requirement.split(";")[0].split("[")[0].split()[0].lower().replace("_", "-")
+        assert name != "onnxruntime"
+    root = Path(__file__).resolve().parents[1]
+    for relative in ("pyproject.toml", "constraints.txt", "installer/linux/install.sh", "installer/windows/install.ps1"):
+        text = (root / relative).read_text(encoding="utf-8")
+        assert "onnxruntime-gpu" in text
+        assert re.findall(r"onnxruntime(?!-gpu)", text) == []
 
 
 def test_optional_pack_notice_includes_size_and_estimate():
@@ -73,9 +308,9 @@ def test_optional_pack_notice_includes_size_and_estimate():
 def test_repair_refetches_a_broken_pack(monkeypatch, tmp_path):
     monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
     shared = shared_dir()
-    register_resource(
-        shared, "z-image-turbo-bf16-16gb", kind="pack", path="models/Tongyi-MAI--Z-Image-Turbo",
-        nbytes=1, files={"missing.bin": "ab" * 32}, app="canvas",
+    register_component(
+        shared, "z-image-turbo-bf16-16gb", kind="model", version="1",
+        path="models/Tongyi-MAI--Z-Image-Turbo", sha256=_SHA, app="canvas",
     )
     calls: list[str] = []
 
@@ -93,11 +328,37 @@ def test_repair_refetches_a_broken_pack(monkeypatch, tmp_path):
     assert any("Repairing" in note for note in notes)
 
 
-def test_installers_use_the_shared_python_addresses():
+def test_repair_leaves_an_enlarge_component_alone(monkeypatch, tmp_path):
+    monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
+    register_component(
+        shared_dir(), "z-image-turbo-bf16-16gb", kind="model", version="1",
+        path="models/Tongyi-MAI--Z-Image-Turbo", sha256=_SHA, app="enlarge",
+    )
+    calls: list[str] = []
+    monkeypatch.setattr(
+        "canvas.models.provision.download_snapshot",
+        lambda spec, root, progress=None: calls.append(spec.id),
+    )
+    assert repair(load_catalog(), lambda _note: None) == []
+    assert calls == []
+
+
+def test_installers_use_the_suite_runtime():
     linux = Path("installer/linux/install.sh").read_text(encoding="utf-8")
     windows = Path("installer/windows/install.ps1").read_text(encoding="utf-8")
     assert LINUX_PYTHON_URL in linux
     assert WINDOWS_PYTHON_URL in windows
+    assert "cpython-3.14" in LINUX_PYTHON_URL
+    assert "python-3.14" in WINDOWS_PYTHON_URL
+    assert TORCH_INDEX == "https://download.pytorch.org/whl/cu130"
+    assert TORCH_INDEX in linux
+    assert TORCH_INDEX in windows
+    assert "runtime/py314-torch2.11-cu130" in linux
+    assert "runtime/py314-torch2.11-cu130" in windows
+    assert "tensorrt-10" in linux
+    assert "tensorrt-10" in windows
+    assert "onnxruntime-gpu" in linux
+    assert "onnxruntime-gpu" in windows
     assert "$SHARED/wheels" in linux
     assert "Voxprint\\shared" in windows
     assert "Installing the default image pack..." in linux

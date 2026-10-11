@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from canvas.infra.discovery import find_app, _split_windows_command
-from canvas.infra.manifest import register_resource
+from canvas.infra.manifest import register_component
 from canvas.infra.paths import shared_dir
 from canvas.infra.enlarge import (
     EnlargeClient,
@@ -264,7 +264,10 @@ def test_enlarge_is_found_on_a_standard_path_and_in_the_manifest(tmp_path, monke
     recorded.parent.mkdir(parents=True)
     recorded.write_text("#!/bin/sh\n", encoding="utf-8")
     recorded.chmod(0o755)
-    register_resource(shared_dir(), "enlarge-cli", kind="suite", path="apps", nbytes=1, files={}, app="enlarge")
+    register_component(
+        shared_dir(), "enlarge-cli", kind="tool", version="0",
+        path="apps", sha256="ab" * 32, app="enlarge",
+    )
     found = find_app("Enlarge", "enlarge")
     assert found is not None
     assert os.path.normcase(found.command[0]) == os.path.normcase(str(recorded))

@@ -1,9 +1,8 @@
 """Which apps use the shared suite folder.
 
-The file format other apps should adopt is ``manifest.json`` in the shared
-directory. ``register`` adds this app to every resource, creating a suite
-entry when the folder is empty. ``unregister`` drops this app and deletes a
-resource only when its refcount reaches zero.
+``manifest.json`` in the shared directory is schema 1. ``register`` records
+this app when the file is empty. ``unregister`` drops this app and deletes a
+component only when nothing else still refs it.
 """
 from __future__ import annotations
 
@@ -26,6 +25,6 @@ def register(root: Path, key: str = USER_KEY) -> dict[str, bool]:
 
 
 def unregister(root: Path, key: str = USER_KEY) -> list[str]:
-    """Drop this app. Returns the apps that still use a resource."""
+    """Drop this app. Returns the apps that still ref a component."""
     unregister_app(root, key)
     return sorted(read_users(root))

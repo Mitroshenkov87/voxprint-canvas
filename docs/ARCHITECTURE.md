@@ -42,7 +42,7 @@ Do not use the app to create content that is illegal or socially unacceptable; y
 
 ## Shared suite behaviour
 
-- Shared files live in `%LOCALAPPDATA%\Voxprint\shared` or `~/.local/share/voxprint/shared`. `manifest.json` records which apps use each resource. An uninstall removes a resource only when its refcount reaches zero. The setup installs Python when it is missing, the GPU libraries, and the default Z-Image-Turbo pack. Optional packs download when a picture needs them, after the window shows the size and the estimated time. Every launch re-checks the recorded hashes and replaces a missing or corrupt file.
+- Shared files live in `%LOCALAPPDATA%\Voxprint\shared` or `~/.local/share/voxprint/shared`. `manifest.json` is schema 1 and records which apps ref each component. An uninstall removes a component only when no app still refs it. The setup installs Python 3.14 when the suite runtime is missing, the CUDA 13.0 libraries, and the default Z-Image-Turbo pack. Optional packs download when a picture needs them, after the window shows the size and the estimated time. Every launch re-checks the recorded hashes and replaces a missing or corrupt file.
 - The GPU lock is `%TEMP%/voxprint-gpu.lock`. It is stale when the recorded process is gone, or when `eta` is more than two hours in the past.
 - The memory budget is free memory minus a headroom of at least 2 GB and at most 3 GB, and at least 8 percent of the card.
 - After 2.5 hours at full speed, work pauses while the 5-minute median temperature is at least 83 °C, or while a throttle has lasted more than 60 seconds. It resumes at 75 °C or below once the throttle has cleared.

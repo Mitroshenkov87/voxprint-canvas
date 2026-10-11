@@ -23,9 +23,21 @@ def test_installers_fetch_gpu_libraries_and_the_default_pack():
     windows = Path("installer/windows/install.ps1").read_text(encoding="utf-8")
     iss = Path("installer/windows/voxprint-canvas.iss").read_text(encoding="utf-8")
     for script in (linux, windows):
-        assert "https://download.pytorch.org/whl/cu128" in script
+        assert "https://download.pytorch.org/whl/cu130" in script
         assert "--register-models" in script
         assert "huggingface.co" not in script
     assert "install.ps1" in iss
     assert "voxprint-canvas.cmd" in iss
     assert "staging\\*" in iss
+
+
+def test_release_ships_tools_and_vm_scripts():
+    text = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
+    assert "tools" in text
+    assert "scripts/vm_test.sh" in text
+    assert "scripts/vm_test.ps1" in text
+    root = Path(__file__).resolve().parents[1]
+    assert (root / "tools" / "vm_test.py").is_file()
+    assert (root / "tools" / "__init__.py").is_file()
+    assert (root / "scripts" / "vm_test.sh").is_file()
+    assert (root / "scripts" / "vm_test.ps1").is_file()

@@ -54,12 +54,6 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--json", action="store_true", help="print a JSON document")
     parser.add_argument("--version", action="store_true", help="print the release identity and exit")
-    parser.add_argument(
-        "--vram-cap-gb",
-        type=float,
-        default=None,
-        help="plan as if the GPU had this many GB (CANVAS_VRAM_CAP_GB)",
-    )
     generate = parser.add_subparsers(dest="command", required=False).add_parser(
         "generate", help="generate one image and exit",
     )

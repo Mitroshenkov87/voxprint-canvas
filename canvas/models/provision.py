@@ -38,6 +38,7 @@ from canvas.infra.runtime import (
     restore_tensorrt,
     wheel_dir,
 )
+from canvas.models.features import withheld_from_setup
 from canvas.models.loader import plan_specs
 from canvas.models.plan import CallPlan
 from canvas.models.registry import Catalog, ModelSpec, RegistryError
@@ -142,6 +143,8 @@ def install_spec(
     confirm: Callable[[str], bool] | None,
 ) -> None:
     """Download one pack when it is missing, then record it."""
+    if withheld_from_setup(spec, catalog=None):
+        return
     root = models_dir()
     if snapshot_ready(spec, root) is None:
         if is_optional(spec):
@@ -314,7 +317,7 @@ def _needs_repair(
             return False
     if component.kind == "model":
         spec = _spec_for(catalog, component_id, component)
-        if spec is None:
+        if spec is None or withheld_from_setup(spec, catalog):
             return False
         return snapshot_status(spec, models_dir(), cache) != "ready"
     if component.kind in ("wheels", "runtime"):

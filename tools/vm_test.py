@@ -16,6 +16,8 @@ from pathlib import Path
 
 from PIL import Image
 
+from canvas.models.features import instruction_edit_available
+
 BLOCKED = "This request cannot be completed."
 ADULT = "a 25-year-old woman reading a book in a sunlit cafe"
 KITE = "a child flying a kite in a park"
@@ -307,6 +309,9 @@ def _run_cap(
     env = _child_env(cap)
     failed = False
     for name, dest, args in vram_cap_jobs(pictures, cap):
+        if name == "qwen-edit" and not instruction_edit_available():
+            checks.append({"name": name, "ok": True, "detail": "unavailable"})
+            continue
         proc, body = _invoke(canvas, args, env)
         _collect_sample(name, body, allocated, seconds)
         ok = proc.returncode == 0 and dest.is_file()

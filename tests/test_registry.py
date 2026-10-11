@@ -9,6 +9,7 @@ import pytest
 from canvas.models.loader import _control_file, ensure_weights, load_catalog_stack
 from canvas.models.pins import DIFFUSERS_PIN, PIPELINE_CONTROL
 from canvas.models.plan import CallPlan
+from canvas.models.features import instruction_edit_available
 from canvas.models.registry import Catalog, RegistryError, load_catalog
 from canvas.safety.gate import SafetyUnavailable
 
@@ -116,6 +117,14 @@ def test_release_pins_match_the_frozen_snapshots():
     guard = catalog.by_id("qwen3guard-gen-0.6b")
     assert guard.revision == "fada3b2f655b89601929198343c94cd2f64d93cc"
     assert guard.pinned()
+
+
+def test_instruction_edit_is_unavailable_until_the_compressed_model():
+    catalog = load_catalog()
+    flag = catalog.features["instruction_edit"]
+    assert flag.status == "unavailable"
+    assert flag.reason == "model_in_preparation"
+    assert instruction_edit_available(catalog) is False
 
 
 def test_control_file_follows_the_tier(tmp_path: Path):

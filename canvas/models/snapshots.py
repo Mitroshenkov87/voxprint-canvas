@@ -12,6 +12,7 @@ import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 
+from canvas.models.features import withheld_from_setup
 from canvas.models.pin import PinError, require_pin, verify_file
 from canvas.models.registry import ModelSpec
 from canvas.models.verified import VerifiedCache
@@ -87,7 +88,7 @@ def download_snapshot(
     spec: ModelSpec, root: Path, progress: Callable[[str], None] | None = None,
 ) -> Path:
     """Fetch the first snapshot whose files can all be verified."""
-    if spec.status == "disabled":
+    if withheld_from_setup(spec) or spec.status == "disabled":
         raise SnapshotError("this model is not available for download")
     primary = weight_dir(root, spec.repo)
     try:

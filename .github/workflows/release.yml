@@ -5,6 +5,7 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
 permissions:
   contents: write
 jobs:
@@ -17,7 +18,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          tag="${GITHUB_REF_NAME#v}"
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            tag="untagged"
+          else
+            tag="${GITHUB_REF_NAME#v}"
+          fi
           name="voxprint-canvas-${tag}-linux-x86_64"
           root="dist/${name}"
           mkdir -p "$root"
@@ -73,7 +78,11 @@ jobs:
           New-Item -ItemType Directory -Force dist | Out-Null
           & $iscc "/Odist" "installer\windows\voxprint-canvas.iss"
           if ($LASTEXITCODE -ne 0) { throw "the setup compiler failed" }
-          $tag = $env:GITHUB_REF_NAME.Substring(1)
+          if ($env:GITHUB_EVENT_NAME -eq "workflow_dispatch") {
+            $tag = "untagged"
+          } else {
+            $tag = $env:GITHUB_REF_NAME.Substring(1)
+          }
           Move-Item -Force "dist\VoxprintCanvasSetup.exe" "dist\VoxprintCanvasSetup-$tag.exe"
       - uses: actions/upload-artifact@v4
         with:
@@ -92,7 +101,20 @@ jobs:
         with:
           path: dist
           merge-multiple: true
-      - name: Checksums and pre-release
+      - name: Checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          (
+            cd dist
+            sha256sum -- *.tar.gz *.exe > SHA256SUMS
+          )
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SHA256SUMS
+          path: dist/SHA256SUMS
+      - name: Pre-release
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -101,10 +123,6 @@ jobs:
           tag="${GITHUB_REF_NAME#v}"
           notes="docs/release-notes/${tag}.md"
           test -f "$notes"
-          (
-            cd dist
-            sha256sum -- *.tar.gz *.exe > SHA256SUMS
-          )
           title=$(PYTHONPATH=. python -c "from canvas.app.identity import release_title; print(release_title())")
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release delete "$GITHUB_REF_NAME" --yes

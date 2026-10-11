@@ -27,6 +27,11 @@ def app():
     return QApplication.instance() or QApplication([])
 
 
+def _item_enabled(box, label: str) -> bool:
+    item = box.model().item(box.findText(label))
+    return bool(item is not None and item.isEnabled())
+
+
 def _labels(box):
     return [box.itemText(index) for index in range(box.count())]
 
@@ -62,6 +67,16 @@ def _ink_span(icon) -> tuple[int, int]:
     return max(xs) - min(xs), max(ys) - min(ys)
 
 
+def test_instruction_edit_control_follows_the_feature_flag(app, monkeypatch):
+    del app
+    monkeypatch.setattr("canvas.ui.main_window.instruction_edit_available", lambda catalog=None: True)
+    window = MainWindow(lambda prompt, mode, fmt: "ok", Tier.GB16)
+    assert "Instruction edit" in _labels(window.image_mode)
+    assert _item_enabled(window.image_mode, "Instruction edit") is True
+    assert window.instruction_note.isHidden()
+    window.close()
+
+
 def test_16gb_offers_instruction_and_hides_creative(app):
     del app
     window = MainWindow(lambda prompt, mode, fmt: "ok", Tier.GB16)
@@ -71,6 +86,11 @@ def test_16gb_offers_instruction_and_hides_creative(app):
     assert tabs.tabText(1) == "Image to image"
     assert _labels(window.creative) == ["Text to image"]
     assert "Instruction edit" in _labels(window.image_mode)
+    assert _item_enabled(window.image_mode, "Instruction edit") is False
+    window.show()
+    tabs.setCurrentIndex(1)
+    assert window.instruction_note.isVisible()
+    assert window.instruction_note.text()
     assert "Creative" not in _labels(window.creative)
     formats = _labels(window.format_box)
     assert formats == ["AVIF", "JPEG XL", "WebP"]
@@ -128,6 +148,11 @@ def test_24gb_offers_creative_and_instruction_and_reports_status(app):
     assert "Quality" not in labels
     assert "Creative" in _labels(window.creative)
     assert "Instruction edit" in _labels(window.image_mode)
+    assert _item_enabled(window.image_mode, "Instruction edit") is False
+    window.show()
+    tabs.setCurrentIndex(1)
+    assert window.instruction_note.isVisible()
+    tabs.setCurrentIndex(0)
     window.prompt.setPlainText("a red boat")
     window.generate_button.click()
     assert seen == {"prompt": "a red boat", "mode": Mode.TEXT, "fmt": OutputFormat.AVIF}

@@ -10,6 +10,7 @@ from PIL import Image
 from PySide6.QtWidgets import QApplication
 
 from canvas.app.identity import version_label
+from canvas.app.i18n import text
 from canvas.app.info import APP_VERSION
 from canvas.app.platform import GpuCheck, check_gpu, current_os_check
 from canvas.app.selftest import selftest_report
@@ -22,6 +23,7 @@ from canvas.infra.gpu import probe_gpu
 from canvas.infra.models_users import register, unregister
 from canvas.infra.paths import models_dir, shared_dir
 from canvas.infra.vram import peak_allocated_bytes, set_vram_cap_gb
+from canvas.models.features import INSTRUCTION_EDIT, instruction_edit_available, instruction_edit_flag
 from canvas.models.loader import ModelNotReady, ZImageGenerator, load_catalog_stack
 from canvas.models.nunchaku import NunchakuUnavailable
 from canvas.models.provision import DownloadDeclined, ensure_plan, install_defaults, install_supporting, repair
@@ -39,8 +41,23 @@ from canvas.ui.main_window import EnhanceReply, MainWindow
 from canvas.ui.splash import Splash, show_splash
 
 
+_EXIT_CODES = (
+    "exit codes:\n"
+    "  0  the picture was written\n"
+    "  1  the request failed\n"
+    "  2  the command or this machine cannot run\n"
+    "  4  feature unavailable"
+)
+EXIT_FEATURE_UNAVAILABLE = 4
+
+
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="voxprint-canvas", description="Voxprint AI Canvas")
+    parser = argparse.ArgumentParser(
+        prog="voxprint-canvas",
+        description="Voxprint AI Canvas",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=_EXIT_CODES,
+    )
     parser.add_argument("--register-models", action="store_true", help="register Canvas in the shared resource manifest")
     parser.add_argument("--unregister-models", action="store_true", help="remove Canvas from the shared resource manifest")
     parser.add_argument("--check-update", action="store_true", help="print a newer GitHub release tag, if one exists")
@@ -55,7 +72,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--json", action="store_true", help="print a JSON document")
     parser.add_argument("--version", action="store_true", help="print the release identity and exit")
     generate = parser.add_subparsers(dest="command", required=False).add_parser(
-        "generate", help="generate one image and exit",
+        "generate",
+        help="generate one image and exit",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=_EXIT_CODES,
     )
     generate.add_argument("--prompt", default="", help="text prompt for a new picture")
     generate.add_argument("--edit-instruction", default="", help="instruction for editing --input")
@@ -210,6 +230,8 @@ def _inputs(args: argparse.Namespace, mode: Mode) -> tuple[PendingInput, ...]:
 def _generate(args: argparse.Namespace) -> int:
     """Download what is missing, generate one image, and write it."""
     as_json = bool(args.json)
+    if str(args.edit_instruction or "") and not instruction_edit_available():
+        return _feature_unavailable(as_json)
     os_result = current_os_check()
     if not os_result.ok:
         return _emit({"ok": False, "error": os_result.message}, as_json, 2)
@@ -375,6 +397,24 @@ def _confirm(window: MainWindow | None, notice: str) -> bool:
     if app is not None:
         app.processEvents()
     return window.confirm_download(notice)
+
+
+def _feature_unavailable(as_json: bool) -> int:
+    """Exit 4. JSON uses the English note; a plain run prints that same note."""
+    flag = instruction_edit_flag()
+    message = text("instruction_edit_unavailable", "en")
+    body = {
+        "ok": False,
+        "error": "feature_unavailable",
+        "feature": INSTRUCTION_EDIT,
+        "reason": flag.reason,
+        "message": message,
+    }
+    if as_json:
+        print(json.dumps(body))
+    else:
+        print(message, file=sys.stderr)
+    return EXIT_FEATURE_UNAVAILABLE
 
 
 def _apply_vram_cap(args: argparse.Namespace) -> int | None:

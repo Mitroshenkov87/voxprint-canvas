@@ -60,6 +60,8 @@ def render(text: str, generate: str = "") -> str:
     return (
         "# Command line\n\n"
         "Generated from `voxprint-canvas --help` when the docs are built.\n\n"
+        "Exit code 4 means a feature is unavailable. "
+        "`generate --edit-instruction` returns that code while instruction editing is in preparation.\n\n"
         "```text\n"
         f"{text}\n"
         "```\n"

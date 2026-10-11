@@ -1,5 +1,6 @@
 """Startup commands. The window itself is not opened here."""
 import json
+import os
 from pathlib import Path
 
 from canvas.app.info import RELEASES_API
@@ -18,9 +19,11 @@ from canvas.ui.backdrop import apply_backdrop
 
 def test_selftest_register_and_update(monkeypatch, tmp_path, capsys):
     monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
-    monkeypatch.setattr("canvas.app.selftest.install_defaults", lambda catalog, progress: None)
     assert main(["--selftest", "--json"]) == 2
-    report = json.loads(capsys.readouterr().out)
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+    assert "Collecting" not in captured.out
+    assert "Looking in indexes" not in captured.out
     assert report["ok"] is False
     assert report["encoders"] == {"avif": True, "jxl": True, "webp": True}
     assert isinstance(report["models"], list) and report["models"]
@@ -28,6 +31,8 @@ def test_selftest_register_and_update(monkeypatch, tmp_path, capsys):
     edit = next(row for row in report["models"] if row["id"] == "qwen-image-edit-2511-fp8")
     assert edit["mirror_status"] == "published"
     assert all(row["detail"] == "not_downloaded" and row["ok"] for row in report["classifiers"])
+    assert report["deep"] is False
+    assert isinstance(report["notes"], list)
     assert main(["--register-models"]) == 0
     assert read_users(tmp_path / "shared")["canvas"] is True
     assert main(["--unregister-models"]) == 0
@@ -35,6 +40,41 @@ def test_selftest_register_and_update(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr("canvas.app.main.check_for_update", lambda current: "v9.9.9")
     assert main(["--check-update"]) == 0
     assert capsys.readouterr().out.strip() == "v9.9.9"
+
+
+def test_vram_cap_flag_selects_the_16gb_tier(monkeypatch, tmp_path):
+    monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
+    monkeypatch.setenv("VOXPRINT_FAKE_VRAM", "RTX 4090,24,20,8.9")
+    monkeypatch.setenv("CANVAS_VRAM_CAP_GB", "16")
+    monkeypatch.setattr("canvas.app.main.current_os_check", lambda: OsCheck(True, ""))
+    monkeypatch.setattr("canvas.infra.gpu._limit_fraction", lambda _fraction: None)
+    launched = []
+    monkeypatch.setattr("canvas.app.main._launch", lambda tier, splash=None, app=None: launched.append(tier))
+    assert main(["--vram-cap-gb", "16"]) == 0
+    assert launched == [Tier.GB16]
+
+
+def test_generate_vram_cap_uses_the_same_name(monkeypatch):
+    monkeypatch.setenv("CANVAS_VRAM_CAP_GB", "16")
+    seen: dict[str, str] = {}
+
+    def fake(_args: object) -> int:
+        seen["cap"] = os.environ.get("CANVAS_VRAM_CAP_GB", "")
+        return 0
+
+    monkeypatch.setattr("canvas.app.main._generate", fake)
+    assert main(["generate", "--vram-cap-gb", "16", "--prompt", "a red boat", "--out", "out.avif"]) == 0
+    assert float(seen["cap"]) == 16.0
+
+
+def test_selftest_deep_is_still_read_only(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
+    monkeypatch.setattr("canvas.app.selftest.python_supports_tensorrt", lambda: False)
+    assert main(["--selftest", "--deep", "--json"]) == 2
+    report = json.loads(capsys.readouterr().out)
+    assert report["deep"] is True
+    assert report["notes"] == ["TensorRT is skipped on Python 3.14."]
+    assert "Collecting" not in capsys.readouterr().out
 
 
 def test_update_check_uses_only_the_releases_endpoint():

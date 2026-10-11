@@ -37,7 +37,13 @@ TRT_ID = "tensorrt-10"
 TRT_VERSION = "10.16.1.11"
 TRT_PATH = "tensorrt-10"
 TRT_SPEC = "tensorrt-cu13==10.16.1.11"
+TORCHAO_VERSION = "0.18.0"
 PYPI_INDEX = "https://pypi.org/simple"
+
+
+def python_supports_tensorrt() -> bool:
+    """False on Python 3.14, which has no TensorRT wheel."""
+    return sys.version_info < (3, 14)
 
 
 def python_home() -> Path:
@@ -77,43 +83,58 @@ def _foreign(relative: str) -> bool:
 
 
 def refill_wheels(progress: Callable[[str], None]) -> None:
-    """Download CUDA 13.0 torch wheels. PyPI supplies numpy and the other dependencies."""
+    """Download CUDA 13.0 torch wheels. PyPI supplies torchao, numpy, and the GPU ONNX Runtime."""
     progress("Installing PyTorch")
     dest = wheel_dir()
     dest.mkdir(parents=True, exist_ok=True)
-    try:
-        subprocess.check_call(
-            [
-                sys.executable, "-m", "pip", "download",
-                f"torch=={TORCH_VERSION}",
-                f"torchvision=={VISION_VERSION}",
-                f"onnxruntime-gpu=={ORT_VERSION}",
-                "--index-url", PYPI_INDEX,
-                "--extra-index-url", TORCH_INDEX,
-                "-d", str(dest),
-            ],
-        )
-    except subprocess.CalledProcessError as exc:
-        raise OSError("PyTorch could not be installed.") from exc
+    _pip(
+        [
+            sys.executable, "-m", "pip", "download",
+            f"torch=={TORCH_VERSION}",
+            f"torchvision=={VISION_VERSION}",
+            "--index-url", TORCH_INDEX,
+            "--extra-index-url", PYPI_INDEX,
+            "-d", str(dest),
+        ],
+    )
+    _pip(
+        [
+            sys.executable, "-m", "pip", "download",
+            f"onnxruntime-gpu=={ORT_VERSION}",
+            f"torchao=={TORCHAO_VERSION}",
+            "--index-url", PYPI_INDEX,
+            "-d", str(dest),
+        ],
+    )
 
 
 def restore_tensorrt(progress: Callable[[str], None]) -> None:
-    """Install TensorRT 10 into its own component directory."""
+    """Install TensorRT 10 into its own component directory.
+
+    Python 3.14 has no wheel. That skip is a note, not a failed install.
+    """
+    if not python_supports_tensorrt():
+        progress("TensorRT is skipped on Python 3.14.")
+        return
     progress("Installing TensorRT")
     if _foreign(TRT_PATH):
         progress("Leaving TensorRT in place")
         return
     dest = shared_dir() / TRT_PATH
     dest.mkdir(parents=True, exist_ok=True)
-    try:
-        subprocess.check_call(
-            [
-                sys.executable, "-m", "pip", "install", "--target", str(dest),
-                "--upgrade-strategy", "only-if-needed", TRT_SPEC,
-            ],
-        )
-    except subprocess.CalledProcessError as exc:
-        raise OSError("TensorRT could not be installed.") from exc
+    _pip(
+        [
+            sys.executable, "-m", "pip", "install", "--target", str(dest),
+            "--upgrade-strategy", "only-if-needed", TRT_SPEC,
+        ],
+    )
+
+
+def _pip(args: list[str]) -> None:
+    """Run pip. Its output stays on stderr so a JSON report can own stdout."""
+    completed = subprocess.run(args, stdout=sys.stderr, stderr=sys.stderr, check=False)
+    if completed.returncode != 0:
+        raise OSError("A package could not be installed.")
 
 
 def file_sha256(path: Path) -> str:

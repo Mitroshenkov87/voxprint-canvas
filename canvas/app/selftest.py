@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import sys
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
@@ -12,29 +11,38 @@ from canvas.app.platform import check_gpu, current_os_check
 from canvas.core.formats import OutputFormat, save_image
 from canvas.infra.gpu import probe_gpu
 from canvas.infra.paths import models_dir
+from canvas.infra.runtime import python_supports_tensorrt
 from canvas.models.edit import EDIT_ID, probe_edit_pack
-from canvas.models.provision import install_defaults, repair
-from canvas.models.registry import ModelSpec, RegistryError, load_catalog
-from canvas.models.snapshots import SnapshotError, snapshot_ready, snapshot_status, weight_dir
+from canvas.models.registry import ModelSpec, load_catalog
+from canvas.models.snapshots import snapshot_ready, snapshot_status, weight_dir
+from canvas.models.verified import VerifiedCache
 from canvas.safety.adapters import FairFaceAge, NsfwViT, Qwen3GuardGen, SiglipZeroShot, YuNetFaces
 from canvas.safety.gate import SafetyError, issue
 from canvas.safety.image import RawImage
 
 
-def selftest_report(root: Path | None = None, progress: Callable[[str], None] | None = None) -> dict[str, object]:
-    """GPU, pinned files, model load, and the three output encoders."""
-    if root is None:
-        _repair(progress)
-        _install_default_pack(progress)
-        folder = models_dir()
-    else:
-        folder = root
+def selftest_report(
+    root: Path | None = None, progress: Callable[[str], None] | None = None, *, deep: bool = False,
+) -> dict[str, object]:
+    """GPU, pinned files, model load, and the three output encoders.
+
+    This check only reads the machine. It does not download models or wheels.
+    ``deep`` hashes every file. Otherwise a file whose path, size, and time
+    match the shared manifest is not read again. ``progress`` is accepted for
+    callers and is not printed to stdout.
+    """
+    del progress
+    folder = models_dir() if root is None else root
     os_result = current_os_check()
     gpu = check_gpu(probe_gpu())
     encoders = _encoders()
     catalog = load_catalog()
-    models = [_model_row(spec, folder) for spec in catalog.models if spec.files]
-    classifiers = _classifiers(catalog, folder)
+    cache = VerifiedCache.open(deep)
+    try:
+        models = [_model_row(spec, folder, cache) for spec in catalog.models if spec.files]
+        classifiers = _classifiers(catalog, folder, cache)
+    finally:
+        cache.flush()
     ok = bool(
         os_result.ok
         and gpu.ok
@@ -42,6 +50,9 @@ def selftest_report(root: Path | None = None, progress: Callable[[str], None] | 
         and all(bool(row["ok"]) for row in models)
         and all(bool(row["ok"]) for row in classifiers)
     )
+    notes: list[str] = []
+    if not python_supports_tensorrt():
+        notes.append("TensorRT is skipped on Python 3.14.")
     return {
         "ok": ok,
         "version": version_label(),
@@ -54,33 +65,18 @@ def selftest_report(root: Path | None = None, progress: Callable[[str], None] | 
         "encoders": encoders,
         "models": models,
         "classifiers": classifiers,
+        "notes": notes,
+        "deep": deep,
     }
 
 
-def _repair(progress: Callable[[str], None] | None) -> None:
-    reporter = progress or (lambda message: print(message, file=sys.stderr))
-    try:
-        repair(load_catalog(), reporter)
-    except (SnapshotError, OSError) as exc:
-        reporter(str(exc))
-
-
-def _install_default_pack(progress: Callable[[str], None] | None) -> None:
-    """Download the default pack. The prompt check still runs before a generator is fetched for a picture."""
-    reporter = progress or (lambda message: print(message, file=sys.stderr))
-    try:
-        install_defaults(load_catalog(), reporter)
-    except (SnapshotError, RegistryError, OSError) as exc:
-        reporter(str(exc))
-
-
-def selftest_json(root: Path | None = None) -> str:
+def selftest_json(root: Path | None = None, *, deep: bool = False) -> str:
     """The self-test report as one JSON document."""
-    return json.dumps(selftest_report(root), indent=2)
+    return json.dumps(selftest_report(root, deep=deep), indent=2)
 
 
-def _model_row(spec: ModelSpec, root: Path) -> dict[str, object]:
-    state = snapshot_status(spec, root)
+def _model_row(spec: ModelSpec, root: Path, cache: VerifiedCache) -> dict[str, object]:
+    state = snapshot_status(spec, root, cache)
     row: dict[str, object] = {"id": spec.id, "ok": True, "detail": ""}
     if spec.mirror_status:
         row["mirror_status"] = spec.mirror_status
@@ -99,7 +95,7 @@ def _model_row(spec: ModelSpec, root: Path) -> dict[str, object]:
     return row
 
 
-def _classifiers(catalog, root: Path) -> list[dict[str, object]]:
+def _classifiers(catalog, root: Path, cache: VerifiedCache) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     binding = (
         ("prompt-guard", Qwen3GuardGen),
@@ -114,14 +110,14 @@ def _classifiers(catalog, root: Path) -> list[dict[str, object]]:
             rows.append({"id": role, "ok": False, "detail": "missing"})
             continue
         spec = found[0]
-        state = snapshot_status(spec, root)
+        state = snapshot_status(spec, root, cache)
         if state == "not_downloaded":
             rows.append({"id": spec.id, "ok": True, "detail": "not_downloaded"})
             continue
         if state != "ready":
             rows.append({"id": spec.id, "ok": False, "detail": state})
             continue
-        folder = snapshot_ready(spec, root)
+        folder = snapshot_ready(spec, root, cache)
         if folder is None:
             rows.append({"id": spec.id, "ok": False, "detail": "hash_mismatch"})
             continue

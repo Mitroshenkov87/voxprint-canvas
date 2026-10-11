@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from canvas.core.vram_policy import budget_gb, halve_on_spill, plan
-from canvas.infra.gpu import probe_gpu
+from canvas.infra.gpu import apply_vram_cap, probe_gpu
 from canvas.infra.gpu_lock import _pid_alive, gpu_job, is_stale, read_lock, release, try_acquire
 from canvas.infra.models_users import read_users, register, unregister
 from canvas.infra.paths import models_dir, shared_dir
@@ -27,6 +27,23 @@ def test_headroom_and_tiers():
     assert select_tier(23.49) is Tier.GB16
     assert select_tier(23.5) is Tier.GB24
     assert select_tier(23.99) is Tier.GB24
+
+
+def test_vram_cap_forces_the_16gb_tier(monkeypatch):
+    monkeypatch.setenv("VOXPRINT_FAKE_VRAM", "RTX 4090,24,20,8.9")
+    monkeypatch.setenv("CANVAS_VRAM_CAP_GB", "16")
+    seen: list[float] = []
+    monkeypatch.setattr("canvas.infra.gpu._limit_fraction", seen.append)
+    info = probe_gpu()
+    assert info is not None
+    assert info.total_gb == 16
+    assert info.free_gb == 16
+    assert select_tier(info.total_gb) is Tier.GB16
+    assert seen == [pytest.approx(16 / 24)]
+    monkeypatch.setenv("CANVAS_VRAM_CAP_GB", "nope")
+    uncapped = probe_gpu()
+    assert uncapped is not None and uncapped.total_gb == 24
+    assert apply_vram_cap(uncapped, 16).total_gb == 16
 
 
 def test_fake_probe(monkeypatch):

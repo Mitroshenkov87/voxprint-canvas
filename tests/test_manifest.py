@@ -4,6 +4,7 @@ import importlib
 import json
 import multiprocessing
 import re
+import subprocess
 from multiprocessing.synchronize import Event as ProcessEvent
 from importlib import metadata
 from pathlib import Path
@@ -22,7 +23,7 @@ from canvas.infra.manifest import (
     unregister_app,
 )
 from canvas.infra.paths import shared_dir
-from canvas.infra.runtime import LINUX_PYTHON_URL, TORCH_INDEX, WINDOWS_PYTHON_URL, refill_wheels
+from canvas.infra.runtime import LINUX_PYTHON_URL, TORCH_INDEX, TORCHAO_VERSION, WINDOWS_PYTHON_URL, refill_wheels, restore_tensorrt
 from canvas.models.provision import default_specs, is_optional, pack_notice, repair
 from canvas.models.registry import load_catalog
 
@@ -385,34 +386,60 @@ def test_installers_resolve_numpy_from_pypi_and_pin_cuda_torch():
     assert config_path.is_file()
     config = config_path.read_text(encoding="utf-8")
     assert 'index-url = "https://pypi.org/simple"' in config
-    assert 'torch-backend = "cu130"' in config
+    assert "torch-backend" not in config
+    assert 'name = "pytorch-cu130"' in config
+    assert "explicit = true" in config
+    assert 'torch = { index = "pytorch-cu130" }' in config
+    assert 'torchvision = { index = "pytorch-cu130" }' in config
+    sources = config.split("[sources]", 1)[1]
+    assert "torchao" not in sources
     for script in (linux, windows):
         assert "uv.cu130.toml" in script
         assert "--config-file" in script
         assert "torch==2.11.0+cu130" in script
         assert "torchvision==0.26.0+cu130" in script
-    assert '--index-url https://pypi.org/simple' in linux
-    assert '--extra-index-url "$TORCH_INDEX"' in linux
-    assert '--index-url "$TORCH_INDEX"' not in linux
+        assert "torchao==0.18.0" in script
+        assert "TensorRT is skipped on Python 3.14." in script
+    assert '--index-url "$TORCH_INDEX"' in linux
+    assert "--extra-index-url https://pypi.org/simple" in linux
+    assert "onnxruntime-gpu==1.31.0" in linux
+    assert '"--index-url", $TorchIndex' in windows
     assert '"--index-url", "https://pypi.org/simple"' in windows
-    assert '"--extra-index-url", $TorchIndex' in windows
-    assert '"--index-url", $TorchIndex' not in windows
     assert "uv==0.13.0" in linux
     assert "uv==0.13.0" in windows
 
 
-def test_wheel_repair_downloads_from_pypi_with_the_cuda_index_extra(monkeypatch, tmp_path):
+def test_wheel_repair_pins_torch_to_cuda_and_torchao_to_pypi(monkeypatch, tmp_path):
     monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
-    seen: list[list[str]] = []
+    seen: list[tuple[list[str], object]] = []
 
-    def capture(args, **_kwargs):
-        seen.append(list(args))
+    def capture(args, **kwargs):
+        seen.append((list(args), kwargs.get("stdout")))
+        return subprocess.CompletedProcess(args, 0)
 
-    monkeypatch.setattr("canvas.infra.runtime.subprocess.check_call", capture)
+    monkeypatch.setattr("canvas.infra.runtime.subprocess.run", capture)
     refill_wheels(lambda _note: None)
-    args = seen[0]
-    assert args[args.index("--index-url") + 1] == "https://pypi.org/simple"
-    assert args[args.index("--extra-index-url") + 1] == TORCH_INDEX
-    assert "torch==2.11.0+cu130" in args
-    assert "torchvision==0.26.0+cu130" in args
-    assert "onnxruntime-gpu==1.31.0" in args
+    torch_args, torch_out = seen[0]
+    other_args, other_out = seen[1]
+    assert torch_args[torch_args.index("--index-url") + 1] == TORCH_INDEX
+    assert torch_args[torch_args.index("--extra-index-url") + 1] == "https://pypi.org/simple"
+    assert "torch==2.11.0+cu130" in torch_args
+    assert "torchvision==0.26.0+cu130" in torch_args
+    assert "torchao" not in " ".join(torch_args)
+    assert other_args[other_args.index("--index-url") + 1] == "https://pypi.org/simple"
+    assert "--extra-index-url" not in other_args
+    assert f"torchao=={TORCHAO_VERSION}" in other_args
+    assert "onnxruntime-gpu==1.31.0" in other_args
+    assert torch_out is other_out
+    assert TORCHAO_VERSION == "0.18.0"
+    assert "torchao==0.18.0" in Path("pyproject.toml").read_text(encoding="utf-8")
+
+
+def test_tensorrt_on_python_314_is_skipped(monkeypatch):
+    monkeypatch.setattr("canvas.infra.runtime.python_supports_tensorrt", lambda: False)
+    called: list[list[str]] = []
+    monkeypatch.setattr("canvas.infra.runtime._pip", lambda args: called.append(args))
+    notes: list[str] = []
+    restore_tensorrt(notes.append)
+    assert called == []
+    assert notes == ["TensorRT is skipped on Python 3.14."]

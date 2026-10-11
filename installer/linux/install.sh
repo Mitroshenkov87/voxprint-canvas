@@ -50,6 +50,7 @@ if [ ! -f "$SRC/constraints.txt" ]; then
 fi
 "$VENV/bin/python" -m pip install --upgrade pip
 # PyPI is the main index. uv pins torch and torchvision to the CUDA 13.0 index.
+# torchao is installed from PyPI with an exact pin.
 "$VENV/bin/python" -m pip install --index-url https://pypi.org/simple "uv==0.13.0"
 UV="$VENV/bin/uv"
 if [ ! -f "$UV_CONFIG" ]; then
@@ -63,11 +64,17 @@ if [ "$FRESH" -eq 1 ]; then
 fi
 echo "Installing PyTorch..."
 "$VENV/bin/python" -m pip download -c "$SRC/constraints.txt" \
-  "torch==2.11.0+cu130" "torchvision==0.26.0+cu130" onnxruntime-gpu \
-  --index-url https://pypi.org/simple --extra-index-url "$TORCH_INDEX" -d "$SHARED/wheels"
+  "torch==2.11.0+cu130" "torchvision==0.26.0+cu130" \
+  --index-url "$TORCH_INDEX" --extra-index-url https://pypi.org/simple -d "$SHARED/wheels"
+"$VENV/bin/python" -m pip download -c "$SRC/constraints.txt" \
+  "onnxruntime-gpu==1.31.0" "torchao==0.18.0" \
+  --index-url https://pypi.org/simple -d "$SHARED/wheels"
+"$UV" pip install --python "$VENV/bin/python" --index-url https://pypi.org/simple "torchao==0.18.0"
 "$UV" pip install --python "$VENV/bin/python" --config-file "$UV_CONFIG" -c "$SRC/constraints.txt" \
   "$SRC[gen]"
-if [ -z "$(find "$SHARED/tensorrt-10" -mindepth 1 -print -quit 2>/dev/null)" ]; then
+if "$VENV/bin/python" -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 14) else 1)"; then
+  echo "TensorRT is skipped on Python 3.14." >&2
+elif [ -z "$(find "$SHARED/tensorrt-10" -mindepth 1 -print -quit 2>/dev/null)" ]; then
   "$VENV/bin/python" -m pip install -c "$SRC/constraints.txt" --target "$SHARED/tensorrt-10" \
     --upgrade-strategy only-if-needed "tensorrt-cu13==10.16.1.11"
 fi

@@ -15,10 +15,12 @@ from canvas.infra.enlarge import (
     EnlargeClient,
     EnlargeError,
     capabilities_ready,
+    declared_vram_gb,
     enlarge_argv,
     exit_error,
     loads,
     message_kind,
+    spawn_env,
 )
 
 FAKE = Path(__file__).resolve().parent / "fixtures" / "enlarge_fake.py"
@@ -37,6 +39,57 @@ def _shape(events: list[dict]) -> list[dict]:
         else:
             shaped.append(event)
     return shaped
+
+
+def test_spawn_env_keeps_only_the_suite_contract(monkeypatch):
+    monkeypatch.setenv("PATH", "/usr/bin")
+    monkeypatch.setenv("HOME", "/home/canvas")
+    monkeypatch.setenv("TEMP", "/tmp")
+    monkeypatch.setenv("PYTHONPATH", "/evil")
+    monkeypatch.setenv("VIRTUAL_ENV", "/venv")
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "0")
+    monkeypatch.setenv("PYTORCH_CUDA_ALLOC_CONF", "max_split_size_mb:32")
+    monkeypatch.setenv("VOXPRINT_GPU_LOCK", "/tmp/voxprint-gpu.lock")
+    monkeypatch.setenv("ENLARGE_FAKE_EXIT", "2")
+    env = spawn_env(7)
+    assert env["PATH"] == "/usr/bin"
+    assert env["HOME"] == "/home/canvas"
+    assert env["TEMP"] == "/tmp"
+    assert env["VOXPRINT_GPU_PARENT_PID"] == "7"
+    assert env["VOXPRINT_GPU_LOCK"] == "/tmp/voxprint-gpu.lock"
+    assert env["ENLARGE_FAKE_EXIT"] == "2"
+    assert "PYTHONPATH" not in env
+    assert "VIRTUAL_ENV" not in env
+    assert "CUDA_VISIBLE_DEVICES" not in env
+    assert "PYTORCH_CUDA_ALLOC_CONF" not in env
+
+
+def test_declared_vram_defaults_to_six_gb():
+    assert declared_vram_gb(None) == 6.0
+    assert declared_vram_gb({}) == 6.0
+    assert declared_vram_gb({"gpu": {"status": "ok"}}) == 6.0
+    assert declared_vram_gb({"gpu": {"vram_gb": 9}}) == 9.0
+    assert declared_vram_gb({"min_free_gb": 4}) == 4.0
+
+
+def test_client_enlarge_drops_inherited_allocator_variables(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYTHONPATH", "/evil")
+    monkeypatch.setenv("VIRTUAL_ENV", "/venv")
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "0")
+    monkeypatch.setenv("PYTORCH_CUDA_ALLOC_CONF", "max_split_size_mb:32")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("TEMP", str(tmp_path))
+    source = tmp_path / "in.png"
+    _png(source)
+    dest = tmp_path / "out.avif"
+    EnlargeClient([sys.executable, str(FAKE)]).enlarge(source, output=dest)
+    call = json.loads(Path(str(dest) + ".call.json").read_text(encoding="utf-8"))
+    assert "PYTHONPATH" not in call["env"]
+    assert "VIRTUAL_ENV" not in call["env"]
+    assert "PYTORCH_CUDA_ALLOC_CONF" not in call["env"]
+    assert "CUDA_VISIBLE_DEVICES" not in call["env"]
+    assert "PATH" in call["env"]
+    assert "VOXPRINT_GPU_PARENT_PID" in call["env"]
 
 
 def test_progress_lines_are_protocol_1_json():
@@ -89,8 +142,7 @@ def test_fake_cli_mirrors_dry_run_and_captures_stderr(tmp_path):
     dest = tmp_path / "out.avif"
     dry_dest = tmp_path / "dry.avif"
     parent = "42"
-    env = os.environ.copy()
-    env["VOXPRINT_GPU_PARENT_PID"] = parent
+    env = spawn_env(int(parent))
     dry = subprocess.run(
         enlarge_argv(
             [sys.executable, str(FAKE)],

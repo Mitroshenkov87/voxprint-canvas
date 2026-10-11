@@ -6,6 +6,7 @@ the unit tests can import Canvas without them.
 """
 from __future__ import annotations
 
+import gc
 from pathlib import Path
 from typing import Any, assert_never
 
@@ -53,51 +54,56 @@ def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, he
     }
     common.update(guidance)
     pipeline_name = plan.pipeline_class
-    if pipeline_name == PIPELINE_TEXT:
-        pipe = diffusers.ZImagePipeline.from_pretrained(folder, torch_dtype=dtype, local_files_only=True)
-        _place(pipe, tier)
-        result = pipe(**common)
-    elif pipeline_name == PIPELINE_IMG2IMG:
-        pipe = diffusers.ZImageImg2ImgPipeline.from_pretrained(folder, torch_dtype=dtype, local_files_only=True)
-        _place(pipe, tier)
-        result = pipe(image=_pil(_frame(screened, "init")), strength=0.6, **common)
-    elif pipeline_name == PIPELINE_INPAINT:
-        pipe = diffusers.ZImageInpaintPipeline.from_pretrained(folder, torch_dtype=dtype, local_files_only=True)
-        _place(pipe, tier)
-        result = pipe(image=_pil(_frame(screened, "init")), mask_image=_pil(_frame(screened, "mask")), **common)
-    elif pipeline_name == PIPELINE_CONTROL or pipeline_name == PIPELINE_CONTROL_INPAINT:
-        if control_file is None:
-            raise InferenceUnavailable("control weights are missing")
-        controlnet = diffusers.ZImageControlNetModel.from_single_file(control_file, torch_dtype=dtype)
-        if pipeline_name == PIPELINE_CONTROL:
-            pipe = diffusers.ZImageControlNetPipeline.from_pretrained(
-                folder, controlnet=controlnet, torch_dtype=dtype, local_files_only=True,
-            )
-            role = _control_role(screened)
+    pipe = None
+    controlnet = None
+    try:
+        if pipeline_name == PIPELINE_TEXT:
+            pipe = diffusers.ZImagePipeline.from_pretrained(folder, torch_dtype=dtype, local_files_only=True)
             _place(pipe, tier)
-            result = pipe(control_image=_pil(_frame(screened, role)), controlnet_conditioning_scale=0.75, **common)
+            result = pipe(**common)
+        elif pipeline_name == PIPELINE_IMG2IMG:
+            pipe = diffusers.ZImageImg2ImgPipeline.from_pretrained(folder, torch_dtype=dtype, local_files_only=True)
+            _place(pipe, tier)
+            result = pipe(image=_pil(_frame(screened, "init")), strength=0.6, **common)
+        elif pipeline_name == PIPELINE_INPAINT:
+            pipe = diffusers.ZImageInpaintPipeline.from_pretrained(folder, torch_dtype=dtype, local_files_only=True)
+            _place(pipe, tier)
+            result = pipe(image=_pil(_frame(screened, "init")), mask_image=_pil(_frame(screened, "mask")), **common)
+        elif pipeline_name == PIPELINE_CONTROL or pipeline_name == PIPELINE_CONTROL_INPAINT:
+            if control_file is None:
+                raise InferenceUnavailable("control weights are missing")
+            controlnet = diffusers.ZImageControlNetModel.from_single_file(control_file, torch_dtype=dtype)
+            if pipeline_name == PIPELINE_CONTROL:
+                pipe = diffusers.ZImageControlNetPipeline.from_pretrained(
+                    folder, controlnet=controlnet, torch_dtype=dtype, local_files_only=True,
+                )
+                role = _control_role(screened)
+                _place(pipe, tier)
+                result = pipe(control_image=_pil(_frame(screened, role)), controlnet_conditioning_scale=0.75, **common)
+            else:
+                pipe = diffusers.ZImageControlNetInpaintPipeline.from_pretrained(
+                    folder, controlnet=controlnet, torch_dtype=dtype, local_files_only=True,
+                )
+                _place(pipe, tier)
+                result = pipe(
+                    image=_pil(_frame(screened, "init")),
+                    mask_image=_pil(_frame(screened, "mask")),
+                    control_image=_pil(_frame(screened, _control_role(screened))),
+                    controlnet_conditioning_scale=0.75,
+                    **common,
+                )
+        elif pipeline_name == PIPELINE_EDIT:
+            try:
+                pipe = load_edit_pipeline(folder, dtype)
+            except EditLoadError as exc:
+                raise InferenceUnavailable(exc.detail) from exc
+            result = pipe(image=_pil(_frame(screened, "init")), **common)
         else:
-            pipe = diffusers.ZImageControlNetInpaintPipeline.from_pretrained(
-                folder, controlnet=controlnet, torch_dtype=dtype, local_files_only=True,
-            )
-            _place(pipe, tier)
-            result = pipe(
-                image=_pil(_frame(screened, "init")),
-                mask_image=_pil(_frame(screened, "mask")),
-                control_image=_pil(_frame(screened, _control_role(screened))),
-                controlnet_conditioning_scale=0.75,
-                **common,
-            )
-    elif pipeline_name == PIPELINE_EDIT:
-        try:
-            pipe = load_edit_pipeline(folder, dtype)
-        except EditLoadError as exc:
-            raise InferenceUnavailable(exc.detail) from exc
-        result = pipe(image=_pil(_frame(screened, "init")), **common)
-    else:
-        raise InferenceUnavailable(f"unknown pipeline {pipeline_name}")
-    image = result.images[0].convert("RGB")
-    return RawImage(image.width, image.height, image.tobytes())
+            raise InferenceUnavailable(f"unknown pipeline {pipeline_name}")
+        image = result.images[0].convert("RGB")
+        return RawImage(image.width, image.height, image.tobytes())
+    finally:
+        _release_inference(torch, pipe, controlnet)
 
 
 def _call_guidance(plan: CallPlan) -> dict[str, float]:
@@ -111,6 +117,24 @@ def _call_guidance(plan: CallPlan) -> dict[str, float]:
             return {}
         return {"guidance_scale": plan.guidance_scale}
     raise InferenceUnavailable("unknown guidance kind")
+
+
+def _release_inference(torch: Any, pipe: Any, controlnet: Any) -> None:
+    """Drop the generator, text encoder, and VAE before the caller continues."""
+    if pipe is not None:
+        for name in ("text_encoder", "text_encoder_2", "vae", "transformer", "unet", "controlnet"):
+            if getattr(pipe, name, None) is not None:
+                try:
+                    setattr(pipe, name, None)
+                except (AttributeError, TypeError):
+                    pass
+    del pipe, controlnet
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        ipc_collect = getattr(torch.cuda, "ipc_collect", None)
+        if ipc_collect is not None:
+            ipc_collect()
 
 
 def _place(pipe: Any, tier: Tier) -> None:

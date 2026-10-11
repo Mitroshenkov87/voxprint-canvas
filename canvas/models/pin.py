@@ -44,3 +44,17 @@ def verify_file(path: Path, expected: str) -> None:
             digest.update(chunk)
     if digest.hexdigest() != pin:
         raise PinError("hash_mismatch")
+
+
+def resolved_sha256(lfs_oid: str = "", sidecar: str = "") -> str:
+    """SHA-256 for one published file.
+
+    Hugging Face LFS objects use the LFS oid, which is the content SHA-256.
+    Files stored directly in git use the ``.sha256`` sidecar. When both are
+    present they have to be the same digest.
+    """
+    oid = lfs_oid.strip().lower()
+    side = sidecar.strip().lower()
+    if oid and side and oid != side:
+        raise PinError("hash_mismatch")
+    return require_pin(oid or side)

@@ -46,7 +46,9 @@ def test_pin_and_visibility():
     assert full.variant == "full" and full.quant == "bf16" and full.quality_gate == "passed"
     edit = catalog.by_id("qwen-image-edit-2511-fp8")
     assert edit.repo == REPO_EDIT and edit.tier == "24gb"
-    assert edit.text_encoder == ENCODER_VL and edit.quality_gate == "pending"
+    assert edit.text_encoder == ENCODER_VL and edit.quality_gate == "passed"
+    assert edit.mirror_status == "published"
+    assert edit.text_encoder_offload == "model-cpu-offload"
     ids = {spec.id for spec in catalog.models}
     assert "qwen-image-2512-int4" not in ids
     assert "qwen-image-2512-fp8" not in ids
@@ -105,7 +107,9 @@ def test_control_and_edit_plans():
     edit = build_plan(catalog, _screened(Mode.INSTRUCTION, ImageRole.INIT), Tier.GB24)
     assert edit.pipeline_class == PIPELINE_EDIT
     assert edit.repos == (REPO_EDIT,)
-    assert edit.steps is None and edit.guidance_scale is None
+    assert edit.steps == 40 and edit.guidance_scale == 4.0
+    assert edit.guidance_kind == "true_cfg_scale"
+    assert edit.text_encoder_offload == "model-cpu-offload"
     creative = build_plan(catalog, _screened(Mode.TEXT_CREATIVE), Tier.GB24)
     assert creative.pipeline_class == PIPELINE_TEXT
     assert creative.steps == 50 and creative.guidance_scale is None

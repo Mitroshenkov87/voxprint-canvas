@@ -96,7 +96,9 @@ def build_plan(catalog: Catalog, screened: ScreenedInput, tier: Tier) -> CallPla
         )
     if mode is Mode.INSTRUCTION:
         edit = _one(catalog, "qwen-image-edit-2511-fp8")
-        return _plan(mode, tier, PIPELINE_EDIT, (edit,), edit.steps, edit.guidance_scale, "")
+        return _plan(
+            mode, tier, PIPELINE_EDIT, (edit,), edit.steps, edit.guidance_scale, edit.text_encoder_offload,
+        )
     assert_never(mode)
 
 

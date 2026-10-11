@@ -1,5 +1,6 @@
 """Startup commands. The window itself is not opened here."""
 import json
+from pathlib import Path
 
 from canvas.app.info import RELEASES_API
 from canvas.app.main import main
@@ -24,6 +25,8 @@ def test_selftest_register_and_update(monkeypatch, tmp_path, capsys):
     assert report["encoders"] == {"avif": True, "jxl": True, "webp": True}
     assert isinstance(report["models"], list) and report["models"]
     assert all(row["detail"] == "not_downloaded" and row["ok"] for row in report["models"])
+    edit = next(row for row in report["models"] if row["id"] == "qwen-image-edit-2511-fp8")
+    assert edit["mirror_status"] == "published"
     assert all(row["detail"] == "not_downloaded" and row["ok"] for row in report["classifiers"])
     assert main(["--register-models"]) == 0
     assert read_users(tmp_path / "shared")["canvas"] is True
@@ -192,6 +195,69 @@ def test_generate_json_reports_the_enlarge_error(monkeypatch, capsys, tmp_path):
     assert code == 1
     body = json.loads(capsys.readouterr().out)
     assert body == {"ok": False, "error": "bad_input: cannot identify image file"}
+
+
+def test_edit_instruction_command_passes_the_input(monkeypatch, tmp_path, capsys):
+    from PIL import Image
+
+    from canvas.models.modes import Mode
+
+    monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
+    monkeypatch.setattr("canvas.app.main.current_os_check", lambda: OsCheck(True, ""))
+    monkeypatch.setattr(
+        "canvas.app.main.probe_gpu",
+        lambda: GpuInfo("RTX 4090", 23.99, 20, 8, 9, "fake"),
+    )
+    monkeypatch.setattr("canvas.app.main.install_supporting", lambda *args, **kwargs: None)
+    monkeypatch.setattr("canvas.app.main.load_catalog_stack", lambda *args, **kwargs: object())
+    from tests.fakes import World
+
+    seen: dict[str, object] = {}
+
+    class FakeGate:
+        def __init__(self, stack: object) -> None:
+            del stack
+            self._gate = World().gate()
+
+        def release_request(self, prompt: str, mode: str, inputs=()):
+            seen["review"] = (prompt, mode, tuple(item.role.value for item in inputs))
+            return self._gate.release_request(prompt, mode, inputs)
+
+    class FakePipeline:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            del args, kwargs
+
+        def export(self, prompt, mode, inputs, path, fmt, **kwargs):
+            del fmt, kwargs
+            seen["export"] = (prompt, mode, tuple(item.role.value for item in inputs), Path(path).name)
+
+    monkeypatch.setattr("canvas.app.main.AgeGate", FakeGate)
+    monkeypatch.setattr("canvas.app.main.ensure_plan", lambda *args, **kwargs: seen.setdefault("ensured", True))
+    monkeypatch.setattr("canvas.app.main.Pipeline", FakePipeline)
+
+    class FakeGenerator:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            del args, kwargs
+            self.seed = 0
+            self.models = None
+
+    monkeypatch.setattr("canvas.app.main.ZImageGenerator", FakeGenerator)
+    monkeypatch.setattr("canvas.app.main.EnlargeClient", lambda *args, **kwargs: object())
+    Image.new("RGB", (2, 2), (4, 5, 6)).save(tmp_path / "in.png")
+    code = main([
+        "generate",
+        "--edit-instruction",
+        "paint the door blue",
+        "--input",
+        str(tmp_path / "in.png"),
+        "--out",
+        str(tmp_path / "out.avif"),
+        "--json",
+    ])
+    assert code == 0
+    assert seen["review"] == ("paint the door blue", Mode.INSTRUCTION.value, ("init",))
+    assert seen["export"] == ("paint the door blue", Mode.INSTRUCTION, ("init",), "out.avif")
+    assert json.loads(capsys.readouterr().out)["ok"] is True
 
 
 def test_generate_command_refuses_an_unsupported_machine(capsys):

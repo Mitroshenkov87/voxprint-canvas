@@ -323,7 +323,8 @@ def test_enlarge_lookup_is_manifest_then_default_path_then_path(tmp_path, monkey
     monkeypatch.setattr("canvas.infra.discovery.enlarge_executable", lambda: default)
     bindir = tmp_path / "bin"
     bindir.mkdir()
-    on_path = bindir / "voxprint-enlarge-cli"
+    path_name = "voxprint-enlarge-cli.exe" if sys.platform == "win32" else "voxprint-enlarge-cli"
+    on_path = bindir / path_name
     on_path.write_text("#!/bin/sh\n", encoding="utf-8")
     on_path.chmod(0o755)
     monkeypatch.setenv("PATH", str(bindir))

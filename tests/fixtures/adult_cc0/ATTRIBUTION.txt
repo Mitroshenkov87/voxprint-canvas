@@ -1,21 +1,16 @@
-Small JPEG derivatives of CC0 1.0 photographs. The originals are public domain.
-These copies are resized for the real-weight image check and stay CC0.
+CC0 1.0 photographs of clearly adult subjects. These copies are resized for the real-weight image check and stay CC0.
 
-front_view.jpg
-  Source: https://commons.wikimedia.org/wiki/File:Front_view_of_a_woman.jpg
-  Derived from https://commons.wikimedia.org/wiki/File:Human_female.jpg
-  Life model, City Studios, Stockholm, 29 September 2011, with KYO.
-  The model consented to the CC0 licence.
+torso_40.jpg
+  Source: https://commons.wikimedia.org/wiki/File:Adult_Female_Torso_-_40_Years_Old.jpg
+  The file description says the subject is around forty years old.
+  Licence: CC0.
 
-anterior_male.jpg
-  Source: https://commons.wikimedia.org/wiki/File:Anterior_view_of_human_male,_retouched.jpg
-  Life model, City Studios, Stockholm, 29 September 2011, with KYO.
-  The model consented to the CC0 licence.
+torso_40_b.jpg
+  Source: https://commons.wikimedia.org/wiki/File:Adult_Female_Torso_-_40_Years_Old_(2).jpg
+  The same file description: the subject is around forty years old.
+  Licence: CC0.
 
-met_female.jpg
-  Source: https://commons.wikimedia.org/wiki/File:-Female_Nude-_MET_DP149734.jpg
-  Louis-Adolphe Humbert de Molard. Metropolitan Museum of Art, CC0.
-
-jones_male.jpg
-  Source: https://commons.wikimedia.org/wiki/File:A_Male_Nude_by_Sarah_Marie_Jones.jpg
-  Sarah Marie Jones. CC0.
+garden_older_man.jpg
+  Source: https://commons.wikimedia.org/wiki/File:A_nude_man_poses_in_the_formal_garden_of_a_privately_owned_chateau_near_Paris.jpg
+  Commons category: Nude old men.
+  Licence: CC0.

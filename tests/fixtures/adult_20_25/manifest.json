@@ -4,314 +4,323 @@
     "age": 20,
     "license": "Public domain",
     "source": "https://commons.wikimedia.org/wiki/File:Orlov_P_N_Portret_M_A_Bek.jpg",
-    "title": "Orlov P N Portret M A Bek.jpg"
+    "title": "Orlov P N Portret M A Bek.jpg",
+    "presentation": "face-crop",
+    "attire": "clothed"
   },
   {
     "file": "a20_02.jpg",
     "age": 20,
     "license": "Public domain",
     "source": "https://commons.wikimedia.org/wiki/File:Raffaella_Carr\u00e0_(1963).jpg",
-    "title": "Raffaella Carr\u00e0 (1963).jpg"
+    "title": "Raffaella Carr\u00e0 (1963).jpg",
+    "presentation": "face-crop",
+    "attire": "clothed"
   },
   {
     "file": "a20_03.jpg",
     "age": 20,
     "license": "Public domain",
     "source": "https://commons.wikimedia.org/wiki/File:Rita_Calderoni,_circa_1972.jpg",
-    "title": "Rita Calderoni, circa 1972.jpg"
+    "title": "Rita Calderoni, circa 1972.jpg",
+    "presentation": "face-crop",
+    "attire": "clothed"
   },
   {
     "file": "a20_04.jpg",
     "age": 20,
     "license": "Public domain",
     "source": "https://commons.wikimedia.org/wiki/File:2025-09-30_Sess\u00e3o_solene_em_homenagem_aos_Influenciadores_Digitais,_014_(Rafa_Gomes).jpg",
-    "title": "2025-09-30 Sess\u00e3o solene em homenagem aos Influenciadores Digitais, 014 (Rafa Gomes).jpg"
+    "title": "2025-09-30 Sess\u00e3o solene em homenagem aos Influenciadores Digitais, 014 (Rafa Gomes).jpg",
+    "presentation": "face-crop",
+    "attire": "clothed"
   },
   {
     "file": "a20_05.jpg",
     "age": 20,
     "license": "Public domain",
     "source": "https://commons.wikimedia.org/wiki/File:Celia_Cooney_portrait,_1924.jpg",
-    "title": "Celia Cooney portrait, 1924.jpg"
+    "title": "Celia Cooney portrait, 1924.jpg",
+    "presentation": "face-crop",
+    "attire": "clothed"
   },
   {
     "file": "a20_06.jpg",
     "age": 20,
     "license": "Public domain",
     "source": "https://commons.wikimedia.org/wiki/File:Elisabeth_in_Bayern,_by_Franz_Hanfstaengl,_1857.jpg",
-    "title": "Elisabeth in Bayern, by Franz Hanfstaengl, 1857.jpg"
+    "title": "Elisabeth in Bayern, by Franz Hanfstaengl, 1857.jpg",
+    "presentation": "face-crop",
+    "attire": "clothed"
   },
   {
     "file": "a20_07.jpg",
     "age": 20,
     "license": "Public domain",
     "source": "https://commons.wikimedia.org/wiki/File:Gertrude_Elizabeth_K\u00e4sebier_1894.jpg",
-    "title": "Gertrude Elizabeth K\u00e4sebier 1894.jpg"
+    "title": "Gertrude Elizabeth K\u00e4sebier 1894.jpg",
+    "presentation": "face-crop",
+    "attire": "clothed"
   },
   {
     "file": "a20_08.jpg",
     "age": 20,
     "license": "Public domain",
     "source": "https://commons.wikimedia.org/wiki/File:Gertrude_K\u00e4sebier_at_Crecy_en_Brie,_France_LCCN2006684217.jpg",
-    "title": "Gertrude K\u00e4sebier at Crecy en Brie, France LCCN2006684217.jpg"
+    "title": "Gertrude K\u00e4sebier at Crecy en Brie, France LCCN2006684217.jpg",
+    "presentation": "face-crop",
+    "attire": "clothed"
   },
   {
     "file": "a21_09.jpg",
     "age": 21,
     "license": "Public domain",
     "source": "https://commons.wikimedia.org/wiki/File:Anna_Kournikova_DF-SD-04-04709.jpg",
-    "title": "Anna Kournikova DF-SD-04-04709.jpg"
-  },
-  {
-    "file": "a21_10.jpg",
-    "age": 21,
-    "license": "Public domain",
-    "source": "https://commons.wikimedia.org/wiki/File:Anna_Kournikova_DF-SD-04-04709_(cropped).jpg",
-    "title": "Anna Kournikova DF-SD-04-04709 (cropped).jpg"
-  },
-  {
-    "file": "a21_11.jpg",
-    "age": 21,
-    "license": "Public domain",
-    "source": "https://commons.wikimedia.org/wiki/File:Fototessera_di_Rita_Levi_Montalcini_all'atto_dell'immatricolazione_all'Universit\u00e0_(cropped).jpg",
-    "title": "Fototessera di Rita Levi Montalcini all'atto dell'immatricolazione all'Universit\u00e0 (cropped).jpg"
+    "title": "Anna Kournikova DF-SD-04-04709.jpg",
+    "presentation": "face-crop",
+    "attire": "clothed"
   },
   {
     "file": "a21_12.jpg",
     "age": 21,
     "license": "Public domain",
     "source": "https://commons.wikimedia.org/wiki/File:Fototessera_di_Rita_Levi_Montalcini_all'atto_dell'immatricolazione_all'Universit\u00e0.jpg",
-    "title": "Fototessera di Rita Levi Montalcini all'atto dell'immatricolazione all'Universit\u00e0.jpg"
+    "title": "Fototessera di Rita Levi Montalcini all'atto dell'immatricolazione all'Universit\u00e0.jpg",
+    "presentation": "face-crop",
+    "attire": "clothed"
   },
   {
     "file": "a21_13.jpg",
     "age": 21,
     "license": "Public domain",
     "source": "https://commons.wikimedia.org/wiki/File:Gabriella_Cotta_Ramusino.jpg",
-    "title": "Gabriella Cotta Ramusino.jpg"
+    "title": "Gabriella Cotta Ramusino.jpg",
+    "presentation": "face-crop",
+    "attire": "clothed"
   },
   {
     "file": "a21_14.jpg",
     "age": 21,
     "license": "Public domain",
     "source": "https://commons.wikimedia.org/wiki/File:Grace_Slick_ca._1967.jpg",
-    "title": "Grace Slick ca. 1967.jpg"
+    "title": "Grace Slick ca. 1967.jpg",
+    "presentation": "face-crop",
+    "attire": "clothed"
   },
   {
     "file": "a21_15.jpg",
     "age": 21,
     "license": "Public domain",
     "source": "https://commons.wikimedia.org/wiki/File:Kalina_J\u0119drusik_NAC.jpg",
-    "title": "Kalina J\u0119drusik NAC.jpg"
+    "title": "Kalina J\u0119drusik NAC.jpg",
+    "presentation": "face-crop",
+    "attire": "clothed"
   },
   {
     "file": "a21_16.jpg",
     "age": 21,
     "license": "Public domain",
     "source": "https://commons.wikimedia.org/wiki/File:One_and_twenty_LCCN2003680549.jpg",
-    "title": "One and twenty LCCN2003680549.jpg"
+    "title": "One and twenty LCCN2003680549.jpg",
+    "presentation": "face-crop",
+    "attire": "clothed"
   },
   {
     "file": "a22_17.jpg",
     "age": 22,
     "license": "CC0",
     "source": "https://commons.wikimedia.org/wiki/File:(Opdracht_Telegraaf)_Simone_Rooskens,_Bestanddeelnr_913-6381.jpg",
-    "title": "(Opdracht Telegraaf) Simone Rooskens, Bestanddeelnr 913-6381.jpg"
+    "title": "(Opdracht Telegraaf) Simone Rooskens, Bestanddeelnr 913-6381.jpg",
+    "presentation": "face-crop",
+    "attire": "clothed"
   },
   {
     "file": "a22_18.jpg",
     "age": 22,
     "license": "Public domain",
     "source": "https://commons.wikimedia.org/wiki/File:Beryl_Cunningham_like_a_1968_olympian_(2).jpg",
-    "title": "Beryl Cunningham like a 1968 olympian (2).jpg"
-  },
-  {
-    "file": "a22_19.jpg",
-    "age": 22,
-    "license": "Public domain",
-    "source": "https://commons.wikimedia.org/wiki/File:Beryl_Cunningham_like_a_1968_olympian_(4).jpg",
-    "title": "Beryl Cunningham like a 1968 olympian (4).jpg"
+    "title": "Beryl Cunningham like a 1968 olympian (2).jpg",
+    "presentation": "face-crop",
+    "attire": "clothed"
   },
   {
     "file": "a22_20.jpg",
     "age": 22,
     "license": "Public domain",
     "source": "https://commons.wikimedia.org/wiki/File:Stefania_Careddu_(Rome,_1967).jpg",
-    "title": "Stefania Careddu (Rome, 1967).jpg"
+    "title": "Stefania Careddu (Rome, 1967).jpg",
+    "presentation": "face-crop",
+    "attire": "clothed"
   },
   {
     "file": "a22_21.jpg",
     "age": 22,
     "license": "Public domain",
     "source": "https://commons.wikimedia.org/wiki/File:Csatay_Janka_(Strelisky-fot\u00f3,_1906).jpg",
-    "title": "Csatay Janka (Strelisky-fot\u00f3, 1906).jpg"
+    "title": "Csatay Janka (Strelisky-fot\u00f3, 1906).jpg",
+    "presentation": "face-crop",
+    "attire": "clothed"
   },
   {
     "file": "a23_22.jpg",
     "age": 23,
     "license": "Public domain",
     "source": "https://commons.wikimedia.org/wiki/File:Catherine_Spaak,_1968.jpg",
-    "title": "Catherine Spaak, 1968.jpg"
-  },
-  {
-    "file": "a23_23.jpg",
-    "age": 23,
-    "license": "Public domain",
-    "source": "https://commons.wikimedia.org/wiki/File:Catherine_Spaak,_1968_(cropped).jpg",
-    "title": "Catherine Spaak, 1968 (cropped).jpg"
+    "title": "Catherine Spaak, 1968.jpg",
+    "presentation": "face-crop",
+    "attire": "clothed"
   },
   {
     "file": "a23_24.jpg",
     "age": 23,
     "license": "Public domain",
     "source": "https://commons.wikimedia.org/wiki/File:Liliana_Ursino_(1970).jpg",
-    "title": "Liliana Ursino (1970).jpg"
-  },
-  {
-    "file": "a23_25.jpg",
-    "age": 23,
-    "license": "Public domain",
-    "source": "https://commons.wikimedia.org/wiki/File:Liliana_Ursino_(1970)_(cropped).jpg",
-    "title": "Liliana Ursino (1970) (cropped).jpg"
+    "title": "Liliana Ursino (1970).jpg",
+    "presentation": "face-crop",
+    "attire": "clothed"
   },
   {
     "file": "a23_26.jpg",
     "age": 23,
     "license": "Public domain",
     "source": "https://commons.wikimedia.org/wiki/File:Ailsa_Maxwell_codebreaker.jpg",
-    "title": "Ailsa Maxwell codebreaker.jpg"
+    "title": "Ailsa Maxwell codebreaker.jpg",
+    "presentation": "face-crop",
+    "attire": "clothed"
   },
   {
     "file": "a23_27.jpg",
     "age": 23,
     "license": "Public domain",
     "source": "https://commons.wikimedia.org/wiki/File:Andr\u00e1ssy_Tivadarn\u00e9_Zichy_Eleon\u00f3ra_(Strelisky_S\u00e1ndor_felv\u00e9tele,_1890).jpg",
-    "title": "Andr\u00e1ssy Tivadarn\u00e9 Zichy Eleon\u00f3ra (Strelisky S\u00e1ndor felv\u00e9tele, 1890).jpg"
+    "title": "Andr\u00e1ssy Tivadarn\u00e9 Zichy Eleon\u00f3ra (Strelisky S\u00e1ndor felv\u00e9tele, 1890).jpg",
+    "presentation": "face-crop",
+    "attire": "clothed"
   },
   {
     "file": "a23_28.jpg",
     "age": 23,
     "license": "Public domain",
     "source": "https://commons.wikimedia.org/wiki/File:Vicki_Draves_1948.jpg",
-    "title": "Vicki Draves 1948.jpg"
+    "title": "Vicki Draves 1948.jpg",
+    "presentation": "face-crop",
+    "attire": "clothed"
   },
   {
     "file": "a23_29.jpg",
     "age": 23,
     "license": "Public domain",
     "source": "https://commons.wikimedia.org/wiki/File:Francois_Xavier_Joseph_Jacquin_-_Portrait_of_Lady_Anna_de_Jong_van_Beek_en_Donk.jpg",
-    "title": "Francois Xavier Joseph Jacquin - Portrait of Lady Anna de Jong van Beek en Donk.jpg"
+    "title": "Francois Xavier Joseph Jacquin - Portrait of Lady Anna de Jong van Beek en Donk.jpg",
+    "presentation": "face-crop",
+    "attire": "clothed"
   },
   {
     "file": "a23_30.jpg",
     "age": 23,
     "license": "Public domain",
     "source": "https://commons.wikimedia.org/wiki/File:HildaTenorioOvacion.jpg",
-    "title": "HildaTenorioOvacion.jpg"
+    "title": "HildaTenorioOvacion.jpg",
+    "presentation": "face-crop",
+    "attire": "clothed"
   },
   {
     "file": "a24_31.jpg",
     "age": 24,
     "license": "Public domain",
     "source": "https://commons.wikimedia.org/wiki/File:Stefania_Casini,_circa_1973.jpg",
-    "title": "Stefania Casini, circa 1973.jpg"
+    "title": "Stefania Casini, circa 1973.jpg",
+    "presentation": "face-crop",
+    "attire": "clothed"
   },
   {
     "file": "a24_32.jpg",
     "age": 24,
     "license": "Public domain",
     "source": "https://commons.wikimedia.org/wiki/File:Zeudi_Araya_(Bolzano,_1975).jpg",
-    "title": "Zeudi Araya (Bolzano, 1975).jpg"
+    "title": "Zeudi Araya (Bolzano, 1975).jpg",
+    "presentation": "face-crop",
+    "attire": "clothed"
   },
   {
     "file": "a24_33.jpg",
     "age": 24,
     "license": "Public domain",
     "source": "https://commons.wikimedia.org/wiki/File:Alona_Bondarenko_in_Albuquerque_2008_(cropped).jpg",
-    "title": "Alona Bondarenko in Albuquerque 2008 (cropped).jpg"
+    "title": "Alona Bondarenko in Albuquerque 2008 (cropped).jpg",
+    "presentation": "face-crop",
+    "attire": "clothed"
   },
   {
     "file": "a24_34.jpg",
     "age": 24,
     "license": "Public domain",
     "source": "https://commons.wikimedia.org/wiki/File:La_polizia_ringrazia_(1972)_-_Laura_Belli.jpg",
-    "title": "La polizia ringrazia (1972) - Laura Belli.jpg"
-  },
-  {
-    "file": "a24_35.jpg",
-    "age": 24,
-    "license": "Public domain",
-    "source": "https://commons.wikimedia.org/wiki/File:Carole_Lombard_wearing_swimsuit_1932.jpg",
-    "title": "Carole Lombard wearing swimsuit 1932.jpg"
-  },
-  {
-    "file": "a24_36.jpg",
-    "age": 24,
-    "license": "Public domain",
-    "source": "https://commons.wikimedia.org/wiki/File:Cary_Grant-Sophia_Loren_in_Houseboat_trailer.jpg",
-    "title": "Cary Grant-Sophia Loren in Houseboat trailer.jpg"
-  },
-  {
-    "file": "a24_37.jpg",
-    "age": 24,
-    "license": "Public domain",
-    "source": "https://commons.wikimedia.org/wiki/File:Hastings_Gilford_62.jpg",
-    "title": "Hastings Gilford 62.jpg"
+    "title": "La polizia ringrazia (1972) - Laura Belli.jpg",
+    "presentation": "face-crop",
+    "attire": "clothed"
   },
   {
     "file": "a25_38.jpg",
     "age": 25,
     "license": "Public domain",
     "source": "https://commons.wikimedia.org/wiki/File:Agneta_Lind\u00e9n_1974.jpg",
-    "title": "Agneta Lind\u00e9n 1974.jpg"
+    "title": "Agneta Lind\u00e9n 1974.jpg",
+    "presentation": "face-crop",
+    "attire": "clothed"
   },
   {
     "file": "a25_39.jpg",
     "age": 25,
     "license": "Public domain",
     "source": "https://commons.wikimedia.org/wiki/File:Aretha_Franklin_1968.jpg",
-    "title": "Aretha Franklin 1968.jpg"
-  },
-  {
-    "file": "a25_40.jpg",
-    "age": 25,
-    "license": "Public domain",
-    "source": "https://commons.wikimedia.org/wiki/File:Edwige_Fenech_-_\u201cLa_signora_gioca_bene_a_scopa\u201d_(1974).jpg",
-    "title": "Edwige Fenech - \u201cLa signora gioca bene a scopa\u201d (1974).jpg"
+    "title": "Aretha Franklin 1968.jpg",
+    "presentation": "face-crop",
+    "attire": "clothed"
   },
   {
     "file": "a25_41.jpg",
     "age": 25,
     "license": "Public domain",
     "source": "https://commons.wikimedia.org/wiki/File:F_lewin.jpg",
-    "title": "F lewin.jpg"
+    "title": "F lewin.jpg",
+    "presentation": "face-crop",
+    "attire": "clothed"
   },
   {
     "file": "a25_42.jpg",
     "age": 25,
     "license": "Public domain",
     "source": "https://commons.wikimedia.org/wiki/File:GehanaVasisth_(cropped).jpg",
-    "title": "GehanaVasisth (cropped).jpg"
+    "title": "GehanaVasisth (cropped).jpg",
+    "presentation": "face-crop",
+    "attire": "clothed"
   },
   {
     "file": "a25_43.jpg",
     "age": 25,
     "license": "Public domain",
     "source": "https://commons.wikimedia.org/wiki/File:Kaiserin_Elisabeth_1862.jpg",
-    "title": "Kaiserin Elisabeth 1862.jpg"
+    "title": "Kaiserin Elisabeth 1862.jpg",
+    "presentation": "face-crop",
+    "attire": "clothed"
   },
   {
     "file": "a25_44.jpg",
     "age": 25,
     "license": "Public domain",
     "source": "https://commons.wikimedia.org/wiki/File:Leila_Kanaan.jpg",
-    "title": "Leila Kanaan.jpg"
+    "title": "Leila Kanaan.jpg",
+    "presentation": "face-crop",
+    "attire": "clothed"
   },
   {
     "file": "a25_45.jpg",
     "age": 25,
     "license": "CC0",
     "source": "https://commons.wikimedia.org/wiki/File:Liesbeth_List_naar_Rio_de_Janeiro_._Hier_tijdens_persconferentie_op_Schiphol,_Bestanddeelnr_920-7916.jpg",
-    "title": "Liesbeth List naar Rio de Janeiro . Hier tijdens persconferentie op Schiphol, Bestanddeelnr 920-7916.jpg"
+    "title": "Liesbeth List naar Rio de Janeiro . Hier tijdens persconferentie op Schiphol, Bestanddeelnr 920-7916.jpg",
+    "presentation": "face-crop",
+    "attire": "clothed"
   }
 ]

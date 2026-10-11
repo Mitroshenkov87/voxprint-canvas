@@ -1,93 +1,77 @@
-Public-domain and CC0 portraits whose Commons category states an age from 20 to 25.
-The age is the category age, not an estimate. These copies are resized for the real-weight check.
+Face crops of public-domain and CC0 portraits whose Commons category states an age from 20 to 25.
+The portraits are clothed or neutral. The age is the category age, not an estimate.
+Each file is that portrait's face, with a margin around the box.
+Swimwear, duplicate frames of the same photograph, and a misfiled medical photograph are not included.
 
-a20_01.jpg  age 20  Public domain
+a20_01.jpg  age 20  Public domain  face crop, clothed
   https://commons.wikimedia.org/wiki/File:Orlov_P_N_Portret_M_A_Bek.jpg
-a20_02.jpg  age 20  Public domain
+a20_02.jpg  age 20  Public domain  face crop, clothed
   https://commons.wikimedia.org/wiki/File:Raffaella_Carrà_(1963).jpg
-a20_03.jpg  age 20  Public domain
+a20_03.jpg  age 20  Public domain  face crop, clothed
   https://commons.wikimedia.org/wiki/File:Rita_Calderoni,_circa_1972.jpg
-a20_04.jpg  age 20  Public domain
+a20_04.jpg  age 20  Public domain  face crop, clothed
   https://commons.wikimedia.org/wiki/File:2025-09-30_Sessão_solene_em_homenagem_aos_Influenciadores_Digitais,_014_(Rafa_Gomes).jpg
-a20_05.jpg  age 20  Public domain
+a20_05.jpg  age 20  Public domain  face crop, clothed
   https://commons.wikimedia.org/wiki/File:Celia_Cooney_portrait,_1924.jpg
-a20_06.jpg  age 20  Public domain
+a20_06.jpg  age 20  Public domain  face crop, clothed
   https://commons.wikimedia.org/wiki/File:Elisabeth_in_Bayern,_by_Franz_Hanfstaengl,_1857.jpg
-a20_07.jpg  age 20  Public domain
+a20_07.jpg  age 20  Public domain  face crop, clothed
   https://commons.wikimedia.org/wiki/File:Gertrude_Elizabeth_Käsebier_1894.jpg
-a20_08.jpg  age 20  Public domain
+a20_08.jpg  age 20  Public domain  face crop, clothed
   https://commons.wikimedia.org/wiki/File:Gertrude_Käsebier_at_Crecy_en_Brie,_France_LCCN2006684217.jpg
-a21_09.jpg  age 21  Public domain
+a21_09.jpg  age 21  Public domain  face crop, clothed
   https://commons.wikimedia.org/wiki/File:Anna_Kournikova_DF-SD-04-04709.jpg
-a21_10.jpg  age 21  Public domain
-  https://commons.wikimedia.org/wiki/File:Anna_Kournikova_DF-SD-04-04709_(cropped).jpg
-a21_11.jpg  age 21  Public domain
-  https://commons.wikimedia.org/wiki/File:Fototessera_di_Rita_Levi_Montalcini_all'atto_dell'immatricolazione_all'Università_(cropped).jpg
-a21_12.jpg  age 21  Public domain
+a21_12.jpg  age 21  Public domain  face crop, clothed
   https://commons.wikimedia.org/wiki/File:Fototessera_di_Rita_Levi_Montalcini_all'atto_dell'immatricolazione_all'Università.jpg
-a21_13.jpg  age 21  Public domain
+a21_13.jpg  age 21  Public domain  face crop, clothed
   https://commons.wikimedia.org/wiki/File:Gabriella_Cotta_Ramusino.jpg
-a21_14.jpg  age 21  Public domain
+a21_14.jpg  age 21  Public domain  face crop, clothed
   https://commons.wikimedia.org/wiki/File:Grace_Slick_ca._1967.jpg
-a21_15.jpg  age 21  Public domain
+a21_15.jpg  age 21  Public domain  face crop, clothed
   https://commons.wikimedia.org/wiki/File:Kalina_Jędrusik_NAC.jpg
-a21_16.jpg  age 21  Public domain
+a21_16.jpg  age 21  Public domain  face crop, clothed
   https://commons.wikimedia.org/wiki/File:One_and_twenty_LCCN2003680549.jpg
-a22_17.jpg  age 22  CC0
+a22_17.jpg  age 22  CC0  face crop, clothed
   https://commons.wikimedia.org/wiki/File:(Opdracht_Telegraaf)_Simone_Rooskens,_Bestanddeelnr_913-6381.jpg
-a22_18.jpg  age 22  Public domain
+a22_18.jpg  age 22  Public domain  face crop, clothed
   https://commons.wikimedia.org/wiki/File:Beryl_Cunningham_like_a_1968_olympian_(2).jpg
-a22_19.jpg  age 22  Public domain
-  https://commons.wikimedia.org/wiki/File:Beryl_Cunningham_like_a_1968_olympian_(4).jpg
-a22_20.jpg  age 22  Public domain
+a22_20.jpg  age 22  Public domain  face crop, clothed
   https://commons.wikimedia.org/wiki/File:Stefania_Careddu_(Rome,_1967).jpg
-a22_21.jpg  age 22  Public domain
+a22_21.jpg  age 22  Public domain  face crop, clothed
   https://commons.wikimedia.org/wiki/File:Csatay_Janka_(Strelisky-fotó,_1906).jpg
-a23_22.jpg  age 23  Public domain
+a23_22.jpg  age 23  Public domain  face crop, clothed
   https://commons.wikimedia.org/wiki/File:Catherine_Spaak,_1968.jpg
-a23_23.jpg  age 23  Public domain
-  https://commons.wikimedia.org/wiki/File:Catherine_Spaak,_1968_(cropped).jpg
-a23_24.jpg  age 23  Public domain
+a23_24.jpg  age 23  Public domain  face crop, clothed
   https://commons.wikimedia.org/wiki/File:Liliana_Ursino_(1970).jpg
-a23_25.jpg  age 23  Public domain
-  https://commons.wikimedia.org/wiki/File:Liliana_Ursino_(1970)_(cropped).jpg
-a23_26.jpg  age 23  Public domain
+a23_26.jpg  age 23  Public domain  face crop, clothed
   https://commons.wikimedia.org/wiki/File:Ailsa_Maxwell_codebreaker.jpg
-a23_27.jpg  age 23  Public domain
+a23_27.jpg  age 23  Public domain  face crop, clothed
   https://commons.wikimedia.org/wiki/File:Andrássy_Tivadarné_Zichy_Eleonóra_(Strelisky_Sándor_felvétele,_1890).jpg
-a23_28.jpg  age 23  Public domain
+a23_28.jpg  age 23  Public domain  face crop, clothed
   https://commons.wikimedia.org/wiki/File:Vicki_Draves_1948.jpg
-a23_29.jpg  age 23  Public domain
+a23_29.jpg  age 23  Public domain  face crop, clothed
   https://commons.wikimedia.org/wiki/File:Francois_Xavier_Joseph_Jacquin_-_Portrait_of_Lady_Anna_de_Jong_van_Beek_en_Donk.jpg
-a23_30.jpg  age 23  Public domain
+a23_30.jpg  age 23  Public domain  face crop, clothed
   https://commons.wikimedia.org/wiki/File:HildaTenorioOvacion.jpg
-a24_31.jpg  age 24  Public domain
+a24_31.jpg  age 24  Public domain  face crop, clothed
   https://commons.wikimedia.org/wiki/File:Stefania_Casini,_circa_1973.jpg
-a24_32.jpg  age 24  Public domain
+a24_32.jpg  age 24  Public domain  face crop, clothed
   https://commons.wikimedia.org/wiki/File:Zeudi_Araya_(Bolzano,_1975).jpg
-a24_33.jpg  age 24  Public domain
+a24_33.jpg  age 24  Public domain  face crop, clothed
   https://commons.wikimedia.org/wiki/File:Alona_Bondarenko_in_Albuquerque_2008_(cropped).jpg
-a24_34.jpg  age 24  Public domain
+a24_34.jpg  age 24  Public domain  face crop, clothed
   https://commons.wikimedia.org/wiki/File:La_polizia_ringrazia_(1972)_-_Laura_Belli.jpg
-a24_35.jpg  age 24  Public domain
-  https://commons.wikimedia.org/wiki/File:Carole_Lombard_wearing_swimsuit_1932.jpg
-a24_36.jpg  age 24  Public domain
-  https://commons.wikimedia.org/wiki/File:Cary_Grant-Sophia_Loren_in_Houseboat_trailer.jpg
-a24_37.jpg  age 24  Public domain
-  https://commons.wikimedia.org/wiki/File:Hastings_Gilford_62.jpg
-a25_38.jpg  age 25  Public domain
+a25_38.jpg  age 25  Public domain  face crop, clothed
   https://commons.wikimedia.org/wiki/File:Agneta_Lindén_1974.jpg
-a25_39.jpg  age 25  Public domain
+a25_39.jpg  age 25  Public domain  face crop, clothed
   https://commons.wikimedia.org/wiki/File:Aretha_Franklin_1968.jpg
-a25_40.jpg  age 25  Public domain
-  https://commons.wikimedia.org/wiki/File:Edwige_Fenech_-_“La_signora_gioca_bene_a_scopa”_(1974).jpg
-a25_41.jpg  age 25  Public domain
+a25_41.jpg  age 25  Public domain  face crop, clothed
   https://commons.wikimedia.org/wiki/File:F_lewin.jpg
-a25_42.jpg  age 25  Public domain
+a25_42.jpg  age 25  Public domain  face crop, clothed
   https://commons.wikimedia.org/wiki/File:GehanaVasisth_(cropped).jpg
-a25_43.jpg  age 25  Public domain
+a25_43.jpg  age 25  Public domain  face crop, clothed
   https://commons.wikimedia.org/wiki/File:Kaiserin_Elisabeth_1862.jpg
-a25_44.jpg  age 25  Public domain
+a25_44.jpg  age 25  Public domain  face crop, clothed
   https://commons.wikimedia.org/wiki/File:Leila_Kanaan.jpg
-a25_45.jpg  age 25  CC0
+a25_45.jpg  age 25  CC0  face crop, clothed
   https://commons.wikimedia.org/wiki/File:Liesbeth_List_naar_Rio_de_Janeiro_._Hier_tijdens_persconferentie_op_Schiphol,_Bestanddeelnr_920-7916.jpg

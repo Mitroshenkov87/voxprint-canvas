@@ -111,11 +111,11 @@ def _raw(path: Path) -> RawImage:
 
 def _trace(gate: AgeGate, raw: RawImage) -> str:
     faces = list(gate._stack.faces.detect(raw))
-    under = [round(float(value), 4) for value in gate._stack.ages.estimate(raw, faces)]
+    bands = [(round(float(left), 4), round(float(right), 4)) for left, right in gate._stack.ages.estimate(raw, faces)]
     nsfw = float(gate._stack.nsfw.sexual_score(raw))
     scores = gate._stack.zeroshot.score_image(raw, IMAGE_LABELS)
     shown = {label: round(float(scores[label]), 4) for label in IMAGE_LABELS}
-    return f"faces={len(faces)} nsfw={nsfw:.4f} under18={under} scores={shown}"
+    return f"faces={len(faces)} nsfw={nsfw:.4f} bands={bands} scores={shown}"
 
 
 def _must_pass(gate: AgeGate, path: Path) -> None:
@@ -134,8 +134,17 @@ def test_real_image_gate_accepts_a_public_domain_adult_portrait():
 
 
 def test_real_image_gate_accepts_public_domain_adult_figures():
+    """These pictures are clearly adult: a stated age of at least 25, or an older-adult category."""
+    manifest = json.loads((ADULT_CC0 / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest
+    for item in manifest:
+        age = item["documented_age"]
+        if age is None:
+            assert item["age_basis"] == "Category:Nude old men"
+        else:
+            assert int(age) >= 25
     paths = sorted(path for path in ADULT_CC0.iterdir() if path.suffix.lower() in _IMAGE_SUFFIXES)
-    assert paths, "adult public-domain fixtures are missing"
+    assert {path.name for path in paths} == {item["file"] for item in manifest}
     gate = _gate()
     for path in paths:
         _must_pass(gate, path)
@@ -158,15 +167,18 @@ def _summary(stated: float, plain: float, child: float, counted: int) -> None:
 
 
 def test_young_adult_false_block_rate_and_child_probes():
-    """Sexual content is assumed so a clothed portrait still exercises the age bands.
+    """The pictures are clothed face crops. The test supplies a sexual score.
 
-    The documented age is the Commons category age. A stated age of 20 or more can
-    support the 16-17 band. The same pictures are also scored with no stated age.
-    Both rates have to stay at or under 5 percent. Every child prompt still blocks.
+    The age check reads the face crop, so this rate does not use a sexual picture
+    of a 20-25 subject. The documented age is the Commons category age. A stated
+    age of 20 or more can support the 16-17 band. The same pictures are also
+    scored with no stated age. Both rates have to stay at or under 5 percent.
+    Every child prompt still blocks.
     """
     manifest = json.loads((YOUNG_ADULTS / "manifest.json").read_text(encoding="utf-8"))
     assert len(manifest) >= 20
     assert {int(item["age"]) for item in manifest} >= set(range(20, 26))
+    assert all(item["attire"] == "clothed" and item["presentation"] == "face-crop" for item in manifest)
     gate = _gate()
     stated_blocks: list[str] = []
     plain_blocks: list[str] = []

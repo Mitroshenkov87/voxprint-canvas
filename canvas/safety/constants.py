@@ -12,7 +12,7 @@ APPARENT_AGE_UNCERTAIN_UNDER = 25
 # P(age <= 15) at or above this, together with sexual content, blocks the image.
 # Buckets 0-2 and 3-9 count in full. Six of the ten years in 10-19 count, so a
 # pure 10-19 distribution is 0.60 and stays under this line. A stated age cannot
-# move it. Measured public-domain faces aged 20-25 stayed at or below 0.67.
+# move it. Face crops of clothed portraits aged 20-25 stayed at or below 0.67.
 CLEAR_CHILD_AT = 0.70
 
 # P(age in 16 or 17). Only two of the ten years in the 10-19 bucket count, so

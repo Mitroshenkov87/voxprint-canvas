@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Callable, NamedTuple
 
-from PySide6.QtCore import Qt, QLocale, QPointF, QRectF, QSize, QUrl
+from PySide6.QtCore import Qt, QPointF, QRectF, QSize, QUrl
 from PySide6.QtGui import (
     QBrush,
     QColor,
@@ -30,8 +30,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from canvas.app.i18n import text
-from canvas.app.info import APP_NAME, ENLARGE_HINT, ENLARGE_RELEASES, RESPONSIBILITY, THIRD_PARTY_NOTICE
+from canvas.app.info import (
+    APP_NAME,
+    ENLARGE_HINT,
+    ENLARGE_RELEASES,
+    INSTRUCTION_EDIT_UNAVAILABLE,
+    RESPONSIBILITY,
+    THIRD_PARTY_NOTICE,
+)
 from canvas.models.features import instruction_edit_available
 from canvas.ui.about import AboutDialog
 from canvas.ui.icons import load_approved
@@ -90,7 +96,7 @@ class MainWindow(QWidget):
                 self.image_mode.addItem(_LABELS[mode], mode)
         self._instruction_ready = instruction_edit_available()
         self._set_instruction_enabled(self._instruction_ready)
-        self.instruction_note = QLabel(text("instruction_edit_unavailable", QLocale.system().name()))
+        self.instruction_note = QLabel(INSTRUCTION_EDIT_UNAVAILABLE)
         self.instruction_note.setObjectName("instruction-note")
         self.instruction_note.setWordWrap(True)
         self.instruction_note.setVisible(not self._instruction_ready)

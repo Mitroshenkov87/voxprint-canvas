@@ -10,8 +10,7 @@ from PIL import Image
 from PySide6.QtWidgets import QApplication
 
 from canvas.app.identity import version_label
-from canvas.app.i18n import text
-from canvas.app.info import APP_NAME, APP_VERSION
+from canvas.app.info import APP_NAME, APP_VERSION, INSTRUCTION_EDIT_UNAVAILABLE
 from canvas.app.platform import GpuCheck, check_gpu, current_os_check
 from canvas.app.selftest import selftest_report
 from canvas.app.updates import check_for_update
@@ -411,9 +410,9 @@ def _confirm(window: MainWindow | None, notice: str) -> bool:
 
 
 def _feature_unavailable(as_json: bool) -> int:
-    """Exit 4. JSON uses the English note; a plain run prints that same note."""
+    """Exit 4. JSON and a plain run both use the English note."""
     flag = instruction_edit_flag()
-    message = text("instruction_edit_unavailable", "en")
+    message = INSTRUCTION_EDIT_UNAVAILABLE
     body = {
         "ok": False,
         "error": "feature_unavailable",

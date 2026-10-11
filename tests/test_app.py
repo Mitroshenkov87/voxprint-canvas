@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from canvas.app.i18n import INSTRUCTION_EDIT_UNAVAILABLE_EN
+from canvas.app.info import INSTRUCTION_EDIT_UNAVAILABLE
 from canvas.app.info import RELEASES_API
 from canvas.app.main import main
 from canvas.app.platform import GpuCheck, OsCheck
@@ -326,7 +326,7 @@ def test_edit_instruction_reports_feature_unavailable(capsys, tmp_path):
         "error": "feature_unavailable",
         "feature": "instruction_edit",
         "reason": "model_in_preparation",
-        "message": INSTRUCTION_EDIT_UNAVAILABLE_EN,
+        "message": INSTRUCTION_EDIT_UNAVAILABLE,
     }
     plain = main([
         "generate",
@@ -340,7 +340,7 @@ def test_edit_instruction_reports_feature_unavailable(capsys, tmp_path):
     captured = capsys.readouterr()
     assert plain == 4
     assert captured.out == ""
-    assert INSTRUCTION_EDIT_UNAVAILABLE_EN in captured.err
+    assert INSTRUCTION_EDIT_UNAVAILABLE in captured.err
 
 
 def test_generate_command_refuses_an_unsupported_machine(capsys):

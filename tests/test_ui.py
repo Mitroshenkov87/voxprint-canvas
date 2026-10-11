@@ -11,7 +11,14 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLabel, QMessageBox, QPlainTextEdit, QTabWidget
 
 from canvas.app.identity import splash_line, version_label
-from canvas.app.info import APP_NAME, ENLARGE_HINT, ENLARGE_RELEASES, RESPONSIBILITY, THIRD_PARTY_NOTICE
+from canvas.app.info import (
+    APP_NAME,
+    ENLARGE_HINT,
+    ENLARGE_RELEASES,
+    INSTRUCTION_EDIT_UNAVAILABLE,
+    RESPONSIBILITY,
+    THIRD_PARTY_NOTICE,
+)
 from canvas.core.formats import OutputFormat
 from canvas.models.modes import Mode, Tier
 from canvas.models.sizes import ASPECT_GROUPS
@@ -77,6 +84,16 @@ def test_instruction_edit_control_follows_the_feature_flag(app, monkeypatch):
     window.close()
 
 
+def test_instruction_note_stays_english_on_a_russian_locale(app, monkeypatch):
+    del app
+    monkeypatch.setenv("LC_ALL", "ru_RU.UTF-8")
+    monkeypatch.setenv("LANG", "ru_RU.UTF-8")
+    monkeypatch.setenv("LC_MESSAGES", "ru_RU.UTF-8")
+    window = MainWindow(lambda prompt, mode, fmt: "ok", Tier.GB16)
+    assert window.instruction_note.text() == INSTRUCTION_EDIT_UNAVAILABLE
+    window.close()
+
+
 def test_16gb_offers_instruction_and_hides_creative(app):
     del app
     window = MainWindow(lambda prompt, mode, fmt: "ok", Tier.GB16)
@@ -90,7 +107,7 @@ def test_16gb_offers_instruction_and_hides_creative(app):
     window.show()
     tabs.setCurrentIndex(1)
     assert window.instruction_note.isVisible()
-    assert window.instruction_note.text()
+    assert window.instruction_note.text() == INSTRUCTION_EDIT_UNAVAILABLE
     assert "Creative" not in _labels(window.creative)
     formats = _labels(window.format_box)
     assert formats == ["AVIF", "JPEG XL", "WebP"]
@@ -152,6 +169,7 @@ def test_24gb_offers_creative_and_instruction_and_reports_status(app):
     window.show()
     tabs.setCurrentIndex(1)
     assert window.instruction_note.isVisible()
+    assert window.instruction_note.text() == INSTRUCTION_EDIT_UNAVAILABLE
     tabs.setCurrentIndex(0)
     window.prompt.setPlainText("a red boat")
     window.generate_button.click()

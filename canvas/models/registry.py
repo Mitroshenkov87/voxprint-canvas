@@ -201,7 +201,7 @@ def load_catalog(path: Path | None = None) -> Catalog:
         if any(item in marker or item in spec.id.casefold() for item in FORBIDDEN_MODEL_MARKERS):
             raise RegistryError("a listed model is not allowed")
         if spec.status == "disabled":
-            if spec.files:
+            if spec.files and (not spec.pinned() or spec.licence.casefold() not in _ALLOWED_LICENCES):
                 raise RegistryError("a disabled model cannot list weights")
             if spec.licence.casefold() not in _ALLOWED_LICENCES | {"unconfirmed"}:
                 raise RegistryError("a listed model is not Apache-2.0 or MIT")

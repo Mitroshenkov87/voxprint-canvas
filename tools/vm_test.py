@@ -142,14 +142,19 @@ def _run(
     allocated: list[int] | None = None,
     seconds: dict[str, float] | None = None,
 ) -> int:
-    selftest = _selftest(canvas, checks, _cap_prefix(cap_gb), _child_env(cap_gb))
+    selftest, report = _selftest(canvas, checks, _cap_prefix(cap_gb), _child_env(cap_gb))
     if selftest != 0:
         return selftest
     if mode == "vram-cap":
         if cap_gb is None:
             checks.append({"name": "vram-cap", "ok": False, "detail": "missing cap"})
             return 2
-        return _run_cap(canvas, folder, checks, cap_gb, allocated if allocated is not None else [0], seconds if seconds is not None else {})
+        return _run_cap(
+            canvas, folder, checks, cap_gb,
+            allocated if allocated is not None else [0],
+            seconds if seconds is not None else {},
+            report,
+        )
     pictures = folder / "pictures"
     pictures.mkdir(exist_ok=True)
     jobs: tuple[tuple[str, str, str, str, str], ...]
@@ -181,34 +186,39 @@ def _selftest(
     checks: list[dict[str, object]],
     prefix: list[str] | None = None,
     env: dict[str, str] | None = None,
-) -> int:
+) -> tuple[int, dict[str, object]]:
     command = [str(canvas), *(prefix or []), "--selftest", "--json"]
     try:
         proc = subprocess.run(command, capture_output=True, text=True, timeout=7200, check=False, env=env)
     except (OSError, subprocess.TimeoutExpired) as exc:
         checks.append({"name": "selftest", "ok": False, "detail": str(exc)})
-        return 2
+        return 2, {}
     if proc.returncode not in (0, 2) or not proc.stdout.strip():
         checks.append({"name": "selftest", "ok": False, "detail": proc.stderr.strip() or proc.stdout.strip()})
-        return 2 if proc.returncode == 2 else 1
+        return (2 if proc.returncode == 2 else 1), {}
     try:
         report = json.loads(proc.stdout)
     except json.JSONDecodeError:
         checks.append({"name": "selftest", "ok": False, "detail": "selftest did not print JSON"})
-        return 2
-    gpu = report.get("gpu") if isinstance(report.get("gpu"), dict) else {}
-    system = report.get("os") if isinstance(report.get("os"), dict) else {}
+        return 2, {}
+    if not isinstance(report, dict):
+        checks.append({"name": "selftest", "ok": False, "detail": "selftest did not print JSON"})
+        return 2, {}
+    gpu_value = report.get("gpu")
+    system_value = report.get("os")
+    gpu = gpu_value if isinstance(gpu_value, dict) else {}
+    system = system_value if isinstance(system_value, dict) else {}
     if not gpu.get("ok"):
         checks.append({"name": "selftest", "ok": False, "detail": str(gpu.get("message") or "no GPU")})
-        return 3
+        return 3, report
     if not system.get("ok"):
         checks.append({"name": "selftest", "ok": False, "detail": str(system.get("message") or "setup")})
-        return 2
+        return 2, report
     if not report.get("ok"):
         checks.append({"name": "selftest", "ok": False, "detail": "a recorded file or a loaded check failed"})
-        return 1
+        return 1, report
     checks.append({"name": "selftest", "ok": True, "detail": ""})
-    return 0
+    return 0, report
 
 
 def _expect_ok(canvas: Path, checks: list[dict[str, object]], name: str, prompt: str, aspect: str, size: str, dest: Path) -> bool:
@@ -249,12 +259,49 @@ def _cap_prefix(cap: float | None) -> list[str]:
     return ["--vram-cap-gb", _cap_text(cap)]
 
 
-def _child_env(cap: float | None) -> dict[str, str] | None:
+def _child_env(cap: float | None, edit_route: str | None = None) -> dict[str, str] | None:
     if cap is None:
         return None
     env = os.environ.copy()
     env["CANVAS_VRAM_CAP_GB"] = _cap_text(cap)
+    if edit_route:
+        env["CANVAS_EDIT_ROUTE"] = edit_route
+    else:
+        env.pop("CANVAS_EDIT_ROUTE", None)
     return env
+
+
+def edit_comparisons(int4_on_disk: bool) -> tuple[tuple[str, str | None], ...]:
+    """Edit jobs for a 16 GB cap.
+
+    When the INT4 route is on disk, the first job follows the automatic route
+    and the second forces the FP8 offload path. Otherwise the only edit job
+    is the FP8 path, so a missing INT4 pack is not reported as an INT4 run.
+    """
+    if int4_on_disk:
+        return (("qwen-edit", None), ("qwen-edit-fp8", "fp8"))
+    return (("qwen-edit", "fp8"),)
+
+
+def _route_16(report: dict[str, object]) -> dict[str, object]:
+    edit = report.get("edit_route")
+    if not isinstance(edit, dict):
+        return {}
+    row = edit.get("16gb")
+    if not isinstance(row, dict):
+        return {}
+    return row
+
+
+def _int4_on_disk(route: dict[str, object]) -> bool:
+    return route.get("quant") == "int4" and route.get("on_disk") is True
+
+
+def _replace_out(args: list[str], dest: Path) -> list[str]:
+    out = list(args)
+    if "--out" in out:
+        out[out.index("--out") + 1] = str(dest)
+    return out
 
 
 def vram_cap_jobs(pictures: Path, cap: float) -> tuple[tuple[str, Path, list[str]], ...]:
@@ -302,32 +349,60 @@ def _run_cap(
     cap: float,
     allocated: list[int],
     seconds: dict[str, float],
+    report: dict[str, object] | None = None,
 ) -> int:
     pictures = folder / "pictures"
     pictures.mkdir(exist_ok=True)
     _write_mask(pictures / "mask.png")
     env = _child_env(cap)
+    int4 = _int4_on_disk(_route_16(report or {}))
     failed = False
     for name, dest, args in vram_cap_jobs(pictures, cap):
         if name == "qwen-edit" and not instruction_edit_available():
             checks.append({"name": name, "ok": True, "detail": "unavailable"})
             continue
-        proc, body = _invoke(canvas, args, env)
-        _collect_sample(name, body, allocated, seconds)
-        ok = proc.returncode == 0 and dest.is_file()
-        detail = "" if ok else (proc.stdout.strip() or proc.stderr.strip())
-        if ok and name in seconds:
-            detail = f"{seconds[name]:.3f} s/image"
-        checks.append({
-            "name": name,
-            "ok": ok,
-            "detail": detail,
-            "seconds_per_image": seconds.get(name),
-            "peak_allocated_bytes": body.get("peak_allocated_bytes"),
-        })
-        if not ok:
-            failed = True
+        if name != "qwen-edit":
+            if not _record_cap_job(canvas, checks, name, dest, args, env, allocated, seconds):
+                failed = True
+            continue
+        for job_name, route_env in edit_comparisons(int4):
+            job_dest = dest if job_name == "qwen-edit" else dest.with_name("edit-fp8.avif")
+            job_env = _child_env(cap, route_env)
+            if not _record_cap_job(
+                canvas, checks, job_name, job_dest, _replace_out(args, job_dest), job_env, allocated, seconds,
+            ):
+                failed = True
     return 1 if failed else 0
+
+
+def _record_cap_job(
+    canvas: Path,
+    checks: list[dict[str, object]],
+    name: str,
+    dest: Path,
+    args: list[str],
+    env: dict[str, str] | None,
+    allocated: list[int],
+    seconds: dict[str, float],
+) -> bool:
+    """Run one capped job and store seconds per image and peak allocated bytes."""
+    proc, body = _invoke(canvas, args, env)
+    _collect_sample(name, body, allocated, seconds)
+    ok = proc.returncode == 0 and dest.is_file()
+    detail = "" if ok else (proc.stdout.strip() or proc.stderr.strip())
+    if ok and name in seconds:
+        detail = f"{seconds[name]:.3f} s/image"
+    row: dict[str, object] = {
+        "name": name,
+        "ok": ok,
+        "detail": detail,
+        "seconds_per_image": seconds.get(name),
+        "peak_allocated_bytes": body.get("peak_allocated_bytes"),
+    }
+    if name.startswith("qwen-edit"):
+        row["edit_route"] = body.get("edit_route", "")
+    checks.append(row)
+    return ok
 
 
 def _invoke(

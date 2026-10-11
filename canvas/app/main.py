@@ -269,6 +269,7 @@ def _generate(args: argparse.Namespace) -> int:
     if args.enhance and mode is not Mode.TEXT:
         return _emit({"ok": False, "error": "Enhance applies to a prompt."}, as_json, 2)
     outcome: EnhanceResult | None = None
+    edit_route = ""
     active = text
     reset_image_seconds()
     progress = lambda message: print(message, file=sys.stderr)
@@ -286,6 +287,8 @@ def _generate(args: argparse.Namespace) -> int:
         screened = gate.release_request(active, mode.value, source)
         try:
             plan = build_plan(catalog, screened, gpu.tier)
+            if mode is Mode.INSTRUCTION:
+                edit_route = plan.model_id
         finally:
             screened.wipe()
         ensure_plan(catalog, plan, progress, confirm=None)
@@ -303,7 +306,11 @@ def _generate(args: argparse.Namespace) -> int:
         return _emit({"ok": False, "error": str(exc)}, as_json, 1)
     if outcome is not None and outcome.fallback and not as_json:
         print(fallback_message(outcome), file=sys.stderr)
-    return _emit(_generate_payload(path, text, outcome, time.perf_counter() - started), as_json, 0)
+    return _emit(
+        _generate_payload(path, text, outcome, time.perf_counter() - started, edit_route=edit_route),
+        as_json,
+        0,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -353,7 +360,9 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def _generate_payload(path: Path, original: str, outcome: EnhanceResult | None, seconds: float) -> dict[str, object]:
+def _generate_payload(
+    path: Path, original: str, outcome: EnhanceResult | None, seconds: float, *, edit_route: str = "",
+) -> dict[str, object]:
     """JSON body for one generate command. Both prompts are present when enhancing."""
     if outcome is None:
         body: dict[str, object] = {
@@ -380,6 +389,8 @@ def _generate_payload(path: Path, original: str, outcome: EnhanceResult | None, 
     peak = peak_allocated_bytes()
     if peak is not None:
         body["peak_allocated_bytes"] = peak
+    if edit_route:
+        body["edit_route"] = edit_route
     return body
 
 

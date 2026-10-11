@@ -37,12 +37,23 @@ def weight_dir(root: Path, repo: str, *, fallback: bool = False) -> Path:
     return root / name
 
 
+def snapshot_repo(spec: ModelSpec) -> str:
+    """Folder key for one registry row.
+
+    INT4 ranks of one upstream repo keep separate trees, so downloading r256
+    does not leave r128 looking incomplete.
+    """
+    if spec.quant == "int4" and spec.id:
+        return f"{spec.repo}/{spec.id}"
+    return spec.repo
+
+
 def snapshot_status(spec: ModelSpec, root: Path, cache: VerifiedCache | None = None) -> str:
     """``ready``, ``not_downloaded``, ``incomplete``, or ``hash_mismatch``."""
-    primary = _folder_status(weight_dir(root, spec.repo), spec.files, cache)
+    primary = _folder_status(weight_dir(root, snapshot_repo(spec)), spec.files, cache)
     fallback = "not_downloaded"
     if spec.fallback_files:
-        fallback = _folder_status(weight_dir(root, spec.repo, fallback=True), spec.fallback_files, cache)
+        fallback = _folder_status(weight_dir(root, snapshot_repo(spec), fallback=True), spec.fallback_files, cache)
     if primary == "ready" or fallback == "ready":
         return "ready"
     for state in (primary, fallback):
@@ -74,11 +85,11 @@ def _folder_status(folder: Path, files: dict[str, str], cache: VerifiedCache | N
 
 def snapshot_ready(spec: ModelSpec, root: Path, cache: VerifiedCache | None = None) -> Path | None:
     """The local folder whose files match the pin, or None when none does."""
-    primary = weight_dir(root, spec.repo)
+    primary = weight_dir(root, snapshot_repo(spec))
     if _complete(primary, spec.files, cache):
         return primary
     if spec.fallback_files:
-        other = weight_dir(root, spec.repo, fallback=True)
+        other = weight_dir(root, snapshot_repo(spec), fallback=True)
         if _complete(other, spec.fallback_files, cache):
             return other
     return None
@@ -90,13 +101,13 @@ def download_snapshot(
     """Fetch the first snapshot whose files can all be verified."""
     if withheld_from_setup(spec) or spec.status == "disabled":
         raise SnapshotError("this model is not available for download")
-    primary = weight_dir(root, spec.repo)
+    primary = weight_dir(root, snapshot_repo(spec))
     try:
         _fill(spec, primary, spec.files, spec.revision, fallback=False, progress=progress)
     except SnapshotError as primary_error:
         if not spec.fallback_files:
             raise
-        other = weight_dir(root, spec.repo, fallback=True)
+        other = weight_dir(root, snapshot_repo(spec), fallback=True)
         try:
             _fill(
                 spec, other, spec.fallback_files, spec.fallback_revision or spec.revision,
@@ -116,7 +127,7 @@ def download_files(
     if not names or missing:
         raise SnapshotError("a requested file is not pinned")
     files = {name: spec.files[name] for name in names}
-    folder = weight_dir(root, spec.repo)
+    folder = weight_dir(root, snapshot_repo(spec))
     _fill(spec, folder, files, spec.revision, fallback=False, progress=progress)
     return folder
 

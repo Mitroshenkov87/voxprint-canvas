@@ -39,9 +39,16 @@ def test_scripts_are_noninteractive_and_name_the_exit_codes():
     assert "--vram-cap-gb" in windows
 
 
-def test_vram_cap_jobs_cover_t2i_inpaint_and_edit(tmp_path):
-    from tools.vm_test import vram_cap_jobs
+def test_vram_cap_jobs_cover_t2i_inpaint_and_edit(tmp_path, monkeypatch):
+    from tools.vm_test import _child_env, edit_comparisons, vram_cap_jobs
 
+    assert edit_comparisons(False) == (("qwen-edit", "fp8"),)
+    assert edit_comparisons(True) == (("qwen-edit", None), ("qwen-edit-fp8", "fp8"))
+    monkeypatch.setenv("CANVAS_EDIT_ROUTE", "fp8")
+    plain = _child_env(16)
+    assert plain is not None and "CANVAS_EDIT_ROUTE" not in plain
+    forced = _child_env(16, "fp8")
+    assert forced is not None and forced["CANVAS_EDIT_ROUTE"] == "fp8"
     jobs = vram_cap_jobs(tmp_path, 16)
     names = [name for name, _dest, _args in jobs]
     assert names == ["t2i-2k", "inpaint-2k", "qwen-edit"]

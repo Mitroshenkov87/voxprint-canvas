@@ -97,11 +97,15 @@ def test_vram_cap_selects_the_16_gb_tier(monkeypatch):
 def test_int4_slot_is_disabled_and_is_not_downloaded(tmp_path: Path):
     spec = load_catalog().by_id(NUNCHAKU_ID)
     assert spec.status == "disabled"
-    assert spec.licence == "unconfirmed"
+    assert spec.licence == "Apache-2.0"
     assert spec.quant == "int4"
     assert spec.quant_backend == "nunchaku-svdquant"
     assert spec.vram_hint_gb == 12
-    assert spec.files == {}
+    assert spec.variant == "r128"
+    assert spec.pinned()
+    assert spec.files["svdq-int4_r128-z-image-turbo.safetensors"] == (
+        "dbf5aba0f7370d1fe88e52823d3d7b9ceb6fa006707f075baf9cfdaf362ea745"
+    )
     assert nunchaku_ready(spec) is False
     assert choose_schedule(16, Mode.TEXT, ram_gb=64, nunchaku_ready=False).placement is Placement.GROUP_OFFLOAD
     assert choose_schedule(16, Mode.TEXT, ram_gb=64, nunchaku_ready=True).placement is Placement.NUNCHAKU_INT4

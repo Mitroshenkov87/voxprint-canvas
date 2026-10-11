@@ -6,6 +6,8 @@ when a picture needs them.
 """
 from __future__ import annotations
 
+import platform
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
@@ -38,11 +40,28 @@ from canvas.infra.runtime import (
     restore_tensorrt,
     wheel_dir,
 )
-from canvas.models.features import withheld_from_setup
+from canvas.models.edit_route import FP8_EDIT_ID, set_edit_route_override
+from canvas.models.features import instruction_edit_available, withheld_from_setup
 from canvas.models.loader import plan_specs
+from canvas.models.nunchaku import (
+    NUNCHAKU_COMPONENT_ID,
+    NunchakuUnavailable,
+    NunchakuWheel,
+    install_runtime_files,
+    runtime_home,
+    runtime_is_installed,
+    select_nunchaku_wheel,
+)
 from canvas.models.plan import CallPlan
 from canvas.models.registry import Catalog, ModelSpec, RegistryError
-from canvas.models.snapshots import SnapshotError, download_snapshot, snapshot_ready, snapshot_status, weight_dir
+from canvas.models.snapshots import (
+    SnapshotError,
+    download_snapshot,
+    snapshot_ready,
+    snapshot_repo,
+    snapshot_status,
+    weight_dir,
+)
 from canvas.models.verified import VerifiedCache
 
 _RATE = 8 * 1024 * 1024
@@ -52,6 +71,9 @@ OPTIONAL_IDS = (
     "z-image-turbo-fun-controlnet-union-bf16",
     "z-image-creative-bf16",
     "qwen-image-edit-2511-fp8",
+    "qwen-image-edit-2511-int4-r256",
+    "qwen-image-edit-2511-int4-r128",
+    "qwen-image-edit-2511-int4-r256-mirror",
 )
 
 
@@ -89,6 +111,8 @@ def pack_title(spec: ModelSpec) -> str:
         return "Creative Z-Image"
     if spec.id == "qwen-image-edit-2511-fp8":
         return "Qwen-Image-Edit-2511"
+    if spec.quant == "int4" and spec.role == "edit":
+        return "Qwen-Image-Edit-2511 INT4"
     if spec.repo.endswith("Z-Image-Turbo"):
         return "Z-Image-Turbo"
     return spec.id
@@ -156,6 +180,30 @@ def install_spec(
     remember(spec)
 
 
+def nunchaku_runtime_notice() -> str:
+    """Size and estimated time for the private INT4 runtime on this PC."""
+    plan = select_nunchaku_wheel(sys.platform, platform.machine())
+    total = plan.nbytes
+    seconds = 1 if total <= 0 else max(1, (total + _RATE - 1) // _RATE)
+    return f"Nunchaku INT4 runtime is {format_bytes(total)}. Estimated time {format_duration(seconds)}."
+
+
+def ensure_nunchaku_runtime(
+    progress: Callable[[str], None],
+    confirm: Callable[[str], bool] | None,
+) -> None:
+    """Download the INT4 runtime when it is missing. The notice is the size and the estimate."""
+    plan = select_nunchaku_wheel(sys.platform, platform.machine())
+    if runtime_is_installed(plan):
+        return
+    notice = nunchaku_runtime_notice()
+    progress(notice)
+    if confirm is not None and not confirm(notice):
+        raise DownloadDeclined()
+    install_runtime_files(plan, runtime_home(), progress)
+    _record_nunchaku(plan)
+
+
 def ensure_plan(
     catalog: Catalog,
     plan: CallPlan,
@@ -163,8 +211,40 @@ def ensure_plan(
     confirm: Callable[[str], bool] | None,
 ) -> None:
     """Download the packs one plan needs. Optional packs ask first."""
+    if plan.mode == "instruction" and not instruction_edit_available(catalog):
+        return
+    if plan.mode == "instruction" and plan.quant == "int4":
+        _ensure_int4_edit(catalog, plan, progress, confirm)
+        return
     for spec in plan_specs(catalog, plan):
         install_spec(spec, progress, confirm)
+
+
+def _ensure_int4_edit(
+    catalog: Catalog,
+    plan: CallPlan,
+    progress: Callable[[str], None],
+    confirm: Callable[[str], bool] | None,
+) -> None:
+    """Offer the INT4 runtime and weights. A declined download installs the FP8 pack."""
+    try:
+        ensure_nunchaku_runtime(progress, confirm)
+        install_spec(catalog.by_id(plan.model_id), progress, confirm)
+    except DownloadDeclined:
+        set_edit_route_override("fp8")
+        install_spec(catalog.by_id(FP8_EDIT_ID), progress, confirm)
+
+
+def _record_nunchaku(plan: NunchakuWheel) -> None:
+    register_component(
+        shared_dir(),
+        NUNCHAKU_COMPONENT_ID,
+        kind="runtime",
+        version=plan.file("nunchaku").filename,
+        path="runtime/nunchaku-side",
+        sha256=plan.file("nunchaku").sha256,
+        app=APP_ID,
+    )
 
 
 def repair(catalog: Catalog, progress: Callable[[str], None]) -> list[str]:
@@ -195,7 +275,7 @@ def repair(catalog: Catalog, progress: Callable[[str], None]) -> list[str]:
 
 def remember(spec: ModelSpec, app: str = APP_ID) -> None:
     """Record a pack that is already on disk."""
-    folder = weight_dir(models_dir(), spec.repo)
+    folder = weight_dir(models_dir(), snapshot_repo(spec))
     try:
         relative = _relative_pack(folder)
     except SnapshotError:
@@ -295,6 +375,15 @@ def _repair_one(
         restore_tensorrt(progress)
         record_tensorrt()
         return
+    if kind == "runtime" and component_id == NUNCHAKU_COMPONENT_ID:
+        try:
+            wheel = select_nunchaku_wheel(sys.platform, platform.machine())
+        except NunchakuUnavailable:
+            progress(f"Leaving {component_id} unchanged")
+            return
+        install_runtime_files(wheel, runtime_home(), progress)
+        _record_nunchaku(wheel)
+        return
     if kind == "runtime":
         if any(ref != APP_ID for ref in component.refs):
             progress(f"Leaving {component_id} unchanged")
@@ -315,6 +404,14 @@ def _needs_repair(
     if component.kind == "runtime" and (component_id == TRT_ID or component.path == TRT_PATH):
         if not python_supports_tensorrt():
             return False
+    if component.kind == "runtime" and component_id == NUNCHAKU_COMPONENT_ID:
+        if not instruction_edit_available(catalog):
+            return False
+        try:
+            wheel = select_nunchaku_wheel(sys.platform, platform.machine())
+        except NunchakuUnavailable:
+            return False
+        return not runtime_is_installed(wheel)
     if component.kind == "model":
         spec = _spec_for(catalog, component_id, component)
         if spec is None or withheld_from_setup(spec, catalog):
@@ -333,7 +430,7 @@ def _spec_for(catalog: Catalog, component_id: str, component: Component) -> Mode
             continue
     for spec in catalog.models:
         try:
-            if _relative_pack(weight_dir(models_dir(), spec.repo)) == component.path:
+            if _relative_pack(weight_dir(models_dir(), snapshot_repo(spec))) == component.path:
                 return spec
         except SnapshotError:
             continue

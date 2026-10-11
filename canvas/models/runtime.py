@@ -15,6 +15,7 @@ from PIL import Image
 
 from canvas.infra.vram import reset_peak_allocated
 from canvas.models.edit import EditLoadError, load_edit_pipeline
+from canvas.models.int4_edit import load_int4_edit_pipeline
 from canvas.models.modes import Tier
 from canvas.models.pins import (
     PIPELINE_CONTROL,
@@ -39,7 +40,7 @@ class InferenceUnavailable(Exception):
 
 
 def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, height: int, tier: Tier, *,
-           seed: int = 0, control_file: Path | None = None) -> RawImage:
+           seed: int = 0, control_file: Path | None = None, weight_name: str = "") -> RawImage:
     """Run one pinned snapshot. ``folder`` is a local diffusers tree."""
     reset_peak_allocated()
     torch = _import_torch()
@@ -104,7 +105,12 @@ def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, he
                 )
         elif pipeline_name == PIPELINE_EDIT:
             try:
-                pipe = load_edit_pipeline(folder, dtype, low_vram=tier is Tier.GB16)
+                if plan.quant == "int4":
+                    if not weight_name:
+                        raise EditLoadError("the INT4 transformer is missing")
+                    pipe = load_int4_edit_pipeline(folder / weight_name, folder, dtype)
+                else:
+                    pipe = load_edit_pipeline(folder, dtype, low_vram=tier is Tier.GB16)
             except EditLoadError as exc:
                 raise InferenceUnavailable(exc.detail) from exc
             result = _timed(pipe, image=_pil(_frame(screened, "init")), **common)

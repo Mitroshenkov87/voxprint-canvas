@@ -26,15 +26,18 @@ def instruction_edit_available(catalog: Catalog | None = None) -> bool:
 def withheld_from_setup(spec: ModelSpec, catalog: Catalog | None = None) -> bool:
     """Setup, repair, and first launch must not fetch this pack.
 
-    Disabled rows, the Nunchaku runtime, and INT4 packs stay out. Instruction
-    edit stays out while its feature switch is unavailable.
+    Disabled rows stay out. While instruction editing is unavailable, its FP8
+    pack, its INT4 packs, and any Nunchaku row stay out as well. Turning the
+    feature available lets those edit packs download again.
     """
     if spec.status == "disabled":
+        return True
+    if instruction_edit_available(catalog):
+        return False
+    if spec.role == "edit" or spec.id == EDIT_ID:
         return True
     if spec.runtime == "nunchaku" or spec.quant == "int4":
         return True
     if spec.quant_backend.casefold().startswith("nunchaku"):
-        return True
-    if spec.id == EDIT_ID and not instruction_edit_available(catalog):
         return True
     return False

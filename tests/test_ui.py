@@ -6,7 +6,9 @@ import pytest
 pytest.importorskip("PySide6")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QLabel, QMessageBox, QTabWidget
+from PySide6.QtCore import Qt
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication, QLabel, QMessageBox, QPlainTextEdit, QTabWidget
 
 from canvas.app.identity import splash_line, version_label
 from canvas.app.info import APP_NAME, ENLARGE_HINT, ENLARGE_RELEASES, RESPONSIBILITY, THIRD_PARTY_NOTICE
@@ -16,7 +18,7 @@ from canvas.models.sizes import ASPECT_GROUPS
 from canvas.infra.enlarge import EnlargeError
 from canvas.safety.gate import GenerationBlocked
 from canvas.ui.about import AboutDialog
-from canvas.ui.main_window import MainWindow
+from canvas.ui.main_window import EnhanceReply, MainWindow
 from canvas.ui.splash import Splash
 
 
@@ -216,37 +218,66 @@ def test_about_and_splash_show_the_release_identity(app, monkeypatch):
     window.close()
 
 
-def test_enhance_box_sits_beside_the_prompt_and_use_or_revert(app):
+def test_enhance_rewrites_the_prompt_in_place_and_revert_restores_it(app):
     del app
     seen: list[dict[str, object]] = []
+    busy: list[tuple[str, bool]] = []
 
     def on_generate(prompt, mode, fmt, original=None):
         seen.append({"prompt": prompt, "mode": mode, "fmt": fmt, "original": original})
         return "ready"
 
-    def on_enhance(text: str) -> str:
-        return f"english: {text}"
+    def on_enhance(text: str) -> EnhanceReply:
+        busy.append((window.enhance_button.text(), window.enhance_button.isEnabled()))
+        return EnhanceReply(f"english: {text}", "")
 
     window = MainWindow(on_generate, Tier.GB16, on_enhance=on_enhance)
+    window.show()
     window.prompt.setPlainText("красная лодка")
-    assert window.enhance_button.text() == "Enhance & translate prompt"
-    assert window.enhanced.parentWidget() is window.prompt.parentWidget()
-    assert window.use_button.isEnabled() is False
+    assert window.enhance_button.text() == "Enhance"
+    assert window.enhance_button.parentWidget() is window.prompt.parentWidget()
+    assert window.findChild(QPlainTextEdit, "enhanced") is None
+    assert window.findChild(type(window.enhance_button), "use-enhanced") is None
+    assert window.revert_button.toolTip() == "Revert"
+    assert window.revert_button.text() == ""
+    assert window.revert_button.icon().isNull() is False
+    assert window.revert_button.isEnabled() is False
     window.enhance_button.click()
-    assert window.enhanced.toPlainText() == "english: красная лодка"
-    window.enhanced.setPlainText('a red boat, sign "Аптека"')
+    assert busy == [("Enhancing…", False)]
+    assert window.enhance_button.text() == "Enhance"
+    assert window.enhance_button.isEnabled() is True
+    assert window.prompt.toPlainText() == "english: красная лодка"
+    assert window.revert_button.isEnabled() is True
+    window.prompt.setFocus()
+    QTest.keyClick(window.prompt, Qt.Key.Key_Z, Qt.KeyboardModifier.ControlModifier)
+    assert window.prompt.toPlainText() == "красная лодка"
+    window.prompt.redo()
+    assert window.prompt.toPlainText() == "english: красная лодка"
+    window.prompt.setPlainText("english: красная лодка, edited")
     window.generate_button.click()
-    assert seen[-1]["prompt"] == "красная лодка"
-    assert seen[-1]["original"] is None
-    window.use_button.click()
-    window.generate_button.click()
-    assert seen[-1]["prompt"] == 'a red boat, sign "Аптека"'
+    assert seen[-1]["prompt"] == "english: красная лодка, edited"
     assert seen[-1]["original"] == "красная лодка"
     window.revert_button.click()
-    assert window.enhanced.toPlainText() == ""
+    assert window.prompt.toPlainText() == "красная лодка"
+    assert window.revert_button.isEnabled() is False
     window.generate_button.click()
     assert seen[-1]["prompt"] == "красная лодка"
     assert seen[-1]["original"] is None
+    window.close()
+
+
+def test_enhance_keeps_the_prompt_and_shows_a_note_when_the_rewrite_is_refused(app):
+    del app
+
+    def on_enhance(text: str) -> EnhanceReply:
+        return EnhanceReply(text, "The enhanced prompt changed a stated age, so the original prompt was used.")
+
+    window = MainWindow(lambda prompt, mode, fmt: "ok", Tier.GB16, on_enhance=on_enhance)
+    window.prompt.setPlainText("a 25-year-old woman")
+    window.enhance_button.click()
+    assert window.prompt.toPlainText() == "a 25-year-old woman"
+    assert window.status.text() == "The enhanced prompt changed a stated age, so the original prompt was used."
+    assert window.revert_button.isEnabled() is False
     window.close()
 
 

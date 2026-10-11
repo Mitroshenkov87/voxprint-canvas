@@ -69,6 +69,14 @@ class ModelSpec:
 
 
 @dataclass(frozen=True)
+class FeatureFlag:
+    """One product switch. ``unavailable`` keeps the code and withholds the feature."""
+
+    status: str
+    reason: str
+
+
+@dataclass(frozen=True)
 class FrameSize:
     """Width and height of one output frame."""
 
@@ -94,6 +102,7 @@ class Catalog:
     default_text_base: str | None = None
     text_bases: tuple[str, ...] = ()
     sizes: dict[str, SizeTable] | None = None
+    features: dict[str, FeatureFlag] = field(default_factory=dict)
 
     def by_id(self, model_id: str) -> ModelSpec:
         """The model with this id."""
@@ -223,7 +232,7 @@ def load_catalog(path: Path | None = None) -> Catalog:
         if "16gb" not in tiers or "24gb" not in tiers:
             raise RegistryError("a text model is missing a tier")
     sizes = _sizes(raw.get("sizes"), text_bases)
-    return Catalog(diffusers, models, default_text_base, text_bases, sizes)
+    return Catalog(diffusers, models, default_text_base, text_bases, sizes, _features(raw.get("features")))
 
 
 _ASPECTS = ("1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9", "9:21")
@@ -271,6 +280,26 @@ def _sizes(raw: object, families: tuple[str, ...]) -> dict[str, SizeTable]:
             multiple, _band(row.get("native"), multiple, "native"), _band(row.get("twok"), multiple, "twok"),
         )
     return tables
+
+
+def _features(raw: object) -> dict[str, FeatureFlag]:
+    """Product switches. A missing object leaves every feature available."""
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise RegistryError("features must be an object")
+    flags: dict[str, FeatureFlag] = {}
+    for name, row in raw.items():
+        if not isinstance(row, dict):
+            raise RegistryError("a feature needs a status")
+        status = str(row.get("status") or "")
+        if status not in {"available", "unavailable"}:
+            raise RegistryError("unknown feature status")
+        reason = str(row.get("reason") or "")
+        if status == "unavailable" and not reason:
+            raise RegistryError("an unavailable feature needs a reason")
+        flags[str(name)] = FeatureFlag(status, reason)
+    return flags
 
 
 def _is_z_image(spec: ModelSpec) -> bool:

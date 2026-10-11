@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from canvas.models.features import instruction_edit_available
 from canvas.models.edit import (
     ENCODER_FP8_TENSORS,
     TRANSFORMER_SHARDS,
@@ -14,9 +15,9 @@ from canvas.models.edit import (
 from canvas.models.modes import Mode, Tier
 from canvas.models.pin import PinError, resolved_sha256
 from canvas.models.plan import build_plan
-from canvas.models.provision import ensure_plan
+from canvas.models.provision import ensure_plan, install_defaults, install_spec
 from canvas.models.registry import load_catalog
-from canvas.models.snapshots import _urls
+from canvas.models.snapshots import SnapshotError, _urls, download_snapshot
 from canvas.safety.inputs import ImageRole, PendingInput
 from tests.fakes import World, rgb
 
@@ -341,6 +342,7 @@ def test_fp8_linear_computes_in_bf16():
     assert torch.allclose(output, reference)
 
 
+@pytest.mark.skipif(not instruction_edit_available(), reason="instruction_edit is model_in_preparation")
 def test_instruction_edit_offers_the_pack_and_records_it(monkeypatch, tmp_path: Path):
     from canvas.infra.manifest import load_manifest
     from canvas.infra.paths import shared_dir
@@ -369,3 +371,29 @@ def test_instruction_edit_offers_the_pack_and_records_it(monkeypatch, tmp_path: 
         component.version == "qwen-image-edit-2511-fp8" and component.kind == "model"
         for component in components.values()
     )
+
+
+@pytest.mark.skipif(instruction_edit_available(), reason="the edit pack downloads when the feature is available")
+def test_setup_does_not_download_instruction_edit_or_int4(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
+    seen: list[str] = []
+
+    def fake_download(spec, root, progress=None):
+        del root, progress
+        seen.append(spec.id)
+        return tmp_path
+
+    monkeypatch.setattr("canvas.models.provision.download_snapshot", fake_download)
+    catalog = load_catalog()
+    install_defaults(catalog, lambda _message: None)
+    install_spec(catalog.by_id("qwen-image-edit-2511-fp8"), lambda _message: None, confirm=None)
+    install_spec(catalog.by_id("z-image-turbo-svdquant-int4"), lambda _message: None, confirm=None)
+    screened = World().gate().release_request(
+        "paint the door blue", Mode.INSTRUCTION.value, [PendingInput(ImageRole.INIT, rgb())],
+    )
+    ensure_plan(catalog, build_plan(catalog, screened, Tier.GB24), lambda _message: None, confirm=None)
+    assert "qwen-image-edit-2511-fp8" not in seen
+    assert "z-image-turbo-svdquant-int4" not in seen
+    with pytest.raises(SnapshotError) as caught:
+        download_snapshot(catalog.by_id("qwen-image-edit-2511-fp8"), tmp_path)
+    assert caught.value.detail == "this model is not available for download"

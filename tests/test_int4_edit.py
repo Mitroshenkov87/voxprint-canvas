@@ -10,6 +10,7 @@ import pytest
 
 from canvas.app.selftest import selftest_report
 from canvas.models.edit import EditLoadError
+from canvas.models.features import instruction_edit_available
 from canvas.models.edit_route import (
     FP8_EDIT_ID,
     MIRROR_R256_ID,
@@ -163,6 +164,7 @@ def test_nunchaku_wheel_is_a_private_side_environment():
     assert notice == f"Nunchaku INT4 runtime is {format_bytes(host.nbytes)}. Estimated time {format_duration(seconds)}."
 
 
+@pytest.mark.skipif(not instruction_edit_available(), reason="instruction_edit is model_in_preparation")
 def test_declined_int4_runtime_installs_the_fp8_pack(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
     monkeypatch.setattr("canvas.models.provision.runtime_is_installed", lambda plan: False)
@@ -192,6 +194,7 @@ def test_declined_int4_runtime_installs_the_fp8_pack(monkeypatch, tmp_path: Path
     assert select_edit_route(catalog, Tier.GB16).id == FP8_EDIT_ID
 
 
+@pytest.mark.skipif(not instruction_edit_available(), reason="instruction_edit is model_in_preparation")
 def test_accepted_int4_downloads_the_runtime_and_the_r256_pack(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
     monkeypatch.setattr("canvas.models.provision.runtime_is_installed", lambda plan: False)

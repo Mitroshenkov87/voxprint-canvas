@@ -14,6 +14,7 @@ from canvas.infra.paths import models_dir
 from canvas.infra.runtime import python_supports_tensorrt
 from canvas.models.edit import EDIT_ID, probe_edit_pack
 from canvas.models.edit_route import edit_route_report
+from canvas.models.features import INSTRUCTION_EDIT, instruction_edit_available
 from canvas.models.modes import Tier
 from canvas.models.registry import ModelSpec, load_catalog
 from canvas.models.snapshots import snapshot_ready, snapshot_status, weight_dir
@@ -39,6 +40,7 @@ def selftest_report(
     gpu = check_gpu(probe_gpu())
     encoders = _encoders()
     catalog = load_catalog()
+    instruction_edit = "available" if instruction_edit_available(catalog) else "unavailable"
     cache = VerifiedCache.open(deep)
     try:
         models = [_model_row(spec, folder, cache) for spec in catalog.models if spec.files]
@@ -80,6 +82,7 @@ def selftest_report(
         "classifiers": classifiers,
         "notes": notes,
         "deep": deep,
+        INSTRUCTION_EDIT: instruction_edit,
     }
 
 
@@ -93,6 +96,9 @@ def _model_row(spec: ModelSpec, root: Path, cache: VerifiedCache) -> dict[str, o
     row: dict[str, object] = {"id": spec.id, "ok": True, "detail": ""}
     if spec.mirror_status:
         row["mirror_status"] = spec.mirror_status
+    if spec.id == EDIT_ID and not instruction_edit_available():
+        row["detail"] = "unavailable"
+        return row
     if state == "ready":
         if spec.id == EDIT_ID:
             detail = probe_edit_pack(weight_dir(root, spec.repo))

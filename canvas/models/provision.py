@@ -41,6 +41,7 @@ from canvas.infra.runtime import (
     wheel_dir,
 )
 from canvas.models.edit_route import FP8_EDIT_ID, set_edit_route_override
+from canvas.models.features import instruction_edit_available, withheld_from_setup
 from canvas.models.loader import plan_specs
 from canvas.models.nunchaku import (
     NUNCHAKU_COMPONENT_ID,
@@ -166,6 +167,8 @@ def install_spec(
     confirm: Callable[[str], bool] | None,
 ) -> None:
     """Download one pack when it is missing, then record it."""
+    if withheld_from_setup(spec, catalog=None):
+        return
     root = models_dir()
     if snapshot_ready(spec, root) is None:
         if is_optional(spec):
@@ -208,6 +211,8 @@ def ensure_plan(
     confirm: Callable[[str], bool] | None,
 ) -> None:
     """Download the packs one plan needs. Optional packs ask first."""
+    if plan.mode == "instruction" and not instruction_edit_available(catalog):
+        return
     if plan.mode == "instruction" and plan.quant == "int4":
         _ensure_int4_edit(catalog, plan, progress, confirm)
         return
@@ -400,6 +405,8 @@ def _needs_repair(
         if not python_supports_tensorrt():
             return False
     if component.kind == "runtime" and component_id == NUNCHAKU_COMPONENT_ID:
+        if not instruction_edit_available(catalog):
+            return False
         try:
             wheel = select_nunchaku_wheel(sys.platform, platform.machine())
         except NunchakuUnavailable:
@@ -407,7 +414,7 @@ def _needs_repair(
         return not runtime_is_installed(wheel)
     if component.kind == "model":
         spec = _spec_for(catalog, component_id, component)
-        if spec is None:
+        if spec is None or withheld_from_setup(spec, catalog):
             return False
         return snapshot_status(spec, models_dir(), cache) != "ready"
     if component.kind in ("wheels", "runtime"):

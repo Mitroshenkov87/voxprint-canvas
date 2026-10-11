@@ -14,8 +14,7 @@ The next version of Voxprint AI Canvas is listed below. Items under Later are pl
 - Modern output formats: AVIF, JPEG XL, and WebP.
 - Opt-in third-party add-ons.
 - Enhance a prompt before generating. The button improves the prompt with the Qwen3-4B text encoder that ships with Z-Image-Turbo. This ships in 0.1.0-rc.4.
-- Instruction edit on a 24 GB GPU, using the published Qwen-Image-Edit-2511 FP8 mirror. This ships in 0.1.0-rc.4.
-- Instruction edit on a 16 GB GPU. The preferred route is SVDQuant INT4, with the FP8 pack and group offload as the fallback. It needs 40 GB of system memory.
+- Instruction editing is coming soon. A written instruction will change a picture you already have. It will run on 16 GB cards and on 24 GB cards.
 
 ## Later
 
@@ -24,3 +23,4 @@ Plans, not promises.
 - Faster engines on your own GPU, with TensorRT.
 - A full command-line interface with JSON output.
 - More languages in the UI.
+- Automatic model choice when several generators or editors are installed. A local prompt classifier tags the request topic (Russian text in the picture, portrait, adult, landscape, photo edit, and others) and picks the best installed model for that topic from a table of our own evaluation results. The window shows the choice, and you can pick a different model.

@@ -83,6 +83,8 @@ QPushButton#primary:hover {{ background: {primary_hover}; }}
 QPushButton#primary:disabled {{ background: {primary_dis_bg}; color: {primary_dis_text}; border-color: #4a4430; }}
 QComboBox, QLineEdit, QPlainTextEdit {{ background: {control}; border: 1px solid {border}; border-radius: 8px; padding: 6px 12px; }}
 QComboBox QAbstractItemView {{ background: {menu_bg}; border: 1px solid {border}; selection-background-color: {menu_sel}; selection-color: #ffffff; }}
+QComboBox QAbstractItemView::item:disabled {{ color: {disabled}; }}
+QLabel#instruction-note {{ color: {muted}; }}
 QTabWidget::pane {{ border: 1px solid {border}; border-radius: 8px; background: {card_bg}; }}
 QTabBar::tab {{ background: {control}; color: {text}; padding: 8px 16px; border-top-left-radius: 8px; border-top-right-radius: 8px; }}
 QTabBar::tab:selected {{ background: {menu_bg}; }}

@@ -3,6 +3,9 @@ import json
 import os
 from pathlib import Path
 
+import pytest
+
+from canvas.app.i18n import INSTRUCTION_EDIT_UNAVAILABLE_EN
 from canvas.app.info import RELEASES_API
 from canvas.app.main import main
 from canvas.app.platform import GpuCheck, OsCheck
@@ -11,6 +14,7 @@ from canvas.app.updates import check_for_update, fetch_release
 from canvas.infra.enlarge import EnlargeError
 from canvas.infra.gpu import GpuInfo
 from canvas.infra.models_users import read_users
+from canvas.models.features import instruction_edit_available
 from canvas.models.modes import Tier
 from canvas.models.registry import load_catalog
 from canvas.models.snapshots import weight_dir
@@ -27,8 +31,12 @@ def test_selftest_register_and_update(monkeypatch, tmp_path, capsys):
     assert report["ok"] is False
     assert report["encoders"] == {"avif": True, "jxl": True, "webp": True}
     assert isinstance(report["models"], list) and report["models"]
-    assert all(row["detail"] == "not_downloaded" and row["ok"] for row in report["models"])
+    assert report["instruction_edit"] == "unavailable"
+    others = [row for row in report["models"] if row["id"] != "qwen-image-edit-2511-fp8"]
+    assert all(row["detail"] == "not_downloaded" and row["ok"] for row in others)
     edit = next(row for row in report["models"] if row["id"] == "qwen-image-edit-2511-fp8")
+    assert edit["ok"] is True
+    assert edit["detail"] == "unavailable"
     assert edit["mirror_status"] == "published"
     assert all(row["detail"] == "not_downloaded" and row["ok"] for row in report["classifiers"])
     assert report["deep"] is False
@@ -237,6 +245,7 @@ def test_generate_json_reports_the_enlarge_error(monkeypatch, capsys, tmp_path):
     assert body == {"ok": False, "error": "bad_input: cannot identify image file"}
 
 
+@pytest.mark.skipif(not instruction_edit_available(), reason="instruction_edit is model_in_preparation")
 def test_edit_instruction_command_passes_the_input(monkeypatch, tmp_path, capsys):
     from PIL import Image
 
@@ -298,6 +307,40 @@ def test_edit_instruction_command_passes_the_input(monkeypatch, tmp_path, capsys
     assert seen["review"] == ("paint the door blue", Mode.INSTRUCTION.value, ("init",))
     assert seen["export"] == ("paint the door blue", Mode.INSTRUCTION, ("init",), "out.avif")
     assert json.loads(capsys.readouterr().out)["ok"] is True
+
+
+def test_edit_instruction_reports_feature_unavailable(capsys, tmp_path):
+    code = main([
+        "generate",
+        "--edit-instruction",
+        "paint the door blue",
+        "--input",
+        "in.png",
+        "--out",
+        str(tmp_path / "out.avif"),
+        "--json",
+    ])
+    assert code == 4
+    assert json.loads(capsys.readouterr().out) == {
+        "ok": False,
+        "error": "feature_unavailable",
+        "feature": "instruction_edit",
+        "reason": "model_in_preparation",
+        "message": INSTRUCTION_EDIT_UNAVAILABLE_EN,
+    }
+    plain = main([
+        "generate",
+        "--edit-instruction",
+        "paint the door blue",
+        "--input",
+        "in.png",
+        "--out",
+        str(tmp_path / "out.avif"),
+    ])
+    captured = capsys.readouterr()
+    assert plain == 4
+    assert captured.out == ""
+    assert INSTRUCTION_EDIT_UNAVAILABLE_EN in captured.err
 
 
 def test_generate_command_refuses_an_unsupported_machine(capsys):

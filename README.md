@@ -4,11 +4,11 @@ Local text-to-image and image-to-image generation for the Voxprint AI Media Suit
 
 > Status: 0.1.0 release candidate.
 
-Text to image uses Z-Image-Turbo in BF16 on every tier. Image to image covers restyle, inpaint, outpaint, pose, depth, and edge. Instruction edit runs on 16 GB and on 24 GB and needs 40 GB of system memory. A 16 GB card prefers the SVDQuant INT4 pack and downloads that runtime only when you choose it, after the size and estimated time are shown. A 24 GB card stays on the FP8 pack. On a 24 GB GPU, Creative is available as well.
+Text to image uses Z-Image-Turbo in BF16 on every tier. Image to image covers restyle, inpaint, outpaint, pose, depth, and edge. On a 24 GB GPU, Creative is available as well.
 
-```bash
-voxprint-canvas generate --edit-instruction "paint the door blue" --input in.png --out out.avif --json
-``` Third-party add-ons are off until you turn them on. Third-party weights are provided by their authors, who are responsible for the licence and training data. Voxprint does not host or redistribute them. Output defaults to AVIF, with JPEG XL and WebP beside it.
+Instruction editing is coming soon. A written instruction will change a picture you already have. It will run on 16 GB cards and on 24 GB cards.
+
+Third-party add-ons are off until you turn them on. Third-party weights are provided by their authors, who are responsible for the licence and training data. Voxprint does not host or redistribute them. Output defaults to AVIF, with JPEG XL and WebP beside it.
 
 ## Requirements
 

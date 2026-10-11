@@ -6,6 +6,9 @@ def test_release_workflow_publishes_a_prerelease_from_the_build_file():
     text = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
     assert 'tags:' in text
     assert '- "v*"' in text
+    assert "workflow_dispatch:" in text
+    assert "github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')" in text
+    assert 'name: SHA256SUMS' in text
     assert "--prerelease" in text
     assert "release_title" in text
     assert "SHA256SUMS" in text
@@ -28,6 +31,9 @@ def test_installers_fetch_gpu_libraries_and_the_default_pack():
         assert "https://download.pytorch.org/whl/cu130" in script
         assert "--register-models" in script
         assert "huggingface.co" not in script
+        folded = script.casefold()
+        assert "nunchaku" not in folded
+        assert "qwen-image-edit" not in folded
     assert "install.ps1" in iss
     assert "voxprint-canvas.cmd" in iss
     assert "staging\\*" in iss

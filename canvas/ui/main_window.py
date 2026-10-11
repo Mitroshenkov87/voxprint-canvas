@@ -3,8 +3,18 @@ from __future__ import annotations
 
 from typing import Callable, NamedTuple
 
-from PySide6.QtCore import Qt, QPointF, QRectF, QSize, QUrl
-from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPainter, QPainterPath, QPen, QPixmap, QTextCursor
+from PySide6.QtCore import Qt, QLocale, QPointF, QRectF, QSize, QUrl
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QDesktopServices,
+    QIcon,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QPixmap,
+    QTextCursor,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -20,13 +30,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from canvas.app.i18n import text
 from canvas.app.info import APP_NAME, ENLARGE_HINT, ENLARGE_RELEASES, RESPONSIBILITY, THIRD_PARTY_NOTICE
+from canvas.models.features import instruction_edit_available
 from canvas.ui.about import AboutDialog
 from canvas.ui.icons import load_approved
 from canvas.core.formats import DEFAULT_FORMAT, OutputFormat
 from canvas.models.modes import Mode, Tier, mode_group, visible_modes
 from canvas.models.sizes import ASPECT_GROUPS, closest_aspect
-from canvas.ui.theme import TEXT, build_style
+from canvas.ui.theme import TEXT, TEXT_DISABLED, build_style
 
 class EnhanceReply(NamedTuple):
     """The prompt to show, and a note when the rewrite was not placed in the field."""
@@ -76,6 +88,12 @@ class MainWindow(QWidget):
         for mode in visible_modes(tier):
             if mode_group(mode) == "image":
                 self.image_mode.addItem(_LABELS[mode], mode)
+        self._instruction_ready = instruction_edit_available()
+        self._set_instruction_enabled(self._instruction_ready)
+        self.instruction_note = QLabel(text("instruction_edit_unavailable", QLocale.system().name()))
+        self.instruction_note.setObjectName("instruction-note")
+        self.instruction_note.setWordWrap(True)
+        self.instruction_note.setVisible(not self._instruction_ready)
         self.creative = QComboBox()
         self.creative.addItem(_LABELS[Mode.TEXT], Mode.TEXT)
         if Mode.TEXT_CREATIVE in visible_modes(tier):
@@ -181,7 +199,22 @@ class MainWindow(QWidget):
         layout = QVBoxLayout(page)
         layout.addWidget(QLabel("Operation"))
         layout.addWidget(self.image_mode)
+        layout.addWidget(self.instruction_note)
         return page
+
+    def _set_instruction_enabled(self, ready: bool) -> None:
+        """Leave instruction edit in the list. Grey it while the feature is unavailable."""
+        index = self.image_mode.findData(Mode.INSTRUCTION)
+        if index < 0:
+            return
+        item = self.image_mode.model().item(index)
+        if item is None:
+            return
+        item.setEnabled(ready)
+        if ready:
+            item.setForeground(QBrush())
+        else:
+            item.setForeground(QBrush(QColor(TEXT_DISABLED)))
 
     def set_enlarge_ready(self, ready: bool) -> None:
         """Enable 4K when Enlarge can run, and show the install hint otherwise."""
@@ -324,6 +357,9 @@ class MainWindow(QWidget):
         tabs = self.findChild(QTabWidget)
         index = 0 if tabs is None else tabs.currentIndex()
         mode = self.current_mode(index)
+        if mode is Mode.INSTRUCTION and not self._instruction_ready:
+            self.status.setText(self.instruction_note.text())
+            return
         fmt = self.format_box.currentData()
         prompt = self.prompt.toPlainText()
         try:

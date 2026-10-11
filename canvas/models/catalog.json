@@ -1,5 +1,11 @@
 {
   "schema": 1,
+  "features": {
+    "instruction_edit": {
+      "status": "unavailable",
+      "reason": "model_in_preparation"
+    }
+  },
   "diffusers": "0.41.0",
   "default_text_base": "z-image-turbo",
   "text_bases": [

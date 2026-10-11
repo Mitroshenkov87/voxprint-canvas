@@ -73,20 +73,24 @@ def main(argv: list[str]) -> int:
     if env_pid != parent:
         print("enlarge: parent pid mismatch", file=sys.stderr)
         return 2
+    dirty = _dirty_env()
+    if dirty is not None:
+        print(f"enlarge: dirty environment {dirty}", file=sys.stderr)
+        return 2
     lock_file = os.environ.get("VOXPRINT_GPU_LOCK", "").strip()
-    if lock_file:
+    if lock_file and Path(lock_file).is_file():
         try:
             lock = json.loads(Path(lock_file).read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             print("enlarge: lock unreadable", file=sys.stderr)
             return 5
-        if str(lock.get("pid")) != parent:
-            print("enlarge: lock is not held by the parent", file=sys.stderr)
+        if str(lock.get("owner")) == "canvas" and str(lock.get("pid")) == parent:
+            print("enlarge: canvas still holds the gpu lock", file=sys.stderr)
             return 5
     dry = "--dry-run" in argv
     print(f"enlarge: log dry_run={dry}", file=sys.stderr)
     Path(output + ".call.json").write_text(
-        json.dumps({"argv": argv, "parent_env": env_pid, "dry_run": dry}),
+        json.dumps({"argv": argv, "parent_env": env_pid, "dry_run": dry, "env": sorted(os.environ)}),
         encoding="utf-8",
     )
     job = "1"
@@ -134,6 +138,29 @@ def main(argv: list[str]) -> int:
         }
     )
     return 0
+
+
+_BANNED = {
+    "PYTHONPATH",
+    "VIRTUAL_ENV",
+    "CUDA_VISIBLE_DEVICES",
+    "PYTORCH_CUDA_ALLOC_CONF",
+    "PYTORCH_ALLOC_CONF",
+    "CUDA_MODULE_LOADING",
+}
+
+
+def _dirty_env() -> str | None:
+    """An inherited variable Enlarge must not see. The interpreter may add a locale."""
+    if not os.environ.get("PATH"):
+        return "PATH"
+    if not os.environ.get("VOXPRINT_GPU_PARENT_PID"):
+        return "VOXPRINT_GPU_PARENT_PID"
+    for key in os.environ:
+        upper = key.upper()
+        if upper in _BANNED or upper.startswith(("PYTORCH_", "TORCH_", "CUDA_")):
+            return key
+    return None
 
 
 def _flag(argv: list[str], name: str) -> str | None:

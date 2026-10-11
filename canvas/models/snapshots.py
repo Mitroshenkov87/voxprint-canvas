@@ -14,6 +14,7 @@ from pathlib import Path
 
 from canvas.models.pin import PinError, require_pin, verify_file
 from canvas.models.registry import ModelSpec
+from canvas.models.verified import VerifiedCache
 
 _PACKAGE = Path(__file__).parent
 _CHUNK = 1024 * 1024
@@ -35,12 +36,12 @@ def weight_dir(root: Path, repo: str, *, fallback: bool = False) -> Path:
     return root / name
 
 
-def snapshot_status(spec: ModelSpec, root: Path) -> str:
+def snapshot_status(spec: ModelSpec, root: Path, cache: VerifiedCache | None = None) -> str:
     """``ready``, ``not_downloaded``, ``incomplete``, or ``hash_mismatch``."""
-    primary = _folder_status(weight_dir(root, spec.repo), spec.files)
+    primary = _folder_status(weight_dir(root, spec.repo), spec.files, cache)
     fallback = "not_downloaded"
     if spec.fallback_files:
-        fallback = _folder_status(weight_dir(root, spec.repo, fallback=True), spec.fallback_files)
+        fallback = _folder_status(weight_dir(root, spec.repo, fallback=True), spec.fallback_files, cache)
     if primary == "ready" or fallback == "ready":
         return "ready"
     for state in (primary, fallback):
@@ -52,7 +53,7 @@ def snapshot_status(spec: ModelSpec, root: Path) -> str:
     return "not_downloaded"
 
 
-def _folder_status(folder: Path, files: dict[str, str]) -> str:
+def _folder_status(folder: Path, files: dict[str, str], cache: VerifiedCache | None = None) -> str:
     if not files:
         return "not_downloaded"
     present = 0
@@ -61,9 +62,7 @@ def _folder_status(folder: Path, files: dict[str, str]) -> str:
         if not path.is_file():
             continue
         present += 1
-        try:
-            verify_file(path, digest)
-        except PinError:
+        if not _matches(path, digest, cache):
             return "hash_mismatch"
     if present == 0:
         return "not_downloaded"
@@ -72,14 +71,14 @@ def _folder_status(folder: Path, files: dict[str, str]) -> str:
     return "incomplete"
 
 
-def snapshot_ready(spec: ModelSpec, root: Path) -> Path | None:
+def snapshot_ready(spec: ModelSpec, root: Path, cache: VerifiedCache | None = None) -> Path | None:
     """The local folder whose files match the pin, or None when none does."""
     primary = weight_dir(root, spec.repo)
-    if _complete(primary, spec.files):
+    if _complete(primary, spec.files, cache):
         return primary
     if spec.fallback_files:
         other = weight_dir(root, spec.repo, fallback=True)
-        if _complete(other, spec.fallback_files):
+        if _complete(other, spec.fallback_files, cache):
             return other
     return None
 
@@ -121,17 +120,25 @@ def download_files(
     return folder
 
 
-def _complete(folder: Path, files: dict[str, str]) -> bool:
+def _complete(folder: Path, files: dict[str, str], cache: VerifiedCache | None = None) -> bool:
     if not files:
         return False
     for name, digest in files.items():
         path = folder / name
         if not path.is_file():
             return False
-        try:
-            verify_file(path, digest)
-        except PinError:
+        if not _matches(path, digest, cache):
             return False
+    return True
+
+
+def _matches(path: Path, digest: str, cache: VerifiedCache | None) -> bool:
+    if cache is not None:
+        return cache.matches(path, digest)
+    try:
+        verify_file(path, digest)
+    except PinError:
+        return False
     return True
 
 

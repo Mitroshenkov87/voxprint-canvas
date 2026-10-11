@@ -1,8 +1,8 @@
 """Enlarge client. The public contract is the headless CLI, protocol 1.
 
 stdout is JSON lines. stderr is a log: it is read and never parsed. A non-zero
-exit code is the error the user sees. Canvas keeps the suite GPU lock and
-passes its pid so Enlarge runs inside that lock.
+exit code is the error the user sees. Canvas releases the suite GPU lock
+before the spawn and passes its pid. The child receives a clean environment.
 """
 from __future__ import annotations
 
@@ -19,6 +19,9 @@ from canvas.infra.discovery import AppInstall, find_app, probe_capabilities
 from canvas.models.sizes import FOUR_K_LONG
 
 PROTOCOL = 1
+DEFAULT_ENLARGE_VRAM_GB = 6.0
+_VRAM_KEYS = ("vram_gb", "min_vram_gb", "min_free_gb", "required_vram_gb")
+_ENV_KEYS = ("PATH", "SYSTEMROOT", "SystemRoot", "HOME", "USERPROFILE", "TEMP", "TMP", "TMPDIR")
 _STAGES = frozenset({"queued", "waiting_gpu", "loading", "tiles", "encoding"})
 # name, user message, retryable. Exit 0 is success and is not in this table.
 _EXITS: dict[int, tuple[str, str, bool]] = {
@@ -142,6 +145,45 @@ def message_kind(message: dict[str, Any]) -> str:
     return ""
 
 
+def declared_vram_gb(body: dict[str, Any] | None) -> float:
+    """GB Enlarge says it needs. A missing or unusable value means 6 GB."""
+    if isinstance(body, dict):
+        containers: list[dict[str, Any]] = [body]
+        gpu = body.get("gpu")
+        if isinstance(gpu, dict):
+            containers.append(gpu)
+        for container in containers:
+            for key in _VRAM_KEYS:
+                value = container.get(key)
+                if isinstance(value, bool) or not isinstance(value, (int, float)):
+                    continue
+                if value > 0:
+                    return float(value)
+    return DEFAULT_ENLARGE_VRAM_GB
+
+
+def spawn_env(parent_pid: int) -> dict[str, str]:
+    """Environment for one Enlarge process.
+
+    The child gets PATH, the home and temp variables, ``VOXPRINT_`` settings
+    such as the lock path and ``VOXPRINT_CI_LANCZOS``, and its parent pid.
+    PYTHONPATH, VIRTUAL_ENV, CUDA_VISIBLE_DEVICES, and torch allocator
+    variables are not copied. ``ENLARGE_FAKE_`` keys are copied so a test
+    stand-in can be configured.
+    """
+    env: dict[str, str] = {}
+    for key in _ENV_KEYS:
+        value = os.environ.get(key)
+        if value:
+            env[key] = value
+    for key, value in os.environ.items():
+        upper = key.upper()
+        if value and (upper.startswith("VOXPRINT_") or upper.startswith("ENLARGE_FAKE_")):
+            env[key] = value
+    env["VOXPRINT_GPU_PARENT_PID"] = str(parent_pid)
+    return env
+
+
 def capabilities_ready(body: dict[str, Any] | None) -> bool:
     """4K is offered when ``--capabilities --json`` reports protocol 1 and a usable GPU."""
     if not isinstance(body, dict) or body.get("protocol") != PROTOCOL:
@@ -203,8 +245,7 @@ class EnlargeClient:
             parent_pid=parent_pid,
             dry_run=dry_run,
         )
-        env = os.environ.copy()
-        env["VOXPRINT_GPU_PARENT_PID"] = str(parent_pid)
+        env = spawn_env(parent_pid)
         proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
         assert proc.stdout is not None
 

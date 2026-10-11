@@ -1,4 +1,14 @@
-# PyPI is the only general index. uv sends torch and torchvision to the
-# CUDA 13.0 wheel index and leaves every other package, including numpy, on PyPI.
+# PyPI is the only general index. torch and torchvision are pinned to the
+# CUDA 13.0 wheel index. torchao and every other package stay on PyPI.
 index-url = "https://pypi.org/simple"
-torch-backend = "cu130"
+
+[[index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[sources]
+torch = { index = "pytorch-cu130" }
+torchvision = { index = "pytorch-cu130" }
+
+override-dependencies = ["torch==2.11.0+cu130", "torchvision==0.26.0+cu130"]

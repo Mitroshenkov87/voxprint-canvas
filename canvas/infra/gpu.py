@@ -6,6 +6,7 @@ import subprocess
 from dataclasses import dataclass
 
 from canvas.app.info import MIN_COMPUTE_CAPABILITY
+from canvas.infra.vram import get_vram_budget_gb
 
 
 @dataclass(frozen=True)
@@ -30,8 +31,66 @@ def _parse_cc(value: str) -> tuple[int, int]:
     return int(major), int(minor)
 
 
+def apply_vram_cap(info: GpuInfo, cap_gb: float | None = None) -> GpuInfo:
+    """Limit reported memory to the shared VRAM budget and reserve that fraction.
+
+    ``get_vram_budget_gb`` reads ``CANVAS_VRAM_CAP_GB``. Tier detection uses
+    ``total_gb``, so a 24 GB card capped at 16 GB is the 16 GB tier. The
+    fraction is applied here; the budget helper does not touch CUDA.
+    """
+    if info.total_gb <= 0:
+        return info
+    if cap_gb is None:
+        budget = get_vram_budget_gb(info.total_gb)
+    elif cap_gb <= 0:
+        budget = info.total_gb
+    else:
+        budget = min(info.total_gb, cap_gb)
+    if budget is None or budget >= info.total_gb:
+        return info
+    limited = budget
+    _limit_fraction(limited / info.total_gb)
+    return GpuInfo(
+        info.name,
+        limited,
+        min(info.free_gb, limited),
+        info.compute_major,
+        info.compute_minor,
+        info.source,
+    )
+
+
+def _limit_fraction(fraction: float) -> None:
+    """Apply ``torch.cuda.set_per_process_memory_fraction`` when CUDA is present.
+
+    torch is an optional extra. Importing it here is not a circular import.
+    A second call, or a machine without CUDA, leaves the process as it is.
+    """
+    try:
+        import torch
+    except ImportError:
+        return
+    if not torch.cuda.is_available():
+        return
+    setter = getattr(torch.cuda, "set_per_process_memory_fraction", None)
+    if setter is None:
+        return
+    try:
+        setter(fraction)
+    except (RuntimeError, ValueError):
+        return
+
+
 def probe_gpu() -> GpuInfo | None:
     """Read the first NVIDIA GPU. ``VOXPRINT_FAKE_VRAM`` is ``name,total_gb,free_gb,cc`` for tests."""
+    info = _probe_gpu()
+    if info is None:
+        return None
+    return apply_vram_cap(info)
+
+
+def _probe_gpu() -> GpuInfo | None:
+    """The uncapped GPU reading."""
     fake = os.environ.get("VOXPRINT_FAKE_VRAM", "").strip()
     if fake:
         name, total, free, cc = [part.strip() for part in fake.split(",")]

@@ -32,6 +32,7 @@ from canvas.infra.runtime import (
     file_sha256,
     hash_tree,
     interpreter_marker,
+    python_supports_tensorrt,
     refill_wheels,
     restore_runtime,
     restore_tensorrt,
@@ -41,6 +42,7 @@ from canvas.models.loader import plan_specs
 from canvas.models.plan import CallPlan
 from canvas.models.registry import Catalog, ModelSpec, RegistryError
 from canvas.models.snapshots import SnapshotError, download_snapshot, snapshot_ready, snapshot_status, weight_dir
+from canvas.models.verified import VerifiedCache
 
 _RATE = 8 * 1024 * 1024
 _SAFETY_ROLES = ("prompt-guard", "zero-shot", "face-detector", "age", "nsfw")
@@ -163,20 +165,28 @@ def ensure_plan(
 
 
 def repair(catalog: Catalog, progress: Callable[[str], None]) -> list[str]:
-    """Replace missing or corrupt shared files and return the component ids fixed."""
+    """Replace missing or corrupt shared files and return the component ids fixed.
+
+    A file whose recorded size and time still match is not hashed again. Nothing
+    is downloaded when every recorded file is present and unchanged.
+    """
     shared = shared_dir()
     try:
         components = load_manifest(shared)
     except ManifestError as exc:
         progress(str(exc))
         return []
+    cache = VerifiedCache.open(False)
     fixed: list[str] = []
-    for component_id, component in components.items():
-        if not _needs_repair(shared, component_id, component, catalog):
-            continue
-        progress(f"Repairing {component_id}")
-        _repair_one(catalog, component_id, component, progress)
-        fixed.append(component_id)
+    try:
+        for component_id, component in components.items():
+            if not _needs_repair(shared, component_id, component, catalog, cache):
+                continue
+            progress(f"Repairing {component_id}")
+            _repair_one(catalog, component_id, component, progress)
+            fixed.append(component_id)
+    finally:
+        cache.flush()
     return fixed
 
 
@@ -294,14 +304,19 @@ def _repair_one(
     progress(f"Leaving {component_id} unchanged")
 
 
-def _needs_repair(shared: Path, component_id: str, component: Component, catalog: Catalog) -> bool:
+def _needs_repair(
+    shared: Path, component_id: str, component: Component, catalog: Catalog, cache: VerifiedCache,
+) -> bool:
     if APP_ID not in component.refs:
         return False
+    if component.kind == "runtime" and (component_id == TRT_ID or component.path == TRT_PATH):
+        if not python_supports_tensorrt():
+            return False
     if component.kind == "model":
         spec = _spec_for(catalog, component_id, component)
         if spec is None:
             return False
-        return snapshot_status(spec, models_dir()) != "ready"
+        return snapshot_status(spec, models_dir(), cache) != "ready"
     if component.kind in ("wheels", "runtime"):
         return not (shared / component.path).exists()
     return False

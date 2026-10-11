@@ -9,6 +9,7 @@ from pathlib import Path
 from canvas.app.info import ENLARGE_HINT
 from canvas.core.exchange import read_picture, write_png
 from canvas.core.formats import DEFAULT_FORMAT, OutputFormat, save_image
+from canvas.infra.enlarge import EnlargeError, declared_vram_gb
 from canvas.infra.gpu_lock import GpuLockTimeout, lock_path, release, try_acquire
 from canvas.infra.thermal import Guard
 from canvas.models.loader import ModelNotReady
@@ -17,6 +18,7 @@ from canvas.models.plan import BaseNotSelected, ModeUnavailable
 from canvas.models.registry import Catalog
 from canvas.models.sizes import FOUR_K_LONG, frame_size, family_for, upscale_factor
 from canvas.pipeline.engine import run_generator
+from canvas.pipeline.gpu_release import free_vram_gb, release_cuda_cache
 from canvas.pipeline.vram_probe import PeakVramProbe
 from canvas.safety.gate import AgeGate, SafetyError
 from canvas.safety.image import RawImage, SafeImage
@@ -45,12 +47,13 @@ class EnlargeMissing(Exception):
 
 
 class _Hold:
-    """The suite GPU lock, held for the whole generate and upscale chain."""
+    """The suite GPU lock. It is released while Enlarge runs, then taken again."""
 
     def __init__(self, enabled: bool) -> None:
         self.enabled = enabled
         self.path = lock_path()
         self.held = False
+        self._lent = False
 
     def __enter__(self) -> _Hold:
         if not self.enabled:
@@ -65,6 +68,26 @@ class _Hold:
         if self.held:
             release(self.path)
             self.held = False
+
+    def lend(self) -> None:
+        """Release the lock so Enlarge can use the GPU."""
+        if not self.held:
+            self._lent = False
+            return
+        release(self.path)
+        self.held = False
+        self._lent = True
+
+    def reclaim(self) -> None:
+        """Take the lock back after Enlarge returns."""
+        if not self._lent:
+            return
+        self._lent = False
+        holder = try_acquire("canvas-generate", 600, self.path)
+        if holder is None:
+            self.held = True
+            return
+        raise GpuLockTimeout("the GPU is busy")
 
 
 class Pipeline:
@@ -85,11 +108,13 @@ class Pipeline:
                  aspect: str = "1:1", output: str = "native", probe: PeakVramProbe | None = None) -> SafeImage:
         """Run one request and return a picture the window may show.
 
-        The suite GPU lock stays held for the whole job. Native output uses the
-        model's frame for the aspect. ``2k`` generates the model's ~2K frame and
-        does not upscale. 4K output generates that same ~2K frame,
-        unloads the generator on a 16 GB card, then asks Voxprint AI Enlarge to
-        make the long side 3840. The enlarged picture is released before it is
+        The suite GPU lock is held while the picture is made. Native output uses
+        the model's frame for the aspect. ``2k`` generates the model's ~2K frame
+        and does not upscale. 4K output generates the model's ~2K frame, unloads
+        the generator, text encoder, and VAE, and asks Voxprint AI Enlarge to
+        make the long side 3840 only when free GPU memory is above Enlarge's
+        declared need. The lock is released for that spawn and taken again
+        afterwards. The enlarged picture is released before it is
         returned. A stage that does not fit the memory budget stops the job.
         """
         if output not in {"native", "2k", "4k"}:
@@ -100,7 +125,7 @@ class Pipeline:
         have = {item.role for item in inputs}
         if any(role not in have for role in needed):
             raise JobError()
-        with self._hold():
+        with self._hold() as hold:
             if self.thermal is not None and self.thermal.should_pause():
                 self.paused = True
                 raise CoolingDown()
@@ -121,7 +146,7 @@ class Pipeline:
                     probe.mark("generate-end")
                 if output != "4k":
                     return image
-                return self._upscale(image, probe, prompt)
+                return self._upscale(image, probe, prompt, hold)
             except ModelNotReady as exc:
                 raise SafetyError("model_not_ready") from exc
             finally:
@@ -150,13 +175,14 @@ class Pipeline:
             upscale_factor(frame)
         return frame.width, frame.height
 
-    def _upscale(self, image: SafeImage, probe: PeakVramProbe | None, prompt: str) -> SafeImage:
-        if self.tier is Tier.GB16:
-            unload = getattr(self.generator, "unload", None)
-            if unload is not None:
-                unload()
-            if probe is not None:
-                probe.mark("unload")
+    def _upscale(self, image: SafeImage, probe: PeakVramProbe | None, prompt: str, hold: _Hold) -> SafeImage:
+        self._release_models()
+        if probe is not None:
+            probe.mark("unload")
+        need = _enlarge_need_gb(self.enlarge)
+        free = free_vram_gb()
+        if free is not None and free <= need:
+            raise EnlargeError("oom", "Enlarge needs more free GPU memory.", False)
         with tempfile.TemporaryDirectory(prefix="voxprint-canvas-") as folder:
             root = Path(folder)
             source = root / "native.png"
@@ -165,7 +191,17 @@ class Pipeline:
             if probe is not None:
                 probe.mark("upscale-start")
             enlarge = getattr(self.enlarge, "enlarge")
-            result = enlarge(source, output=dest, format_name="avif", long_side=FOUR_K_LONG)
+            hold.lend()
+            failed = True
+            try:
+                result = enlarge(source, output=dest, format_name="avif", long_side=FOUR_K_LONG)
+                failed = False
+            finally:
+                try:
+                    hold.reclaim()
+                except GpuLockTimeout:
+                    if failed:
+                        raise
             out_path = Path(result.output)
             upscaled = read_picture(out_path)
             if probe is not None:
@@ -173,6 +209,17 @@ class Pipeline:
             reviewed = self._reviewed(upscaled, prompt)
             out_path.unlink(missing_ok=True)
             return reviewed
+
+    def _release_models(self) -> None:
+        """Drop the generator, text encoder, and VAE, then return CUDA memory."""
+        generator = self.generator
+        for name in ("pipe", "pipeline", "text_encoder", "text_encoder_2", "vae", "transformer", "controlnet"):
+            if getattr(generator, name, None) is not None:
+                setattr(generator, name, None)
+        unload = getattr(generator, "unload", None)
+        if unload is not None:
+            unload()
+        release_cuda_cache()
 
     def _reviewed(self, raw: RawImage, prompt: str) -> SafeImage:
         image = self.gate.review_image(raw, prompt)
@@ -185,6 +232,12 @@ class Pipeline:
         hold = _Hold(self.use_gpu_lock)
         with hold:
             yield hold
+
+
+def _enlarge_need_gb(enlarge: object | None) -> float:
+    caps = getattr(enlarge, "capabilities", None)
+    body = caps() if callable(caps) else None
+    return declared_vram_gb(body if isinstance(body, dict) else None)
 
 
 def _enlarge_ready(enlarge: object | None) -> bool:

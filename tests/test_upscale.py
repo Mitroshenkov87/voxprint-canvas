@@ -27,6 +27,8 @@ class _Gen:
         self.order: list[str] = []
         self.sizes: list[tuple[int, int]] = []
         self.lock_held = False
+        self.text_encoder = object()
+        self.vae = object()
 
     def generate(self, screened: ScreenedInput, width: int, height: int) -> RawImage:
         del screened
@@ -83,7 +85,9 @@ def test_fourk_chain_unloads_on_16gb_and_screens_the_upscale(tmp_path, monkeypat
     assert enlarge.source_long < 3840
     assert gen.order == ["generate", "unload"]
     assert gen.lock_held is True
-    assert enlarge.lock_held is True
+    assert enlarge.lock_held is False
+    assert gen.text_encoder is None
+    assert gen.vae is None
     assert image.width == expected.width * factor
     assert image.height == expected.height * factor
     assert [mark for mark, _used in probe.marks] == [
@@ -95,9 +99,13 @@ def test_fourk_chain_unloads_on_16gb_and_screens_the_upscale(tmp_path, monkeypat
     assert avif_file(path.read_bytes())
 
 
-def test_fourk_cli_runs_inside_the_held_lock(tmp_path, monkeypatch):
+def test_fourk_cli_releases_the_lock_and_starts_from_a_clean_environment(tmp_path, monkeypatch):
     monkeypatch.setenv("VOXPRINT_GPU_LOCK", str(tmp_path / "voxprint-gpu.lock"))
     monkeypatch.setenv("CANVAS_CACHE", str(tmp_path / "cache"))
+    monkeypatch.setenv("PYTHONPATH", "/from-the-parent")
+    monkeypatch.setenv("VIRTUAL_ENV", "/from-the-parent")
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "0")
+    monkeypatch.setenv("PYTORCH_CUDA_ALLOC_CONF", "max_split_size_mb:32")
     catalog = replace(load_catalog(), default_text_base="qwen-image-2512")
     world = World()
     gen = _Gen(catalog)
@@ -115,7 +123,7 @@ def test_fourk_cli_runs_inside_the_held_lock(tmp_path, monkeypatch):
     assert world.calls.count("image-score") == 2
 
 
-def test_24gb_keeps_the_generator_and_image_modes_use_zimage_frames(monkeypatch, tmp_path):
+def test_24gb_unloads_before_enlarge_and_image_modes_use_zimage_frames(monkeypatch, tmp_path):
     monkeypatch.setenv("VOXPRINT_GPU_LOCK", str(tmp_path / "lock"))
     catalog = replace(load_catalog(), default_text_base="qwen-image-2512")
     world = World()
@@ -131,8 +139,26 @@ def test_24gb_keeps_the_generator_and_image_modes_use_zimage_frames(monkeypatch,
     )
     expected = frame_size(catalog, "z-image-turbo", "3:2", twok=True)
     assert gen.sizes == [(expected.width, expected.height)]
-    assert gen.order == ["generate"]
-    assert "unload" not in gen.order
+    assert gen.order == ["generate", "unload"]
+    assert enlarge.lock_held is False
+    assert gen.text_encoder is None
+    assert gen.vae is None
+
+
+def test_fourk_does_not_spawn_enlarge_without_enough_free_memory(tmp_path, monkeypatch):
+    monkeypatch.setattr("canvas.pipeline.pipeline.free_vram_gb", lambda: 5.0)
+    catalog = replace(load_catalog(), default_text_base="z-image-turbo")
+    enlarge = _Enlarge()
+    enlarge.capabilities = lambda: {"protocol": 1, "gpu": {"vram_gb": 8}}
+    pipeline = Pipeline(World().gate(), _Gen(catalog), Tier.GB24, catalog=catalog, enlarge=enlarge)
+    with pytest.raises(EnlargeError) as caught:
+        pipeline.generate("a red boat", Mode.TEXT, output="4k")
+    assert caught.value.code == "oom"
+    assert enlarge.long_side == 0
+    monkeypatch.setattr("canvas.pipeline.pipeline.free_vram_gb", lambda: 9.0)
+    enlarge.long_side = 0
+    pipeline.generate("a red boat", Mode.TEXT, output="4k")
+    assert enlarge.long_side == 3840
 
 
 def test_missing_enlarge_does_not_generate_and_a_blocked_upscale_is_not_saved(tmp_path):

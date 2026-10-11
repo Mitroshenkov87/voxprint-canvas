@@ -45,14 +45,15 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--unregister-models", action="store_true", help="remove Canvas from the shared resource manifest")
     parser.add_argument("--check-update", action="store_true", help="print a newer GitHub release tag, if one exists")
     parser.add_argument("--selftest", action="store_true", help="check the GPU, model files and encoders")
-    parser.add_argument("--json", action="store_true", help="print a JSON document")
-    parser.add_argument("--version", action="store_true", help="print the release identity and exit")
+    parser.add_argument("--deep", action="store_true", help="re-hash every model file during --selftest")
     parser.add_argument(
         "--vram-cap-gb",
         type=float,
         default=None,
         help="plan as if the GPU had this many GB (CANVAS_VRAM_CAP_GB)",
     )
+    parser.add_argument("--json", action="store_true", help="print a JSON document")
+    parser.add_argument("--version", action="store_true", help="print the release identity and exit")
     generate = parser.add_subparsers(dest="command", required=False).add_parser(
         "generate", help="generate one image and exit",
     )
@@ -68,6 +69,12 @@ def _parser() -> argparse.ArgumentParser:
         "--enhance",
         action="store_true",
         help="improve the prompt before generating",
+    )
+    generate.add_argument(
+        "--vram-cap-gb",
+        type=float,
+        default=argparse.SUPPRESS,
+        help="plan as if the GPU had this many GB (CANVAS_VRAM_CAP_GB)",
     )
     generate.add_argument("--json", action="store_true")
     return parser
@@ -280,14 +287,16 @@ def _generate(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     """Register the shared model folder, check for a release, or open the window."""
     args = _parser().parse_args(argv)
-    _apply_vram_cap(args)
+    refused = _apply_vram_cap(args)
+    if refused is not None:
+        return refused
     if args.version:
         print(version_label())
         return 0
     if getattr(args, "command", None) == "generate":
         return _generate(args)
     if args.selftest:
-        report = selftest_report()
+        report = selftest_report(deep=bool(args.deep))
         if args.json:
             print(json.dumps(report, indent=2))
         else:
@@ -320,14 +329,6 @@ def main(argv: list[str] | None = None) -> int:
     _repair_shared(splash.set_stage)
     _launch(gpu.tier, splash, app)
     return 0
-
-
-def _apply_vram_cap(args: argparse.Namespace) -> None:
-    """Store ``--vram-cap-gb`` where tier selection and the other cap reader look."""
-    cap = getattr(args, "vram_cap_gb", None)
-    if cap is None:
-        return
-    set_vram_cap_gb(float(cap))
 
 
 def _generate_payload(path: Path, original: str, outcome: EnhanceResult | None, seconds: float) -> dict[str, object]:
@@ -374,6 +375,19 @@ def _confirm(window: MainWindow | None, notice: str) -> bool:
     if app is not None:
         app.processEvents()
     return window.confirm_download(notice)
+
+
+def _apply_vram_cap(args: argparse.Namespace) -> int | None:
+    """Store ``--vram-cap-gb`` where tier selection and the other cap reader look."""
+    cap = getattr(args, "vram_cap_gb", None)
+    if cap is None:
+        return None
+    try:
+        set_vram_cap_gb(float(cap))
+    except ValueError:
+        print("The VRAM cap must be greater than 0.", file=sys.stderr)
+        return 2
+    return None
 
 
 def _repair_shared(stage: Callable[[str], None]) -> None:

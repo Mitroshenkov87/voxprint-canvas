@@ -83,6 +83,25 @@ def manifest_lock(shared: Path):
         os.close(fd)
 
 
+def read_extra(shared: Path, key: str) -> Any:
+    """One top-level value kept beside ``components``, or None when it is absent."""
+    if not manifest_path(shared).is_file():
+        return None
+    with manifest_lock(shared):
+        _components, extra, _migrated = _read_document(shared)
+        return extra.get(key)
+
+
+def update_extra(shared: Path, key: str, value: Any) -> None:
+    """Replace one top-level key that is not the schema or the component map."""
+    if key in ("schema", "components", "version", "resources"):
+        raise ManifestError("that manifest key is reserved")
+    with manifest_lock(shared):
+        components, extra, _migrated = _read_document(shared)
+        extra[key] = value
+        _write_unlocked(shared, components, extra)
+
+
 def load_manifest(shared: Path) -> dict[str, Component]:
     """Components in the manifest. A missing file is an empty map.
 

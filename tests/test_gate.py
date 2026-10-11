@@ -5,10 +5,16 @@ import time
 import pytest
 
 from canvas.safety.classifiers import Face
+from canvas.safety.adapters import age_bands, apparent_age_from_bucket
 from canvas.safety.constants import (
+    ADOLESCENT_16_17_AT,
+    ADOLESCENT_16_17_AT_AGE_18,
     APPARENT_AGE_UNCERTAIN_UNDER,
     BLOCKED_MESSAGE,
     CLASSIFIER_TIMEOUT_S,
+    CLEAR_CHILD_AT,
+    IMAGE_ADULT_SEXUAL,
+    IMAGE_LABELS,
     IMAGE_MINOR,
     IMAGE_MINOR_SEXUAL,
     IMAGE_TIMEOUT_S,
@@ -17,7 +23,14 @@ from canvas.safety.constants import (
     ZERO_SHOT_BLOCK_AT,
 )
 from canvas.safety.denylist import explain
-from canvas.safety.gate import GenerationBlocked, SafetyUnavailable, _wait, refusal_stage
+from canvas.safety.gate import (
+    GenerationBlocked,
+    SafetyUnavailable,
+    _wait,
+    adult_age_support,
+    image_block_reason,
+    refusal_stage,
+)
 from canvas.safety.image import SafeImage, ScreenedInput, _INPUT_TOKEN, _OUTPUT_TOKEN
 from canvas.safety.inputs import ImageRole, PendingInput
 from tests.fakes import World, rgb
@@ -32,6 +45,9 @@ SHOWER = (
 
 def test_thresholds_are_compile_time_constants():
     assert APPARENT_AGE_UNCERTAIN_UNDER == 25
+    assert CLEAR_CHILD_AT == 0.70
+    assert ADOLESCENT_16_17_AT == 0.16
+    assert ADOLESCENT_16_17_AT_AGE_18 == 0.18
     assert SEXUAL_SCORE_BLOCK_AT == 0.50
     assert ZERO_SHOT_BLOCK_AT == 0.35
     assert CLASSIFIER_TIMEOUT_S == 20.0
@@ -130,18 +146,60 @@ def test_prompt_gate_fails_closed_on_the_guard():
     world.gate().review_prompt("a red boat")
 
 
-def test_image_age_boundary_and_adult_sexual_image():
+def _adult_distribution(bucket: str) -> dict[str, float]:
+    labels = ("0-2", "3-9", "10-19", "20-29", "30-39", "40-49", "50-59", "60-69", "70+")
+    return {label: (1.0 if label == bucket else 0.0) for label in labels}
+
+
+def _image_scores(**overrides: float) -> dict[str, float]:
+    scores = {label: 0.0 for label in IMAGE_LABELS}
+    scores.update(overrides)
+    return scores
+
+
+def test_shower_prompt_allows_and_a_20_29_face_does_not_block_an_adult_picture():
+    assert refusal_stage(SHOWER, "unsafe", ("Sexual Content or Sexual Acts",)) == "allow"
+    assert adult_age_support(SHOWER) == "strong"
+    assert adult_age_support("a 22-year-old woman") == "strong"
+    assert adult_age_support("an 18-year-old woman") == "adult"
+    assert adult_age_support("a 17-year-old") == "none"
+    assert adult_age_support("a 25-year-old and a 10-year-old") == "none"
+    assert adult_age_support("a red boat") == "none"
+    assert age_bands(_adult_distribution("20-29")) == (0.0, 0.0)
+    assert age_bands(_adult_distribution("30-39")) == (0.0, 0.0)
+    assert age_bands(_adult_distribution("10-19")) == pytest.approx((0.6, 0.2))
+    assert age_bands(_adult_distribution("3-9")) == (1.0, 0.0)
+    assert apparent_age_from_bucket("20-29") == 20.0
+    scores = _image_scores(**{IMAGE_ADULT_SEXUAL: 0.9, IMAGE_MINOR: 0.9})
+    # Highest bands measured on public-domain faces aged 20-25 stay open.
+    assert image_block_reason(0.95, [(0.67, 0.09)], scores) == "allow"
+    assert image_block_reason(0.95, [(0.50, 0.14)], scores) == "allow"
+    assert image_block_reason(0.95, [(0.69, 0.0)], scores) == "allow"
+    assert image_block_reason(0.95, [(0.70, 0.0)], scores, support="strong") == "clear-child"
+    assert image_block_reason(0.95, [(0.0, 0.16)], scores) == "adolescent"
+    assert image_block_reason(0.95, [(0.0, 0.16)], scores, support="strong") == "allow"
+    assert image_block_reason(0.95, [(0.0, 0.17)], scores, support="adult") == "allow"
+    assert image_block_reason(0.95, [(0.0, 0.18)], scores, support="adult") == "adolescent"
+    assert image_block_reason(0.95, [(0.0, 0.20)], scores, support="strong") == "allow"
+    assert image_block_reason(0.1, [], _image_scores(**{IMAGE_MINOR_SEXUAL: 0.35})) == "minor-sexual"
+    with pytest.raises(SafetyUnavailable):
+        image_block_reason(0.0, [], {IMAGE_MINOR_SEXUAL: 0.0, IMAGE_ADULT_SEXUAL: 0.0})
+
+
+def test_image_probability_boundary_and_adult_sexual_image():
     world = World()
     world.nsfw = 0.90
     world.gate().review_image(rgb())
     world.faces = [Face(0, 0, 2, 2)]
-    world.ages = [25.0]
-    released = world.gate().review_image(rgb())
+    world.ages = [(0.0, 0.0)]
+    released = world.gate().review_image(rgb(), "a 22-year-old woman")
     assert type(released) is SafeImage
-    world.ages = [24.9]
+    world.ages = [(0.69, 0.15)]
+    world.gate().review_image(rgb())
+    world.ages = [(0.70, 0.0)]
     raw = rgb(color=(9, 8, 7))
     with pytest.raises(GenerationBlocked):
-        world.gate().review_image(raw)
+        world.gate().review_image(raw, "a 25-year-old woman")
     assert raw.to_bytes() == b""
     assert raw.width == 0
 
@@ -157,17 +215,22 @@ def test_image_label_and_failed_age_are_fail_closed():
     with pytest.raises(SafetyUnavailable) as caught:
         world.gate().review_image(rgb())
     assert caught.value.code == "classifier_error"
-    world.ages = [float("nan")]
+    world.ages = [(float("nan"), 0.0)]
     with pytest.raises(SafetyUnavailable):
         world.gate().review_image(rgb())
-    world.ages = [30.0]
+    world.ages = [(0.0, 0.0)]
     world.nsfw = True  # type: ignore[assignment]
     with pytest.raises(SafetyUnavailable):
         world.gate().review_image(rgb())
     world.nsfw = 0.9
-    world.image_scores[IMAGE_MINOR] = 0.35
-    with pytest.raises(GenerationBlocked):
+    world.ages = [(30.0, 0.0)]
+    with pytest.raises(SafetyUnavailable):
         world.gate().review_image(rgb())
+    world.ages = [(0.0, 0.0)]
+    world.image_scores[IMAGE_MINOR] = 0.90
+    world.image_scores[IMAGE_ADULT_SEXUAL] = 0.90
+    released = world.gate().review_image(rgb())
+    assert type(released) is SafeImage
 
 
 def test_every_input_is_screened_and_sources_are_wiped():
@@ -195,7 +258,7 @@ def test_a_blocked_input_wipes_every_staged_image():
     world = World()
     world.nsfw = 0.9
     world.faces = [Face(0, 0, 1, 1)]
-    world.ages = [10.0]
+    world.ages = [(1.0, 0.0)]
     images = [rgb(), rgb()]
     with pytest.raises(GenerationBlocked) as caught:
         world.gate().release_request(
@@ -217,6 +280,13 @@ def test_issued_types_cannot_be_built_outside_the_gate():
 def test_environment_cannot_turn_the_checks_off(monkeypatch):
     monkeypatch.setenv("CANVAS_DISABLE_SAFETY", "1")
     monkeypatch.setenv("APPARENT_AGE_UNCERTAIN_UNDER", "0")
+    monkeypatch.setenv("CLEAR_CHILD_AT", "1")
+    monkeypatch.setenv("ADOLESCENT_16_17_AT", "1")
     world = World()
     with pytest.raises(GenerationBlocked):
         world.gate().review_prompt("nude child")
+    world.nsfw = 0.9
+    world.faces = [Face(0, 0, 1, 1)]
+    world.ages = [(1.0, 0.0)]
+    with pytest.raises(GenerationBlocked):
+        world.gate().review_image(rgb(), "a 25-year-old woman")

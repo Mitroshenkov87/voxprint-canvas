@@ -5,8 +5,24 @@ CLI flags or plugins to change them. Tests pin the values.
 """
 from __future__ import annotations
 
-# Apparent age below this is uncertain and blocks when the image is sexual or suggestive.
+# Pinned historical cutoff. The image gate does not compare an apparent age with this
+# value. A face in the 20-29 bucket used to be read as 20 and then stopped.
 APPARENT_AGE_UNCERTAIN_UNDER = 25
+
+# P(age <= 15) at or above this, together with sexual content, blocks the image.
+# Buckets 0-2 and 3-9 count in full. Six of the ten years in 10-19 count, so a
+# pure 10-19 distribution is 0.60 and stays under this line. A stated age cannot
+# move it. Face crops of clothed portraits aged 20-25 stayed at or below 0.67.
+CLEAR_CHILD_AT = 0.70
+
+# P(age in 16 or 17). Only two of the ten years in the 10-19 bucket count, so
+# this line is that bucket at 0.80 or more. It is the higher-confidence band.
+# A stated age of 20 or more can support a pass here. It cannot move CLEAR_CHILD_AT.
+ADOLESCENT_16_17_AT = 0.16
+
+# A stated age of 18 or 19 raises the 16-17 line to a 10-19 bucket of 0.90.
+# A stated age of 20 or more removes the 16-17 line.
+ADOLESCENT_16_17_AT_AGE_18 = 0.18
 
 # Falconsai/nsfw_image_detection score at or above this counts as sexual content.
 SEXUAL_SCORE_BLOCK_AT = 0.50

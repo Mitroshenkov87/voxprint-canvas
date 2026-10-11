@@ -61,7 +61,7 @@ def test_a_refused_image_is_not_written(tmp_path: Path):
     world = World()
     world.nsfw = 0.95
     world.faces = [Face(0, 0, 1, 1)]
-    world.ages = [8.0]
+    world.ages = [(1.0, 0.0)]
 
     def runner(base: str, prompt: str, seed: int, screened: ScreenedInput):
         del base, prompt, seed, screened

@@ -13,7 +13,8 @@ The next version of Voxprint AI Canvas is listed below. Items under Later are pl
 - Smart memory placement on 16 GB cards. Components load one at a time, so full-quality BF16 models fit.
 - Modern output formats: AVIF, JPEG XL, and WebP.
 - Opt-in third-party add-ons.
-- Enhance a prompt before generating, for the release candidate after 0.1.0-rc.3. The button improves the prompt with the Qwen3-4B text encoder that ships with Z-Image-Turbo. This change is not a release tag.
+- Enhance a prompt before generating. The button improves the prompt with the Qwen3-4B text encoder that ships with Z-Image-Turbo. This ships in 0.1.0-rc.4.
+- Instruction edit on a 24 GB GPU, using the published Qwen-Image-Edit-2511 FP8 mirror. This ships in 0.1.0-rc.4.
 
 ## Later
 

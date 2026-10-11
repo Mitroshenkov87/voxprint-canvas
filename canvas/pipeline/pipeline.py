@@ -115,12 +115,12 @@ class Pipeline:
                 if attach is not None:
                     attach(probe)
                 raw = run_generator(self.generator, screened, width=width, height=height)
-                image = self._reviewed(raw)
+                image = self._reviewed(raw, prompt)
                 if probe is not None:
                     probe.mark("generate-end")
                 if output == "native":
                     return image
-                return self._upscale(image, probe)
+                return self._upscale(image, probe, prompt)
             except ModelNotReady as exc:
                 raise SafetyError("model_not_ready") from exc
             finally:
@@ -149,7 +149,7 @@ class Pipeline:
             upscale_factor(frame)
         return frame.width, frame.height
 
-    def _upscale(self, image: SafeImage, probe: PeakVramProbe | None) -> SafeImage:
+    def _upscale(self, image: SafeImage, probe: PeakVramProbe | None, prompt: str) -> SafeImage:
         if self.tier is Tier.GB16:
             unload = getattr(self.generator, "unload", None)
             if unload is not None:
@@ -169,12 +169,12 @@ class Pipeline:
             upscaled = read_picture(out_path)
             if probe is not None:
                 probe.mark("upscale-end")
-            reviewed = self._reviewed(upscaled)
+            reviewed = self._reviewed(upscaled, prompt)
             out_path.unlink(missing_ok=True)
             return reviewed
 
-    def _reviewed(self, raw: RawImage) -> SafeImage:
-        image = self.gate.review_image(raw)
+    def _reviewed(self, raw: RawImage, prompt: str) -> SafeImage:
+        image = self.gate.review_image(raw, prompt)
         if type(image) is not SafeImage:
             raise TypeError("the checks must release the image")
         return image

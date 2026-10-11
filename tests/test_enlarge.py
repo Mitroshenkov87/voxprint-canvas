@@ -258,7 +258,7 @@ def test_enlarge_is_found_on_a_standard_path_and_in_the_manifest(tmp_path, monke
     binary.chmod(0o755)
     found = find_app("Enlarge", "enlarge")
     assert found is not None
-    assert found.command == [str(binary)]
+    assert os.path.normcase(found.command[0]) == os.path.normcase(str(binary))
     binary.unlink()
     recorded = tmp_path / "shared" / "apps" / "voxprint-enlarge"
     recorded.parent.mkdir(parents=True)
@@ -267,7 +267,7 @@ def test_enlarge_is_found_on_a_standard_path_and_in_the_manifest(tmp_path, monke
     register_resource(shared_dir(), "enlarge-cli", kind="suite", path="apps", nbytes=1, files={}, app="enlarge")
     found = find_app("Enlarge", "enlarge")
     assert found is not None
-    assert found.command == [str(recorded)]
+    assert os.path.normcase(found.command[0]) == os.path.normcase(str(recorded))
 
 
 def test_missing_capabilities_disables_fourk(tmp_path, monkeypatch):

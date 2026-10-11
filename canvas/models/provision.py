@@ -11,27 +11,36 @@ from pathlib import Path
 
 from canvas.infra.manifest import (
     APP_ID,
+    Component,
     ManifestError,
-    Resource,
-    broken_files,
     load_manifest,
-    register_resource,
+    lock_sha256,
+    register_component,
 )
 from canvas.infra.paths import models_dir, shared_dir
 from canvas.infra.runtime import (
-    WHEEL_SOURCE,
+    ORT_ID,
+    ORT_VERSION,
+    PYTHON_ID,
+    PYTHON_VERSION,
+    RUNTIME_REL,
+    TORCH_ID,
+    TORCH_VERSION,
+    TRT_ID,
+    TRT_PATH,
+    TRT_VERSION,
     file_sha256,
     hash_tree,
     interpreter_marker,
-    python_home,
     refill_wheels,
     restore_runtime,
+    restore_tensorrt,
     wheel_dir,
 )
 from canvas.models.loader import plan_specs
 from canvas.models.plan import CallPlan
 from canvas.models.registry import Catalog, ModelSpec, RegistryError
-from canvas.models.snapshots import SnapshotError, download_snapshot, snapshot_ready, weight_dir
+from canvas.models.snapshots import SnapshotError, download_snapshot, snapshot_ready, snapshot_status, weight_dir
 
 _RATE = 8 * 1024 * 1024
 _SAFETY_ROLES = ("prompt-guard", "zero-shot", "face-detector", "age", "nsfw")
@@ -154,20 +163,20 @@ def ensure_plan(
 
 
 def repair(catalog: Catalog, progress: Callable[[str], None]) -> list[str]:
-    """Replace missing or corrupt shared files and return the resource ids fixed."""
+    """Replace missing or corrupt shared files and return the component ids fixed."""
     shared = shared_dir()
     try:
-        resources = load_manifest(shared)
+        components = load_manifest(shared)
     except ManifestError as exc:
         progress(str(exc))
         return []
     fixed: list[str] = []
-    for resource_id, resource in resources.items():
-        if not broken_files(shared, resource):
+    for component_id, component in components.items():
+        if not _needs_repair(shared, component_id, component, catalog):
             continue
-        progress(f"Repairing {resource_id}")
-        _repair_one(catalog, resource_id, resource, progress)
-        fixed.append(resource_id)
+        progress(f"Repairing {component_id}")
+        _repair_one(catalog, component_id, component, progress)
+        fixed.append(component_id)
     return fixed
 
 
@@ -178,15 +187,15 @@ def remember(spec: ModelSpec, app: str = APP_ID) -> None:
         relative = _relative_pack(folder)
     except SnapshotError:
         return
-    register_resource(
+    digest = lock_sha256(dict(spec.files))
+    register_component(
         shared_dir(),
-        spec.id,
-        kind="pack",
+        f"model-{digest[:12]}",
+        kind="model",
+        version=spec.id,
         path=relative,
-        nbytes=spec.nbytes,
-        files=dict(spec.files),
+        sha256=digest,
         app=app,
-        source="",
     )
 
 
@@ -195,47 +204,72 @@ def record_runtime(app: str = APP_ID) -> None:
     marker = interpreter_marker()
     if marker is None:
         return
-    home = python_home()
-    relative = marker.relative_to(home).as_posix()
-    register_resource(
+    register_component(
         shared_dir(),
-        "python",
+        PYTHON_ID,
         kind="runtime",
-        path="python",
-        nbytes=marker.stat().st_size,
-        files={relative: file_sha256(marker)},
+        version=PYTHON_VERSION,
+        path=RUNTIME_REL,
+        sha256=file_sha256(marker),
         app=app,
-        source="python",
     )
 
 
 def record_wheels(app: str = APP_ID) -> None:
-    """Record the cached CUDA wheels when that folder has files."""
+    """Record torch, the GPU runtime, and TensorRT when those files are present."""
     files = hash_tree(wheel_dir())
+    torch_files = {
+        name: digest for name, digest in files.items() if _wheel_name(name).startswith(("torch-", "torchvision-"))
+    }
+    if torch_files:
+        register_component(
+            shared_dir(),
+            TORCH_ID,
+            kind="wheels",
+            version=TORCH_VERSION,
+            path=RUNTIME_REL if interpreter_marker() is not None else "wheels",
+            sha256=lock_sha256(torch_files),
+            app=app,
+        )
+    ort_files = {name: digest for name, digest in files.items() if "onnxruntime_gpu" in _wheel_name(name)}
+    if ort_files:
+        register_component(
+            shared_dir(),
+            ORT_ID,
+            kind="wheels",
+            version=ORT_VERSION,
+            path=RUNTIME_REL if interpreter_marker() is not None else "wheels",
+            sha256=lock_sha256(ort_files),
+            app=app,
+        )
+    record_tensorrt(app)
+
+
+def record_tensorrt(app: str = APP_ID) -> None:
+    """Record TensorRT 10 when its component directory has files."""
+    folder = shared_dir() / TRT_PATH
+    files = hash_tree(folder)
     if not files:
         return
-    total = sum((wheel_dir() / name).stat().st_size for name in files)
-    register_resource(
+    register_component(
         shared_dir(),
-        "torch-cu128",
-        kind="wheels",
-        path="wheels",
-        nbytes=total,
-        files=files,
+        TRT_ID,
+        kind="runtime",
+        version=TRT_VERSION,
+        path=TRT_PATH,
+        sha256=lock_sha256(files),
         app=app,
-        source=WHEEL_SOURCE,
     )
 
 
 def _repair_one(
-    catalog: Catalog, resource_id: str, resource: Resource, progress: Callable[[str], None],
+    catalog: Catalog, component_id: str, component: Component, progress: Callable[[str], None],
 ) -> None:
-    kind = resource.kind
-    if kind == "pack":
-        try:
-            spec = catalog.by_id(resource_id)
-        except RegistryError:
-            progress(f"Leaving {resource_id} unchanged")
+    kind = component.kind
+    if kind == "model":
+        spec = _spec_for(catalog, component_id, component)
+        if spec is None:
+            progress(f"Leaving {component_id} unchanged")
             return
         download_snapshot(spec, models_dir(), progress=progress)
         remember(spec)
@@ -244,13 +278,52 @@ def _repair_one(
         refill_wheels(progress)
         record_wheels()
         return
+    if kind == "runtime" and (component_id == TRT_ID or component.path == TRT_PATH):
+        restore_tensorrt(progress)
+        record_tensorrt()
+        return
     if kind == "runtime":
+        if any(ref != APP_ID for ref in component.refs):
+            progress(f"Leaving {component_id} unchanged")
+            return
         restore_runtime(progress)
         record_runtime()
         return
-    if kind == "suite":
+    if kind == "tool":
         return
-    progress(f"Leaving {resource_id} unchanged")
+    progress(f"Leaving {component_id} unchanged")
+
+
+def _needs_repair(shared: Path, component_id: str, component: Component, catalog: Catalog) -> bool:
+    if APP_ID not in component.refs:
+        return False
+    if component.kind == "model":
+        spec = _spec_for(catalog, component_id, component)
+        if spec is None:
+            return False
+        return snapshot_status(spec, models_dir()) != "ready"
+    if component.kind in ("wheels", "runtime"):
+        return not (shared / component.path).exists()
+    return False
+
+
+def _spec_for(catalog: Catalog, component_id: str, component: Component) -> ModelSpec | None:
+    for key in (component_id, component.version):
+        try:
+            return catalog.by_id(key)
+        except RegistryError:
+            continue
+    for spec in catalog.models:
+        try:
+            if _relative_pack(weight_dir(models_dir(), spec.repo)) == component.path:
+                return spec
+        except SnapshotError:
+            continue
+    return None
+
+
+def _wheel_name(name: str) -> str:
+    return Path(name).name
 
 
 def _relative_pack(folder: Path) -> str:

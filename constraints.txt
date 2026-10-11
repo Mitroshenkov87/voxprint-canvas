@@ -1,6 +1,6 @@
 # Exact runtime pins. Installers pass this file to pip with -c.
-# torch and torchvision resolve from https://download.pytorch.org/whl/cu128
-# (the newest CUDA 12.8 wheels are torch 2.11.0 and torchvision 0.26.0).
+# torch and torchvision resolve from https://download.pytorch.org/whl/cu130
+# (torch 2.11.0+cu130 and torchvision 0.26.0+cu130).
 # huggingface-hub stays on 1.x because diffusers 0.41.0 requires huggingface-hub<2.
 torch==2.11.0
 torchvision==0.26.0
@@ -16,6 +16,7 @@ pillow==12.3.0
 imagecodecs==2026.10.10
 opencv-python-headless==5.0.0.93
 PySide6==6.12.0
-onnxruntime==1.31.0
+onnxruntime-gpu==1.31.0
+tensorrt-cu13==10.16.1.11
 numpy==2.5.4
 regex==2026.9.29

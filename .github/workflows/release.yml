@@ -21,9 +21,11 @@ jobs:
           name="voxprint-canvas-${tag}-linux-x86_64"
           root="dist/${name}"
           mkdir -p "$root"
-          cp -a canvas pyproject.toml README.md LICENSE NOTICE BUILD.json constraints.txt "$root/"
+          cp -a canvas tools pyproject.toml README.md LICENSE NOTICE BUILD.json constraints.txt "$root/"
+          mkdir -p "$root/scripts"
+          cp -a scripts/vm_test.sh scripts/vm_test.ps1 "$root/scripts/"
           cp installer/linux/install.sh "$root/install.sh"
-          chmod 755 "$root/install.sh"
+          chmod 755 "$root/install.sh" "$root/scripts/vm_test.sh"
           find "$root" -type d -name __pycache__ -print0 | xargs -0r rm -rf
           tar -C dist -czf "dist/${name}.tar.gz" "$name"
       - uses: actions/upload-artifact@v4
@@ -45,6 +47,10 @@ jobs:
           $stage = "installer\windows\staging"
           New-Item -ItemType Directory -Force $stage | Out-Null
           Copy-Item -Path canvas -Destination $stage -Recurse
+          Copy-Item -Path tools -Destination $stage -Recurse
+          New-Item -ItemType Directory -Force (Join-Path $stage "scripts") | Out-Null
+          Copy-Item "scripts/vm_test.sh" (Join-Path $stage "scripts/vm_test.sh")
+          Copy-Item "scripts/vm_test.ps1" (Join-Path $stage "scripts/vm_test.ps1")
           foreach ($name in @("pyproject.toml", "README.md", "LICENSE", "NOTICE", "BUILD.json", "constraints.txt")) {
             Copy-Item $name (Join-Path $stage $name)
           }

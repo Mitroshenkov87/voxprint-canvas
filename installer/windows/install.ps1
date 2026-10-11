@@ -7,7 +7,12 @@ $Venv = Join-Path $App "venv"
 $Py = Join-Path $Venv "Scripts\python.exe"
 $Shared = Join-Path $env:LOCALAPPDATA "Voxprint\shared"
 $Wheels = Join-Path $Shared "wheels"
-$WindowsPythonUrl = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe"
+$RuntimeRel = "runtime/py314-torch2.11-cu130"
+$Runtime = Join-Path $Shared ($RuntimeRel -replace '/', '\')
+$RuntimePy = Join-Path $Runtime "Scripts\python.exe"
+$Trt = Join-Path $Shared "tensorrt-10"
+$WindowsPythonUrl = "https://www.python.org/ftp/python/3.14.8/python-3.14.8-amd64.exe"
+$TorchIndex = "https://download.pytorch.org/whl/cu130"
 
 function Invoke-Py([string[]]$ArgList) {
     & $Py @ArgList
@@ -20,8 +25,8 @@ Write-Host "Checking Python..."
 $Base = $null
 $pyLauncher = Get-Command py -ErrorAction SilentlyContinue
 if ($pyLauncher) {
-    foreach ($spec in @("-3.12", "-3")) {
-        & py $spec -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 12) else 1)"
+    foreach ($spec in @("-3.14", "-3")) {
+        & py $spec -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 14) else 1)"
         if ($LASTEXITCODE -eq 0) {
             $Base = $spec
             break
@@ -31,7 +36,7 @@ if ($pyLauncher) {
 if (-not $Base) {
     $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
     if ($pythonCmd) {
-        & $pythonCmd.Source -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 12) else 1)"
+        & $pythonCmd.Source -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 14) else 1)"
         if ($LASTEXITCODE -eq 0) {
             $Base = $pythonCmd.Source
         }
@@ -40,29 +45,44 @@ if (-not $Base) {
 if (-not $Base) {
     $uv = Join-Path $App "uv.exe"
     if (-not (Test-Path $uv)) {
-        throw "Python 3.12 is not installed, and uv.exe is not bundled next to install.ps1. Install Python 3.12 from $WindowsPythonUrl and run this setup again."
+        throw "Python 3.14 is not installed, and uv.exe is not bundled next to install.ps1. Install Python 3.14 from $WindowsPythonUrl and run this setup again."
     }
     Write-Host "Installing Python with uv..."
-    & $uv python install 3.12
+    & $uv python install 3.14
     if ($LASTEXITCODE -ne 0) {
-        throw "uv could not install Python 3.12. Install Python 3.12 from $WindowsPythonUrl and run this setup again."
+        throw "uv could not install Python 3.14. Install Python 3.14 from $WindowsPythonUrl and run this setup again."
     }
-    $found = (& $uv python find 3.12 | Out-String).Trim()
+    $found = (& $uv python find 3.14 | Out-String).Trim()
     if ($LASTEXITCODE -ne 0 -or -not $found) {
-        throw "uv installed Python 3.12 but the interpreter could not be found. Install Python 3.12 from $WindowsPythonUrl and run this setup again."
+        throw "uv installed Python 3.14 but the interpreter could not be found. Install Python 3.14 from $WindowsPythonUrl and run this setup again."
     }
     $Base = (($found -split '\r?\n') | Where-Object { $_.Trim() } | Select-Object -Last 1).Trim()
     if (-not (Test-Path $Base)) {
-        throw "uv reported Python at '$Base', but that file does not exist. Install Python 3.12 from $WindowsPythonUrl and run this setup again."
+        throw "uv reported Python at '$Base', but that file does not exist. Install Python 3.14 from $WindowsPythonUrl and run this setup again."
     }
 }
 
-if (-not (Test-Path $Py)) {
-    if ($Base -eq "-3.12" -or $Base -eq "-3") {
-        & py $Base -m venv $Venv
-    } else {
-        & $Base -m venv $Venv
+$RootPy = Join-Path $Runtime "python.exe"
+if (Test-Path $RootPy) {
+    $RuntimePy = $RootPy
+}
+$Fresh = -not (Test-Path $RuntimePy)
+if ($Fresh) {
+    $occupied = Get-ChildItem -Force $Runtime -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($occupied) {
+        throw "The suite runtime is already installed. Canvas will not replace it."
     }
+    New-Item -ItemType Directory -Force $Shared | Out-Null
+    if ($Base -eq "-3.14" -or $Base -eq "-3") {
+        & py $Base -m venv $Runtime
+    } else {
+        & $Base -m venv $Runtime
+    }
+    if ($LASTEXITCODE -ne 0) { throw "Python could not create the suite runtime." }
+}
+
+if (-not (Test-Path $Py)) {
+    & $RuntimePy -m venv $Venv
     if ($LASTEXITCODE -ne 0) { throw "Python could not create the environment." }
 }
 
@@ -71,11 +91,20 @@ if (-not (Test-Path $Constraints)) {
     throw "constraints.txt is missing from the setup. The install cannot continue."
 }
 Invoke-Py @("-m", "pip", "install", "--upgrade", "pip")
+if ($Fresh) {
+    & $RuntimePy -m pip install --upgrade pip
+    if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
+    & $RuntimePy -m pip install -c $Constraints --upgrade-strategy only-if-needed --index-url $TorchIndex --extra-index-url "https://pypi.org/simple" torch torchvision onnxruntime-gpu
+    if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
+}
 Write-Host "Installing PyTorch..."
 New-Item -ItemType Directory -Force $Wheels | Out-Null
-Invoke-Py @("-m", "pip", "download", "-c", $Constraints, "torch", "torchvision", "--index-url", "https://download.pytorch.org/whl/cu128", "-d", $Wheels)
-Invoke-Py @("-m", "pip", "install", "-c", $Constraints, "--upgrade-strategy", "only-if-needed", "--find-links", $Wheels, "torch", "torchvision")
-Invoke-Py @("-m", "pip", "install", "-c", $Constraints, "--upgrade-strategy", "only-if-needed", "${App}[gen]")
+Invoke-Py @("-m", "pip", "download", "-c", $Constraints, "torch", "torchvision", "onnxruntime-gpu", "--index-url", $TorchIndex, "--extra-index-url", "https://pypi.org/simple", "-d", $Wheels)
+Invoke-Py @("-m", "pip", "install", "-c", $Constraints, "--upgrade-strategy", "only-if-needed", "--index-url", $TorchIndex, "--extra-index-url", "https://pypi.org/simple", "${App}[gen]")
+if (-not (Get-ChildItem -Force $Trt -ErrorAction SilentlyContinue | Select-Object -First 1)) {
+    New-Item -ItemType Directory -Force $Trt | Out-Null
+    Invoke-Py @("-m", "pip", "install", "-c", $Constraints, "--target", $Trt, "--upgrade-strategy", "only-if-needed", "tensorrt-cu13==10.16.1.11")
+}
 
 Write-Host "Installing the default image pack..."
 Invoke-Py @("-m", "canvas.app.provision")

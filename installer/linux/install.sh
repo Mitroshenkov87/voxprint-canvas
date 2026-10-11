@@ -15,35 +15,54 @@ fi
 APP="$ROOT/canvas"
 VENV="$APP/venv"
 SHARED="$ROOT/shared"
+RUNTIME_REL="runtime/py314-torch2.11-cu130"
+RUNTIME="$SHARED/$RUNTIME_REL"
 APP_DIR="$HOME/.local/share/applications"
 DIR_DIR="$HOME/.local/share/desktop-directories"
 BIN_DIR="$HOME/.local/bin"
-LINUX_PYTHON_URL="https://github.com/astral-sh/python-build-standalone/releases/download/20261009/cpython-3.12.15%2B20261009-x86_64-unknown-linux-gnu-install_only.tar.gz"
+LINUX_PYTHON_URL="https://github.com/astral-sh/python-build-standalone/releases/download/20261009/cpython-3.14.8%2B20261009-x86_64-unknown-linux-gnu-install_only.tar.gz"
+TORCH_INDEX="https://download.pytorch.org/whl/cu130"
 
 echo "Checking Python..."
-if python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 12) else 1)'; then
-  PY=python3
+FRESH=0
+if [ -x "$RUNTIME/bin/python3" ]; then
+  PY="$RUNTIME/bin/python3"
+elif [ -d "$RUNTIME" ] && [ -n "$(find "$RUNTIME" -mindepth 1 -print -quit 2>/dev/null)" ]; then
+  echo "The suite runtime is already installed. Canvas will not replace it." >&2
+  exit 1
 else
   echo "Installing Python..."
-  mkdir -p "$SHARED/python"
+  mkdir -p "$RUNTIME"
   archive=$(mktemp)
   curl -fsSL -o "$archive" "$LINUX_PYTHON_URL"
-  tar -xzf "$archive" -C "$SHARED/python" --strip-components=1
+  tar -xzf "$archive" -C "$RUNTIME" --strip-components=1
   rm -f "$archive"
-  PY="$SHARED/python/bin/python3"
+  PY="$RUNTIME/bin/python3"
+  FRESH=1
 fi
 
-mkdir -p "$APP" "$APP_DIR" "$DIR_DIR" "$BIN_DIR" "$SHARED/wheels"
+mkdir -p "$APP" "$APP_DIR" "$DIR_DIR" "$BIN_DIR" "$SHARED/wheels" "$SHARED/tensorrt-10"
 "$PY" -m venv "$VENV"
 if [ ! -f "$SRC/constraints.txt" ]; then
   echo "constraints.txt is missing from the setup. The install cannot continue." >&2
   exit 1
 fi
 "$VENV/bin/python" -m pip install --upgrade pip
+if [ "$FRESH" -eq 1 ]; then
+  "$PY" -m pip install --upgrade pip
+  "$PY" -m pip install -c "$SRC/constraints.txt" --upgrade-strategy only-if-needed \
+    --index-url "$TORCH_INDEX" --extra-index-url https://pypi.org/simple \
+    torch torchvision onnxruntime-gpu
+fi
 echo "Installing PyTorch..."
-"$VENV/bin/python" -m pip download -c "$SRC/constraints.txt" torch torchvision --index-url https://download.pytorch.org/whl/cu128 -d "$SHARED/wheels"
-"$VENV/bin/python" -m pip install -c "$SRC/constraints.txt" --upgrade-strategy only-if-needed --find-links "$SHARED/wheels" torch torchvision
-"$VENV/bin/python" -m pip install -c "$SRC/constraints.txt" --upgrade-strategy only-if-needed "$SRC[gen]"
+"$VENV/bin/python" -m pip download -c "$SRC/constraints.txt" torch torchvision onnxruntime-gpu \
+  --index-url "$TORCH_INDEX" --extra-index-url https://pypi.org/simple -d "$SHARED/wheels"
+"$VENV/bin/python" -m pip install -c "$SRC/constraints.txt" --upgrade-strategy only-if-needed \
+  --index-url "$TORCH_INDEX" --extra-index-url https://pypi.org/simple "$SRC[gen]"
+if [ -z "$(find "$SHARED/tensorrt-10" -mindepth 1 -print -quit 2>/dev/null)" ]; then
+  "$VENV/bin/python" -m pip install -c "$SRC/constraints.txt" --target "$SHARED/tensorrt-10" \
+    --upgrade-strategy only-if-needed "tensorrt-cu13==10.16.1.11"
+fi
 echo "Installing the default image pack..."
 "$VENV/bin/python" -m canvas.app.provision
 "$VENV/bin/python" -m canvas.models.tiers > "$APP/tier.txt"

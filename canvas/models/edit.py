@@ -185,26 +185,30 @@ def install_fp8_files(
     return planned.fp8_count
 
 
-def load_edit_pipeline(folder: Path, dtype: Any, *, low_vram: bool = False) -> Any:
+def load_edit_pipeline(folder: Path, dtype: Any, *, low_vram: bool = False, transformer: Any = None) -> Any:
     """Open the edit pipeline with FP8 weights.
 
     ``low_vram`` installs group offload (or sequential CPU offload) so the
     encoder, the transformer blocks, and the VAE take turns. Otherwise one
-    component at a time is moved to the GPU, which is the 24 GB path.
+    component at a time is moved to the GPU, which is the 24 GB path. A
+    caller that passes ``transformer`` has already built the INT4 transformer
+    and places the encoder and the VAE itself.
     """
     torch = _import_torch()
     diffusers = _import_diffusers()
     transformers = _import_transformers()
     accelerate = _import_accelerate()
+    supplied = transformer is not None
     try:
-        transformer = _empty(
-            accelerate, diffusers.QwenImageTransformer2DModel, folder / "transformer" / "config.json",
-        )
-        transformer_count = install_fp8_files(
-            transformer, [folder / name for name in TRANSFORMER_SHARDS], remap=None,
-        )
-        if transformer_count < 1:
-            raise EditLoadError("the FP8 transformer did not match")
+        if not supplied:
+            transformer = _empty(
+                accelerate, diffusers.QwenImageTransformer2DModel, folder / "transformer" / "config.json",
+            )
+            transformer_count = install_fp8_files(
+                transformer, [folder / name for name in TRANSFORMER_SHARDS], remap=None,
+            )
+            if transformer_count < 1:
+                raise EditLoadError("the FP8 transformer did not match")
         config = transformers.AutoConfig.from_pretrained(folder / "text_encoder", local_files_only=True)
         encoder = _empty(
             accelerate, transformers.Qwen2_5_VLForConditionalGeneration, config, dtype,
@@ -223,6 +227,9 @@ def load_edit_pipeline(folder: Path, dtype: Any, *, low_vram: bool = False) -> A
         raise
     except (OSError, ValueError) as exc:
         raise EditLoadError("the edit model could not be loaded") from exc
+    if supplied:
+        del torch
+        return pipe
     if low_vram:
         _install_low_vram(pipe)
     else:

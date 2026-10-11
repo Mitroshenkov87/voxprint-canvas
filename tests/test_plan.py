@@ -113,7 +113,10 @@ def test_control_and_edit_plans():
     edit16 = build_plan(catalog, _screened(Mode.INSTRUCTION, ImageRole.INIT), Tier.GB16)
     assert edit16.pipeline_class == PIPELINE_EDIT
     assert edit16.tier == "16gb"
-    assert edit16.text_encoder_offload == "group-offload"
+    assert edit16.quant == "int4"
+    assert edit16.model_id == "qwen-image-edit-2511-int4-r256"
+    assert edit16.text_encoder_offload == "encode-then-unload"
+    assert edit16.repos == ("QuantFunc/Nunchaku-Qwen-Image-EDIT-2511",)
     creative = build_plan(catalog, _screened(Mode.TEXT_CREATIVE), Tier.GB24)
     assert creative.pipeline_class == PIPELINE_TEXT
     assert creative.steps == 50 and creative.guidance_scale is None

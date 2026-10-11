@@ -29,6 +29,14 @@ class OutputFormat(Enum):
 
 DEFAULT_FORMAT = OutputFormat.AVIF
 
+# Visually lossless defaults. AVIF stays 4:4:4. JPEG XL distance 1.0 matches that size.
+_AVIF_QUALITY = 80
+_AVIF_SPEED = 6
+_AVIF_SUBSAMPLING = "4:4:4"
+_WEBP_QUALITY = 90
+_JPEG_QUALITY = 95
+_JXL_DISTANCE = 1.0
+
 _EXTENSION = {
     OutputFormat.AVIF: ".avif",
     OutputFormat.JXL: ".jxl",
@@ -78,17 +86,23 @@ def save_image(image: SafeImage, path: Path, fmt: OutputFormat = DEFAULT_FORMAT)
         raise UnsupportedFormat("the file extension does not match the format")
     picture = Image.frombytes("RGB", (image.width, image.height), image.data)
     if fmt is OutputFormat.AVIF:
-        picture.save(path, format="AVIF")
+        picture.save(
+            path,
+            format="AVIF",
+            quality=_AVIF_QUALITY,
+            subsampling=_AVIF_SUBSAMPLING,
+            speed=_AVIF_SPEED,
+        )
         return
     if fmt is OutputFormat.WEBP:
-        picture.save(path, format="WEBP", quality=95)
+        picture.save(path, format="WEBP", quality=_WEBP_QUALITY)
         return
     if fmt is OutputFormat.JPEG:
-        picture.save(path, format="JPEG", quality=95)
+        picture.save(path, format="JPEG", quality=_JPEG_QUALITY)
         return
     if fmt is OutputFormat.JXL:
         pixels = np.frombuffer(image.data, dtype=np.uint8).reshape(image.height, image.width, 3)
-        path.write_bytes(jpegxl_encode(pixels))
+        path.write_bytes(jpegxl_encode(pixels, distance=_JXL_DISTANCE))
         return
     if fmt is OutputFormat.HEIC:
         try:

@@ -50,7 +50,7 @@ Do not use the app to create content that is illegal or socially unacceptable; y
 
 ## Release identity
 
-`BUILD.json` ships in the package and is the copy of the version, the channel, the build number and the codename. The build number is the `build` field. `GITHUB_RUN_NUMBER` is not used. The release title template, the About dialog, the splash and `voxprint-canvas --version` all show `X.Y.Z RC · build N "Yotzer"` from that file.
+`BUILD.json` ships in the package and is the copy of the version, the channel, the build number and the codename. The build number is the `build` field. `GITHUB_RUN_NUMBER` is not used. The release title template, the About dialog, and `voxprint-canvas --version` show `X.Y.Z RC · build N "Yotzer"` from that file. The startup splash shows `X.Y.Z RC build N "Codename"`.
 
 Save, download and export use the approved icons in `canvas/ui/icons`. A row marked PENDING is not loaded. Icons are recoloured with a palette token. The floppy-disk drawing and the theme name `document-save` are not used.
 

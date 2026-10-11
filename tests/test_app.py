@@ -68,7 +68,10 @@ def test_startup_refuses_or_launches(monkeypatch, tmp_path):
         lambda: GpuInfo("RTX 4090", 24, 20, 8, 9, "fake"),
     )
     launched = []
-    monkeypatch.setattr("canvas.app.main._launch", lambda tier: launched.append(tier))
+    monkeypatch.setattr(
+        "canvas.app.main._launch",
+        lambda tier, splash=None, app=None: launched.append(tier),
+    )
     assert main([]) == 0
     assert launched == [Tier.GB24]
 

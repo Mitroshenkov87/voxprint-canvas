@@ -1,6 +1,6 @@
 # Exact runtime pins. Installers pass this file to pip with -c.
-# torch and torchvision resolve from https://download.pytorch.org/whl/cu130
-# (torch 2.11.0+cu130 and torchvision 0.26.0+cu130).
+# torch and torchvision resolve as 2.11.0+cu130 and 0.26.0+cu130 from
+# https://download.pytorch.org/whl/cu130. Other pins, including numpy, resolve from PyPI.
 # huggingface-hub stays on 1.x because diffusers 0.41.0 requires huggingface-hub<2.
 torch==2.11.0
 torchvision==0.26.0

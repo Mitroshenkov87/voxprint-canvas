@@ -9,7 +9,7 @@ Suite apps share one folder and one manifest.
 
 On Linux, `XDG_DATA_HOME/voxprint/shared` is used when `XDG_DATA_HOME` is set. `VOXPRINT_HOME` replaces the Voxprint directory on either platform.
 
-The suite runtime is Python 3.14 at `shared/runtime/py314-torch2.11-cu130`. Every pinned dependency publishes a wheel that installs on Python 3.14, so Canvas uses that runtime. The runtime contains PyTorch 2.11.0 for CUDA 13.0, the matching torchvision 0.26.0, and the GPU ONNX Runtime 1.31.0. The CPU ONNX Runtime build is not installed into it, because that build would shadow the GPU build. TensorRT 10.16.1.11 is a separate component, `tensorrt-10`, for that GPU runtime.
+The suite runtime is Python 3.14 at `shared/runtime/py314-torch2.11-cu130`. Every pinned dependency publishes a wheel that installs on Python 3.14, so Canvas uses that runtime. The runtime contains PyTorch 2.11.0 for CUDA 13.0, the matching torchvision 0.26.0, and the GPU ONNX Runtime 1.31.0. Setup resolves numpy and the other packages from PyPI, and takes torch and torchvision from the CUDA 13.0 index. The CPU ONNX Runtime build is not installed into it, because that build would shadow the GPU build. TensorRT 10.16.1.11 is a separate component, `tensorrt-10`, for that GPU runtime.
 
 The setup installs anything that is missing before the first picture: the suite runtime when it is not already there, the CUDA 13.0 wheels, the default Z-Image-Turbo pack, and the models that ship with that pack. Progress is printed while those files are fetched. Wheels are cached in `shared/wheels` so another suite app can reuse them. A component that another app already refs is left in place. A different version is installed beside it, under a new path.
 

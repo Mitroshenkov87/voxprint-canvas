@@ -2,6 +2,7 @@
 import argparse
 import json
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
@@ -27,7 +28,7 @@ from canvas.pipeline.bf16_schedule import VramRefused
 from canvas.pipeline.pipeline import CoolingDown, EnlargeMissing, JobError, Pipeline
 from canvas.safety.gate import AgeGate, SafetyError
 from canvas.ui.main_window import MainWindow
-from canvas.ui.splash import show_splash
+from canvas.ui.splash import Splash, show_splash
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -85,13 +86,28 @@ def _callback(tier: Tier, window_box: list[MainWindow | None], enlarge: EnlargeC
     return on_generate
 
 
-def _launch(tier: Tier) -> None:
+def _application() -> QApplication:
+    """The running application, creating one when startup has not yet done so."""
+    current = QApplication.instance()
+    if isinstance(current, QApplication):
+        return current
+    return QApplication(sys.argv)
+
+
+def _launch(tier: Tier, splash: Splash | None = None, app: QApplication | None = None) -> None:
+    if app is None:
+        app = _application()
+    if splash is None:
+        splash = show_splash()
+
+    def stage(message: str) -> None:
+        print(message, file=sys.stderr)
+        splash.set_stage(message)
+
     try:
-        install_defaults(load_catalog(), lambda message: print(message, file=sys.stderr))
+        install_defaults(load_catalog(), stage)
     except (SnapshotError, OSError) as exc:
-        print(str(exc), file=sys.stderr)
-    app = QApplication.instance() or QApplication(sys.argv)
-    splash = show_splash()
+        stage(str(exc))
     enlarge = EnlargeClient()
     window_box: list[MainWindow | None] = [None]
     window = MainWindow(_callback(tier, window_box, enlarge), tier, glass=False, enlarge_ready=enlarge.ready())
@@ -179,16 +195,21 @@ def main(argv: list[str] | None = None) -> int:
         if tag:
             print(tag)
         return 0
+    app = _application()
+    splash = show_splash()
     os_result = current_os_check()
     if not os_result.ok:
+        splash.close()
         print(os_result.message, file=sys.stderr)
         return 2
+    splash.set_stage("Checking the GPU")
     gpu: GpuCheck = check_gpu(probe_gpu())
     if not gpu.ok or gpu.tier is None:
+        splash.close()
         print(gpu.message, file=sys.stderr)
         return 2
-    _repair_shared()
-    _launch(gpu.tier)
+    _repair_shared(splash.set_stage)
+    _launch(gpu.tier, splash, app)
     return 0
 
 
@@ -208,11 +229,15 @@ def _confirm(window: MainWindow | None, notice: str) -> bool:
     return window.confirm_download(notice)
 
 
-def _repair_shared() -> None:
+def _repair_shared(stage: Callable[[str], None]) -> None:
+    def progress(message: str) -> None:
+        print(message, file=sys.stderr)
+        stage(message)
+
     try:
-        repair(load_catalog(), lambda message: print(message, file=sys.stderr))
+        repair(load_catalog(), progress)
     except (SnapshotError, OSError) as exc:
-        print(str(exc), file=sys.stderr)
+        progress(str(exc))
 
 
 if __name__ == "__main__":

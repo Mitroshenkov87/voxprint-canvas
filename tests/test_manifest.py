@@ -18,7 +18,7 @@ from canvas.infra.manifest import (
     unregister_app,
 )
 from canvas.infra.paths import shared_dir
-from canvas.infra.runtime import LINUX_PYTHON_URL, TORCH_INDEX, WINDOWS_PYTHON_URL
+from canvas.infra.runtime import LINUX_PYTHON_URL, TORCH_INDEX, WINDOWS_PYTHON_URL, refill_wheels
 from canvas.models.provision import default_specs, is_optional, pack_notice, repair
 from canvas.models.registry import load_catalog
 
@@ -363,3 +363,43 @@ def test_installers_use_the_suite_runtime():
     assert "Voxprint\\shared" in windows
     assert "Installing the default image pack..." in linux
     assert "Installing the default image pack..." in windows
+
+
+def test_installers_resolve_numpy_from_pypi_and_pin_cuda_torch():
+    linux = Path("installer/linux/install.sh").read_text(encoding="utf-8")
+    windows = Path("installer/windows/install.ps1").read_text(encoding="utf-8")
+    config_path = Path("canvas/infra/uv.cu130.toml")
+    assert config_path.is_file()
+    config = config_path.read_text(encoding="utf-8")
+    assert 'index-url = "https://pypi.org/simple"' in config
+    assert 'torch-backend = "cu130"' in config
+    for script in (linux, windows):
+        assert "uv.cu130.toml" in script
+        assert "--config-file" in script
+        assert "torch==2.11.0+cu130" in script
+        assert "torchvision==0.26.0+cu130" in script
+    assert '--index-url https://pypi.org/simple' in linux
+    assert '--extra-index-url "$TORCH_INDEX"' in linux
+    assert '--index-url "$TORCH_INDEX"' not in linux
+    assert '"--index-url", "https://pypi.org/simple"' in windows
+    assert '"--extra-index-url", $TorchIndex' in windows
+    assert '"--index-url", $TorchIndex' not in windows
+    assert "uv==0.13.0" in linux
+    assert "uv==0.13.0" in windows
+
+
+def test_wheel_repair_downloads_from_pypi_with_the_cuda_index_extra(monkeypatch, tmp_path):
+    monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
+    seen: list[list[str]] = []
+
+    def capture(args, **_kwargs):
+        seen.append(list(args))
+
+    monkeypatch.setattr("canvas.infra.runtime.subprocess.check_call", capture)
+    refill_wheels(lambda _note: None)
+    args = seen[0]
+    assert args[args.index("--index-url") + 1] == "https://pypi.org/simple"
+    assert args[args.index("--extra-index-url") + 1] == TORCH_INDEX
+    assert "torch==2.11.0+cu130" in args
+    assert "torchvision==0.26.0+cu130" in args
+    assert "onnxruntime-gpu==1.31.0" in args

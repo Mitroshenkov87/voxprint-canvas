@@ -58,6 +58,18 @@ def version_label(env: Mapping[str, str] | None = None) -> str:
     return label
 
 
+def splash_line(env: Mapping[str, str] | None = None) -> str:
+    """``X.Y.Z RC build N "Codename"`` for the startup window."""
+    data = load_build()
+    channel = str(data.get("channel") or "").strip()
+    head = f"{version()} {channel}".strip()
+    label = f"{head} build {build_number(env)}"
+    codename = str(data.get("codename") or "").strip()
+    if codename:
+        label += f' "{codename}"'
+    return label
+
+
 def release_title(env: Mapping[str, str] | None = None) -> str:
     """GitHub release title. The app name is the product name; the rest is ``BUILD.json``."""
     from canvas.app.info import APP_NAME

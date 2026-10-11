@@ -1,7 +1,6 @@
 """Command line and window startup."""
 import argparse
 import json
-import os
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -19,6 +18,7 @@ from canvas.safety.image import RawImage
 from canvas.safety.inputs import ImageRole, PendingInput
 from canvas.infra.enlarge import EnlargeClient, EnlargeError
 from canvas.infra.gpu import probe_gpu
+from canvas.infra.vram import set_vram_cap_gb
 from canvas.infra.models_users import register, unregister
 from canvas.infra.paths import models_dir, shared_dir
 from canvas.models.loader import ModelNotReady, ZImageGenerator, load_catalog_stack
@@ -43,7 +43,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--check-update", action="store_true", help="print a newer GitHub release tag, if one exists")
     parser.add_argument("--selftest", action="store_true", help="check the GPU, model files and encoders")
     parser.add_argument("--deep", action="store_true", help="re-hash every model file during --selftest")
-    parser.add_argument("--vram-cap-gb", type=float, default=None, help="limit GPU memory in GB and use that tier")
+    parser.add_argument(
+        "--vram-cap-gb",
+        type=float,
+        default=None,
+        help="plan as if the GPU had this many GB (CANVAS_VRAM_CAP_GB)",
+    )
     parser.add_argument("--json", action="store_true", help="print a JSON document")
     parser.add_argument("--version", action="store_true", help="print the release identity and exit")
     generate = parser.add_subparsers(dest="command", required=False).add_parser(
@@ -62,7 +67,10 @@ def _parser() -> argparse.ArgumentParser:
         help="improve the prompt before generating",
     )
     generate.add_argument(
-        "--vram-cap-gb", type=float, default=argparse.SUPPRESS, help="limit GPU memory in GB and use that tier",
+        "--vram-cap-gb",
+        type=float,
+        default=argparse.SUPPRESS,
+        help="plan as if the GPU had this many GB (CANVAS_VRAM_CAP_GB)",
     )
     generate.add_argument("--json", action="store_true")
     return parser
@@ -335,14 +343,15 @@ def _confirm(window: MainWindow | None, notice: str) -> bool:
 
 
 def _apply_vram_cap(args: argparse.Namespace) -> int | None:
-    """Copy ``--vram-cap-gb`` into ``CANVAS_VRAM_CAP_GB`` before the GPU is probed."""
+    """Store ``--vram-cap-gb`` where tier selection and the other cap reader look."""
     cap = getattr(args, "vram_cap_gb", None)
     if cap is None:
         return None
-    if cap <= 0:
+    try:
+        set_vram_cap_gb(float(cap))
+    except ValueError:
         print("The VRAM cap must be greater than 0.", file=sys.stderr)
         return 2
-    os.environ["CANVAS_VRAM_CAP_GB"] = str(cap)
     return None
 
 

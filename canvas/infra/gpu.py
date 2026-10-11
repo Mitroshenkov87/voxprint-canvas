@@ -6,6 +6,7 @@ import subprocess
 from dataclasses import dataclass
 
 from canvas.app.info import MIN_COMPUTE_CAPABILITY
+from canvas.infra.vram import get_vram_budget_gb
 
 
 @dataclass(frozen=True)
@@ -30,29 +31,24 @@ def _parse_cc(value: str) -> tuple[int, int]:
     return int(major), int(minor)
 
 
-def vram_cap_gb() -> float | None:
-    """``CANVAS_VRAM_CAP_GB`` when it is a positive number of gigabytes."""
-    raw = os.environ.get("CANVAS_VRAM_CAP_GB", "").strip()
-    if not raw:
-        return None
-    try:
-        value = float(raw)
-    except ValueError:
-        return None
-    if value <= 0:
-        return None
-    return value
-
-
 def apply_vram_cap(info: GpuInfo, cap_gb: float | None = None) -> GpuInfo:
-    """Limit reported memory to ``cap_gb`` and reserve only that fraction on the device.
+    """Limit reported memory to the shared VRAM budget and reserve that fraction.
 
-    Tier detection reads ``total_gb``, so a 24 GB card capped at 16 GB is the 16 GB tier.
+    ``get_vram_budget_gb`` reads ``CANVAS_VRAM_CAP_GB``. Tier detection uses
+    ``total_gb``, so a 24 GB card capped at 16 GB is the 16 GB tier. The
+    fraction is applied here; the budget helper does not touch CUDA.
     """
-    cap = vram_cap_gb() if cap_gb is None else cap_gb
-    if cap is None or info.total_gb <= 0:
+    if info.total_gb <= 0:
         return info
-    limited = min(info.total_gb, cap)
+    if cap_gb is None:
+        budget = get_vram_budget_gb(info.total_gb)
+    elif cap_gb <= 0:
+        budget = info.total_gb
+    else:
+        budget = min(info.total_gb, cap_gb)
+    if budget is None or budget >= info.total_gb:
+        return info
+    limited = budget
     _limit_fraction(limited / info.total_gb)
     return GpuInfo(
         info.name,

@@ -64,7 +64,7 @@ def test_generate_vram_cap_uses_the_same_name(monkeypatch):
 
     monkeypatch.setattr("canvas.app.main._generate", fake)
     assert main(["generate", "--vram-cap-gb", "16", "--prompt", "a red boat", "--out", "out.avif"]) == 0
-    assert float(seen["cap"]) == 16.0
+    assert seen["cap"] == "16"
 
 
 def test_selftest_deep_is_still_read_only(monkeypatch, tmp_path, capsys):

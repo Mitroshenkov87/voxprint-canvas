@@ -9,9 +9,9 @@ from canvas.safety.adapters import (
     YuNetFaces,
     _pooled_features,
     apparent_age_from_bucket,
-    fairface_under_18,
+    age_bands,
+    fairface_age_bands,
     parse_qwen3guard,
-    probability_under_18,
 )
 from canvas.safety.gate import SafetyUnavailable
 from tests.fakes import rgb
@@ -35,41 +35,42 @@ def _bucket_row(chosen: str) -> dict[str, float]:
     return {label: (1.0 if label == chosen else 0.0) for label in labels}
 
 
-def test_under_18_probability_ignores_the_20_29_bucket():
+def test_age_bands_leave_18_and_older_out_of_both_lines():
     labels = ("0-2", "3-9", "10-19", "20-29", "30-39", "40-49", "50-59", "60-69", "70+")
-    assert probability_under_18(_bucket_row("20-29")) == 0.0
-    assert probability_under_18(_bucket_row("30-39")) == 0.0
-    assert probability_under_18(_bucket_row("10-19")) == pytest.approx(0.8)
+    assert age_bands(_bucket_row("20-29")) == (0.0, 0.0)
+    assert age_bands(_bucket_row("30-39")) == (0.0, 0.0)
+    assert age_bands(_bucket_row("3-9")) == (1.0, 0.0)
+    assert age_bands(_bucket_row("10-19")) == pytest.approx((0.6, 0.2))
     older = {label: 0.0 for label in labels if label != "70+"}
     older["more than 70"] = 1.0
-    assert probability_under_18(older) == 0.0
+    assert age_bands(older) == (0.0, 0.0)
     mixed = _bucket_row("30-39")
     mixed["30-39"] = 0.25
     mixed["0-2"] = 0.25
     mixed["10-19"] = 0.50
-    assert probability_under_18(mixed) == pytest.approx(0.65)
+    assert age_bands(mixed) == pytest.approx((0.55, 0.10))
     with pytest.raises(SafetyUnavailable):
-        probability_under_18({"20-29": 0.5})
+        age_bands({"20-29": 0.5})
     with pytest.raises(SafetyUnavailable):
-        probability_under_18({"nope": 1.0})
+        age_bands({"nope": 1.0})
     with pytest.raises(SafetyUnavailable):
-        probability_under_18({})
+        age_bands({})
     broken = _bucket_row("20-29")
     broken["20-29"] = float("nan")
     with pytest.raises(SafetyUnavailable):
-        probability_under_18(broken)
+        age_bands(broken)
     broken = _bucket_row("20-29")
     broken["20-29"] = True  # type: ignore[assignment]
     with pytest.raises(SafetyUnavailable):
-        probability_under_18(broken)
+        age_bands(broken)
     ids = {str(index): label for index, label in enumerate(labels)}
-    assert fairface_under_18(ids, [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0]) == 0.0
+    assert fairface_age_bands(ids, [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0]) == (0.0, 0.0)
     ints = {index: label for index, label in enumerate(labels)}
-    assert fairface_under_18(ints, [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]) == pytest.approx(0.8)
+    assert fairface_age_bands(ints, [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]) == pytest.approx((0.6, 0.2))
     with pytest.raises(SafetyUnavailable):
-        fairface_under_18({}, [1.0])
+        fairface_age_bands({}, [1.0])
     with pytest.raises(SafetyUnavailable):
-        fairface_under_18({0: "20-29", 1: "20-29"}, [0.5, 0.5])
+        fairface_age_bands({0: "20-29", 1: "20-29"}, [0.5, 0.5])
 
 
 def test_pooled_features_accepts_a_tensor_or_a_pooling_output():

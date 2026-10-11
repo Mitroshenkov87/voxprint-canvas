@@ -84,7 +84,7 @@ def test_blocked_output_is_wiped_and_not_saved(tmp_path):
     world = World()
     world.nsfw = 0.95
     world.faces = [Face(0, 0, 1, 1)]
-    world.ages = [1.0]
+    world.ages = [(1.0, 0.0)]
     raw = rgb(color=(9, 9, 9))
     gen = _Gen(raw, reuse=True)
     pipeline = Pipeline(world.gate(), gen, Tier.GB24)

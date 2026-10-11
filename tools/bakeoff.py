@@ -194,7 +194,7 @@ def _one(
         screened.wipe()
         return empty
     try:
-        released = gate.review_image(image)
+        released = gate.review_image(image, prompt)
     except GenerationBlocked:
         screened.wipe()
         return BakeoffRow(base, prompt, seed, elapsed, peak, "refused", "", 0, 0)

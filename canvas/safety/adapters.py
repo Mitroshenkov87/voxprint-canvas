@@ -34,12 +34,28 @@ FAIRFACE_AGE_LOW = {
     "more than 70": 70.0,
 }
 
-# Share of each bucket that is under 18. 10-19 covers ten years and eight of them
-# are under 18. 20-29 and every older bucket contribute 0, so they cannot leak.
-FAIRFACE_UNDER_18 = {
+# Share of each bucket that is age 15 or under. 10-19 covers ten years and six
+# of them are 15 or under. 18-19 inside that bucket, and every bucket from 20-29
+# up, contribute nothing, so an 18-25 face does not leak in through them.
+FAIRFACE_AT_MOST_15 = {
     "0-2": 1.0,
     "3-9": 1.0,
-    "10-19": 0.8,
+    "10-19": 0.6,
+    "20-29": 0.0,
+    "30-39": 0.0,
+    "40-49": 0.0,
+    "50-59": 0.0,
+    "60-69": 0.0,
+    "70+": 0.0,
+    "more than 70": 0.0,
+}
+
+# Share of each bucket that is 16 or 17. That is two years of the 10-19 bucket.
+# The other eight years are not this band.
+FAIRFACE_16_17 = {
+    "0-2": 0.0,
+    "3-9": 0.0,
+    "10-19": 0.2,
     "20-29": 0.0,
     "30-39": 0.0,
     "40-49": 0.0,
@@ -61,19 +77,15 @@ def apparent_age_from_bucket(label: str) -> float:
         raise SafetyUnavailable("classifier_error") from exc
 
 
-def probability_under_18(probs: Mapping[str, float]) -> float:
-    """P(age < 18) from a full FairFace softmax.
-
-    An unknown label, a non-numeric weight, or a distribution that does not sum
-    to one refuses the request.
-    """
+def _distribution_weight(probs: Mapping[str, float], table: Mapping[str, float]) -> float:
+    """Weighted sum of one FairFace softmax. A bad distribution refuses the request."""
     if not probs:
         raise SafetyUnavailable("classifier_error")
     total = 0.0
-    under = 0.0
+    weighted = 0.0
     for label, value in probs.items():
         try:
-            weight = FAIRFACE_UNDER_18[str(label)]
+            weight = table[str(label)]
         except KeyError as exc:
             raise SafetyUnavailable("classifier_error") from exc
         if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -82,14 +94,23 @@ def probability_under_18(probs: Mapping[str, float]) -> float:
         if math.isnan(number) or math.isinf(number) or number < 0.0:
             raise SafetyUnavailable("classifier_error")
         total += number
-        under += weight * number
+        weighted += weight * number
     if total < _PROBABILITY_SUM_LOW or total > _PROBABILITY_SUM_HIGH:
         raise SafetyUnavailable("classifier_error")
-    return under
+    return weighted
 
 
-def fairface_under_18(id2label: Mapping[int | str, str], values: Sequence[float]) -> float:
-    """P(age < 18) for one face. ``values`` aligns with class ids ``0 .. n-1``."""
+def age_bands(probs: Mapping[str, float]) -> tuple[float, float]:
+    """(P(age <= 15), P(age in 16 or 17)) from a full FairFace softmax.
+
+    An unknown label, a non-numeric weight, or a distribution that does not sum
+    to one refuses the request. Years 18 and older contribute to neither band.
+    """
+    return (_distribution_weight(probs, FAIRFACE_AT_MOST_15), _distribution_weight(probs, FAIRFACE_16_17))
+
+
+def fairface_age_bands(id2label: Mapping[int | str, str], values: Sequence[float]) -> tuple[float, float]:
+    """Age bands for one face. ``values`` aligns with class ids ``0 .. n-1``."""
     mapped: dict[str, float] = {}
     for index, value in enumerate(values):
         if index in id2label:
@@ -102,7 +123,7 @@ def fairface_under_18(id2label: Mapping[int | str, str], values: Sequence[float]
         if name in mapped:
             raise SafetyUnavailable("classifier_error")
         mapped[name] = value
-    return probability_under_18(mapped)
+    return age_bands(mapped)
 
 
 def parse_qwen3guard(text: str) -> GuardVerdict:
@@ -300,12 +321,12 @@ class FairFaceAge:
             folder, local_files_only=True,
         )
 
-    def estimate(self, image: RawImage, faces: Sequence[Face]) -> Sequence[float]:
-        """P(age < 18) for each face, from the full FairFace distribution."""
+    def estimate(self, image: RawImage, faces: Sequence[Face]) -> Sequence[tuple[float, float]]:
+        """(P(age <= 15), P(age in 16 or 17)) for each face."""
         self.load()
         import torch
         picture = _rgb(image)
-        under: list[float] = []
+        bands: list[tuple[float, float]] = []
         for face in faces:
             crop = picture.crop((face.x, face.y, face.x + face.width, face.y + face.height))
             inputs = self._processor(images=crop, return_tensors="pt")
@@ -313,8 +334,8 @@ class FairFaceAge:
                 logits = self._model(**inputs).logits
                 probs = torch.softmax(logits, dim=-1)[0]
             values = [float(probs[index]) for index in range(int(probs.shape[-1]))]
-            under.append(fairface_under_18(self._model.config.id2label, values))
-        return under
+            bands.append(fairface_age_bands(self._model.config.id2label, values))
+        return bands
 
 
 class NsfwViT:

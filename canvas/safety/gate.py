@@ -14,15 +14,17 @@ from typing import Literal, Sequence, assert_never
 
 from canvas.safety.classifiers import AgeEstimator, FaceDetector, NsfwDetector, PromptGuard, ZeroShot
 from canvas.safety.constants import (
+    ADOLESCENT_16_17_AT,
+    ADOLESCENT_16_17_AT_AGE_18,
     BLOCKED_MESSAGE,
     CLASSIFIER_TIMEOUT_S,
+    CLEAR_CHILD_AT,
     GUARD_SEXUAL_CATEGORY,
     IMAGE_ADULT_SEXUAL,
     IMAGE_LABELS,
     IMAGE_MINOR,
     IMAGE_MINOR_SEXUAL,
     IMAGE_TIMEOUT_S,
-    MINOR_FACE_PROBABILITY_AT,
     SEXUAL_SCORE_BLOCK_AT,
     UNAVAILABLE_MESSAGE,
     ZERO_SHOT_BLOCK_AT,
@@ -111,32 +113,77 @@ def _at_least(value: float) -> bool:
     return value >= ZERO_SHOT_BLOCK_AT
 
 
-def image_block_reason(
-    nsfw: float,
-    under18: Sequence[float],
-    scores: dict[str, float],
-) -> Literal["allow", "minor-sexual", "under18-and-sexual"]:
-    """Why a picture would stop, or ``allow``.
+def adult_age_support(text: str) -> Literal["none", "adult", "strong"]:
+    """How a stated age can support an ambiguous face.
 
-    Adult sexual content passes. A minor-sexual image score blocks on its own.
-    A face whose P(age < 18) is at or above the cutoff blocks only together with
-    sexual content. A 20-29 distribution is not under 18, and a child label on
-    its own does not make an adult sexual picture young.
+    ``strong`` means every stated age is 20 or more. ``adult`` means every stated
+    age is 18 or 19, or a mix of those with older ages. No stated age, or any
+    stated age under 18, is ``none``. This never changes the child band.
+
+    The enhancer imports this module, so the age reader stays local.
     """
-    for value in under18:
+    from canvas.pipeline.enhance import stated_ages
+
+    ages = stated_ages(text)
+    if not ages or any(age < 18 for age in ages):
+        return "none"
+    if all(age >= 20 for age in ages):
+        return "strong"
+    return "adult"
+
+
+def _band_pair(item: object) -> tuple[float, float]:
+    if isinstance(item, tuple) and len(item) == 2:
+        pair = item
+    else:
+        raise SafetyUnavailable("classifier_error")
+    numbers: list[float] = []
+    for value in pair:
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise SafetyUnavailable("classifier_error")
         number = float(value)
         if math.isnan(number) or math.isinf(number) or number < 0.0 or number > 1.0:
             raise SafetyUnavailable("classifier_error")
+        numbers.append(number)
+    return (numbers[0], numbers[1])
+
+
+def image_block_reason(
+    nsfw: float,
+    bands: Sequence[object],
+    scores: dict[str, float],
+    *,
+    support: Literal["none", "adult", "strong"] = "none",
+) -> Literal["allow", "minor-sexual", "clear-child", "adolescent"]:
+    """Why a picture would stop, or ``allow``.
+
+    Adult sexual content passes. A minor-sexual image score blocks on its own.
+    P(age <= 15) at the child line blocks with sexual content, and a stated age
+    cannot remove that. P(16 or 17) blocks only at its own higher line. A stated
+    age of 18 or 19 raises that line, and a stated age of 20 or more removes it.
+    Years 18 and older are not part of either band.
+    """
+    parsed = tuple(_band_pair(item) for item in bands)
     minor_sexual = _at_least(_score(scores, IMAGE_MINOR_SEXUAL))
     adult_sexual = _at_least(_score(scores, IMAGE_ADULT_SEXUAL))
     _score(scores, IMAGE_MINOR)
     sexual = float(nsfw) >= SEXUAL_SCORE_BLOCK_AT or adult_sexual or minor_sexual
+    clear = any(at_most_15 >= CLEAR_CHILD_AT for at_most_15, _band in parsed)
+    match support:
+        case "strong":
+            adolescent = False
+        case "adult":
+            adolescent = any(band >= ADOLESCENT_16_17_AT_AGE_18 for _at_most_15, band in parsed)
+        case "none":
+            adolescent = any(band >= ADOLESCENT_16_17_AT for _at_most_15, band in parsed)
+        case _ as unexpected:
+            assert_never(unexpected)
     if minor_sexual:
         return "minor-sexual"
-    if sexual and any(float(value) >= MINOR_FACE_PROBABILITY_AT for value in under18):
-        return "under18-and-sexual"
+    if sexual and clear:
+        return "clear-child"
+    if sexual and adolescent:
+        return "adolescent"
     return "allow"
 
 
@@ -217,7 +264,7 @@ class AgeGate:
             packed: list[tuple[str, int, int, bytes]] = []
             for item in inputs:
                 name = role_name(item.role)
-                self._check_image(item.image, "input")
+                self._check_image(item.image, "input", prompt)
                 staged.append(bytearray(item.image.to_bytes()))
                 packed.append((name, item.image.width, item.image.height, bytes(staged[-1])))
             return issue_input(prompt, mode, tuple(packed))
@@ -229,21 +276,22 @@ class AgeGate:
             for item in inputs:
                 item.image.wipe()
 
-    def review_image(self, raw: RawImage) -> SafeImage:
+    def review_image(self, raw: RawImage, prompt: str = "") -> SafeImage:
         """Decide whether a finished picture may be kept."""
         try:
-            self._check_image(raw, "image")
+            self._check_image(raw, "image", prompt)
             return issue(raw)
         finally:
             raw.wipe()
 
-    def _check_image(self, raw: RawImage, code: str) -> None:
+    def _check_image(self, raw: RawImage, code: str, prompt: str = "") -> None:
         """Run the image checks in a fixed order.
 
-        Faces and P(age < 18) are read together and must agree in count. Sexual
-        content blocks only when a face is under 18 or the minor-sexual score
-        matches. A missing, non-numeric, out-of-range, or timed-out result raises
-        ``SafetyUnavailable``. The caller wipes the picture either way.
+        Faces and the two age bands are read together and must agree in count.
+        Sexual content blocks on a clear child band, or on the higher 16-17 band
+        unless a stated adult age supports that band. A missing, non-numeric,
+        out-of-range, or timed-out result raises ``SafetyUnavailable``. The
+        caller wipes the picture either way.
         """
         faces = _wait(lambda: self._stack.faces.detect(raw), timeout=IMAGE_TIMEOUT_S)
         ages = _wait(lambda: self._stack.ages.estimate(raw, faces), timeout=IMAGE_TIMEOUT_S)
@@ -253,11 +301,11 @@ class AgeGate:
         if isinstance(nsfw, bool) or not isinstance(nsfw, (int, float)) or math.isnan(float(nsfw)) or math.isinf(float(nsfw)):
             raise SafetyUnavailable("classifier_error")
         scores = _wait(lambda: self._stack.zeroshot.score_image(raw, IMAGE_LABELS), timeout=IMAGE_TIMEOUT_S)
-        reason = image_block_reason(float(nsfw), ages, scores)
+        reason = image_block_reason(float(nsfw), ages, scores, support=adult_age_support(prompt))
         match reason:
             case "allow":
                 return
-            case "minor-sexual" | "under18-and-sexual":
+            case "minor-sexual" | "clear-child" | "adolescent":
                 log.info("content check refused an image (%s)", reason)
                 raise GenerationBlocked(code)
             case _ as unexpected:

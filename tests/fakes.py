@@ -26,7 +26,7 @@ class World:
         self.text_scores = {label: 0.0 for label in PROMPT_LABELS}
         self.image_scores = {label: 0.0 for label in IMAGE_LABELS}
         self.faces: list[Face] = []
-        self.ages: list[float] = []  # P(age < 18) for each face, from 0 to 1
+        self.ages: list[tuple[float, float]] = []  # (P(age <= 15), P(16 or 17)) per face
         self.nsfw = 0.0
         self.error = ""
         self.calls: list[str] = []
@@ -85,7 +85,7 @@ class _Ages:
     def __init__(self, world: World) -> None:
         self.world = world
 
-    def estimate(self, image: RawImage, faces: object) -> list[float]:
+    def estimate(self, image: RawImage, faces: object) -> list[tuple[float, float]]:
         del image, faces
         self.world.calls.append("ages")
         if self.world.error == "ages":

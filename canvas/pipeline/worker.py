@@ -53,12 +53,12 @@ def handle_message(payload: dict[str, Any], gate: AgeGate, generator: object) ->
     return {"ok": True, "width": width, "height": height, "data_b64": data}
 
 
-def release_worker_image(gate: AgeGate, payload: dict[str, Any]) -> SafeImage:
+def release_worker_image(gate: AgeGate, payload: dict[str, Any], prompt: str = "") -> SafeImage:
     """Parent side. Worker JSON stays unreviewed until this returns a SafeImage."""
     if not payload.get("ok"):
         raise SafetyUnavailable("worker")
     raw = RawImage(int(payload["width"]), int(payload["height"]), base64.b64decode(str(payload["data_b64"])))
-    image = gate.review_image(raw)
+    image = gate.review_image(raw, prompt)
     if type(image) is not SafeImage:
         raise TypeError("the checks must release the image")
     return image

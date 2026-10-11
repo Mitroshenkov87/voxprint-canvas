@@ -59,7 +59,7 @@ class _Enlarge:
         if self.world is not None:
             self.world.nsfw = 0.95
             self.world.faces = [Face(0, 0, 1, 1)]
-            self.world.ages = [1.0]
+            self.world.ages = [(1.0, 0.0)]
         factor = long_side // self.source_long
         width, height = raw_w * factor, raw_h * factor
         Image.new("RGB", (width, height), (4, 5, 6)).save(output, format="PNG")

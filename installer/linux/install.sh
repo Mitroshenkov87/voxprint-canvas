@@ -22,6 +22,7 @@ DIR_DIR="$HOME/.local/share/desktop-directories"
 BIN_DIR="$HOME/.local/bin"
 LINUX_PYTHON_URL="https://github.com/astral-sh/python-build-standalone/releases/download/20261009/cpython-3.14.8%2B20261009-x86_64-unknown-linux-gnu-install_only.tar.gz"
 TORCH_INDEX="https://download.pytorch.org/whl/cu130"
+UV_CONFIG="$SRC/canvas/infra/uv.cu130.toml"
 
 echo "Checking Python..."
 FRESH=0
@@ -48,17 +49,24 @@ if [ ! -f "$SRC/constraints.txt" ]; then
   exit 1
 fi
 "$VENV/bin/python" -m pip install --upgrade pip
+# PyPI is the main index. uv pins torch and torchvision to the CUDA 13.0 index.
+"$VENV/bin/python" -m pip install --index-url https://pypi.org/simple "uv==0.13.0"
+UV="$VENV/bin/uv"
+if [ ! -f "$UV_CONFIG" ]; then
+  echo "The CUDA index configuration is missing from the setup. The install cannot continue." >&2
+  exit 1
+fi
 if [ "$FRESH" -eq 1 ]; then
   "$PY" -m pip install --upgrade pip
-  "$PY" -m pip install -c "$SRC/constraints.txt" --upgrade-strategy only-if-needed \
-    --index-url "$TORCH_INDEX" --extra-index-url https://pypi.org/simple \
+  "$UV" pip install --python "$PY" --config-file "$UV_CONFIG" -c "$SRC/constraints.txt" \
     torch torchvision onnxruntime-gpu
 fi
 echo "Installing PyTorch..."
-"$VENV/bin/python" -m pip download -c "$SRC/constraints.txt" torch torchvision onnxruntime-gpu \
-  --index-url "$TORCH_INDEX" --extra-index-url https://pypi.org/simple -d "$SHARED/wheels"
-"$VENV/bin/python" -m pip install -c "$SRC/constraints.txt" --upgrade-strategy only-if-needed \
-  --index-url "$TORCH_INDEX" --extra-index-url https://pypi.org/simple "$SRC[gen]"
+"$VENV/bin/python" -m pip download -c "$SRC/constraints.txt" \
+  "torch==2.11.0+cu130" "torchvision==0.26.0+cu130" onnxruntime-gpu \
+  --index-url https://pypi.org/simple --extra-index-url "$TORCH_INDEX" -d "$SHARED/wheels"
+"$UV" pip install --python "$VENV/bin/python" --config-file "$UV_CONFIG" -c "$SRC/constraints.txt" \
+  "$SRC[gen]"
 if [ -z "$(find "$SHARED/tensorrt-10" -mindepth 1 -print -quit 2>/dev/null)" ]; then
   "$VENV/bin/python" -m pip install -c "$SRC/constraints.txt" --target "$SHARED/tensorrt-10" \
     --upgrade-strategy only-if-needed "tensorrt-cu13==10.16.1.11"

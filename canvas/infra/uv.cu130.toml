@@ -1,0 +1,4 @@
+# PyPI is the only general index. uv sends torch and torchvision to the
+# CUDA 13.0 wheel index and leaves every other package, including numpy, on PyPI.
+index-url = "https://pypi.org/simple"
+torch-backend = "cu130"

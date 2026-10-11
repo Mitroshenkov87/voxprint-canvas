@@ -49,6 +49,7 @@ include = ["canvas*"]
 [tool.setuptools.package-data]
 "canvas.models" = ["catalog.json", "third_party.json", "turbo_transformer_index.json"]
 "canvas.app" = ["BUILD.json"]
+"canvas.infra" = ["uv.cu130.toml"]
 
 [tool.ruff]
 target-version = "py312"

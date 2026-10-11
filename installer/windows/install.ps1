@@ -91,16 +91,34 @@ if (-not (Test-Path $Constraints)) {
     throw "constraints.txt is missing from the setup. The install cannot continue."
 }
 Invoke-Py @("-m", "pip", "install", "--upgrade", "pip")
+# PyPI is the main index. uv pins torch and torchvision to the CUDA 13.0 index.
+$Uv = Join-Path $App "uv.exe"
+if (-not (Test-Path $Uv)) {
+    Invoke-Py @("-m", "pip", "install", "--index-url", "https://pypi.org/simple", "uv==0.13.0")
+    $Uv = Join-Path $Venv "Scripts\uv.exe"
+}
+if (-not (Test-Path $Uv)) {
+    throw "uv 0.13.0 is required to install PyTorch."
+}
+$UvConfig = Join-Path $App "canvas\infra\uv.cu130.toml"
+if (-not (Test-Path $UvConfig)) {
+    throw "The CUDA index configuration is missing from the setup. The install cannot continue."
+}
 if ($Fresh) {
     & $RuntimePy -m pip install --upgrade pip
     if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
-    & $RuntimePy -m pip install -c $Constraints --upgrade-strategy only-if-needed --index-url $TorchIndex --extra-index-url "https://pypi.org/simple" torch torchvision onnxruntime-gpu
+    & $Uv pip install --python $RuntimePy --config-file $UvConfig -c $Constraints torch torchvision onnxruntime-gpu
     if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
 }
 Write-Host "Installing PyTorch..."
 New-Item -ItemType Directory -Force $Wheels | Out-Null
-Invoke-Py @("-m", "pip", "download", "-c", $Constraints, "torch", "torchvision", "onnxruntime-gpu", "--index-url", $TorchIndex, "--extra-index-url", "https://pypi.org/simple", "-d", $Wheels)
-Invoke-Py @("-m", "pip", "install", "-c", $Constraints, "--upgrade-strategy", "only-if-needed", "--index-url", $TorchIndex, "--extra-index-url", "https://pypi.org/simple", "${App}[gen]")
+Invoke-Py @(
+    "-m", "pip", "download", "-c", $Constraints,
+    "torch==2.11.0+cu130", "torchvision==0.26.0+cu130", "onnxruntime-gpu",
+    "--index-url", "https://pypi.org/simple", "--extra-index-url", $TorchIndex, "-d", $Wheels
+)
+& $Uv pip install --python $Py --config-file $UvConfig -c $Constraints "${App}[gen]"
+if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
 if (-not (Get-ChildItem -Force $Trt -ErrorAction SilentlyContinue | Select-Object -First 1)) {
     New-Item -ItemType Directory -Force $Trt | Out-Null
     Invoke-Py @("-m", "pip", "install", "-c", $Constraints, "--target", $Trt, "--upgrade-strategy", "only-if-needed", "tensorrt-cu13==10.16.1.11")

@@ -9,6 +9,8 @@ def test_release_workflow_publishes_a_prerelease_from_the_build_file():
     assert "--prerelease" in text
     assert "release_title" in text
     assert "SHA256SUMS" in text
+    assert "gh release delete" in text
+    assert "--cleanup-tag" not in text
     assert "voxprint-canvas.iss" in text
     assert "installer/linux/install.sh" in text
     assert "constraints.txt" in text

@@ -30,6 +30,7 @@ PYTHON_ID = "python-3.14"
 PYTHON_VERSION = "3.14.8"
 TORCH_ID = "torch-2.11.0-cu130"
 TORCH_VERSION = "2.11.0+cu130"
+VISION_VERSION = "0.26.0+cu130"
 ORT_ID = "onnxruntime-gpu-1.31"
 ORT_VERSION = "1.31.0"
 TRT_ID = "tensorrt-10"
@@ -76,15 +77,20 @@ def _foreign(relative: str) -> bool:
 
 
 def refill_wheels(progress: Callable[[str], None]) -> None:
-    """Download the CUDA 13.0 torch wheels and the GPU ONNX Runtime wheel."""
+    """Download CUDA 13.0 torch wheels. PyPI supplies numpy and the other dependencies."""
     progress("Installing PyTorch")
     dest = wheel_dir()
     dest.mkdir(parents=True, exist_ok=True)
     try:
         subprocess.check_call(
             [
-                sys.executable, "-m", "pip", "download", "torch", "torchvision", "onnxruntime-gpu",
-                "--index-url", TORCH_INDEX, "--extra-index-url", PYPI_INDEX, "-d", str(dest),
+                sys.executable, "-m", "pip", "download",
+                f"torch=={TORCH_VERSION}",
+                f"torchvision=={VISION_VERSION}",
+                f"onnxruntime-gpu=={ORT_VERSION}",
+                "--index-url", PYPI_INDEX,
+                "--extra-index-url", TORCH_INDEX,
+                "-d", str(dest),
             ],
         )
     except subprocess.CalledProcessError as exc:

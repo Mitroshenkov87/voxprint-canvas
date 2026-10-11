@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import assert_never
 
+from canvas.models.edit_route import select_edit_route
 from canvas.models.modes import Mode, Tier
 from canvas.models.pins import (
     DIFFUSERS_PIN,
@@ -48,6 +49,7 @@ class CallPlan:
     mode: str
     guidance_kind: str = ""
     text_encoder: str = ""
+    model_id: str = ""
 
 
 def _one(catalog: Catalog, model_id: str) -> ModelSpec:
@@ -95,8 +97,13 @@ def build_plan(catalog: Catalog, screened: ScreenedInput, tier: Tier) -> CallPla
             mode, tier, pipeline, (turbo, control), turbo.steps, turbo.guidance_scale, turbo.text_encoder_offload,
         )
     if mode is Mode.INSTRUCTION:
-        edit = _one(catalog, "qwen-image-edit-2511-fp8")
-        offload = "group-offload" if tier is Tier.GB16 else edit.text_encoder_offload
+        edit = select_edit_route(catalog, tier)
+        if edit.quant == "int4":
+            offload = "encode-then-unload"
+        elif tier is Tier.GB16:
+            offload = "group-offload"
+        else:
+            offload = edit.text_encoder_offload
         return _plan(
             mode, tier, PIPELINE_EDIT, (edit,), edit.steps, edit.guidance_scale, offload,
         )
@@ -134,4 +141,5 @@ def _plan(mode: Mode, tier: Tier, pipeline: str, specs: tuple[ModelSpec, ...], s
         mode=mode.value,
         guidance_kind=spec.guidance_kind,
         text_encoder=spec.text_encoder,
+        model_id=spec.id,
     )

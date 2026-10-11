@@ -7,11 +7,12 @@ from pathlib import Path
 from typing import assert_never
 
 from canvas.infra.paths import models_dir
+from canvas.models.edit_route import int4_weight_name, select_edit_route
 from canvas.models.modes import Mode, Tier
 from canvas.models.nunchaku import NUNCHAKU_ID, load_nunchaku_generator, nunchaku_ready
 from canvas.models.pin import PinError, require_pin, verify_file
 from canvas.models.plan import CallPlan, build_plan
-from canvas.models.registry import Catalog, ModelSpec, load_catalog
+from canvas.models.registry import Catalog, ModelSpec, RegistryError, load_catalog
 from canvas.models.runtime import render
 from canvas.models.snapshots import download_snapshot, snapshot_ready, weight_dir
 from canvas.pipeline.bf16_schedule import (
@@ -25,6 +26,7 @@ from canvas.pipeline.schedule import (
     Placement,
     choose_schedule,
     run_edit_16gb,
+    run_edit_int4,
     system_ram_gb,
 )
 from canvas.pipeline.vram_probe import PeakVramProbe
@@ -130,9 +132,11 @@ class ZImageGenerator:
         if folder is None or width is None or height is None:
             raise ModelNotReady(plan)
         control_file = _control_file(self.catalog, plan, root)
+        weight_name = int4_weight_name(spec) if spec.quant == "int4" else ""
         try:
             return render(
-                plan, folder, screened, width, height, self.tier, seed=self.seed, control_file=control_file,
+                plan, folder, screened, width, height, self.tier,
+                seed=self.seed, control_file=control_file, weight_name=weight_name,
             )
         except ImportError as exc:
             raise ModelNotReady(plan) from exc
@@ -145,9 +149,13 @@ class ZImageGenerator:
         ready = False
         if mode is not Mode.INSTRUCTION:
             ready = nunchaku_ready(self.catalog.by_id(NUNCHAKU_ID))
+        int4_edit = mode is Mode.INSTRUCTION and select_edit_route(self.catalog, self.tier).quant == "int4"
         ram = 0.0 if mode is not Mode.INSTRUCTION else self._ram()
-        choice = choose_schedule(budget, mode, ram, nunchaku_ready=ready)
+        choice = choose_schedule(budget, mode, ram, nunchaku_ready=ready, int4_edit=int4_edit)
         if choice.placement is Placement.NUNCHAKU_INT4:
+            if mode is Mode.INSTRUCTION:
+                run_edit_int4(width=width, height=height, ledger=self.ledger, probe=self.probe)
+                return
             load_nunchaku_generator(self.catalog.by_id(NUNCHAKU_ID))
             raise ModelNotReady(plan)
         if choice.placement is Placement.RESIDENT:
@@ -201,6 +209,11 @@ def plan_specs(catalog: Catalog, plan: CallPlan) -> tuple[ModelSpec, ...]:
 
 
 def _spec_for(catalog: Catalog, plan: CallPlan) -> ModelSpec:
+    if plan.model_id:
+        try:
+            return catalog.by_id(plan.model_id)
+        except RegistryError:
+            pass
     repo = plan.repos[0]
     ranked = [
         spec for spec in catalog.models

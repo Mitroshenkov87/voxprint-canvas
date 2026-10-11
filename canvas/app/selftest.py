@@ -13,6 +13,8 @@ from canvas.infra.gpu import probe_gpu
 from canvas.infra.paths import models_dir
 from canvas.infra.runtime import python_supports_tensorrt
 from canvas.models.edit import EDIT_ID, probe_edit_pack
+from canvas.models.edit_route import edit_route_report
+from canvas.models.modes import Tier
 from canvas.models.registry import ModelSpec, load_catalog
 from canvas.models.snapshots import snapshot_ready, snapshot_status, weight_dir
 from canvas.models.verified import VerifiedCache
@@ -53,6 +55,11 @@ def selftest_report(
     notes: list[str] = []
     if not python_supports_tensorrt():
         notes.append("TensorRT is skipped on Python 3.14.")
+    routes = {
+        "16gb": edit_route_report(catalog, Tier.GB16, folder),
+        "24gb": edit_route_report(catalog, Tier.GB24, folder),
+    }
+    active = "" if gpu.tier is None else gpu.tier.value
     return {
         "ok": ok,
         "version": version_label(),
@@ -64,6 +71,12 @@ def selftest_report(
         },
         "encoders": encoders,
         "models": models,
+        "edit_route": {
+            "active_tier": active,
+            "active": routes.get(active, {}),
+            "16gb": routes["16gb"],
+            "24gb": routes["24gb"],
+        },
         "classifiers": classifiers,
         "notes": notes,
         "deep": deep,

@@ -11,6 +11,7 @@ theme:
 nav:
   - Home: index.md
   - Command line: cli.md
+  - Shared resources: shared-resources.md
   - API:
       - App: api/app.md
       - Core: api/core.md

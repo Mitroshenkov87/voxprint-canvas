@@ -1,6 +1,7 @@
 # Infrastructure
 
 ::: canvas.infra.paths
+::: canvas.infra.manifest
 ::: canvas.infra.gpu
 ::: canvas.infra.gpu_lock
 ::: canvas.infra.thermal

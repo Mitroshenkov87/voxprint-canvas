@@ -26,6 +26,13 @@ def voxprint_home() -> Path:
     return root
 
 
+def shared_dir() -> Path:
+    """Versioned suite folder: ``%LOCALAPPDATA%\\Voxprint\\shared`` or ``~/.local/share/voxprint/shared``."""
+    path = voxprint_home() / "shared"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def models_dir() -> Path:
     """Shared model folder. ``VOXPRINT_MODELS_DIR`` overrides it when it is absolute."""
     override = os.environ.get("VOXPRINT_MODELS_DIR", "").strip()
@@ -34,6 +41,6 @@ def models_dir() -> Path:
         if path.is_absolute():
             path.mkdir(parents=True, exist_ok=True)
             return path
-    path = voxprint_home() / "models"
+    path = shared_dir() / "models"
     path.mkdir(parents=True, exist_ok=True)
     return path

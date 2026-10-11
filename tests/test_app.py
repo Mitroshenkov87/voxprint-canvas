@@ -12,16 +12,16 @@ from canvas.ui.backdrop import apply_backdrop
 
 
 def test_selftest_register_and_update(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
     assert main(["--selftest", "--json"]) == 2
     report = json.loads(capsys.readouterr().out)
     assert report["ok"] is False
     assert report["encoders"] == {"avif": True, "jxl": True, "webp": True}
     assert isinstance(report["models"], list) and report["models"]
-    monkeypatch.setenv("VOXPRINT_MODELS_DIR", str(tmp_path))
     assert main(["--register-models"]) == 0
-    assert read_users(tmp_path)["canvas"] is True
+    assert read_users(tmp_path / "shared")["canvas"] is True
     assert main(["--unregister-models"]) == 0
-    assert "canvas" not in read_users(tmp_path)
+    assert "canvas" not in read_users(tmp_path / "shared")
     monkeypatch.setattr("canvas.app.main.check_for_update", lambda current: "v9.9.9")
     assert main(["--check-update"]) == 0
     assert capsys.readouterr().out.strip() == "v9.9.9"
@@ -50,7 +50,8 @@ def test_update_check_uses_only_the_releases_endpoint():
         raise AssertionError("expected a refused url")
 
 
-def test_startup_refuses_or_launches(monkeypatch):
+def test_startup_refuses_or_launches(monkeypatch, tmp_path):
+    monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
     monkeypatch.setattr("canvas.app.main.current_os_check", lambda: OsCheck(False, "Windows 11 24H2 or newer is required."))
     assert main([]) == 2
     monkeypatch.setattr("canvas.app.main.current_os_check", lambda: OsCheck(True, ""))

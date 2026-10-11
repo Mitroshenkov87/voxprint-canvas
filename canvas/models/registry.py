@@ -61,6 +61,7 @@ class ModelSpec:
     origins: dict[str, tuple[str, str]] = field(default_factory=dict)
     fallback_files: dict[str, str] = field(default_factory=dict)
     fallback_revision: str = ""
+    nbytes: int = 0
 
     def pinned(self) -> bool:
         """True when every listed file has a 64-character SHA-256."""
@@ -104,6 +105,14 @@ class Catalog:
     def by_role(self, role: str) -> tuple[ModelSpec, ...]:
         """Every model with this role."""
         return tuple(spec for spec in self.models if spec.role == role)
+
+
+def _nbytes(files: dict[str, Any]) -> int:
+    total = 0
+    for meta in files.values():
+        if isinstance(meta, dict) and meta.get("size"):
+            total += int(meta["size"])
+    return total
 
 
 def _sha_map(files: dict[str, Any]) -> dict[str, str]:
@@ -167,6 +176,7 @@ def _spec(row: dict[str, Any]) -> ModelSpec:
         origins=_origins(files),
         fallback_files=_sha_map(fallback_files),
         fallback_revision=str(fallback.get("revision") or ""),
+        nbytes=_nbytes(files),
     )
 
 

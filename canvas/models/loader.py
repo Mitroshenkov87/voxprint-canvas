@@ -141,10 +141,17 @@ def download_safety(catalog: Catalog, root: Path) -> None:
 
 def download_generator(catalog: Catalog, plan: CallPlan, root: Path) -> None:
     """Download the generator snapshot for one plan, including a control file when the plan needs one."""
-    download_snapshot(_spec_for(catalog, plan), root)
+    for spec in plan_specs(catalog, plan):
+        download_snapshot(spec, root)
+
+
+def plan_specs(catalog: Catalog, plan: CallPlan) -> tuple[ModelSpec, ...]:
+    """The generator snapshot for one plan, plus a control file when the plan needs one."""
+    specs = [_spec_for(catalog, plan)]
     control = _control_spec(catalog, plan)
     if control is not None:
-        download_snapshot(control, root)
+        specs.append(control)
+    return tuple(specs)
 
 
 def _spec_for(catalog: Catalog, plan: CallPlan) -> ModelSpec:

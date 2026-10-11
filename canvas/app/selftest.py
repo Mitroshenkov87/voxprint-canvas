@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import json
+import sys
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 
 from canvas.app.identity import version_label
@@ -10,16 +12,21 @@ from canvas.app.platform import check_gpu, current_os_check
 from canvas.core.formats import OutputFormat, save_image
 from canvas.infra.gpu import probe_gpu
 from canvas.infra.paths import models_dir
+from canvas.models.provision import repair
 from canvas.models.registry import ModelSpec, load_catalog
-from canvas.models.snapshots import snapshot_ready
+from canvas.models.snapshots import SnapshotError, snapshot_ready
 from canvas.safety.adapters import FairFaceAge, NsfwViT, Qwen3GuardGen, SiglipZeroShot, YuNetFaces
 from canvas.safety.gate import SafetyError, issue
 from canvas.safety.image import RawImage
 
 
-def selftest_report(root: Path | None = None) -> dict[str, object]:
-    """GPU, pinned files, classifier load, and the three output encoders."""
-    folder = root if root is not None else models_dir()
+def selftest_report(root: Path | None = None, progress: Callable[[str], None] | None = None) -> dict[str, object]:
+    """GPU, pinned files, model load, and the three output encoders."""
+    if root is None:
+        _repair(progress)
+        folder = models_dir()
+    else:
+        folder = root
     os_result = current_os_check()
     gpu = check_gpu(probe_gpu())
     encoders = _encoders()
@@ -46,6 +53,14 @@ def selftest_report(root: Path | None = None) -> dict[str, object]:
         "models": models,
         "classifiers": classifiers,
     }
+
+
+def _repair(progress: Callable[[str], None] | None) -> None:
+    reporter = progress or (lambda message: print(message, file=sys.stderr))
+    try:
+        repair(load_catalog(), reporter)
+    except (SnapshotError, OSError) as exc:
+        reporter(str(exc))
 
 
 def selftest_json(root: Path | None = None) -> str:

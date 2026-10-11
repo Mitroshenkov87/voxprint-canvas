@@ -15,14 +15,9 @@ from canvas.core.formats import OutputFormat, parse_format
 from canvas.infra.enlarge import EnlargeClient, EnlargeError
 from canvas.infra.gpu import probe_gpu
 from canvas.infra.models_users import register, unregister
-from canvas.infra.paths import models_dir
-from canvas.models.loader import (
-    ModelNotReady,
-    ZImageGenerator,
-    download_generator,
-    download_safety,
-    load_catalog_stack,
-)
+from canvas.infra.paths import models_dir, shared_dir
+from canvas.models.loader import ModelNotReady, ZImageGenerator, load_catalog_stack
+from canvas.models.provision import DownloadDeclined, ensure_plan, install_supporting, repair
 from canvas.models.runtime import InferenceUnavailable
 from canvas.models.modes import Mode, Tier
 from canvas.models.plan import BaseNotSelected, ModeUnavailable, build_plan
@@ -37,8 +32,8 @@ from canvas.ui.splash import show_splash
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="voxprint-canvas", description="Voxprint AI Canvas")
-    parser.add_argument("--register-models", action="store_true", help="mark Canvas as a user of the shared models folder")
-    parser.add_argument("--unregister-models", action="store_true", help="remove Canvas from the shared models folder")
+    parser.add_argument("--register-models", action="store_true", help="register Canvas in the shared resource manifest")
+    parser.add_argument("--unregister-models", action="store_true", help="remove Canvas from the shared resource manifest")
     parser.add_argument("--check-update", action="store_true", help="print a newer GitHub release tag, if one exists")
     parser.add_argument("--selftest", action="store_true", help="check the GPU, model files and encoders")
     parser.add_argument("--json", action="store_true", help="print a JSON document")
@@ -63,8 +58,9 @@ def _callback(tier: Tier, window_box: list[MainWindow | None], enlarge: EnlargeC
         window = window_box[0]
         aspect = "1:1" if window is None else window.current_aspect()
         output = "4k" if window is not None and window.fourk.isChecked() else "native"
+        progress = lambda message: _progress(message, window)
         try:
-            download_safety(catalog, models_dir())
+            install_supporting(catalog, progress)
             stack = load_catalog_stack(models_dir(), catalog)
         except (SafetyError, SnapshotError) as exc:
             return str(exc)
@@ -77,10 +73,10 @@ def _callback(tier: Tier, window_box: list[MainWindow | None], enlarge: EnlargeC
                 plan = build_plan(catalog, screened, tier)
             finally:
                 screened.wipe()
-            download_generator(catalog, plan, models_dir())
+            ensure_plan(catalog, plan, progress, lambda notice: _confirm(window, notice))
             pipeline.generate(prompt, mode, aspect=aspect, output=output)
         except (
-            SafetyError, SnapshotError, InferenceUnavailable, ModelNotReady,
+            SafetyError, SnapshotError, DownloadDeclined, InferenceUnavailable, ModelNotReady,
             ModeUnavailable, BaseNotSelected, JobError, CoolingDown, EnlargeMissing, EnlargeError, VramRefused,
         ) as exc:
             return str(exc)
@@ -129,8 +125,9 @@ def _generate(args: argparse.Namespace) -> int:
     catalog = load_catalog()
     root = models_dir()
     output = "4k" if args.output_size == "4k" else "native"
+    progress = lambda message: print(message, file=sys.stderr)
     try:
-        download_safety(catalog, root)
+        install_supporting(catalog, progress)
         stack = load_catalog_stack(root, catalog)
         gate = AgeGate(stack)
         screened = gate.release_request(args.prompt, Mode.TEXT.value, ())
@@ -138,14 +135,14 @@ def _generate(args: argparse.Namespace) -> int:
             plan = build_plan(catalog, screened, gpu.tier)
         finally:
             screened.wipe()
-        download_generator(catalog, plan, root)
+        ensure_plan(catalog, plan, progress, confirm=None)
         generator = ZImageGenerator(catalog, gpu.tier)
         generator.seed = args.seed
         generator.models = root
         pipeline = Pipeline(gate, generator, gpu.tier, use_gpu_lock=True, catalog=catalog, enlarge=EnlargeClient())
         pipeline.export(args.prompt, Mode.TEXT, (), path, fmt, aspect=args.aspect, output=output)
     except (
-        SafetyError, SnapshotError, InferenceUnavailable, ModelNotReady,
+        SafetyError, SnapshotError, DownloadDeclined, InferenceUnavailable, ModelNotReady,
         ModeUnavailable, BaseNotSelected, JobError, CoolingDown, EnlargeMissing, EnlargeError, VramRefused, OSError,
     ) as exc:
         return _emit({"ok": False, "error": str(exc)}, as_json, 1)
@@ -168,10 +165,10 @@ def main(argv: list[str] | None = None) -> int:
             print("ok" if report["ok"] else "failed")
         return 0 if report["ok"] else 2
     if args.register_models:
-        register(models_dir())
+        register(shared_dir())
         return 0
     if args.unregister_models:
-        unregister(models_dir())
+        unregister(shared_dir())
         return 0
     if args.check_update:
         tag = check_for_update(APP_VERSION)
@@ -186,8 +183,32 @@ def main(argv: list[str] | None = None) -> int:
     if not gpu.ok or gpu.tier is None:
         print(gpu.message, file=sys.stderr)
         return 2
+    _repair_shared()
     _launch(gpu.tier)
     return 0
+
+
+def _progress(message: str, window: MainWindow | None) -> None:
+    print(message, file=sys.stderr)
+    if window is not None:
+        window.status.setText(message)
+
+
+def _confirm(window: MainWindow | None, notice: str) -> bool:
+    if window is None:
+        return True
+    window.status.setText(notice)
+    app = QApplication.instance()
+    if app is not None:
+        app.processEvents()
+    return window.confirm_download(notice)
+
+
+def _repair_shared() -> None:
+    try:
+        repair(load_catalog(), lambda message: print(message, file=sys.stderr))
+    except (SnapshotError, OSError) as exc:
+        print(str(exc), file=sys.stderr)
 
 
 if __name__ == "__main__":

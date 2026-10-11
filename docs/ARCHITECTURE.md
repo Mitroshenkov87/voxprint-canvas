@@ -32,7 +32,7 @@ Both tabs offer the same aspect picker, grouped as Landscape (16:9, 21:9, 3:2, 4
 
 Third-party add-ons are off until you turn them on. The curated list has one model, Chroma1-HD, fetched from its upstream address when you ask. Files are stored in a `third-party` folder under the shared models directory. Voxprint does not host or redistribute those files.
 
-Weight files in the main registry are pinned by SHA-256. The loader refuses a missing file or a bad hash. A picture uses the pinned snapshot through diffusers 0.41.0 when those files are already on disk. The first run downloads them. Z-Image-Turbo is taken from the public mirror first, then from the upstream repository.
+Weight files in the main registry are pinned by SHA-256. The loader refuses a missing file or a bad hash. A picture uses the pinned snapshot through diffusers 0.41.0 when those files are already on disk. The setup downloads the default Z-Image-Turbo pack. Z-Image-Turbo is taken from the public mirror first, then from the upstream repository.
 
 ## Content safety checks
 
@@ -42,7 +42,7 @@ Do not use the app to create content that is illegal or socially unacceptable; y
 
 ## Shared suite behaviour
 
-- Models live in `%LOCALAPPDATA%\Voxprint\models` or `~/.local/share/voxprint/models`. `.users.json` records the key `canvas`.
+- Shared files live in `%LOCALAPPDATA%\Voxprint\shared` or `~/.local/share/voxprint/shared`. `manifest.json` records which apps use each resource. An uninstall removes a resource only when its refcount reaches zero. The setup installs Python when it is missing, the GPU libraries, and the default Z-Image-Turbo pack. Optional packs download when a picture needs them, after the window shows the size and the estimated time. Every launch re-checks the recorded hashes and replaces a missing or corrupt file.
 - The GPU lock is `%TEMP%/voxprint-gpu.lock`. It is stale when the recorded process is gone, or when `eta` is more than two hours in the past.
 - The memory budget is free memory minus a headroom of at least 2 GB and at most 3 GB, and at least 8 percent of the card.
 - After 2.5 hours at full speed, work pauses while the 5-minute median temperature is at least 83 °C, or while a throttle has lasted more than 60 seconds. It resumes at 75 °C or below once the throttle has cleared.

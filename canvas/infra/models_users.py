@@ -1,69 +1,31 @@
-"""Refcount of programs that use the shared models folder.
+"""Which apps use the shared suite folder.
 
-Adapted from Voxprint AI Audiobook Builder ``infra/models_users.py``
-(Apache-2.0, Copyright Aleksandr Mitroshenkov). The file format is
-``{"canvas": true}`` in ``<models>/.users.json``.
+The file format other apps should adopt is ``manifest.json`` in the shared
+directory. ``register`` adds this app to every resource, creating a suite
+entry when the folder is empty. ``unregister`` drops this app and deletes a
+resource only when its refcount reaches zero.
 """
 from __future__ import annotations
 
-import json
-import os
-import time
-import uuid
 from pathlib import Path
 
-USER_KEY = "canvas"
-USERS_FILE = ".users.json"
+from canvas.infra.manifest import APP_ID, apps_in, register_app, unregister_app
 
-
-def users_path(root: Path) -> Path:
-    """``.users.json`` inside the shared models folder."""
-    return root / USERS_FILE
+USER_KEY = APP_ID
 
 
 def read_users(root: Path) -> dict[str, bool]:
-    """Keys in ``.users.json``. A missing or broken file is an empty map."""
-    try:
-        data = json.loads(users_path(root).read_text(encoding="utf-8-sig"))
-    except (OSError, ValueError):
-        return {}
-    if not isinstance(data, dict):
-        return {}
-    return {str(key): bool(value) for key, value in data.items()}
-
-
-def _write(users: dict[str, bool], root: Path) -> None:
-    path = users_path(root)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f"{path.name}.{uuid.uuid4().hex[:8]}.tmp")
-    tmp.write_text(json.dumps(users, indent=1, sort_keys=True), encoding="utf-8")
-    try:
-        for attempt in range(10):
-            try:
-                os.replace(tmp, path)
-                return
-            except PermissionError:
-                time.sleep(0.01 * (attempt + 1))
-        raise PermissionError(f"cannot replace {path}")
-    finally:
-        if tmp.exists():
-            tmp.unlink()
+    """Apps recorded in the manifest. A missing file is an empty map."""
+    return {app: True for app in apps_in(root)}
 
 
 def register(root: Path, key: str = USER_KEY) -> dict[str, bool]:
-    """Mark Canvas as a user of the shared models folder."""
-    users = read_users(root)
-    if users.get(key) is True:
-        return users
-    users[key] = True
-    _write(users, root)
-    return users
+    """Record this app in the shared manifest."""
+    register_app(root, key)
+    return read_users(root)
 
 
 def unregister(root: Path, key: str = USER_KEY) -> list[str]:
-    """Remove Canvas from the shared models folder. Returns the keys still in use."""
-    users = read_users(root)
-    if key in users:
-        users.pop(key)
-        _write(users, root)
-    return sorted(name for name, used in users.items() if used)
+    """Drop this app. Returns the apps that still use a resource."""
+    unregister_app(root, key)
+    return sorted(read_users(root))

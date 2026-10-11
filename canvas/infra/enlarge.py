@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from canvas.app.i18n import text as catalog_text
 from canvas.app.info import ENLARGE_NAME
 from canvas.infra.discovery import AppInstall, find_app, probe_capabilities
 from canvas.models.sizes import FOUR_K_LONG
@@ -24,17 +25,17 @@ DEFAULT_ENLARGE_VRAM_GB = 6.0
 _VRAM_KEYS = ("vram_gb", "min_vram_gb", "min_free_gb", "required_vram_gb")
 _ENV_KEYS = ("PATH", "SYSTEMROOT", "SystemRoot", "HOME", "USERPROFILE", "TEMP", "TMP", "TMPDIR")
 _STAGES = frozenset({"queued", "waiting_gpu", "loading", "tiles", "encoding"})
-# name, user message, retryable. Exit 0 is success and is not in this table.
+# name, catalog key, retryable. Exit 0 is success and is not in this table.
 _EXITS: dict[int, tuple[str, str, bool]] = {
-    1: ("internal", "Enlarge could not finish.", False),
-    2: ("bad_input", "Enlarge could not read this picture.", False),
-    3: ("unsupported_format", "Enlarge cannot write this format.", False),
-    4: ("gpu_unsupported", "This computer cannot run Enlarge.", False),
-    5: ("gpu_busy", "The GPU is busy.", True),
-    6: ("oom", "Enlarge ran out of memory.", False),
-    7: ("model_missing", f"Download the upscale model in {ENLARGE_NAME}, then try again.", True),
-    8: ("io_error", "Enlarge could not write the picture.", False),
-    130: ("cancelled", "Enlarge was cancelled.", False),
+    1: ("internal", "enlarge.finish", False),
+    2: ("bad_input", "enlarge.read", False),
+    3: ("unsupported_format", "enlarge.format", False),
+    4: ("gpu_unsupported", "enlarge.gpu", False),
+    5: ("gpu_busy", "enlarge.busy", True),
+    6: ("oom", "enlarge.oom", False),
+    7: ("model_missing", "enlarge.model_missing", True),
+    8: ("io_error", "enlarge.write", False),
+    130: ("cancelled", "enlarge.cancelled", False),
 }
 
 
@@ -57,10 +58,18 @@ class EnlargeResult:
     format: str
 
 
+def exit_message(code: int) -> str:
+    """The catalog line for one Enlarge exit code. Unknown codes use internal."""
+    _name, key, _retryable = _EXITS.get(code, _EXITS[1])
+    if key == "enlarge.model_missing":
+        return catalog_text(key, name=ENLARGE_NAME)
+    return catalog_text(key)
+
+
 def exit_error(code: int) -> EnlargeError:
     """The user message for one Enlarge exit code. Unknown codes use internal."""
-    name, message, retryable = _EXITS.get(code, _EXITS[1])
-    return EnlargeError(name, message, retryable)
+    name, _key, retryable = _EXITS.get(code, _EXITS[1])
+    return EnlargeError(name, exit_message(code), retryable)
 
 
 def _protocol_error(message: dict[str, Any]) -> EnlargeError:
@@ -72,23 +81,23 @@ def _protocol_error(message: dict[str, Any]) -> EnlargeError:
     raw_code = message.get("code")
     code = raw_code.strip() if isinstance(raw_code, str) and raw_code.strip() else "internal"
     raw_text = message.get("message")
-    text = raw_text.strip() if isinstance(raw_text, str) else ""
-    table = next((item for item in _EXITS.values() if item[0] == code), None)
+    reported = raw_text.strip() if isinstance(raw_text, str) else ""
+    table = next((item for item in _EXITS.items() if item[1][0] == code), None)
     raw_retry = message.get("retryable")
     if isinstance(raw_retry, bool):
         retryable = raw_retry
     elif table is not None:
-        retryable = table[2]
+        retryable = table[1][2]
     else:
         retryable = False
     if code == "model_missing":
-        body = _EXITS[7][1]
-    elif text:
-        body = text
+        body = exit_message(7)
+    elif reported:
+        body = reported
     elif table is not None:
-        body = table[1]
+        body = exit_message(table[0])
     else:
-        body = _EXITS[1][1]
+        body = exit_message(1)
     return EnlargeError(code, f"{code}: {body}", retryable)
 
 
@@ -131,7 +140,7 @@ def loads(line: bytes | bytearray | str) -> dict[str, Any]:
     text = line if isinstance(line, str) else bytes(line).decode("utf-8")
     data = json.loads(text)
     if not isinstance(data, dict) or data.get("protocol") != PROTOCOL:
-        raise EnlargeError("internal", "Enlarge sent a message this app does not understand.", False)
+        raise EnlargeError("internal", catalog_text("enlarge.protocol"), False)
     return data
 
 
@@ -235,7 +244,7 @@ class EnlargeClient:
         if format_name != "avif":
             raise exit_error(3)
         if not self.command:
-            raise EnlargeError("io_error", "Enlarge is not installed.", False)
+            raise EnlargeError("io_error", catalog_text("enlarge.missing"), False)
         parent_pid = os.getpid()
         command = enlarge_argv(
             self.command,

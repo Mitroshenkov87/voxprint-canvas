@@ -18,8 +18,8 @@ from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QRect, QRectF, Qt, 
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import QApplication, QWidget
 
+from canvas.app.i18n import text
 from canvas.app.identity import splash_line
-from canvas.app.info import APP_NAME
 from canvas.ui.theme import SPLASH, TEXT, UI_FONT
 
 LOGICAL_W = 960
@@ -63,7 +63,7 @@ class Splash(QWidget):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setFixedSize(LOGICAL_W + 2 * MARGIN, LOGICAL_H + 2 * MARGIN)
-        self.setWindowTitle(APP_NAME)
+        self.setWindowTitle(text("app.name"))
         self.version_line = splash_line()
         self.stage = ""
         self.progress: float | None = None
@@ -111,7 +111,7 @@ class Splash(QWidget):
         bounds = QFontMetrics(self.name_font).boundingRect(
             0, 0, self.text_width, 240,
             int(Qt.AlignmentFlag.AlignLeft | Qt.TextFlag.TextWordWrap),
-            APP_NAME,
+            text("app.name"),
         )
         return QRect(PADDING, PADDING, self.text_width, max(bounds.height(), _NAME_PX))
 
@@ -227,7 +227,7 @@ class Splash(QWidget):
         painter.drawText(
             name,
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap,
-            APP_NAME,
+            text("app.name"),
         )
         painter.setFont(self.version_font)
         muted = QColor(TEXT)

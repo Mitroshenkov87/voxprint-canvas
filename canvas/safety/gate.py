@@ -12,11 +12,11 @@ from concurrent.futures import TimeoutError as FuturesTimeout
 from dataclasses import dataclass
 from typing import Literal, Sequence, assert_never
 
+from canvas.app.i18n import text
 from canvas.safety.classifiers import AgeEstimator, FaceDetector, NsfwDetector, PromptGuard, ZeroShot
 from canvas.safety.constants import (
     ADOLESCENT_16_17_AT,
     ADOLESCENT_16_17_AT_AGE_18,
-    BLOCKED_MESSAGE,
     CLASSIFIER_TIMEOUT_S,
     CLEAR_CHILD_AT,
     GUARD_SEXUAL_CATEGORY,
@@ -26,7 +26,6 @@ from canvas.safety.constants import (
     IMAGE_MINOR_SEXUAL,
     IMAGE_TIMEOUT_S,
     SEXUAL_SCORE_BLOCK_AT,
-    UNAVAILABLE_MESSAGE,
     ZERO_SHOT_BLOCK_AT,
 )
 from canvas.safety.denylist import scan
@@ -39,11 +38,16 @@ log = logging.getLogger("voxprint.canvas.safety")
 class SafetyError(Exception):
     """The request stopped. The message is safe to show."""
 
-    user_message = UNAVAILABLE_MESSAGE
+    message_key = "gate.unavailable"
 
     def __init__(self, code: str) -> None:
-        super().__init__(self.user_message)
+        super().__init__(code)
         self.code = code
+
+    @property
+    def user_message(self) -> str:
+        """The catalog line for this refusal, in the process language."""
+        return text(self.message_key)
 
     def __str__(self) -> str:
         return self.user_message
@@ -52,13 +56,13 @@ class SafetyError(Exception):
 class GenerationBlocked(SafetyError):
     """The request cannot be completed."""
 
-    user_message = BLOCKED_MESSAGE
+    message_key = "gate.blocked"
 
 
 class SafetyUnavailable(SafetyError):
     """A check could not finish, so the request stops."""
 
-    user_message = UNAVAILABLE_MESSAGE
+    message_key = "gate.unavailable"
 
 
 @dataclass(frozen=True)

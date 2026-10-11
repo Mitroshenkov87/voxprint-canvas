@@ -5,6 +5,8 @@ CLI flags or plugins to change them. Tests pin the values.
 """
 from __future__ import annotations
 
+from canvas.app.i18n import text
+
 # Pinned historical cutoff. The image gate does not compare an apparent age with this
 # value. A face in the 20-29 bucket used to be read as 20 and then stopped.
 APPARENT_AGE_UNCERTAIN_UNDER = 25
@@ -35,10 +37,10 @@ CLASSIFIER_TIMEOUT_S = 20.0
 IMAGE_TIMEOUT_S = 30.0
 
 # Shown for a blocked prompt or a blocked image. No reason, no prompt echo.
-BLOCKED_MESSAGE = "This request cannot be completed."
+BLOCKED_MESSAGE = text("gate.blocked", "en")
 
 # Shown when a classifier is missing, mismatched, or fails. Same silence about why.
-UNAVAILABLE_MESSAGE = "Image generation is unavailable."
+UNAVAILABLE_MESSAGE = text("gate.unavailable", "en")
 
 # Prompt-side SigLIP2 labels. The wording is part of the gate, not a user setting.
 PROMPT_MINOR_SEXUAL = "sexual or suggestive content involving a child or minor"

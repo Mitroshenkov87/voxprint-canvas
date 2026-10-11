@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.request import Request, urlopen
 
+from canvas.app.i18n import text
 from canvas.infra.paths import shared_dir
 from canvas.models.registry import ModelSpec
 
@@ -55,8 +56,12 @@ Pip = Callable[[Path, Path, bool], None]
 class NunchakuUnavailable(Exception):
     """The INT4 generator is not confirmed, or its runtime is not installed."""
 
-    def __init__(self, detail: str = "The INT4 generator is not available yet.") -> None:
-        super().__init__(detail)
+    def __init__(self, key: str = "nunchaku.unavailable") -> None:
+        super().__init__(key)
+        self.key = key
+
+    def __str__(self) -> str:
+        return text(self.key)
 
 
 @dataclass(frozen=True)
@@ -95,7 +100,7 @@ class NunchakuWheel:
         for item in self.files:
             if item.role == role:
                 return item
-        raise NunchakuUnavailable("The INT4 runtime is missing a file.")
+        raise NunchakuUnavailable("nunchaku.missing_file")
 
 
 def _wheel(filename: str, sha256: str, nbytes: int) -> PinnedFile:
@@ -183,7 +188,7 @@ def platform_tag(system: str, machine: str) -> str:
         return "linux_x86_64"
     if system == "win32" and arch in {"x86_64", "amd64"}:
         return "win_amd64"
-    raise NunchakuUnavailable("The INT4 runtime has no wheel for this PC.")
+    raise NunchakuUnavailable("nunchaku.no_wheel")
 
 
 def select_nunchaku_wheel(system: str, machine: str) -> NunchakuWheel:
@@ -195,9 +200,9 @@ def select_nunchaku_wheel(system: str, machine: str) -> NunchakuWheel:
             continue
         plan = _PLANS.get((tag, abi))
         if plan is None:
-            raise NunchakuUnavailable("The INT4 runtime wheel is not pinned.")
+            raise NunchakuUnavailable("nunchaku.unpinned")
         return plan
-    raise NunchakuUnavailable("The INT4 runtime has no wheel for this PC.")
+    raise NunchakuUnavailable("nunchaku.no_wheel")
 
 
 def runtime_home() -> Path:
@@ -252,20 +257,20 @@ def install_runtime_files(
         if not item.sha256 and dest.is_file() and dest.stat().st_size == item.nbytes:
             continue
         if progress is not None:
-            progress(f"{item.filename} starting")
+            progress(text("splash.starting", name=item.filename))
         fetch_one(item.url, dest)
         if item.sha256 and not _matches(dest, item.sha256):
             dest.unlink(missing_ok=True)
-            raise OSError("A package could not be installed.")
+            raise OSError(text("error.package"))
         if not item.sha256 and (not dest.is_file() or dest.stat().st_size != item.nbytes):
             dest.unlink(missing_ok=True)
-            raise OSError("A package could not be installed.")
+            raise OSError(text("error.package"))
     interpreter = interpreter_path(root, plan)
     if not interpreter.is_file():
         # The standalone archive already contains a python/ directory.
         extract_one(root / plan.file("python").filename, root)
     if not interpreter.is_file():
-        raise OSError("A package could not be installed.")
+        raise OSError(text("error.package"))
     pip_one(interpreter, root / plan.file("torch").filename, True)
     pip_one(interpreter, root / plan.file("nunchaku").filename, False)
     (root / "ready").write_text(plan.file("nunchaku").sha256 + "\n", encoding="utf-8")
@@ -317,7 +322,7 @@ def _sha256(path: Path) -> str:
 
 def _fetch(url: str, dest: Path) -> None:
     if not url.startswith("https://"):
-        raise OSError("A package could not be installed.")
+        raise OSError(text("error.package"))
     dest.parent.mkdir(parents=True, exist_ok=True)
     partial = dest.with_name(dest.name + ".partial")
     request = Request(url, headers={"User-Agent": "voxprint-canvas"})
@@ -356,4 +361,4 @@ def _pip_install(interpreter: Path, wheel: Path, deps: bool) -> None:
         command.append("--no-deps")
     completed = subprocess.run(command, stdout=sys.stderr, stderr=sys.stderr, check=False)
     if completed.returncode != 0:
-        raise OSError("A package could not be installed.")
+        raise OSError(text("error.package"))

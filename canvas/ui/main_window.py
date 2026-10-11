@@ -1,7 +1,7 @@
 """The two-mode window: text to image, and image to image."""
 from __future__ import annotations
 
-from typing import Callable, NamedTuple
+from typing import Callable, NamedTuple, assert_never
 
 from PySide6.QtCore import Qt, QPointF, QRectF, QSize, QUrl
 from PySide6.QtGui import (
@@ -30,14 +30,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from canvas.app.info import (
-    APP_NAME,
-    ENLARGE_HINT,
-    ENLARGE_RELEASES,
-    INSTRUCTION_EDIT_UNAVAILABLE,
-    RESPONSIBILITY,
-    THIRD_PARTY_NOTICE,
-)
+from canvas.app.i18n import text
+from canvas.app.info import ENLARGE_NAME, ENLARGE_RELEASES
 from canvas.models.features import instruction_edit_available
 from canvas.ui.about import AboutDialog
 from canvas.ui.icons import load_approved
@@ -53,17 +47,40 @@ class EnhanceReply(NamedTuple):
     note: str
 
 
-_LABELS = {
-    Mode.TEXT: "Text to image",
-    Mode.TEXT_CREATIVE: "Creative",
-    Mode.RESTYLE: "Restyle",
-    Mode.INPAINT: "Inpaint",
-    Mode.OUTPAINT: "Outpaint",
-    Mode.POSE: "Pose",
-    Mode.DEPTH: "Depth",
-    Mode.EDGE: "Edge",
-    Mode.INSTRUCTION: "Instruction edit",
-}
+def _mode_label(mode: Mode) -> str:
+    """The catalog label for one mode."""
+    if mode is Mode.TEXT:
+        key = "mode.text"
+    elif mode is Mode.TEXT_CREATIVE:
+        key = "mode.creative"
+    elif mode is Mode.RESTYLE:
+        key = "mode.restyle"
+    elif mode is Mode.INPAINT:
+        key = "mode.inpaint"
+    elif mode is Mode.OUTPAINT:
+        key = "mode.outpaint"
+    elif mode is Mode.POSE:
+        key = "mode.pose"
+    elif mode is Mode.DEPTH:
+        key = "mode.depth"
+    elif mode is Mode.EDGE:
+        key = "mode.edge"
+    elif mode is Mode.INSTRUCTION:
+        key = "mode.instruction"
+    else:
+        assert_never(mode)
+    return text(key)
+
+
+def _aspect_label(name: str) -> str:
+    """The catalog label for one aspect group."""
+    if name == "Landscape":
+        return text("aspect.landscape")
+    if name == "Square":
+        return text("aspect.square")
+    if name == "Portrait":
+        return text("aspect.portrait")
+    raise KeyError(name)
 
 
 class MainWindow(QWidget):
@@ -80,30 +97,34 @@ class MainWindow(QWidget):
         self._aspect_touched = False
         self._input_size: tuple[int, int] | None = None
         self.setObjectName("root")
-        self.setWindowTitle(APP_NAME)
+        self.setWindowTitle(text("app.name"))
         self.setStyleSheet(build_style(glass))
         self.prompt = QPlainTextEdit()
-        self.prompt.setPlaceholderText("Describe the picture")
+        self.prompt.setPlaceholderText(text("prompt.placeholder"))
         self.format_box = QComboBox()
-        for fmt, label in ((OutputFormat.AVIF, "AVIF"), (OutputFormat.JXL, "JPEG XL"), (OutputFormat.WEBP, "WebP")):
-            self.format_box.addItem(label, fmt)
+        for fmt, key in (
+            (OutputFormat.AVIF, "format.avif"),
+            (OutputFormat.JXL, "format.jxl"),
+            (OutputFormat.WEBP, "format.webp"),
+        ):
+            self.format_box.addItem(text(key), fmt)
         index = self.format_box.findData(DEFAULT_FORMAT)
         if index >= 0:
             self.format_box.setCurrentIndex(index)
         self.image_mode = QComboBox()
         for mode in visible_modes(tier):
             if mode_group(mode) == "image":
-                self.image_mode.addItem(_LABELS[mode], mode)
+                self.image_mode.addItem(_mode_label(mode), mode)
         self._instruction_ready = instruction_edit_available()
         self._set_instruction_enabled(self._instruction_ready)
-        self.instruction_note = QLabel(INSTRUCTION_EDIT_UNAVAILABLE)
+        self.instruction_note = QLabel(text("edit.unavailable"))
         self.instruction_note.setObjectName("instruction-note")
         self.instruction_note.setWordWrap(True)
         self.instruction_note.setVisible(not self._instruction_ready)
         self.creative = QComboBox()
-        self.creative.addItem(_LABELS[Mode.TEXT], Mode.TEXT)
+        self.creative.addItem(_mode_label(Mode.TEXT), Mode.TEXT)
         if Mode.TEXT_CREATIVE in visible_modes(tier):
-            self.creative.addItem(_LABELS[Mode.TEXT_CREATIVE], Mode.TEXT_CREATIVE)
+            self.creative.addItem(_mode_label(Mode.TEXT_CREATIVE), Mode.TEXT_CREATIVE)
         self.status = QLabel("")
         self.status.setObjectName("status")
         self.aspects = QButtonGroup(self)
@@ -111,21 +132,21 @@ class MainWindow(QWidget):
         self._aspect_buttons: dict[str, QPushButton] = {}
         self.aspect_row = self._aspect_picker()
         self.aspects.idClicked.connect(self._aspect_picked)
-        self.fourk = QCheckBox("Output size: 4K")
+        self.fourk = QCheckBox(text("checkbox.fourk"))
         self.fourk.setObjectName("fourk")
-        self.fourk_hint = QLabel(ENLARGE_HINT)
+        self.fourk_hint = QLabel(text("enlarge.hint", name=ENLARGE_NAME))
         self.fourk_hint.setObjectName("fourk-hint")
         self.fourk_hint.setWordWrap(True)
-        self.install_enlarge = QPushButton("Install Enlarge")
+        self.install_enlarge = QPushButton(text("button.install_enlarge"))
         self.install_enlarge.setObjectName("install-enlarge")
         self.install_enlarge.clicked.connect(self._install_enlarge)
         self.set_enlarge_ready(enlarge_ready)
-        self.generate_button = QPushButton("Generate")
+        self.generate_button = QPushButton(text("button.generate"))
         self.generate_button.setObjectName("primary")
         self.generate_button.clicked.connect(self._generate)
-        self.enhance_button = QPushButton("Enhance")
+        self.enhance_button = QPushButton(text("button.enhance"))
         self.enhance_button.setObjectName("enhance")
-        self.enhance_button.setToolTip("Improve the prompt")
+        self.enhance_button.setToolTip(text("tooltip.enhance"))
         self.enhance_button.clicked.connect(self._enhance)
         self.enhance_button.setEnabled(on_enhance is not None)
         self.revert_button = QPushButton()
@@ -133,29 +154,29 @@ class MainWindow(QWidget):
         self.revert_button.setIcon(_undo_icon())
         self.revert_button.setIconSize(QSize(18, 18))
         self.revert_button.setFixedSize(36, 36)
-        self.revert_button.setToolTip("Revert")
-        self.revert_button.setAccessibleName("Revert")
+        self.revert_button.setToolTip(text("tooltip.revert"))
+        self.revert_button.setAccessibleName(text("tooltip.revert"))
         self.revert_button.clicked.connect(self._revert)
         self.revert_button.setEnabled(False)
         self.action_icons = load_approved()
-        self.about_button = QPushButton("About")
+        self.about_button = QPushButton(text("button.about"))
         self.about_button.setObjectName("about")
         self.about_button.clicked.connect(self._about)
         tabs = QTabWidget()
-        tabs.addTab(self._text_tab(), "Text to image")
-        tabs.addTab(self._image_tab(), "Image to image")
-        self.addons_box = QCheckBox("Third-party add-ons")
+        tabs.addTab(self._text_tab(), text("tab.text"))
+        tabs.addTab(self._image_tab(), text("tab.image"))
+        self.addons_box = QCheckBox(text("checkbox.addons"))
         self.addons_box.setChecked(False)
-        self.addons_notice = QLabel(THIRD_PARTY_NOTICE)
+        self.addons_notice = QLabel(text("notice.third_party"))
         self.addons_notice.setObjectName("third-party-notice")
         self.addons_notice.setWordWrap(True)
         self.addons_notice.setVisible(False)
         self.addons_box.toggled.connect(self.addons_notice.setVisible)
-        footer = QLabel(RESPONSIBILITY)
+        footer = QLabel(text("notice.responsibility"))
         footer.setObjectName("footer")
         footer.setWordWrap(True)
         layout = QVBoxLayout(self)
-        title = QLabel(APP_NAME)
+        title = QLabel(text("app.name"))
         title.setObjectName("title")
         title_row = QHBoxLayout()
         title_row.addWidget(title)
@@ -203,7 +224,7 @@ class MainWindow(QWidget):
     def _image_tab(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.addWidget(QLabel("Operation"))
+        layout.addWidget(QLabel(text("label.operation")))
         layout.addWidget(self.image_mode)
         layout.addWidget(self.instruction_note)
         return page
@@ -226,7 +247,7 @@ class MainWindow(QWidget):
         """Enable 4K when Enlarge can run, and show the install hint otherwise."""
         self.fourk.setEnabled(ready)
         self.fourk_hint.setVisible(not ready)
-        self.fourk.setToolTip("" if ready else ENLARGE_HINT)
+        self.fourk.setToolTip("" if ready else text("enlarge.hint", name=ENLARGE_NAME))
         self.install_enlarge.setVisible(not ready)
         if not ready:
             self.fourk.setChecked(False)
@@ -258,7 +279,7 @@ class MainWindow(QWidget):
             group_layout = QVBoxLayout(group)
             group_layout.setContentsMargins(0, 0, 0, 0)
             group_layout.setSpacing(4)
-            label = QLabel(name)
+            label = QLabel(_aspect_label(name))
             label.setObjectName("aspect-group")
             buttons = QHBoxLayout()
             buttons.setSpacing(4)
@@ -300,7 +321,7 @@ class MainWindow(QWidget):
         """Ask before an optional pack download. The notice has the size and the estimate."""
         answer = QMessageBox.question(
             self,
-            "Download",
+            text("dialog.download"),
             notice,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
@@ -308,7 +329,7 @@ class MainWindow(QWidget):
 
     def _set_busy(self, busy: bool) -> None:
         self._busy = busy
-        self.enhance_button.setText("Enhancing…" if busy else "Enhance")
+        self.enhance_button.setText(text("button.enhancing") if busy else text("button.enhance"))
         self.enhance_button.setEnabled((not busy) and self.on_enhance is not None)
         self.prompt.setReadOnly(busy)
         self.generate_button.setEnabled(not busy)
@@ -329,7 +350,7 @@ class MainWindow(QWidget):
             return
         source = self.prompt.toPlainText()
         self._set_busy(True)
-        self.status.setText("Enhancing…")
+        self.status.setText(text("button.enhancing"))
         app = QApplication.instance()
         if app is not None:
             app.processEvents()

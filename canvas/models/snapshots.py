@@ -12,6 +12,7 @@ import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 
+from canvas.app.i18n import text
 from canvas.models.features import withheld_from_setup
 from canvas.models.pin import PinError, require_pin, verify_file
 from canvas.models.registry import ModelSpec
@@ -25,8 +26,11 @@ class SnapshotError(Exception):
     """A weight file could not be fetched or did not match its pin."""
 
     def __init__(self, detail: str) -> None:
-        super().__init__("The model could not be downloaded.")
+        super().__init__(detail)
         self.detail = detail
+
+    def __str__(self) -> str:
+        return text("error.download")
 
 
 def weight_dir(root: Path, repo: str, *, fallback: bool = False) -> Path:
@@ -185,7 +189,7 @@ def _fetch_one(
         try:
             if url.startswith("package:"):
                 if progress is not None:
-                    progress(f"{name} copying")
+                    progress(text("splash.copying", name=name))
                 _copy_package(url, dest, pin)
             else:
                 _stream(url, dest, pin, progress=progress, label=name)
@@ -265,7 +269,7 @@ def _stream(
             done = 0
             started = time.monotonic()
             if progress is not None:
-                progress(f"{name} starting")
+                progress(text("splash.starting", name=name))
             while True:
                 chunk = response.read(_CHUNK)
                 if not chunk:
@@ -276,7 +280,7 @@ def _stream(
                 if progress is not None and total:
                     elapsed = max(time.monotonic() - started, 0.001)
                     remaining = max(0, total - done) / (done / elapsed)
-                    progress(f"{name} {done * 100 // total}% about {int(remaining)}s")
+                    progress(text("splash.progress", name=name, percent=done * 100 // total, seconds=int(remaining)))
     except Exception:
         partial.unlink(missing_ok=True)
         raise
@@ -285,4 +289,4 @@ def _stream(
         raise PinError("hash_mismatch")
     partial.replace(dest)
     if progress is not None:
-        progress(f"{name} ready")
+        progress(text("splash.ready", name=name))

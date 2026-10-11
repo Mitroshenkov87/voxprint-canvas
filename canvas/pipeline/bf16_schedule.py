@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import assert_never
 
+from canvas.app.i18n import text
 from canvas.core.vram_policy import budget_gb
 from canvas.models.modes import Mode
 from canvas.models.pins import TEXT_ENCODER
@@ -34,7 +35,10 @@ class VramRefused(Exception):
     """A stage does not fit in the memory budget. ``str`` is the UI line."""
 
     def __init__(self) -> None:
-        super().__init__("This picture does not fit on the GPU.")
+        super().__init__(text("error.vram"))
+
+    def __str__(self) -> str:
+        return text("error.vram")
 
 
 @dataclass(frozen=True)

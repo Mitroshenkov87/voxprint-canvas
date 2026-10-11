@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, assert_never
 
+from canvas.app.i18n import text
 from canvas.models.modes import Tier
 from canvas.models.registry import Catalog, ModelSpec
 from canvas.models.snapshots import SnapshotError, download_files
@@ -88,10 +89,10 @@ _RU_TENS = {
 }
 _QUOTE = re.compile(r'"([^"\n]+)"|“([^”\n]+)”|«([^»\n]+)»|„([^“\n]+)“')
 _THINKING = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
-_FALLBACK_TEXT = {
-    "age": "The enhanced prompt changed a stated age, so the original prompt was used.",
-    "quote": "The enhanced prompt dropped quoted text, so the original prompt was used.",
-    "empty": "The enhanced prompt was empty, so the original prompt was used.",
+_FALLBACK_KEYS = {
+    "age": "enhance.age",
+    "quote": "enhance.quote",
+    "empty": "enhance.empty",
 }
 
 
@@ -171,11 +172,11 @@ def resolve_prompt(gate: object, original: str, rewritten: str | None) -> Enhanc
     rewrite is not replaced by the original.
     """
     reviewer = getattr(gate, "review_prompt")
-    texts = (original,) if rewritten is None else (original, rewritten)
+    candidates = (original,) if rewritten is None else (original, rewritten)
     first: SafetyError | None = None
-    for text in texts:
+    for candidate in candidates:
         try:
-            reviewer(text)
+            reviewer(candidate)
         except SafetyError as exc:
             if first is None:
                 first = exc
@@ -190,8 +191,8 @@ def fallback_message(result: EnhanceResult) -> str:
     """A short line when the rewrite was discarded. Empty when it was kept."""
     if result.fallback == "":
         return ""
-    if result.fallback in _FALLBACK_TEXT:
-        return _FALLBACK_TEXT[result.fallback]
+    if result.fallback in _FALLBACK_KEYS:
+        return text(_FALLBACK_KEYS[result.fallback])
     raise ValueError(f"unknown fallback {result.fallback}")
 
 

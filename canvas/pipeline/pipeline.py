@@ -6,7 +6,8 @@ from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 
-from canvas.app.info import ENLARGE_HINT
+from canvas.app.i18n import text
+from canvas.app.info import ENLARGE_NAME
 from canvas.core.exchange import read_picture, write_png
 from canvas.core.formats import DEFAULT_FORMAT, OutputFormat, save_image
 from canvas.infra.enlarge import EnlargeError, declared_vram_gb
@@ -29,21 +30,30 @@ class JobError(Exception):
     """The request is missing an image the chosen mode needs."""
 
     def __init__(self) -> None:
-        super().__init__("This mode needs another image.")
+        super().__init__(text("error.job"))
+
+    def __str__(self) -> str:
+        return text("error.job")
 
 
 class CoolingDown(Exception):
     """The thermal guard asked the job to wait."""
 
     def __init__(self) -> None:
-        super().__init__("The GPU is cooling down. Try again in a little while.")
+        super().__init__(text("error.cooling"))
+
+    def __str__(self) -> str:
+        return text("error.cooling")
 
 
 class EnlargeMissing(Exception):
     """4K was requested and Enlarge is not available."""
 
     def __init__(self) -> None:
-        super().__init__(ENLARGE_HINT)
+        super().__init__(text("enlarge.hint", name=ENLARGE_NAME))
+
+    def __str__(self) -> str:
+        return text("enlarge.hint", name=ENLARGE_NAME)
 
 
 class _Hold:
@@ -182,7 +192,7 @@ class Pipeline:
         need = _enlarge_need_gb(self.enlarge)
         free = free_vram_gb()
         if free is not None and free <= need:
-            raise EnlargeError("oom", "Enlarge needs more free GPU memory.", False)
+            raise EnlargeError("oom", text("enlarge.vram"), False)
         with tempfile.TemporaryDirectory(prefix="voxprint-canvas-") as folder:
             root = Path(folder)
             source = root / "native.png"

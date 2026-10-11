@@ -4,6 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 
+from canvas.app.i18n import text
 from canvas.models.pin import PinError, require_pin, verify_bytes
 from canvas.models.registry import ModelSpec, Source
 
@@ -12,8 +13,11 @@ class DownloadError(Exception):
     """A model file was not saved. ``detail`` is for logs, not the window."""
 
     def __init__(self, detail: str) -> None:
-        super().__init__("The model could not be downloaded.")
+        super().__init__(detail)
         self.detail = detail
+
+    def __str__(self) -> str:
+        return text("error.download")
 
 
 Transport = Callable[[Source], bytes]

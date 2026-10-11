@@ -11,6 +11,7 @@ from typing import Any, assert_never
 
 from PIL import Image
 
+from canvas.models.edit import EditLoadError, load_edit_pipeline
 from canvas.models.modes import Tier
 from canvas.models.pins import (
     PIPELINE_CONTROL,
@@ -39,7 +40,7 @@ def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, he
     diffusers = _import_diffusers()
     dtype = torch.bfloat16
     steps = plan.steps if plan.steps is not None else 8
-    guidance = {} if plan.guidance_scale is None else {"guidance_scale": plan.guidance_scale}
+    guidance = _call_guidance(plan)
     generator = torch.Generator(device="cuda" if torch.cuda.is_available() else "cpu")
     generator.manual_seed(seed)
     common = {
@@ -88,13 +89,28 @@ def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, he
                 **common,
             )
     elif pipeline_name == PIPELINE_EDIT:
-        pipe = diffusers.QwenImageEditPlusPipeline.from_pretrained(folder, torch_dtype=dtype, local_files_only=True)
-        _place(pipe, tier)
-        result = pipe(image=_pil(_frame(screened, "init")), true_cfg_scale=4.0, **common)
+        try:
+            pipe = load_edit_pipeline(folder, dtype)
+        except EditLoadError as exc:
+            raise InferenceUnavailable(exc.detail) from exc
+        result = pipe(image=_pil(_frame(screened, "init")), **common)
     else:
         raise InferenceUnavailable(f"unknown pipeline {pipeline_name}")
     image = result.images[0].convert("RGB")
     return RawImage(image.width, image.height, image.tobytes())
+
+
+def _call_guidance(plan: CallPlan) -> dict[str, float]:
+    """The guidance argument for this plan. Instruction edit uses true CFG."""
+    kind = plan.guidance_kind
+    if kind == "true_cfg_scale":
+        value = 4.0 if plan.guidance_scale is None else plan.guidance_scale
+        return {"true_cfg_scale": value}
+    if kind == "" or kind == "guidance_scale":
+        if plan.guidance_scale is None:
+            return {}
+        return {"guidance_scale": plan.guidance_scale}
+    raise InferenceUnavailable("unknown guidance kind")
 
 
 def _place(pipe: Any, tier: Tier) -> None:

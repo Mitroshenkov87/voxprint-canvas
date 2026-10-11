@@ -38,12 +38,12 @@ def test_catalog_loads_and_rejects_a_bad_pin_or_licence(tmp_path: Path):
         load_catalog(_rewrite(tmp_path, lambda raw: raw["models"][0]["sources"].append({"kind": "http", "uri": "https://example.invalid"})))
 
 
-def test_z_image_fp8_is_rejected_and_edit_fp8_keeps_a_pending_gate(tmp_path: Path):
+def test_z_image_fp8_is_rejected_and_edit_fp8_keeps_its_gate(tmp_path: Path):
     catalog = load_catalog()
     ids = {spec.id for spec in catalog.models}
     assert "qwen-image-2512-fp8" not in ids
     assert "qwen-image-2512-int4" not in ids
-    assert catalog.by_id("qwen-image-edit-2511-fp8").quality_gate == "pending"
+    assert catalog.by_id("qwen-image-edit-2511-fp8").quality_gate == "passed"
 
     def as_fp8(raw: dict) -> None:
         raw["models"][0]["quant"] = "fp8-e4m3"
@@ -106,7 +106,8 @@ def test_release_pins_match_the_frozen_snapshots():
     assert creative.pinned()
     edit = catalog.by_id("qwen-image-edit-2511-fp8")
     assert edit.revision == "6f3ccc0b56e431dc6a0c2b2039706d7d26f22cb9"
-    assert edit.mirror_status == "pending"
+    assert edit.mirror_revision == "32a23ad2004c32096ae39371bd8332e440b8d1ae"
+    assert edit.mirror_status == "published"
     assert edit.pinned()
     yunet = catalog.by_id("yunet-face")
     assert yunet.files["face_detection_yunet_2023mar.onnx"] == (

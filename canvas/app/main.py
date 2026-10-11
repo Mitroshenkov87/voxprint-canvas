@@ -5,6 +5,7 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
+from PIL import Image
 from PySide6.QtWidgets import QApplication
 
 from canvas.app.identity import version_label
@@ -13,6 +14,8 @@ from canvas.app.platform import GpuCheck, check_gpu, current_os_check
 from canvas.app.selftest import selftest_report
 from canvas.app.updates import check_for_update
 from canvas.core.formats import OutputFormat, parse_format
+from canvas.safety.image import RawImage
+from canvas.safety.inputs import ImageRole, PendingInput
 from canvas.infra.enlarge import EnlargeClient, EnlargeError
 from canvas.infra.gpu import probe_gpu
 from canvas.infra.models_users import register, unregister
@@ -43,7 +46,9 @@ def _parser() -> argparse.ArgumentParser:
     generate = parser.add_subparsers(dest="command", required=False).add_parser(
         "generate", help="generate one image and exit",
     )
-    generate.add_argument("--prompt", required=True)
+    generate.add_argument("--prompt", default="", help="text prompt for a new picture")
+    generate.add_argument("--edit-instruction", default="", help="instruction for editing --input")
+    generate.add_argument("--input", default="", help="image to edit, used with --edit-instruction")
     generate.add_argument("--aspect", default="1:1")
     generate.add_argument("--out", required=True)
     generate.add_argument("--output-size", default="native", choices=("native", "4k"))
@@ -156,6 +161,18 @@ def _emit(payload: dict[str, object], as_json: bool, code: int) -> int:
     return code
 
 
+def _load_rgb(path: Path) -> RawImage:
+    """Read one RGB image from disk. PNG, JPEG, WebP, and AVIF are accepted as inputs."""
+    with Image.open(path) as image:
+        rgb = image.convert("RGB")
+        return RawImage(rgb.width, rgb.height, rgb.tobytes())
+
+
+def _pending_init(path: Path) -> PendingInput:
+    """An unscreened init image for instruction edit."""
+    return PendingInput(ImageRole.INIT, _load_rgb(path))
+
+
 def _generate(args: argparse.Namespace) -> int:
     """Download what is missing, generate one image, and write it."""
     as_json = bool(args.json)
@@ -173,19 +190,36 @@ def _generate(args: argparse.Namespace) -> int:
     catalog = load_catalog()
     root = models_dir()
     output = "4k" if args.output_size == "4k" else "native"
+    instruction = str(args.edit_instruction or "")
+    prompt = str(args.prompt or "")
+    if instruction and prompt:
+        return _emit({"ok": False, "error": "Use a prompt or an edit instruction."}, as_json, 2)
+    if instruction:
+        if not args.input:
+            return _emit({"ok": False, "error": "Instruction edit needs an input image."}, as_json, 2)
+        mode = Mode.INSTRUCTION
+        text = instruction
+    elif prompt:
+        mode = Mode.TEXT
+        text = prompt
+    else:
+        return _emit({"ok": False, "error": "A prompt is required."}, as_json, 2)
+    if args.enhance and mode is not Mode.TEXT:
+        return _emit({"ok": False, "error": "Enhance applies to a prompt."}, as_json, 2)
+    outcome: EnhanceResult | None = None
+    active = text
     progress = lambda message: print(message, file=sys.stderr)
     try:
+        source = _pending_init(Path(args.input)) if mode is Mode.INSTRUCTION else None
         install_supporting(catalog, progress)
         stack = load_catalog_stack(root, catalog)
         gate = AgeGate(stack)
-        outcome: EnhanceResult | None = None
-        active = args.prompt
         if args.enhance:
-            gate.review_prompt(args.prompt)
-            rewritten = rewrite_text(open_rewriter(catalog, gpu.tier, root, progress), args.prompt)
-            outcome = resolve_prompt(gate, args.prompt, rewritten)
+            gate.review_prompt(prompt)
+            rewritten = rewrite_text(open_rewriter(catalog, gpu.tier, root, progress), prompt)
+            outcome = resolve_prompt(gate, prompt, rewritten)
             active = outcome.prompt
-        screened = gate.release_request(active, Mode.TEXT.value, ())
+        screened = gate.release_request(active, mode.value, () if source is None else (source,))
         try:
             plan = build_plan(catalog, screened, gpu.tier)
         finally:
@@ -195,7 +229,8 @@ def _generate(args: argparse.Namespace) -> int:
         generator.seed = args.seed
         generator.models = root
         pipeline = Pipeline(gate, generator, gpu.tier, use_gpu_lock=True, catalog=catalog, enlarge=EnlargeClient())
-        pipeline.export(active, Mode.TEXT, (), path, fmt, aspect=args.aspect, output=output)
+        fresh = _pending_init(Path(args.input)) if mode is Mode.INSTRUCTION else None
+        pipeline.export(active, mode, () if fresh is None else (fresh,), path, fmt, aspect=args.aspect, output=output)
     except (
         SafetyError, SnapshotError, DownloadDeclined, InferenceUnavailable, ModelNotReady,
         ModeUnavailable, BaseNotSelected, JobError, CoolingDown, EnlargeMissing, EnlargeError, VramRefused, OSError,
@@ -203,7 +238,7 @@ def _generate(args: argparse.Namespace) -> int:
         return _emit({"ok": False, "error": str(exc)}, as_json, 1)
     if outcome is not None and outcome.fallback and not as_json:
         print(fallback_message(outcome), file=sys.stderr)
-    return _emit(_generate_payload(path, args.prompt, outcome), as_json, 0)
+    return _emit(_generate_payload(path, text, outcome), as_json, 0)
 
 
 def main(argv: list[str] | None = None) -> int:

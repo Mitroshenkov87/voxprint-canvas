@@ -24,6 +24,10 @@ THIRD_PARTY_NOTICE = (
     "Voxprint does not host or redistribute them."
 )
 
+INSTRUCTION_EDIT_UNAVAILABLE = (
+    "Editing is temporarily unavailable: we are preparing a model for 16 GB+ graphics cards"
+)
+
 ENLARGE_NAME = "VOXPrint AI Enlarge"
 ENLARGE_HINT = f"Install {ENLARGE_NAME} to use this."
 ENLARGE_RELEASES = "https://github.com/Mitroshenkov87/voxprint-enlarge/releases"

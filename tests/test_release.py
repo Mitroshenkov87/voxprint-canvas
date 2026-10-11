@@ -7,12 +7,11 @@ def test_release_workflow_publishes_a_prerelease_from_the_build_file():
     assert 'tags:' in text
     assert '- "v*"' in text
     assert "workflow_dispatch:" in text
+    assert "repository_dispatch:" in text
+    assert "build-installers" in text
+    assert '[ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ] || [ "${GITHUB_EVENT_NAME}" = "repository_dispatch" ]' in text
+    assert '$env:GITHUB_EVENT_NAME -eq "workflow_dispatch" -or $env:GITHUB_EVENT_NAME -eq "repository_dispatch"' in text
     assert "github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')" in text
-    relay = Path(".github/workflows/dispatch-release.yml").read_text(encoding="utf-8")
-    assert "repository_dispatch:" in relay
-    assert "build-installers" in relay
-    assert "actions: write" in relay
-    assert "gh workflow run release.yml --ref main" in relay
     assert 'name: SHA256SUMS' in text
     assert "--prerelease" in text
     assert "release_title" in text

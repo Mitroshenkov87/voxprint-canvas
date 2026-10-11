@@ -204,7 +204,7 @@ def test_exit_codes_map_to_user_messages(tmp_path, monkeypatch, code):
     assert "enlarge: log" not in str(caught.value)
     assert str(caught.value).startswith(f"{expected.code}: ")
     if code == 7:
-        assert "Download the upscale model in Voxprint AI Enlarge" in str(caught.value)
+        assert "Download the upscale model in VOXPrint AI Enlarge" in str(caught.value)
         assert "raw cli detail" not in str(caught.value)
         assert "foo" not in str(caught.value)
     else:
@@ -311,18 +311,23 @@ def test_capabilities_json_is_the_enable_state(tmp_path, monkeypatch, protocol, 
     assert capabilities_ready(client.capabilities()) is enabled
 
 
-def test_enlarge_is_found_on_a_standard_path_and_in_the_manifest(tmp_path, monkeypatch):
-    monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
+def test_enlarge_lookup_is_manifest_then_default_path_then_path(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    monkeypatch.setenv("VOXPRINT_HOME", str(home))
     monkeypatch.delenv("CANVAS_ENLARGE_EXE", raising=False)
-    binary = tmp_path / "enlarge" / "venv" / "bin" / "voxprint-enlarge"
-    binary.parent.mkdir(parents=True)
-    binary.write_text("#!/bin/sh\n", encoding="utf-8")
-    binary.chmod(0o755)
-    found = find_app("Enlarge", "enlarge")
-    assert found is not None
-    assert os.path.normcase(found.command[0]) == os.path.normcase(str(binary))
-    binary.unlink()
-    recorded = tmp_path / "shared" / "apps" / "voxprint-enlarge"
+    monkeypatch.setattr("canvas.infra.discovery._from_suite_registry", lambda _pascal, _kebab: None)
+    default = tmp_path / "suite" / "voxprint-enlarge-cli"
+    default.parent.mkdir(parents=True)
+    default.write_text("#!/bin/sh\n", encoding="utf-8")
+    default.chmod(0o755)
+    monkeypatch.setattr("canvas.infra.discovery.enlarge_executable", lambda: default)
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    on_path = bindir / "voxprint-enlarge-cli"
+    on_path.write_text("#!/bin/sh\n", encoding="utf-8")
+    on_path.chmod(0o755)
+    monkeypatch.setenv("PATH", str(bindir))
+    recorded = home / "shared" / "apps" / "voxprint-enlarge-cli"
     recorded.parent.mkdir(parents=True)
     recorded.write_text("#!/bin/sh\n", encoding="utf-8")
     recorded.chmod(0o755)
@@ -333,6 +338,14 @@ def test_enlarge_is_found_on_a_standard_path_and_in_the_manifest(tmp_path, monke
     found = find_app("Enlarge", "enlarge")
     assert found is not None
     assert os.path.normcase(found.command[0]) == os.path.normcase(str(recorded))
+    recorded.unlink()
+    found = find_app("Enlarge", "enlarge")
+    assert found is not None
+    assert os.path.normcase(found.command[0]) == os.path.normcase(str(default))
+    default.unlink()
+    found = find_app("Enlarge", "enlarge")
+    assert found is not None
+    assert os.path.normcase(found.command[0]) == os.path.normcase(str(on_path))
 
 
 def test_fake_enlarge_rejects_a_file_that_is_not_a_png(tmp_path):

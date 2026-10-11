@@ -97,7 +97,7 @@ def test_left_column_type_and_progress_bar(app):
     del app
     splash = Splash()
     assert splash.version_line.endswith('"Yotzer"')
-    assert APP_NAME == "Voxprint AI Canvas"
+    assert APP_NAME == "VOXPrint AI Canvas"
     assert splash.name_font.pixelSize() == 40
     assert splash.name_rect().height() >= 80
     assert splash.version_rect().top() >= splash.name_rect().bottom()

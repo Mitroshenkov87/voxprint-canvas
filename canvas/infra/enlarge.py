@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from canvas.app.info import ENLARGE_NAME
 from canvas.infra.discovery import AppInstall, find_app, probe_capabilities
 from canvas.models.sizes import FOUR_K_LONG
 
@@ -31,7 +32,7 @@ _EXITS: dict[int, tuple[str, str, bool]] = {
     4: ("gpu_unsupported", "This computer cannot run Enlarge.", False),
     5: ("gpu_busy", "The GPU is busy.", True),
     6: ("oom", "Enlarge ran out of memory.", False),
-    7: ("model_missing", "Download the upscale model in Voxprint AI Enlarge, then try again.", True),
+    7: ("model_missing", f"Download the upscale model in {ENLARGE_NAME}, then try again.", True),
     8: ("io_error", "Enlarge could not write the picture.", False),
     130: ("cancelled", "Enlarge was cancelled.", False),
 }

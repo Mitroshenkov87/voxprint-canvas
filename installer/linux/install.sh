@@ -1,20 +1,21 @@
 #!/bin/sh
-# Install Voxprint AI Canvas into a local environment.
+# Install VOXPrint AI Canvas into /opt/voxprint-ai-suite/canvas.
 # The archive does not contain GPU libraries or model files.
 # Missing dependencies are installed here, before the first picture.
+# Per-user data stays in ~/.local/share/voxprint.
 set -eu
 
 SRC=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 if [ -n "${VOXPRINT_HOME:-}" ]; then
-  ROOT="$VOXPRINT_HOME"
+  DATA="$VOXPRINT_HOME"
 elif [ -n "${XDG_DATA_HOME:-}" ]; then
-  ROOT="$XDG_DATA_HOME/voxprint"
+  DATA="$XDG_DATA_HOME/voxprint"
 else
-  ROOT="$HOME/.local/share/voxprint"
+  DATA="$HOME/.local/share/voxprint"
 fi
-APP="$ROOT/canvas"
+APP="/opt/voxprint-ai-suite/canvas"
 VENV="$APP/venv"
-SHARED="$ROOT/shared"
+SHARED="$DATA/shared"
 RUNTIME_REL="runtime/py314-torch2.11-cu130"
 RUNTIME="$SHARED/$RUNTIME_REL"
 APP_DIR="$HOME/.local/share/applications"
@@ -42,7 +43,11 @@ else
   FRESH=1
 fi
 
-mkdir -p "$APP" "$APP_DIR" "$DIR_DIR" "$BIN_DIR" "$SHARED/wheels" "$SHARED/tensorrt-10"
+if ! mkdir -p "$APP"; then
+  echo "VOXPrint AI Canvas needs permission to create $APP." >&2
+  exit 1
+fi
+mkdir -p "$APP_DIR" "$DIR_DIR" "$BIN_DIR" "$SHARED/wheels" "$SHARED/tensorrt-10"
 "$PY" -m venv "$VENV"
 if [ ! -f "$SRC/constraints.txt" ]; then
   echo "constraints.txt is missing from the setup. The install cannot continue." >&2
@@ -78,24 +83,31 @@ elif [ -z "$(find "$SHARED/tensorrt-10" -mindepth 1 -print -quit 2>/dev/null)" ]
   "$VENV/bin/python" -m pip install -c "$SRC/constraints.txt" --target "$SHARED/tensorrt-10" \
     --upgrade-strategy only-if-needed "tensorrt-cu13==10.16.1.11"
 fi
+"$VENV/bin/python" -m canvas.infra.layout migrate --install-dir "$APP"
 echo "Installing the default image pack..."
 "$VENV/bin/python" -m canvas.app.provision
-"$VENV/bin/python" -m canvas.models.tiers > "$APP/tier.txt"
+mkdir -p "$DATA/canvas"
+"$VENV/bin/python" -m canvas.models.tiers > "$DATA/canvas/tier.txt"
 "$VENV/bin/python" -m canvas.app.main --register-models
 ln -sfn "$VENV/bin/voxprint-canvas" "$BIN_DIR/voxprint-canvas"
+ln -sfn "$VENV/bin/voxprint-canvas-cli" "$BIN_DIR/voxprint-canvas-cli"
+if [ -w /usr/local/bin ] || [ "$(id -u)" -eq 0 ]; then
+  ln -sfn "$VENV/bin/voxprint-canvas" /usr/local/bin/voxprint-canvas
+  ln -sfn "$VENV/bin/voxprint-canvas-cli" /usr/local/bin/voxprint-canvas-cli
+fi
 
 cat > "$DIR_DIR/voxprint.directory" << 'EOF'
 [Desktop Entry]
 Version=1.0
 Type=Directory
-Name=Voxprint
+Name=VOXPrint AI Suite
 EOF
 
 cat > "$APP_DIR/voxprint-canvas.desktop" << EOF
 [Desktop Entry]
 Version=1.0
 Type=Application
-Name=Voxprint AI Canvas
+Name=VOXPrint AI Canvas
 GenericName=Image canvas
 Comment=Local image generation
 Exec=$VENV/bin/voxprint-canvas

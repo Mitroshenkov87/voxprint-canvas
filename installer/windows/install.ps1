@@ -1,4 +1,5 @@
-# Install Voxprint AI Canvas into a local environment.
+# Install VOXPrint AI Canvas. Program files live beside this script.
+# Per-user data stays in %LOCALAPPDATA%\Voxprint.
 # The setup does not contain GPU libraries or model files.
 # Missing dependencies are installed here, before the first picture.
 $ErrorActionPreference = "Stop"
@@ -126,6 +127,8 @@ Invoke-Py @(
 & $Uv pip install --python $Py --index-url https://pypi.org/simple "torchao==0.18.0"
 if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
 & $Uv pip install --python $Py --config-file $UvConfig -c $Constraints "${App}[gen]"
+if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
+& $Py -m canvas.infra.layout migrate --install-dir $App
 if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
 & $Py -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 14) else 1)"
 if ($LASTEXITCODE -eq 0) {

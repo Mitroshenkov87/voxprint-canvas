@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from canvas.app.identity import version
 
-APP_NAME = "Voxprint AI Canvas"
+APP_NAME = "VOXPrint AI Canvas"
 APP_VERSION = version()
 APP_ID = "canvas"
 # Windows 11 24H2.
@@ -24,7 +24,8 @@ THIRD_PARTY_NOTICE = (
     "Voxprint does not host or redistribute them."
 )
 
-ENLARGE_HINT = "Install Voxprint AI Enlarge to use this."
+ENLARGE_NAME = "VOXPrint AI Enlarge"
+ENLARGE_HINT = f"Install {ENLARGE_NAME} to use this."
 ENLARGE_RELEASES = "https://github.com/Mitroshenkov87/voxprint-enlarge/releases"
 
 RELEASES_API = "https://api.github.com/repos/Mitroshenkov87/voxprint-canvas/releases/latest"

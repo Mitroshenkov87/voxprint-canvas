@@ -12,9 +12,9 @@ def test_version_label_and_release_title_come_from_build_json():
     assert version() == "0.1.0"
     assert version_label({}) == '0.1.0 RC · build 4 "Yotzer"'
     assert splash_line({}) == '0.1.0 RC build 4 "Yotzer"'
-    assert release_title({}) == 'Voxprint AI Canvas 0.1.0 RC · build 4 "Yotzer"'
+    assert release_title({}) == 'VOXPrint AI Canvas 0.1.0 RC · build 4 "Yotzer"'
     template = (ROOT / "docs" / "RELEASE-NOTES-TEMPLATE.md").read_text(encoding="utf-8")
-    assert 'Voxprint AI Canvas X.Y.Z RC · build N "Yotzer"' in template
+    assert 'VOXPrint AI Canvas X.Y.Z RC · build N "Yotzer"' in template
     data = json.loads((ROOT / "BUILD.json").read_text(encoding="utf-8"))
     packaged = json.loads((ROOT / "canvas" / "app" / "BUILD.json").read_text(encoding="utf-8"))
     assert packaged == data

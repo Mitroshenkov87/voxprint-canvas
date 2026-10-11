@@ -53,7 +53,9 @@ def test_installer_selects_a_tier_and_shares_the_voxprint_group(monkeypatch, cap
     assert capsys.readouterr().out.strip() == "24gb"
     iss = Path("installer/windows/voxprint-canvas.iss").read_text(encoding="utf-8")
     assert "MinVersion=10.0.26100" in iss
-    assert "DefaultGroupName=Voxprint" in iss
+    assert "DefaultGroupName={#MySuiteName}" in iss
+    assert 'MySuiteName "VOXPrint AI Suite"' in iss
+    assert r"DefaultDirName={autopf}\{#MySuiteName}\Canvas" in iss
     assert "python -m canvas.models.tiers" in iss
     assert "default image pack" in iss
     windows = Path("installer/windows/install.ps1").read_text(encoding="utf-8")
@@ -64,7 +66,9 @@ def test_installer_selects_a_tier_and_shares_the_voxprint_group(monkeypatch, cap
     assert "could not install Python" in windows
     script = Path("installer/linux/install.sh").read_text(encoding="utf-8")
     assert "voxprint.directory" in script
-    assert "Name=Voxprint" in script
+    assert "Name=VOXPrint AI Suite" in script
+    assert 'Name=VOXPrint AI Canvas' in script
+    assert "/opt/voxprint-ai-suite/canvas" in script
     assert "canvas.models.tiers" in script
     assert "canvas.app.provision" in script
     assert "Checking Python..." in script

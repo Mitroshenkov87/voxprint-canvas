@@ -210,5 +210,5 @@ into the blind review pack.
 
 Qwen-Image-2512 is not a Canvas generator. Z-Image-Turbo BF16 is the text-to-image
 generator on every tier. Z-Image base stays the 24 GB Creative mode. Qwen-Image-Edit-2511
-stays the 24 GB instruction editor. The `q_*` arms remain so an operator can still
+is the instruction editor on 16 GB and on 24 GB. The `q_*` arms remain so an operator can still
 measure Qwen-Image-2512; they are not a product plan.

@@ -220,9 +220,10 @@ def test_render_calls_the_edit_loader(monkeypatch, tmp_path: Path):
         def to(self, device: str):
             raise AssertionError(device)
 
-    def fake_load(folder, dtype):
+    def fake_load(folder, dtype, low_vram=False):
         called["folder"] = folder
         called["dtype"] = dtype
+        called["low_vram"] = low_vram
         return _Pipe()
 
     class _Gen:
@@ -255,6 +256,7 @@ def test_render_calls_the_edit_loader(monkeypatch, tmp_path: Path):
     image = render(plan, tmp_path, screened, 1328, 1328, Tier.GB24, seed=3)
     assert called["folder"] == tmp_path
     assert called["dtype"] == "bf16"
+    assert called["low_vram"] is False
     kwargs = called["kwargs"]
     assert isinstance(kwargs, dict)
     assert kwargs["true_cfg_scale"] == 4.0

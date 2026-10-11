@@ -15,12 +15,12 @@ The next version of Voxprint AI Canvas is listed below. Items under Later are pl
 - Opt-in third-party add-ons.
 - Enhance a prompt before generating. The button improves the prompt with the Qwen3-4B text encoder that ships with Z-Image-Turbo. This ships in 0.1.0-rc.4.
 - Instruction edit on a 24 GB GPU, using the published Qwen-Image-Edit-2511 FP8 mirror. This ships in 0.1.0-rc.4.
+- Instruction edit on a 16 GB GPU. The same FP8 pack encodes, unloads, then group-offloads transformer blocks from pinned memory. It needs 40 GB of system memory.
 
 ## Later
 
 Plans, not promises.
 
-- Instruction-based editing on 16 GB cards.
 - Faster engines on your own GPU, with TensorRT.
 - A full command-line interface with JSON output.
 - More languages in the UI.

@@ -35,7 +35,7 @@ def test_pin_and_visibility():
     assert catalog.default_text_base == "z-image-turbo"
     assert catalog.text_bases == ("z-image-turbo",)
     assert DIFFUSERS_PIN == "0.41.0"
-    assert Mode.INSTRUCTION not in visible_modes(Tier.GB16)
+    assert Mode.INSTRUCTION in visible_modes(Tier.GB16)
     assert Mode.TEXT_CREATIVE not in visible_modes(Tier.GB16)
     assert Mode.INSTRUCTION in visible_modes(Tier.GB24)
     assert Mode.TEXT_CREATIVE in visible_modes(Tier.GB24)
@@ -110,11 +110,13 @@ def test_control_and_edit_plans():
     assert edit.steps == 40 and edit.guidance_scale == 4.0
     assert edit.guidance_kind == "true_cfg_scale"
     assert edit.text_encoder_offload == "model-cpu-offload"
+    edit16 = build_plan(catalog, _screened(Mode.INSTRUCTION, ImageRole.INIT), Tier.GB16)
+    assert edit16.pipeline_class == PIPELINE_EDIT
+    assert edit16.tier == "16gb"
+    assert edit16.text_encoder_offload == "group-offload"
     creative = build_plan(catalog, _screened(Mode.TEXT_CREATIVE), Tier.GB24)
     assert creative.pipeline_class == PIPELINE_TEXT
     assert creative.steps == 50 and creative.guidance_scale is None
     assert creative.repos == ("Tongyi-MAI/Z-Image",)
-    with pytest.raises(ModeUnavailable):
-        build_plan(catalog, _screened(Mode.INSTRUCTION, ImageRole.INIT), Tier.GB16)
     with pytest.raises(ModeUnavailable):
         build_plan(catalog, _screened(Mode.TEXT_CREATIVE), Tier.GB16)

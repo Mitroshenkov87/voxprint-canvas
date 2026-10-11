@@ -6,11 +6,13 @@ the unit tests can import Canvas without them.
 """
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Any, assert_never
 
 from PIL import Image
 
+from canvas.infra.vram import reset_peak_allocated
 from canvas.models.edit import EditLoadError, load_edit_pipeline
 from canvas.models.modes import Tier
 from canvas.models.pins import (
@@ -22,6 +24,8 @@ from canvas.models.pins import (
     PIPELINE_TEXT,
 )
 from canvas.models.plan import CallPlan
+from canvas.pipeline.offload import OffloadUnavailable, install_low_vram_offload
+from canvas.pipeline.schedule import note_image_seconds
 from canvas.safety.image import RawImage, ScreenedFrame, ScreenedInput
 
 
@@ -36,6 +40,7 @@ class InferenceUnavailable(Exception):
 def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, height: int, tier: Tier, *,
            seed: int = 0, control_file: Path | None = None) -> RawImage:
     """Run one pinned snapshot. ``folder`` is a local diffusers tree."""
+    reset_peak_allocated()
     torch = _import_torch()
     diffusers = _import_diffusers()
     dtype = torch.bfloat16
@@ -56,15 +61,17 @@ def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, he
     if pipeline_name == PIPELINE_TEXT:
         pipe = diffusers.ZImagePipeline.from_pretrained(folder, torch_dtype=dtype, local_files_only=True)
         _place(pipe, tier)
-        result = pipe(**common)
+        result = _timed(pipe, **common)
     elif pipeline_name == PIPELINE_IMG2IMG:
         pipe = diffusers.ZImageImg2ImgPipeline.from_pretrained(folder, torch_dtype=dtype, local_files_only=True)
         _place(pipe, tier)
-        result = pipe(image=_pil(_frame(screened, "init")), strength=0.6, **common)
+        result = _timed(pipe, image=_pil(_frame(screened, "init")), strength=0.6, **common)
     elif pipeline_name == PIPELINE_INPAINT:
         pipe = diffusers.ZImageInpaintPipeline.from_pretrained(folder, torch_dtype=dtype, local_files_only=True)
         _place(pipe, tier)
-        result = pipe(image=_pil(_frame(screened, "init")), mask_image=_pil(_frame(screened, "mask")), **common)
+        result = _timed(
+            pipe, image=_pil(_frame(screened, "init")), mask_image=_pil(_frame(screened, "mask")), **common,
+        )
     elif pipeline_name == PIPELINE_CONTROL or pipeline_name == PIPELINE_CONTROL_INPAINT:
         if control_file is None:
             raise InferenceUnavailable("control weights are missing")
@@ -75,13 +82,16 @@ def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, he
             )
             role = _control_role(screened)
             _place(pipe, tier)
-            result = pipe(control_image=_pil(_frame(screened, role)), controlnet_conditioning_scale=0.75, **common)
+            result = _timed(
+                pipe, control_image=_pil(_frame(screened, role)), controlnet_conditioning_scale=0.75, **common,
+            )
         else:
             pipe = diffusers.ZImageControlNetInpaintPipeline.from_pretrained(
                 folder, controlnet=controlnet, torch_dtype=dtype, local_files_only=True,
             )
             _place(pipe, tier)
-            result = pipe(
+            result = _timed(
+                pipe,
                 image=_pil(_frame(screened, "init")),
                 mask_image=_pil(_frame(screened, "mask")),
                 control_image=_pil(_frame(screened, _control_role(screened))),
@@ -90,14 +100,22 @@ def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, he
             )
     elif pipeline_name == PIPELINE_EDIT:
         try:
-            pipe = load_edit_pipeline(folder, dtype)
+            pipe = load_edit_pipeline(folder, dtype, low_vram=tier is Tier.GB16)
         except EditLoadError as exc:
             raise InferenceUnavailable(exc.detail) from exc
-        result = pipe(image=_pil(_frame(screened, "init")), **common)
+        result = _timed(pipe, image=_pil(_frame(screened, "init")), **common)
     else:
         raise InferenceUnavailable(f"unknown pipeline {pipeline_name}")
     image = result.images[0].convert("RGB")
     return RawImage(image.width, image.height, image.tobytes())
+
+
+def _timed(pipe: Any, **kwargs: Any) -> Any:
+    """Run one pipeline call and remember the seconds for the JSON report."""
+    started = time.perf_counter()
+    result = pipe(**kwargs)
+    note_image_seconds(time.perf_counter() - started)
+    return result
 
 
 def _call_guidance(plan: CallPlan) -> dict[str, float]:
@@ -114,8 +132,12 @@ def _call_guidance(plan: CallPlan) -> dict[str, float]:
 
 
 def _place(pipe: Any, tier: Tier) -> None:
+    """16 GB streams transformer blocks from pinned RAM. 24 GB keeps the pipeline resident."""
     if tier is Tier.GB16:
-        pipe.enable_model_cpu_offload()
+        try:
+            install_low_vram_offload(pipe)
+        except OffloadUnavailable as exc:
+            raise InferenceUnavailable("this pipeline cannot offload weights") from exc
         return
     if tier is Tier.GB24:
         pipe.to("cuda")

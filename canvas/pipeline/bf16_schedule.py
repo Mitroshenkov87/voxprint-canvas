@@ -17,10 +17,12 @@ from canvas.models.pins import TEXT_ENCODER
 from canvas.models.plan import CallPlan
 from canvas.pipeline.vram_probe import PeakVramProbe
 
-# Qwen3-4B BF16 weights, the 6B transformer, and a lite ControlNet that still
-# fits beside the transformer inside a 14 GB budget at 1-2 MP.
+# Qwen3-4B BF16 weights. The 6B transformer is about 12.3 GB in system RAM.
+# Plan B keeps one block group on the GPU (GROUP_BLOCK_GB) and streams the rest.
 ENCODER_GB = 8.0
 TRANSFORMER_GB = 12.3
+GROUP_BLOCK_GB = 1.6
+GROUP_ACT_PER_MP_GB = 0.45
 CONTROL_LITE_GB = 1.2
 VAE_WEIGHT_GB = 0.4
 DENOISE_PER_MP_GB = 0.12
@@ -58,6 +60,15 @@ class StageCost:
     def vae_tiled_cost_gb(self) -> float:
         """VAE weights plus one tile. The frame size does not change this."""
         return self.vae_weight_gb + self.vae_tiled_gb
+
+
+def group_offload_cost() -> StageCost:
+    """Resident GPU cost for Plan B. Full BF16 weights stay in system RAM.
+
+    The text encoder is loaded and freed before denoise. One transformer block
+    group stays on the GPU. Activations scale with the frame.
+    """
+    return StageCost(transformer_gb=GROUP_BLOCK_GB, denoise_per_mp_gb=GROUP_ACT_PER_MP_GB)
 
 
 @dataclass

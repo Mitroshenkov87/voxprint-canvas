@@ -28,20 +28,48 @@ def help_text() -> str:
     return text
 
 
-def render(text: str) -> str:
+def generate_help() -> str:
+    """Stdout of ``python -m canvas.app.main generate --help``."""
+    env = dict(os.environ)
+    env.setdefault("QT_QPA_PLATFORM", "offscreen")
+    proc = subprocess.run(
+        [sys.executable, "-m", "canvas.app.main", "generate", "--help"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    text = proc.stdout.strip()
+    if proc.returncode != 0 or "--enhance" not in text:
+        raise RuntimeError(proc.stderr.strip() or text or "generate help did not come from the app")
+    return text
+
+
+def render(text: str, generate: str = "") -> str:
     """The command-line page. The fenced block is the captured help."""
+    extra = ""
+    if generate.strip():
+        extra = (
+            "\n## generate\n\n"
+            "Generated from `voxprint-canvas generate --help` when the docs are built.\n\n"
+            "```text\n"
+            f"{generate.strip()}\n"
+            "```\n"
+        )
     return (
         "# Command line\n\n"
         "Generated from `voxprint-canvas --help` when the docs are built.\n\n"
         "```text\n"
         f"{text}\n"
         "```\n"
+        f"{extra}"
     )
 
 
 def main() -> int:
     """Capture help and write ``docs/cli.md``."""
-    DEST.write_text(render(help_text()), encoding="utf-8")
+    DEST.write_text(render(help_text(), generate_help()), encoding="utf-8")
     return 0
 
 

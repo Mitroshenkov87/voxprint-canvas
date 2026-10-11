@@ -106,6 +106,19 @@ def download_snapshot(
     return primary
 
 
+def download_files(
+    spec: ModelSpec, root: Path, names: tuple[str, ...], progress: Callable[[str], None] | None = None,
+) -> Path:
+    """Fetch and verify named files from one snapshot. Other files stay as they are."""
+    missing = [name for name in names if name not in spec.files]
+    if not names or missing:
+        raise SnapshotError("a requested file is not pinned")
+    files = {name: spec.files[name] for name in names}
+    folder = weight_dir(root, spec.repo)
+    _fill(spec, folder, files, spec.revision, fallback=False, progress=progress)
+    return folder
+
+
 def _complete(folder: Path, files: dict[str, str]) -> bool:
     if not files:
         return False

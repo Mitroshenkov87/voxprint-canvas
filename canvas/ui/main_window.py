@@ -43,11 +43,13 @@ _LABELS = {
 class MainWindow(QWidget):
     """Prompt, mode and format. Generation is delegated to ``on_generate``."""
 
-    def __init__(self, on_generate: Callable[[str, Mode, OutputFormat], str], tier: Tier, glass: bool = False,
-                 enlarge_ready: bool = False) -> None:
+    def __init__(self, on_generate: Callable[..., str], tier: Tier, glass: bool = False,
+                 enlarge_ready: bool = False, on_enhance: Callable[[str], str] | None = None) -> None:
         super().__init__()
         self.on_generate = on_generate
+        self.on_enhance = on_enhance
         self.tier = tier
+        self._use_enhanced = False
         self._aspect_touched = False
         self._input_size: tuple[int, int] | None = None
         self.setObjectName("root")
@@ -55,6 +57,9 @@ class MainWindow(QWidget):
         self.setStyleSheet(build_style(glass))
         self.prompt = QPlainTextEdit()
         self.prompt.setPlaceholderText("Describe the picture")
+        self.enhanced = QPlainTextEdit()
+        self.enhanced.setObjectName("enhanced")
+        self.enhanced.setPlaceholderText("Enhanced English prompt")
         self.format_box = QComboBox()
         for fmt, label in ((OutputFormat.AVIF, "AVIF"), (OutputFormat.JXL, "JPEG XL"), (OutputFormat.WEBP, "WebP")):
             self.format_box.addItem(label, fmt)
@@ -88,6 +93,18 @@ class MainWindow(QWidget):
         self.generate_button = QPushButton("Generate")
         self.generate_button.setObjectName("primary")
         self.generate_button.clicked.connect(self._generate)
+        self.enhance_button = QPushButton("Enhance & translate prompt")
+        self.enhance_button.setObjectName("enhance")
+        self.enhance_button.clicked.connect(self._enhance)
+        self.enhance_button.setEnabled(on_enhance is not None)
+        self.use_button = QPushButton("Use this prompt")
+        self.use_button.setObjectName("use-enhanced")
+        self.use_button.clicked.connect(self._use_rewrite)
+        self.use_button.setEnabled(False)
+        self.revert_button = QPushButton("Revert")
+        self.revert_button.setObjectName("revert-enhanced")
+        self.revert_button.clicked.connect(self._revert_rewrite)
+        self.revert_button.setEnabled(False)
         self.action_icons = load_approved()
         self.about_button = QPushButton("About")
         self.about_button.setObjectName("about")
@@ -114,7 +131,18 @@ class MainWindow(QWidget):
         title_row.addWidget(self.about_button)
         layout.addLayout(title_row)
         layout.addWidget(tabs)
-        layout.addWidget(self.prompt)
+        prompt_row = QWidget()
+        prompts = QHBoxLayout(prompt_row)
+        prompts.setContentsMargins(0, 0, 0, 0)
+        prompts.addWidget(self.prompt)
+        prompts.addWidget(self.enhanced)
+        layout.addWidget(prompt_row)
+        enhance_row = QHBoxLayout()
+        enhance_row.addWidget(self.enhance_button)
+        enhance_row.addWidget(self.use_button)
+        enhance_row.addWidget(self.revert_button)
+        enhance_row.addStretch(1)
+        layout.addLayout(enhance_row)
         layout.addWidget(self.aspect_row)
         fourk_row = QHBoxLayout()
         fourk_row.addWidget(self.fourk)
@@ -232,13 +260,42 @@ class MainWindow(QWidget):
         )
         return answer == QMessageBox.StandardButton.Yes
 
+    def _enhance(self) -> None:
+        if self.on_enhance is None:
+            return
+        try:
+            rewritten = self.on_enhance(self.prompt.toPlainText())
+        except Exception as exc:
+            self.status.setText(str(exc))
+            return
+        self.enhanced.setPlainText(rewritten)
+        self._use_enhanced = False
+        self.use_button.setEnabled(True)
+        self.revert_button.setEnabled(True)
+        self.status.setText("Review the enhanced prompt, then use it or revert.")
+
+    def _use_rewrite(self) -> None:
+        self._use_enhanced = True
+        self.status.setText("Using the enhanced prompt.")
+
+    def _revert_rewrite(self) -> None:
+        self._use_enhanced = False
+        self.enhanced.clear()
+        self.use_button.setEnabled(False)
+        self.revert_button.setEnabled(False)
+        self.status.setText("Using the original prompt.")
+
     def _generate(self) -> None:
         tabs = self.findChild(QTabWidget)
         index = 0 if tabs is None else tabs.currentIndex()
         mode = self.current_mode(index)
         fmt = self.format_box.currentData()
+        original = self.prompt.toPlainText()
         try:
-            self.status.setText(self.on_generate(self.prompt.toPlainText(), mode, fmt))
+            if self._use_enhanced:
+                self.status.setText(self.on_generate(self.enhanced.toPlainText(), mode, fmt, original=original))
+            else:
+                self.status.setText(self.on_generate(original, mode, fmt))
         except Exception as exc:
             self.status.setText(str(exc))
 

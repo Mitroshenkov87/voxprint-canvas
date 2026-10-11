@@ -216,6 +216,40 @@ def test_about_and_splash_show_the_release_identity(app, monkeypatch):
     window.close()
 
 
+def test_enhance_box_sits_beside_the_prompt_and_use_or_revert(app):
+    del app
+    seen: list[dict[str, object]] = []
+
+    def on_generate(prompt, mode, fmt, original=None):
+        seen.append({"prompt": prompt, "mode": mode, "fmt": fmt, "original": original})
+        return "ready"
+
+    def on_enhance(text: str) -> str:
+        return f"english: {text}"
+
+    window = MainWindow(on_generate, Tier.GB16, on_enhance=on_enhance)
+    window.prompt.setPlainText("красная лодка")
+    assert window.enhance_button.text() == "Enhance & translate prompt"
+    assert window.enhanced.parentWidget() is window.prompt.parentWidget()
+    assert window.use_button.isEnabled() is False
+    window.enhance_button.click()
+    assert window.enhanced.toPlainText() == "english: красная лодка"
+    window.enhanced.setPlainText('a red boat, sign "Аптека"')
+    window.generate_button.click()
+    assert seen[-1]["prompt"] == "красная лодка"
+    assert seen[-1]["original"] is None
+    window.use_button.click()
+    window.generate_button.click()
+    assert seen[-1]["prompt"] == 'a red boat, sign "Аптека"'
+    assert seen[-1]["original"] == "красная лодка"
+    window.revert_button.click()
+    assert window.enhanced.toPlainText() == ""
+    window.generate_button.click()
+    assert seen[-1]["prompt"] == "красная лодка"
+    assert seen[-1]["original"] is None
+    window.close()
+
+
 def test_confirm_download_uses_the_notice(app, monkeypatch):
     del app
     seen: list[str] = []

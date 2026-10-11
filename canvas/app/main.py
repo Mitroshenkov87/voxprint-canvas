@@ -25,6 +25,7 @@ from canvas.models.plan import BaseNotSelected, ModeUnavailable, build_plan
 from canvas.models.registry import load_catalog
 from canvas.models.snapshots import SnapshotError
 from canvas.pipeline.bf16_schedule import VramRefused
+from canvas.pipeline.enhance import EnhanceResult, fallback_message, open_rewriter, resolve_prompt, rewrite_text
 from canvas.pipeline.pipeline import CoolingDown, EnlargeMissing, JobError, Pipeline
 from canvas.safety.gate import AgeGate, SafetyError
 from canvas.ui.main_window import MainWindow
@@ -47,6 +48,11 @@ def _parser() -> argparse.ArgumentParser:
     generate.add_argument("--out", required=True)
     generate.add_argument("--output-size", default="native", choices=("native", "4k"))
     generate.add_argument("--seed", type=int, default=0)
+    generate.add_argument(
+        "--enhance",
+        action="store_true",
+        help="translate the prompt into English and expand it before generating",
+    )
     generate.add_argument("--json", action="store_true")
     return parser
 
@@ -54,7 +60,7 @@ def _parser() -> argparse.ArgumentParser:
 def _callback(tier: Tier, window_box: list[MainWindow | None], enlarge: EnlargeClient):
     catalog = load_catalog()
 
-    def on_generate(prompt: str, mode: Mode, fmt: OutputFormat) -> str:
+    def on_generate(prompt: str, mode: Mode, fmt: OutputFormat, original: str | None = None) -> str:
         del fmt
         window = window_box[0]
         aspect = "1:1" if window is None else window.current_aspect()
@@ -65,25 +71,44 @@ def _callback(tier: Tier, window_box: list[MainWindow | None], enlarge: EnlargeC
             stack = load_catalog_stack(models_dir(), catalog)
         except (SafetyError, SnapshotError) as exc:
             return str(exc)
+        gate = AgeGate(stack)
+        active = prompt
+        note = ""
+        if original is not None:
+            try:
+                outcome = resolve_prompt(gate, original, prompt)
+            except SafetyError as exc:
+                return str(exc)
+            active = outcome.prompt
+            note = fallback_message(outcome)
         pipeline = Pipeline(
-            AgeGate(stack), ZImageGenerator(catalog, tier), tier, use_gpu_lock=True, catalog=catalog, enlarge=enlarge,
+            gate, ZImageGenerator(catalog, tier), tier, use_gpu_lock=True, catalog=catalog, enlarge=enlarge,
         )
         try:
-            screened = AgeGate(stack).release_request(prompt, mode.value, ())
+            screened = gate.release_request(active, mode.value, ())
             try:
                 plan = build_plan(catalog, screened, tier)
             finally:
                 screened.wipe()
             ensure_plan(catalog, plan, progress, lambda notice: _confirm(window, notice))
-            pipeline.generate(prompt, mode, aspect=aspect, output=output)
+            pipeline.generate(active, mode, aspect=aspect, output=output)
         except (
             SafetyError, SnapshotError, DownloadDeclined, InferenceUnavailable, ModelNotReady,
             ModeUnavailable, BaseNotSelected, JobError, CoolingDown, EnlargeMissing, EnlargeError, VramRefused,
         ) as exc:
             return str(exc)
+        if note:
+            return note
         return "Done"
 
-    return on_generate
+    def on_enhance(text: str) -> str:
+        progress = lambda message: _progress(message, window_box[0])
+        install_supporting(catalog, progress)
+        stack = load_catalog_stack(models_dir(), catalog)
+        AgeGate(stack).review_prompt(text)
+        return rewrite_text(open_rewriter(catalog, tier, models_dir(), progress), text)
+
+    return on_generate, on_enhance
 
 
 def _application() -> QApplication:
@@ -110,7 +135,10 @@ def _launch(tier: Tier, splash: Splash | None = None, app: QApplication | None =
         stage(str(exc))
     enlarge = EnlargeClient()
     window_box: list[MainWindow | None] = [None]
-    window = MainWindow(_callback(tier, window_box, enlarge), tier, glass=False, enlarge_ready=enlarge.ready())
+    on_generate, on_enhance = _callback(tier, window_box, enlarge)
+    window = MainWindow(
+        on_generate, tier, glass=False, enlarge_ready=enlarge.ready(), on_enhance=on_enhance,
+    )
     window_box[0] = window
     window.resize(960, 720)
     window.show()
@@ -150,7 +178,14 @@ def _generate(args: argparse.Namespace) -> int:
         install_supporting(catalog, progress)
         stack = load_catalog_stack(root, catalog)
         gate = AgeGate(stack)
-        screened = gate.release_request(args.prompt, Mode.TEXT.value, ())
+        outcome: EnhanceResult | None = None
+        active = args.prompt
+        if args.enhance:
+            gate.review_prompt(args.prompt)
+            rewritten = rewrite_text(open_rewriter(catalog, gpu.tier, root, progress), args.prompt)
+            outcome = resolve_prompt(gate, args.prompt, rewritten)
+            active = outcome.prompt
+        screened = gate.release_request(active, Mode.TEXT.value, ())
         try:
             plan = build_plan(catalog, screened, gpu.tier)
         finally:
@@ -160,13 +195,15 @@ def _generate(args: argparse.Namespace) -> int:
         generator.seed = args.seed
         generator.models = root
         pipeline = Pipeline(gate, generator, gpu.tier, use_gpu_lock=True, catalog=catalog, enlarge=EnlargeClient())
-        pipeline.export(args.prompt, Mode.TEXT, (), path, fmt, aspect=args.aspect, output=output)
+        pipeline.export(active, Mode.TEXT, (), path, fmt, aspect=args.aspect, output=output)
     except (
         SafetyError, SnapshotError, DownloadDeclined, InferenceUnavailable, ModelNotReady,
         ModeUnavailable, BaseNotSelected, JobError, CoolingDown, EnlargeMissing, EnlargeError, VramRefused, OSError,
     ) as exc:
         return _emit({"ok": False, "error": str(exc)}, as_json, 1)
-    return _emit({"ok": True, "path": str(path)}, as_json, 0)
+    if outcome is not None and outcome.fallback and not as_json:
+        print(fallback_message(outcome), file=sys.stderr)
+    return _emit(_generate_payload(path, args.prompt, outcome), as_json, 0)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -211,6 +248,27 @@ def main(argv: list[str] | None = None) -> int:
     _repair_shared(splash.set_stage)
     _launch(gpu.tier, splash, app)
     return 0
+
+
+def _generate_payload(path: Path, original: str, outcome: EnhanceResult | None) -> dict[str, object]:
+    """JSON body for one generate command. Both prompts are present when enhancing."""
+    if outcome is None:
+        return {
+            "ok": True,
+            "path": str(path),
+            "prompt": original,
+            "enhanced_prompt": None,
+            "used_prompt": original,
+            "fallback": "",
+        }
+    return {
+        "ok": True,
+        "path": str(path),
+        "prompt": outcome.original,
+        "enhanced_prompt": outcome.rewritten,
+        "used_prompt": outcome.prompt,
+        "fallback": outcome.fallback,
+    }
 
 
 def _progress(message: str, window: MainWindow | None) -> None:

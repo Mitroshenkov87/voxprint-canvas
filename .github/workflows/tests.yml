@@ -160,3 +160,43 @@ jobs:
           VOXPRINT_REQUIRE_GATE: "1"
           VOXPRINT_HOME: /home/runner/.cache/voxprint-gate
         run: .venv/bin/python -m pytest tests/test_gate_weights.py
+  enhance-weights:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Cache the Qwen3-4B text encoder
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/.cache/voxprint-enhance
+          key: enhance-encoder-v1-${{ hashFiles('canvas/models/catalog.json') }}
+          restore-keys: enhance-encoder-v1-
+      - name: Install the pinned CPU stack
+        run: |
+          python -m pip install -q uv
+          uv venv .venv
+          uv pip install --python .venv/bin/python \
+            --index-url https://download.pytorch.org/whl/cpu \
+            --extra-index-url https://pypi.org/simple \
+            -c constraints.txt \
+            -e ".[dev,gen]"
+      - name: Free disk for the text encoder
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /usr/local/.ghcup /opt/hostedtoolcache || true
+          df -h /
+      - name: Download the text encoder
+        env:
+          VOXPRINT_HOME: /home/runner/.cache/voxprint-enhance
+        run: |
+          .venv/bin/python -c "from canvas.infra.paths import models_dir; from canvas.models.registry import load_catalog; from canvas.models.snapshots import download_files; from canvas.pipeline.enhance import encoder_names, turbo_spec; from canvas.models.modes import Tier; spec = turbo_spec(load_catalog(), Tier.GB16); download_files(spec, models_dir(), encoder_names(spec), print)"
+      - name: Rewrite a tiny prompt on CPU
+        env:
+          VOXPRINT_REQUIRE_ENHANCE: "1"
+          VOXPRINT_HOME: /home/runner/.cache/voxprint-enhance
+          OMP_NUM_THREADS: "1"
+          MKL_NUM_THREADS: "1"
+          TOKENIZERS_PARALLELISM: "false"
+        run: .venv/bin/python -m pytest tests/test_enhance_weights.py

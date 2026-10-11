@@ -17,6 +17,7 @@ from typing import assert_never
 
 import psutil
 
+from canvas.app.i18n import text
 from canvas.models.modes import TIER_24_MIN_GB, Mode
 from canvas.pipeline.bf16_schedule import GpuLedger, VramRefused
 from canvas.pipeline.vram_probe import PeakVramProbe
@@ -56,9 +57,11 @@ class SystemMemoryRefused(Exception):
         self.have_gb = float(have_gb)
         self.need_gb = float(need_gb)
         shown = max(0, int(self.have_gb))
-        super().__init__(
-            f"Instruction edit needs {self.need_gb:.0f} GB of system memory. This PC has {shown} GB."
-        )
+        super().__init__(text("error.memory", need=f"{self.need_gb:.0f}", have=shown))
+
+    def __str__(self) -> str:
+        shown = max(0, int(self.have_gb))
+        return text("error.memory", need=f"{self.need_gb:.0f}", have=shown)
 
 
 @dataclass(frozen=True)

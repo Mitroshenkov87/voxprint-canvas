@@ -4,13 +4,18 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+from canvas.app.i18n import text as catalog_text
+
 
 class PinError(Exception):
     """A weight file has no pin or the bytes do not match it."""
 
     def __init__(self, code: str) -> None:
-        super().__init__("The model file could not be verified.")
+        super().__init__(code)
         self.code = code
+
+    def __str__(self) -> str:
+        return catalog_text("error.verify")
 
 
 def require_pin(value: str) -> str:

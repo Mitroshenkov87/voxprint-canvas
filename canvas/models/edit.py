@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from canvas.app.i18n import text
 from canvas.pipeline.offload import OffloadUnavailable, install_low_vram_offload
 
 _HEADER_MAX = 8_000_000
@@ -40,8 +41,11 @@ class EditLoadError(Exception):
     """The edit snapshot is on disk and the FP8 pack cannot be loaded."""
 
     def __init__(self, detail: str) -> None:
-        super().__init__("Image generation is unavailable.")
+        super().__init__(detail)
         self.detail = detail
+
+    def __str__(self) -> str:
+        return text("gate.unavailable")
 
 
 @dataclass(frozen=True)

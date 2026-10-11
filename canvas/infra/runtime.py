@@ -16,6 +16,7 @@ import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 
+from canvas.app.i18n import text
 from canvas.infra.manifest import APP_ID, ManifestError, load_manifest
 from canvas.infra.paths import shared_dir
 
@@ -58,11 +59,11 @@ def wheel_dir() -> Path:
 
 def restore_runtime(progress: Callable[[str], None]) -> None:
     """Download the suite interpreter into the shared folder."""
-    progress("Installing Python")
+    progress(text("splash.install_python"))
     if interpreter_marker() is not None:
         return
     if python_home().exists() and _foreign(RUNTIME_REL):
-        progress("Leaving the suite runtime in place")
+        progress(text("splash.runtime_left"))
         return
     if sys.platform == "win32":
         _restore_windows()
@@ -84,7 +85,7 @@ def _foreign(relative: str) -> bool:
 
 def refill_wheels(progress: Callable[[str], None]) -> None:
     """Download CUDA 13.0 torch wheels. PyPI supplies torchao, numpy, and the GPU ONNX Runtime."""
-    progress("Installing PyTorch")
+    progress(text("splash.install_torch"))
     dest = wheel_dir()
     dest.mkdir(parents=True, exist_ok=True)
     _pip(
@@ -114,11 +115,11 @@ def restore_tensorrt(progress: Callable[[str], None]) -> None:
     Python 3.14 has no wheel. That skip is a note, not a failed install.
     """
     if not python_supports_tensorrt():
-        progress("TensorRT is skipped on Python 3.14.")
+        progress(text("splash.tensorrt_skip"))
         return
-    progress("Installing TensorRT")
+    progress(text("splash.install_tensorrt"))
     if _foreign(TRT_PATH):
-        progress("Leaving TensorRT in place")
+        progress(text("splash.tensorrt_left"))
         return
     dest = shared_dir() / TRT_PATH
     dest.mkdir(parents=True, exist_ok=True)
@@ -134,7 +135,7 @@ def _pip(args: list[str]) -> None:
     """Run pip. Its output stays on stderr so a JSON report can own stdout."""
     completed = subprocess.run(args, stdout=sys.stderr, stderr=sys.stderr, check=False)
     if completed.returncode != 0:
-        raise OSError("A package could not be installed.")
+        raise OSError(text("error.package"))
 
 
 def file_sha256(path: Path) -> str:
@@ -199,7 +200,7 @@ def _restore_windows() -> None:
     )
     installer.unlink(missing_ok=True)
     if completed.returncode != 0:
-        raise OSError("Python could not be installed.")
+        raise OSError(text("error.python"))
 
 
 def interpreter_marker() -> Path | None:
@@ -216,7 +217,7 @@ def interpreter_marker() -> Path | None:
 
 def _download(url: str, dest: Path) -> None:
     if not url.startswith("https://"):
-        raise OSError("unsupported download address")
+        raise OSError(text("error.address"))
     request = urllib.request.Request(url, headers={"User-Agent": "voxprint-canvas"})
     with urllib.request.urlopen(request, timeout=120) as response, dest.open("wb") as handle:  # nosec B310
         shutil.copyfileobj(response, handle)

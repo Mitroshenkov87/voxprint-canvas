@@ -12,12 +12,17 @@ import inspect
 from dataclasses import dataclass
 from typing import Any
 
+from canvas.app.i18n import text
+
 
 class OffloadUnavailable(Exception):
     """The pipeline has neither group offload nor sequential CPU offload."""
 
     def __init__(self) -> None:
-        super().__init__("This pipeline cannot offload weights.")
+        super().__init__(text("error.offload"))
+
+    def __str__(self) -> str:
+        return text("error.offload")
 
 
 @dataclass(frozen=True)

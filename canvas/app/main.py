@@ -10,7 +10,8 @@ from PIL import Image
 from PySide6.QtWidgets import QApplication
 
 from canvas.app.identity import version_label
-from canvas.app.info import APP_NAME, APP_VERSION, INSTRUCTION_EDIT_UNAVAILABLE
+from canvas.app.i18n import text
+from canvas.app.info import APP_NAME, APP_VERSION
 from canvas.app.platform import GpuCheck, check_gpu, current_os_check
 from canvas.app.selftest import selftest_report
 from canvas.app.updates import check_for_update
@@ -142,7 +143,7 @@ def _callback(tier: Tier, window_box: list[MainWindow | None], enlarge: EnlargeC
             return str(exc)
         if note:
             return note
-        return "Done"
+        return text("status.done")
 
     def on_enhance(text: str) -> EnhanceReply:
         progress = lambda message: _progress(message, window_box[0])
@@ -348,7 +349,7 @@ def main(argv: list[str] | None = None) -> int:
         splash.close()
         print(os_result.message, file=sys.stderr)
         return 2
-    splash.set_stage("Checking the GPU")
+    splash.set_stage(text("splash.gpu"))
     gpu: GpuCheck = check_gpu(probe_gpu())
     if not gpu.ok or gpu.tier is None:
         splash.close()
@@ -410,9 +411,9 @@ def _confirm(window: MainWindow | None, notice: str) -> bool:
 
 
 def _feature_unavailable(as_json: bool) -> int:
-    """Exit 4. JSON and a plain run both use the English note."""
+    """Exit 4. JSON and a plain run both use the English catalog line."""
     flag = instruction_edit_flag()
-    message = INSTRUCTION_EDIT_UNAVAILABLE
+    message = text("edit.unavailable", "en")
     body = {
         "ok": False,
         "error": "feature_unavailable",

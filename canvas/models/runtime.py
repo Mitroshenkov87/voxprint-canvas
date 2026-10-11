@@ -13,6 +13,7 @@ from typing import Any, assert_never
 
 from PIL import Image
 
+from canvas.app.i18n import text
 from canvas.infra.vram import reset_peak_allocated
 from canvas.models.edit import EditLoadError, load_edit_pipeline
 from canvas.models.int4_edit import load_int4_edit_pipeline
@@ -35,8 +36,11 @@ class InferenceUnavailable(Exception):
     """The plan is known and this machine cannot run it."""
 
     def __init__(self, detail: str) -> None:
-        super().__init__("Image generation is unavailable.")
+        super().__init__(detail)
         self.detail = detail
+
+    def __str__(self) -> str:
+        return text("gate.unavailable")
 
 
 def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, height: int, tier: Tier, *,

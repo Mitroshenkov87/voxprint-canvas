@@ -84,13 +84,15 @@ def test_instruction_edit_control_follows_the_feature_flag(app, monkeypatch):
     window.close()
 
 
-def test_instruction_note_stays_english_on_a_russian_locale(app, monkeypatch):
+def test_instruction_note_follows_the_russian_locale(app, monkeypatch):
     del app
     monkeypatch.setenv("LC_ALL", "ru_RU.UTF-8")
     monkeypatch.setenv("LANG", "ru_RU.UTF-8")
     monkeypatch.setenv("LC_MESSAGES", "ru_RU.UTF-8")
     window = MainWindow(lambda prompt, mode, fmt: "ok", Tier.GB16)
-    assert window.instruction_note.text() == INSTRUCTION_EDIT_UNAVAILABLE
+    assert window.instruction_note.text() == (
+        "Редактирование временно недоступно: готовим модель для видеокарт от 16 ГБ"
+    )
     window.close()
 
 

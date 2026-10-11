@@ -6,6 +6,7 @@ when the pinned snapshot is already on disk. Downloading is a separate call.
 from pathlib import Path
 from typing import assert_never
 
+from canvas.app.i18n import text
 from canvas.infra.paths import models_dir
 from canvas.models.edit_route import int4_weight_name, select_edit_route
 from canvas.models.modes import Mode, Tier
@@ -41,8 +42,11 @@ class ModelNotReady(Exception):
     """The selected pipeline is known, and its weights are not runnable yet."""
 
     def __init__(self, plan: CallPlan) -> None:
-        super().__init__("Image generation is unavailable.")
+        super().__init__(text("gate.unavailable"))
         self.plan = plan
+
+    def __str__(self) -> str:
+        return text("gate.unavailable")
 
 
 def _weight_path(root: Path, spec: ModelSpec, name: str) -> Path:

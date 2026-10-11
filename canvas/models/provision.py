@@ -11,6 +11,7 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
+from canvas.app.i18n import plural_form, text
 from canvas.infra.manifest import (
     APP_ID,
     Component,
@@ -81,7 +82,10 @@ class DownloadDeclined(Exception):
     """The user left an optional pack uninstalled."""
 
     def __init__(self) -> None:
-        super().__init__("The download was cancelled.")
+        super().__init__(text("error.cancelled"))
+
+    def __str__(self) -> str:
+        return text("error.cancelled")
 
 
 def default_specs(catalog: Catalog) -> tuple[ModelSpec, ...]:
@@ -104,17 +108,17 @@ def is_optional(spec: ModelSpec) -> bool:
 def pack_title(spec: ModelSpec) -> str:
     """A short name safe to show before a download."""
     if spec.id.endswith("-lite"):
-        return "ControlNet lite"
+        return text("pack.controlnet_lite")
     if spec.role == "control":
-        return "ControlNet"
+        return text("pack.controlnet")
     if spec.id == "z-image-creative-bf16":
-        return "Creative Z-Image"
+        return text("pack.creative")
     if spec.id == "qwen-image-edit-2511-fp8":
-        return "Qwen-Image-Edit-2511"
+        return text("pack.edit")
     if spec.quant == "int4" and spec.role == "edit":
-        return "Qwen-Image-Edit-2511 INT4"
+        return text("pack.edit_int4")
     if spec.repo.endswith("Z-Image-Turbo"):
-        return "Z-Image-Turbo"
+        return text("pack.turbo")
     return spec.id
 
 
@@ -122,28 +126,30 @@ def pack_notice(spec: ModelSpec) -> str:
     """Size and estimated time, before the download starts."""
     total = spec.nbytes
     seconds = 1 if total <= 0 else max(1, (total + _RATE - 1) // _RATE)
-    return f"{pack_title(spec)} is {format_bytes(total)}. Estimated time {format_duration(seconds)}."
+    return text("download.notice", title=pack_title(spec), size=format_bytes(total), duration=format_duration(seconds))
 
 
 def format_bytes(nbytes: int) -> str:
     """A short size, in GB, MB, KB, or bytes."""
     if nbytes >= 1_000_000_000:
-        return f"{nbytes / 1_000_000_000:.1f} GB"
+        return text("unit.gb", value=f"{nbytes / 1_000_000_000:.1f}")
     if nbytes >= 1_000_000:
-        return f"{nbytes / 1_000_000:.1f} MB"
+        return text("unit.mb", value=f"{nbytes / 1_000_000:.1f}")
     if nbytes >= 1_000:
-        return f"{nbytes / 1_000:.1f} KB"
-    return f"{nbytes} B"
+        return text("unit.kb", value=f"{nbytes / 1_000:.1f}")
+    return text("unit.b", value=nbytes)
 
 
 def format_duration(seconds: int) -> str:
     """A short estimate in minutes or seconds."""
     if seconds >= 60:
-        minutes = max(1, round(seconds / 60))
-        unit = "minute" if minutes == 1 else "minutes"
-        return f"{minutes} {unit}"
-    unit = "second" if seconds == 1 else "seconds"
-    return f"{seconds} {unit}"
+        count = max(1, round(seconds / 60))
+        kind = "minute"
+    else:
+        count = seconds
+        kind = "second"
+    unit = text(f"unit.{kind}.{plural_form(count)}")
+    return text("unit.span", count=count, unit=unit)
 
 
 def install_supporting(catalog: Catalog, progress: Callable[[str], None]) -> None:
@@ -157,7 +163,7 @@ def install_supporting(catalog: Catalog, progress: Callable[[str], None]) -> Non
 def install_defaults(catalog: Catalog, progress: Callable[[str], None]) -> None:
     """Download the default packs during setup."""
     for spec in default_specs(catalog):
-        progress(f"Installing {pack_title(spec)}")
+        progress(text("splash.installing", name=pack_title(spec)))
         install_spec(spec, progress, confirm=None)
 
 
@@ -185,7 +191,7 @@ def nunchaku_runtime_notice() -> str:
     plan = select_nunchaku_wheel(sys.platform, platform.machine())
     total = plan.nbytes
     seconds = 1 if total <= 0 else max(1, (total + _RATE - 1) // _RATE)
-    return f"Nunchaku INT4 runtime is {format_bytes(total)}. Estimated time {format_duration(seconds)}."
+    return text("download.runtime", size=format_bytes(total), duration=format_duration(seconds))
 
 
 def ensure_nunchaku_runtime(
@@ -265,7 +271,7 @@ def repair(catalog: Catalog, progress: Callable[[str], None]) -> list[str]:
         for component_id, component in components.items():
             if not _needs_repair(shared, component_id, component, catalog, cache):
                 continue
-            progress(f"Repairing {component_id}")
+            progress(text("splash.repairing", name=component_id))
             _repair_one(catalog, component_id, component, progress)
             fixed.append(component_id)
     finally:
@@ -362,7 +368,7 @@ def _repair_one(
     if kind == "model":
         spec = _spec_for(catalog, component_id, component)
         if spec is None:
-            progress(f"Leaving {component_id} unchanged")
+            progress(text("splash.leaving", name=component_id))
             return
         download_snapshot(spec, models_dir(), progress=progress)
         remember(spec)
@@ -379,21 +385,21 @@ def _repair_one(
         try:
             wheel = select_nunchaku_wheel(sys.platform, platform.machine())
         except NunchakuUnavailable:
-            progress(f"Leaving {component_id} unchanged")
+            progress(text("splash.leaving", name=component_id))
             return
         install_runtime_files(wheel, runtime_home(), progress)
         _record_nunchaku(wheel)
         return
     if kind == "runtime":
         if any(ref != APP_ID for ref in component.refs):
-            progress(f"Leaving {component_id} unchanged")
+            progress(text("splash.leaving", name=component_id))
             return
         restore_runtime(progress)
         record_runtime()
         return
     if kind == "tool":
         return
-    progress(f"Leaving {component_id} unchanged")
+    progress(text("splash.leaving", name=component_id))
 
 
 def _needs_repair(

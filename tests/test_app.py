@@ -309,6 +309,30 @@ def test_edit_instruction_command_passes_the_input(monkeypatch, tmp_path, capsys
     assert json.loads(capsys.readouterr().out)["ok"] is True
 
 
+def test_edit_instruction_json_stays_english_on_a_russian_locale(capsys, tmp_path, monkeypatch):
+    monkeypatch.setenv("LC_ALL", "ru_RU.UTF-8")
+    monkeypatch.setenv("LANG", "ru_RU.UTF-8")
+    monkeypatch.setenv("LC_MESSAGES", "ru_RU.UTF-8")
+    code = main([
+        "generate",
+        "--edit-instruction",
+        "paint the door blue",
+        "--input",
+        "in.png",
+        "--out",
+        str(tmp_path / "out.avif"),
+        "--json",
+    ])
+    assert code == 4
+    assert json.loads(capsys.readouterr().out) == {
+        "ok": False,
+        "error": "feature_unavailable",
+        "feature": "instruction_edit",
+        "reason": "model_in_preparation",
+        "message": "Editing is temporarily unavailable: we're preparing a model for 16 GB GPUs",
+    }
+
+
 def test_edit_instruction_reports_feature_unavailable(capsys, tmp_path):
     code = main([
         "generate",

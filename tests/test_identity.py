@@ -22,7 +22,7 @@ def test_version_label_and_release_title_come_from_build_json():
     assert data["channel"] == "RC"
     assert data["build"] == 4
     assert data["codename"] == "Yotzer"
-    assert '"canvas.app" = ["BUILD.json"]' in (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    assert '"canvas.app" = ["BUILD.json", "messages.json"]' in (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     assert f'version = "{data["version"]}"' in (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     iss = (ROOT / "installer" / "windows" / "voxprint-canvas.iss").read_text(encoding="utf-8")
     assert f'#define MyAppVersion "{data["version"]}"' in iss

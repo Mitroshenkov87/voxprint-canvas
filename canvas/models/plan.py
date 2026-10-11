@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import assert_never
 
+from canvas.app.i18n import text
 from canvas.models.edit_route import select_edit_route
 from canvas.models.modes import Mode, Tier
 from canvas.models.pins import (
@@ -24,14 +25,20 @@ class ModeUnavailable(Exception):
     """This GPU tier does not offer the mode. The UI hides it."""
 
     def __init__(self) -> None:
-        super().__init__("This mode is not available on this GPU.")
+        super().__init__(text("error.mode"))
+
+    def __str__(self) -> str:
+        return text("error.mode")
 
 
 class BaseNotSelected(Exception):
     """Text to image has no default until a comparison picks one."""
 
     def __init__(self) -> None:
-        super().__init__("The text model has not been selected yet.")
+        super().__init__(text("error.base"))
+
+    def __str__(self) -> str:
+        return text("error.base")
 
 
 @dataclass(frozen=True)

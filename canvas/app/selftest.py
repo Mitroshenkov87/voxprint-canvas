@@ -6,6 +6,7 @@ import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
+from canvas.app.i18n import text
 from canvas.app.identity import version_label
 from canvas.app.platform import check_gpu, current_os_check
 from canvas.core.formats import OutputFormat, save_image
@@ -56,7 +57,7 @@ def selftest_report(
     )
     notes: list[str] = []
     if not python_supports_tensorrt():
-        notes.append("TensorRT is skipped on Python 3.14.")
+        notes.append(text("splash.tensorrt_skip", "en"))
     routes = {
         "16gb": edit_route_report(catalog, Tier.GB16, folder),
         "24gb": edit_route_report(catalog, Tier.GB24, folder),

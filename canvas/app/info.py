@@ -4,6 +4,7 @@ The version string lives in ``BUILD.json`` and is read by ``canvas.app.identity`
 """
 from __future__ import annotations
 
+from canvas.app.i18n import text
 from canvas.app.identity import version
 
 APP_NAME = "VOXPrint AI Canvas"
@@ -14,22 +15,12 @@ MIN_WINDOWS_BUILD = 26100
 MIN_LINUX_YEAR = 2025
 MIN_COMPUTE_CAPABILITY = (8, 9)
 
-RESPONSIBILITY = (
-    "Do not use the app to create content that is illegal or socially unacceptable; "
-    "you are responsible for what you create."
-)
-
-THIRD_PARTY_NOTICE = (
-    "Third-party weights are provided by their authors, who are responsible for the licence and training data. "
-    "Voxprint does not host or redistribute them."
-)
-
-INSTRUCTION_EDIT_UNAVAILABLE = (
-    "Editing is temporarily unavailable: we are preparing a model for 16 GB+ graphics cards"
-)
+RESPONSIBILITY = text("notice.responsibility", "en")
+THIRD_PARTY_NOTICE = text("notice.third_party", "en")
+INSTRUCTION_EDIT_UNAVAILABLE = text("edit.unavailable", "en")
 
 ENLARGE_NAME = "VOXPrint AI Enlarge"
-ENLARGE_HINT = f"Install {ENLARGE_NAME} to use this."
+ENLARGE_HINT = text("enlarge.hint", "en", name=ENLARGE_NAME)
 ENLARGE_RELEASES = "https://github.com/Mitroshenkov87/voxprint-enlarge/releases"
 
 RELEASES_API = "https://api.github.com/repos/Mitroshenkov87/voxprint-canvas/releases/latest"

@@ -1,0 +1,421 @@
+{
+  "locales": ["en", "ru"],
+  "strings": {
+    "app.name": {
+      "en": "VOXPrint AI Canvas",
+      "ru": "VOXPrint AI Canvas"
+    },
+    "app.about_title": {
+      "en": "About {name}",
+      "ru": "О программе {name}"
+    },
+    "app.close": {
+      "en": "Close",
+      "ru": "Закрыть"
+    },
+    "prompt.placeholder": {
+      "en": "Describe the picture",
+      "ru": "Опишите изображение"
+    },
+    "tab.text": {
+      "en": "Text to image",
+      "ru": "Текст в изображение"
+    },
+    "tab.image": {
+      "en": "Image to image",
+      "ru": "Изображение в изображение"
+    },
+    "label.operation": {
+      "en": "Operation",
+      "ru": "Операция"
+    },
+    "format.avif": {
+      "en": "AVIF",
+      "ru": "AVIF"
+    },
+    "format.jxl": {
+      "en": "JPEG XL",
+      "ru": "JPEG XL"
+    },
+    "format.webp": {
+      "en": "WebP",
+      "ru": "WebP"
+    },
+    "checkbox.fourk": {
+      "en": "Output size: 4K",
+      "ru": "Размер вывода: 4K"
+    },
+    "checkbox.addons": {
+      "en": "Third-party add-ons",
+      "ru": "Сторонние дополнения"
+    },
+    "button.install_enlarge": {
+      "en": "Install Enlarge",
+      "ru": "Установить Enlarge"
+    },
+    "button.generate": {
+      "en": "Generate",
+      "ru": "Создать"
+    },
+    "button.enhance": {
+      "en": "Enhance",
+      "ru": "Улучшить"
+    },
+    "button.enhancing": {
+      "en": "Enhancing…",
+      "ru": "Улучшение…"
+    },
+    "button.about": {
+      "en": "About",
+      "ru": "О программе"
+    },
+    "tooltip.enhance": {
+      "en": "Improve the prompt",
+      "ru": "Улучшить запрос"
+    },
+    "tooltip.revert": {
+      "en": "Revert",
+      "ru": "Вернуть"
+    },
+    "aspect.landscape": {
+      "en": "Landscape",
+      "ru": "Альбомная"
+    },
+    "aspect.square": {
+      "en": "Square",
+      "ru": "Квадрат"
+    },
+    "aspect.portrait": {
+      "en": "Portrait",
+      "ru": "Портретная"
+    },
+    "mode.text": {
+      "en": "Text to image",
+      "ru": "Текст в изображение"
+    },
+    "mode.creative": {
+      "en": "Creative",
+      "ru": "Творческий"
+    },
+    "mode.restyle": {
+      "en": "Restyle",
+      "ru": "Смена стиля"
+    },
+    "mode.inpaint": {
+      "en": "Inpaint",
+      "ru": "Дорисовка"
+    },
+    "mode.outpaint": {
+      "en": "Outpaint",
+      "ru": "Расширение"
+    },
+    "mode.pose": {
+      "en": "Pose",
+      "ru": "Поза"
+    },
+    "mode.depth": {
+      "en": "Depth",
+      "ru": "Глубина"
+    },
+    "mode.edge": {
+      "en": "Edge",
+      "ru": "Контур"
+    },
+    "mode.instruction": {
+      "en": "Instruction edit",
+      "ru": "Правка по инструкции"
+    },
+    "edit.unavailable": {
+      "en": "Editing is temporarily unavailable: we're preparing a model for 16 GB GPUs",
+      "ru": "Редактирование временно недоступно: готовим модель для видеокарт от 16 ГБ"
+    },
+    "notice.responsibility": {
+      "en": "Do not use the app to create content that is illegal or socially unacceptable; you are responsible for what you create.",
+      "ru": "Не используйте приложение для создания незаконного или социально неприемлемого контента; вы отвечаете за то, что создаёте."
+    },
+    "notice.third_party": {
+      "en": "Third-party weights are provided by their authors, who are responsible for the licence and training data. Voxprint does not host or redistribute them.",
+      "ru": "Сторонние веса предоставляют их авторы, которые отвечают за лицензию и обучающие данные. Voxprint их не размещает и не распространяет."
+    },
+    "enlarge.hint": {
+      "en": "Install {name} to use this.",
+      "ru": "Установите {name}, чтобы пользоваться этим."
+    },
+    "dialog.download": {
+      "en": "Download",
+      "ru": "Скачать"
+    },
+    "status.done": {
+      "en": "Done",
+      "ru": "Готово"
+    },
+    "gate.blocked": {
+      "en": "This request cannot be completed.",
+      "ru": "Этот запрос нельзя выполнить."
+    },
+    "gate.unavailable": {
+      "en": "Image generation is unavailable.",
+      "ru": "Генерация изображений недоступна."
+    },
+    "error.job": {
+      "en": "This mode needs another image.",
+      "ru": "Для этого режима нужно другое изображение."
+    },
+    "error.cooling": {
+      "en": "The GPU is cooling down. Try again in a little while.",
+      "ru": "Видеокарта остывает. Попробуйте ещё раз чуть позже."
+    },
+    "error.mode": {
+      "en": "This mode is not available on this GPU.",
+      "ru": "Этот режим недоступен на этой видеокарте."
+    },
+    "error.base": {
+      "en": "The text model has not been selected yet.",
+      "ru": "Текстовая модель ещё не выбрана."
+    },
+    "error.vram": {
+      "en": "This picture does not fit on the GPU.",
+      "ru": "Это изображение не помещается на видеокарту."
+    },
+    "error.download": {
+      "en": "The model could not be downloaded.",
+      "ru": "Не удалось скачать модель."
+    },
+    "error.verify": {
+      "en": "The model file could not be verified.",
+      "ru": "Не удалось проверить файл модели."
+    },
+    "error.cancelled": {
+      "en": "The download was cancelled.",
+      "ru": "Загрузка отменена."
+    },
+    "error.memory": {
+      "en": "Instruction edit needs {need} GB of system memory. This PC has {have} GB.",
+      "ru": "Для правки по инструкции нужно {need} ГБ оперативной памяти. На этом компьютере {have} ГБ."
+    },
+    "error.offload": {
+      "en": "This pipeline cannot offload weights.",
+      "ru": "Этот конвейер не может выгрузить веса."
+    },
+    "error.package": {
+      "en": "A package could not be installed.",
+      "ru": "Не удалось установить пакет."
+    },
+    "error.python": {
+      "en": "Python could not be installed.",
+      "ru": "Не удалось установить Python."
+    },
+    "error.address": {
+      "en": "unsupported download address",
+      "ru": "Неподдерживаемый адрес загрузки"
+    },
+    "enlarge.finish": {
+      "en": "Enlarge could not finish.",
+      "ru": "Enlarge не смог завершить работу."
+    },
+    "enlarge.read": {
+      "en": "Enlarge could not read this picture.",
+      "ru": "Enlarge не смог прочитать это изображение."
+    },
+    "enlarge.format": {
+      "en": "Enlarge cannot write this format.",
+      "ru": "Enlarge не может записать этот формат."
+    },
+    "enlarge.gpu": {
+      "en": "This computer cannot run Enlarge.",
+      "ru": "Этот компьютер не может запустить Enlarge."
+    },
+    "enlarge.busy": {
+      "en": "The GPU is busy.",
+      "ru": "Видеокарта занята."
+    },
+    "enlarge.oom": {
+      "en": "Enlarge ran out of memory.",
+      "ru": "Enlarge не хватило памяти."
+    },
+    "enlarge.model_missing": {
+      "en": "Download the upscale model in {name}, then try again.",
+      "ru": "Скачайте модель увеличения в {name} и попробуйте снова."
+    },
+    "enlarge.write": {
+      "en": "Enlarge could not write the picture.",
+      "ru": "Enlarge не смог записать изображение."
+    },
+    "enlarge.cancelled": {
+      "en": "Enlarge was cancelled.",
+      "ru": "Enlarge отменён."
+    },
+    "enlarge.protocol": {
+      "en": "Enlarge sent a message this app does not understand.",
+      "ru": "Enlarge прислал сообщение, которое это приложение не понимает."
+    },
+    "enlarge.vram": {
+      "en": "Enlarge needs more free GPU memory.",
+      "ru": "Enlarge нужно больше свободной памяти видеокарты."
+    },
+    "enlarge.missing": {
+      "en": "Enlarge is not installed.",
+      "ru": "Enlarge не установлен."
+    },
+    "enhance.age": {
+      "en": "The enhanced prompt changed a stated age, so the original prompt was used.",
+      "ru": "Улучшенный запрос изменил указанный возраст, поэтому использован исходный запрос."
+    },
+    "enhance.quote": {
+      "en": "The enhanced prompt dropped quoted text, so the original prompt was used.",
+      "ru": "Улучшенный запрос потерял текст в кавычках, поэтому использован исходный запрос."
+    },
+    "enhance.empty": {
+      "en": "The enhanced prompt was empty, so the original prompt was used.",
+      "ru": "Улучшенный запрос оказался пустым, поэтому использован исходный запрос."
+    },
+    "splash.gpu": {
+      "en": "Checking the GPU",
+      "ru": "Проверка видеокарты"
+    },
+    "splash.installing": {
+      "en": "Installing {name}",
+      "ru": "Установка {name}"
+    },
+    "splash.repairing": {
+      "en": "Repairing {name}",
+      "ru": "Восстановление {name}"
+    },
+    "splash.leaving": {
+      "en": "Leaving {name} unchanged",
+      "ru": "{name} оставлен без изменений"
+    },
+    "splash.install_python": {
+      "en": "Installing Python",
+      "ru": "Установка Python"
+    },
+    "splash.runtime_left": {
+      "en": "Leaving the suite runtime in place",
+      "ru": "Среда выполнения комплекта оставлена без изменений"
+    },
+    "splash.install_torch": {
+      "en": "Installing PyTorch",
+      "ru": "Установка PyTorch"
+    },
+    "splash.tensorrt_skip": {
+      "en": "TensorRT is skipped on Python 3.14.",
+      "ru": "TensorRT пропускается в Python 3.14."
+    },
+    "splash.install_tensorrt": {
+      "en": "Installing TensorRT",
+      "ru": "Установка TensorRT"
+    },
+    "splash.tensorrt_left": {
+      "en": "Leaving TensorRT in place",
+      "ru": "TensorRT оставлен без изменений"
+    },
+    "splash.copying": {
+      "en": "{name} copying",
+      "ru": "Копирование {name}"
+    },
+    "splash.starting": {
+      "en": "{name} starting",
+      "ru": "{name}: начало"
+    },
+    "splash.progress": {
+      "en": "{name} {percent}% about {seconds}s",
+      "ru": "{name} {percent}% ещё около {seconds} с"
+    },
+    "splash.ready": {
+      "en": "{name} ready",
+      "ru": "{name} готов"
+    },
+    "pack.controlnet_lite": {
+      "en": "ControlNet lite",
+      "ru": "ControlNet lite"
+    },
+    "pack.controlnet": {
+      "en": "ControlNet",
+      "ru": "ControlNet"
+    },
+    "pack.creative": {
+      "en": "Creative Z-Image",
+      "ru": "Creative Z-Image"
+    },
+    "pack.edit": {
+      "en": "Qwen-Image-Edit-2511",
+      "ru": "Qwen-Image-Edit-2511"
+    },
+    "pack.edit_int4": {
+      "en": "Qwen-Image-Edit-2511 INT4",
+      "ru": "Qwen-Image-Edit-2511 INT4"
+    },
+    "pack.turbo": {
+      "en": "Z-Image-Turbo",
+      "ru": "Z-Image-Turbo"
+    },
+    "download.notice": {
+      "en": "{title} is {size}. Estimated time {duration}.",
+      "ru": "{title}: {size}. Примерное время: {duration}."
+    },
+    "download.runtime": {
+      "en": "Nunchaku INT4 runtime is {size}. Estimated time {duration}.",
+      "ru": "Среда Nunchaku INT4: {size}. Примерное время: {duration}."
+    },
+    "unit.gb": {
+      "en": "{value} GB",
+      "ru": "{value} ГБ"
+    },
+    "unit.mb": {
+      "en": "{value} MB",
+      "ru": "{value} МБ"
+    },
+    "unit.kb": {
+      "en": "{value} KB",
+      "ru": "{value} КБ"
+    },
+    "unit.b": {
+      "en": "{value} B",
+      "ru": "{value} Б"
+    },
+    "unit.span": {
+      "en": "{count} {unit}",
+      "ru": "{count} {unit}"
+    },
+    "unit.minute.one": {
+      "en": "minute",
+      "ru": "минута"
+    },
+    "unit.minute.few": {
+      "en": "minutes",
+      "ru": "минуты"
+    },
+    "unit.minute.many": {
+      "en": "minutes",
+      "ru": "минут"
+    },
+    "unit.second.one": {
+      "en": "second",
+      "ru": "секунда"
+    },
+    "unit.second.few": {
+      "en": "seconds",
+      "ru": "секунды"
+    },
+    "unit.second.many": {
+      "en": "seconds",
+      "ru": "секунд"
+    },
+    "nunchaku.unavailable": {
+      "en": "The INT4 generator is not available yet.",
+      "ru": "Генератор INT4 пока недоступен."
+    },
+    "nunchaku.missing_file": {
+      "en": "The INT4 runtime is missing a file.",
+      "ru": "В среде выполнения INT4 не хватает файла."
+    },
+    "nunchaku.no_wheel": {
+      "en": "The INT4 runtime has no wheel for this PC.",
+      "ru": "Для этого компьютера нет пакета среды выполнения INT4."
+    },
+    "nunchaku.unpinned": {
+      "en": "The INT4 runtime wheel is not pinned.",
+      "ru": "Пакет среды выполнения INT4 не закреплён."
+    }
+  }
+}

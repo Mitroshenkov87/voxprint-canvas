@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import hashlib
 import shutil
+import time
 import urllib.request
+from collections.abc import Callable
 from pathlib import Path
 
 from canvas.models.pin import PinError, require_pin, verify_file
@@ -45,17 +47,22 @@ def snapshot_ready(spec: ModelSpec, root: Path) -> Path | None:
     return None
 
 
-def download_snapshot(spec: ModelSpec, root: Path) -> Path:
+def download_snapshot(
+    spec: ModelSpec, root: Path, progress: Callable[[str], None] | None = None,
+) -> Path:
     """Fetch the first snapshot whose files can all be verified."""
     primary = weight_dir(root, spec.repo)
     try:
-        _fill(spec, primary, spec.files, spec.revision, fallback=False)
+        _fill(spec, primary, spec.files, spec.revision, fallback=False, progress=progress)
     except SnapshotError as primary_error:
         if not spec.fallback_files:
             raise
         other = weight_dir(root, spec.repo, fallback=True)
         try:
-            _fill(spec, other, spec.fallback_files, spec.fallback_revision or spec.revision, fallback=True)
+            _fill(
+                spec, other, spec.fallback_files, spec.fallback_revision or spec.revision,
+                fallback=True, progress=progress,
+            )
         except SnapshotError as fallback_error:
             raise SnapshotError(f"{primary_error.detail}; fallback: {fallback_error.detail}") from fallback_error
         return other
@@ -76,7 +83,10 @@ def _complete(folder: Path, files: dict[str, str]) -> bool:
     return True
 
 
-def _fill(spec: ModelSpec, folder: Path, files: dict[str, str], revision: str, *, fallback: bool) -> None:
+def _fill(
+    spec: ModelSpec, folder: Path, files: dict[str, str], revision: str, *, fallback: bool,
+    progress: Callable[[str], None] | None = None,
+) -> None:
     errors: list[str] = []
     for name, digest in files.items():
         path = folder / name
@@ -87,22 +97,27 @@ def _fill(spec: ModelSpec, folder: Path, files: dict[str, str], revision: str, *
             except PinError:
                 path.unlink()
         try:
-            _fetch_one(spec, name, digest, path, revision, fallback=fallback)
+            _fetch_one(spec, name, digest, path, revision, fallback=fallback, progress=progress)
         except (OSError, PinError, SnapshotError) as exc:
             errors.append(f"{name}: {exc}")
     if errors:
         raise SnapshotError("; ".join(errors))
 
 
-def _fetch_one(spec: ModelSpec, name: str, digest: str, dest: Path, revision: str, *, fallback: bool) -> None:
+def _fetch_one(
+    spec: ModelSpec, name: str, digest: str, dest: Path, revision: str, *, fallback: bool,
+    progress: Callable[[str], None] | None = None,
+) -> None:
     pin = require_pin(digest)
     last = "no source"
     for url in _urls(spec, name, revision, fallback=fallback):
         try:
             if url.startswith("package:"):
+                if progress is not None:
+                    progress(f"{name} copying")
                 _copy_package(url, dest, pin)
             else:
-                _stream(url, dest, pin)
+                _stream(url, dest, pin, progress=progress, label=name)
             return
         except (OSError, PinError, SnapshotError) as exc:
             last = f"{url}: {exc}"
@@ -163,21 +178,34 @@ def _copy_package(url: str, dest: Path, pin: str) -> None:
     verify_file(dest, pin)
 
 
-def _stream(url: str, dest: Path, pin: str) -> None:
+def _stream(
+    url: str, dest: Path, pin: str, progress: Callable[[str], None] | None = None, label: str = "",
+) -> None:
     if not url.startswith("https://"):
         raise SnapshotError("unsupported download address")
     dest.parent.mkdir(parents=True, exist_ok=True)
     partial = dest.with_name(dest.name + ".partial")
     request = urllib.request.Request(url, headers={"User-Agent": "voxprint-canvas"})
     digest = hashlib.sha256()
+    name = label or dest.name
     try:
         with urllib.request.urlopen(request, timeout=120) as response, partial.open("wb") as handle:  # nosec B310
+            total = int(response.headers.get("Content-Length") or 0)
+            done = 0
+            started = time.monotonic()
+            if progress is not None:
+                progress(f"{name} starting")
             while True:
                 chunk = response.read(_CHUNK)
                 if not chunk:
                     break
                 handle.write(chunk)
                 digest.update(chunk)
+                done += len(chunk)
+                if progress is not None and total:
+                    elapsed = max(time.monotonic() - started, 0.001)
+                    remaining = max(0, total - done) / (done / elapsed)
+                    progress(f"{name} {done * 100 // total}% about {int(remaining)}s")
     except Exception:
         partial.unlink(missing_ok=True)
         raise
@@ -185,3 +213,5 @@ def _stream(url: str, dest: Path, pin: str) -> None:
         partial.unlink(missing_ok=True)
         raise PinError("hash_mismatch")
     partial.replace(dest)
+    if progress is not None:
+        progress(f"{name} ready")

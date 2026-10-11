@@ -2,9 +2,7 @@
 ; Shared Start-menu folder: Voxprint
 ; Windows 11 24H2 or newer, 64-bit.
 ; The setup copies the app. It does not embed GPU libraries or model files.
-; It does not download model weights.
-; install.ps1 creates the environment and runs: python -m canvas.models.tiers
-; The first picture downloads the pinned models.
+; install.ps1 installs missing dependencies, including the default image pack, and runs: python -m canvas.models.tiers
 
 #define MyAppName "Voxprint AI Canvas"
 #define MyAppVersion "0.1.0"

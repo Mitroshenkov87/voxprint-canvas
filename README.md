@@ -24,7 +24,7 @@ python -m pytest
 python tools/audit.py --python python
 ```
 
-Tests do not download weights and do not need a GPU. AVIF, JPEG XL, WebP and JPEG are written by the installed libraries. HEIC still needs a system codec. The Windows setup and the Linux archive install the app and register the shared models folder. GPU libraries and model files download on the PC. The first picture on a supported GPU downloads the pinned models.
+Tests do not download weights and do not need a GPU. AVIF, JPEG XL, WebP and JPEG are written by the installed libraries. HEIC still needs a system codec. The Windows setup and the Linux archive install Python when it is missing, the GPU libraries, and the default Z-Image-Turbo pack. Optional packs download when you choose them, after the window shows the size and the estimated time.
 
 ## License
 

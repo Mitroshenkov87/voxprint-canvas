@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QTabWidget,
@@ -217,6 +218,16 @@ class MainWindow(QWidget):
 
     def _about(self) -> None:
         AboutDialog(self).exec()
+
+    def confirm_download(self, notice: str) -> bool:
+        """Ask before an optional pack download. The notice has the size and the estimate."""
+        answer = QMessageBox.question(
+            self,
+            "Download",
+            notice,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        return answer == QMessageBox.StandardButton.Yes
 
     def _generate(self) -> None:
         tabs = self.findChild(QTabWidget)

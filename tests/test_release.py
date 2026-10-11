@@ -16,7 +16,7 @@ def test_release_workflow_publishes_a_prerelease_from_the_build_file():
     assert "Fixed:" in notes
 
 
-def test_installers_fetch_gpu_libraries_and_leave_models_for_later():
+def test_installers_fetch_gpu_libraries_and_the_default_pack():
     linux = Path("installer/linux/install.sh").read_text(encoding="utf-8")
     windows = Path("installer/windows/install.ps1").read_text(encoding="utf-8")
     iss = Path("installer/windows/voxprint-canvas.iss").read_text(encoding="utf-8")

@@ -6,7 +6,7 @@ import pytest
 pytest.importorskip("PySide6")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QTabWidget
+from PySide6.QtWidgets import QApplication, QMessageBox, QTabWidget
 
 from canvas.app.identity import version_label
 from canvas.app.info import APP_NAME, ENLARGE_HINT, ENLARGE_RELEASES, RESPONSIBILITY, THIRD_PARTY_NOTICE
@@ -196,4 +196,20 @@ def test_about_and_splash_show_the_release_identity(app, monkeypatch):
     splash = Splash()
     assert splash.version_line == version_label()
     splash.close()
+    window.close()
+
+
+def test_confirm_download_uses_the_notice(app, monkeypatch):
+    del app
+    seen: list[str] = []
+
+    def question(parent, title, notice, buttons):
+        del parent, buttons
+        seen.append(f"{title}:{notice}")
+        return QMessageBox.StandardButton.No
+
+    monkeypatch.setattr("canvas.ui.main_window.QMessageBox.question", question)
+    window = MainWindow(lambda prompt, mode, fmt: "ok", Tier.GB16)
+    assert window.confirm_download("ControlNet lite is 1.0 GB. Estimated time 1 minute.") is False
+    assert seen == ["Download:ControlNet lite is 1.0 GB. Estimated time 1 minute."]
     window.close()

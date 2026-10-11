@@ -9,7 +9,7 @@ from canvas.core.vram_policy import budget_gb, halve_on_spill, plan
 from canvas.infra.gpu import probe_gpu
 from canvas.infra.gpu_lock import _pid_alive, gpu_job, is_stale, read_lock, release, try_acquire
 from canvas.infra.models_users import read_users, register, unregister
-from canvas.infra.paths import models_dir
+from canvas.infra.paths import models_dir, shared_dir
 from canvas.infra.thermal import FULL_SPEED_S, THROTTLE_HOLD_S, Guard
 from canvas.models.modes import Tier, headroom_gb, select_tier
 
@@ -106,12 +106,12 @@ def test_thermal_pause_and_resume():
 def test_model_folder_and_users(monkeypatch, tmp_path):
     monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
     monkeypatch.setenv("VOXPRINT_MODELS_DIR", "relative/models")
-    assert models_dir() == tmp_path / "models"
+    assert models_dir() == tmp_path / "shared" / "models"
     monkeypatch.setenv("VOXPRINT_MODELS_DIR", str(tmp_path / "weights"))
-    root = models_dir()
-    assert root == tmp_path / "weights"
-    register(root)
-    assert read_users(root)["canvas"] is True
-    register(root)
-    assert unregister(root) == []
-    assert "canvas" not in read_users(root)
+    assert models_dir() == tmp_path / "weights"
+    shared = shared_dir()
+    register(shared)
+    assert read_users(shared)["canvas"] is True
+    register(shared)
+    assert unregister(shared) == []
+    assert "canvas" not in read_users(shared)

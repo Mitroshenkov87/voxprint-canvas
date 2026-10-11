@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 from canvas.infra.discovery import find_app, _split_windows_command
 from canvas.infra.manifest import register_component
@@ -78,9 +79,13 @@ def test_enlarge_argv_is_the_only_command_line(tmp_path):
     assert "def enlarge_argv" in enlarge_text
 
 
+def _png(path: Path, width: int = 16, height: int = 9) -> None:
+    Image.new("RGB", (width, height), (1, 2, 3)).save(path, format="PNG")
+
+
 def test_fake_cli_mirrors_dry_run_and_captures_stderr(tmp_path):
-    source = tmp_path / "in.avif"
-    source.write_bytes(b"in")
+    source = tmp_path / "in.png"
+    _png(source)
     dest = tmp_path / "out.avif"
     dry_dest = tmp_path / "dry.avif"
     parent = "42"
@@ -141,13 +146,15 @@ def test_exit_codes_map_to_user_messages(tmp_path, monkeypatch, code):
     with pytest.raises(EnlargeError) as caught:
         EnlargeClient([sys.executable, str(FAKE)]).enlarge(source, output=dest)
     assert caught.value.code == expected.code
-    assert str(caught.value) == str(expected)
     assert caught.value.retryable is expected.retryable
-    assert "raw cli detail" not in str(caught.value)
-    assert "foo" not in str(caught.value)
     assert "enlarge: log" not in str(caught.value)
+    assert str(caught.value).startswith(f"{expected.code}: ")
     if code == 7:
         assert "Download the upscale model in Voxprint AI Enlarge" in str(caught.value)
+        assert "raw cli detail" not in str(caught.value)
+        assert "foo" not in str(caught.value)
+    else:
+        assert "raw cli detail model-id foo" in str(caught.value)
 
 
 def test_message_kind_accepts_type_or_op():
@@ -168,8 +175,8 @@ def test_shipped_retryable_flags():
 
 def test_op_only_progress_still_finishes(tmp_path, monkeypatch):
     monkeypatch.setenv("ENLARGE_FAKE_KIND", "op")
-    source = tmp_path / "in.avif"
-    source.write_bytes(b"in")
+    source = tmp_path / "in.png"
+    _png(source)
     seen: list[dict] = []
     result = EnlargeClient([sys.executable, str(FAKE)]).enlarge(
         source, output=tmp_path / "out.avif", on_event=seen.append,
@@ -186,8 +193,9 @@ def test_unknown_exit_uses_the_internal_message(tmp_path, monkeypatch):
     monkeypatch.setenv("ENLARGE_FAKE_EXIT", "99")
     with pytest.raises(EnlargeError) as caught:
         EnlargeClient([sys.executable, str(FAKE)]).enlarge(source, output=tmp_path / "out.avif")
-    assert str(caught.value) == str(exit_error(1))
     assert caught.value.code == "internal"
+    assert "raw cli detail model-id foo" in str(caught.value)
+    assert "internal: " in str(caught.value)
 
 
 def test_windows_enlarge_override_keeps_backslashes(monkeypatch):
@@ -271,6 +279,28 @@ def test_enlarge_is_found_on_a_standard_path_and_in_the_manifest(tmp_path, monke
     found = find_app("Enlarge", "enlarge")
     assert found is not None
     assert os.path.normcase(found.command[0]) == os.path.normcase(str(recorded))
+
+
+def test_fake_enlarge_rejects_a_file_that_is_not_a_png(tmp_path):
+    source = tmp_path / "native.avif"
+    source.write_bytes(b"VOXPRINT rgb 2 2\n" + bytes(12))
+    with pytest.raises(EnlargeError) as caught:
+        EnlargeClient([sys.executable, str(FAKE)]).enlarge(source, output=tmp_path / "out.avif")
+    assert caught.value.code == "bad_input"
+    assert str(caught.value) == "bad_input: cannot identify image file"
+    assert "Enlarge could not read this picture." not in str(caught.value)
+
+
+def test_fake_enlarge_accepts_a_decodable_png(tmp_path):
+    source = tmp_path / "native.png"
+    _png(source, 16, 9)
+    dest = tmp_path / "out.avif"
+    result = EnlargeClient([sys.executable, str(FAKE)]).enlarge(source, output=dest)
+    assert result.width == 3840
+    assert result.height == 2160
+    with Image.open(dest) as image:
+        assert image.format == "AVIF"
+        assert image.size == (3840, 2160)
 
 
 def test_missing_capabilities_disables_fourk(tmp_path, monkeypatch):

@@ -59,6 +59,35 @@ def exit_error(code: int) -> EnlargeError:
     return EnlargeError(name, message, retryable)
 
 
+def _protocol_error(message: dict[str, Any]) -> EnlargeError:
+    """The JSON ``code`` and ``message`` from an Enlarge ``error`` line.
+
+    ``model_missing`` keeps the download hint. That line can name an internal
+    weight, and the hint is the sentence the window shows.
+    """
+    raw_code = message.get("code")
+    code = raw_code.strip() if isinstance(raw_code, str) and raw_code.strip() else "internal"
+    raw_text = message.get("message")
+    text = raw_text.strip() if isinstance(raw_text, str) else ""
+    table = next((item for item in _EXITS.values() if item[0] == code), None)
+    raw_retry = message.get("retryable")
+    if isinstance(raw_retry, bool):
+        retryable = raw_retry
+    elif table is not None:
+        retryable = table[2]
+    else:
+        retryable = False
+    if code == "model_missing":
+        body = _EXITS[7][1]
+    elif text:
+        body = text
+    elif table is not None:
+        body = table[1]
+    else:
+        body = _EXITS[1][1]
+    return EnlargeError(code, f"{code}: {body}", retryable)
+
+
 def enlarge_argv(
     program: list[str],
     *,
@@ -205,7 +234,8 @@ class EnlargeClient:
                 if kind == "done":
                     result = _result(message, output)
                 elif kind == "error":
-                    continue
+                    failure = _protocol_error(message)
+                    break
                 elif kind == "progress" and message.get("stage") not in _STAGES:
                     failure = exit_error(1)
                     break

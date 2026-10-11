@@ -1,7 +1,8 @@
 """How Canvas finds another Voxprint app.
 
-This is Canvas's copy of the suite discovery rules. A shared package replaces
-it once that repository exists. Enlarge messages stay in ``canvas.infra.enlarge``.
+This is Canvas's copy of the suite discovery rules. Package ``voxprint-common``
+replaces it once that package exists (``voxprint_common.runtime``). Enlarge
+messages stay in ``canvas.infra.enlarge``.
 """
 from __future__ import annotations
 

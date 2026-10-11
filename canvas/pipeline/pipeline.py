@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from canvas.app.info import ENLARGE_HINT
-from canvas.core.exchange import read_rgb, write_rgb
+from canvas.core.exchange import read_picture, write_png
 from canvas.core.formats import DEFAULT_FORMAT, OutputFormat, save_image
 from canvas.infra.gpu_lock import GpuLockTimeout, lock_path, release, try_acquire
 from canvas.infra.thermal import Guard
@@ -158,15 +158,15 @@ class Pipeline:
                 probe.mark("unload")
         with tempfile.TemporaryDirectory(prefix="voxprint-canvas-") as folder:
             root = Path(folder)
-            source = root / "native.avif"
+            source = root / "native.png"
             dest = root / "upscaled.avif"
-            write_rgb(source, image.width, image.height, image.data)
+            write_png(source, image.width, image.height, image.data)
             if probe is not None:
                 probe.mark("upscale-start")
             enlarge = getattr(self.enlarge, "enlarge")
             result = enlarge(source, output=dest, format_name="avif", long_side=FOUR_K_LONG)
             out_path = Path(result.output)
-            upscaled = read_rgb(out_path)
+            upscaled = read_picture(out_path)
             if probe is not None:
                 probe.mark("upscale-end")
             reviewed = self._reviewed(upscaled)

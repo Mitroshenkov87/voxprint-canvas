@@ -21,6 +21,8 @@ from canvas.ui.splash import (
     PADDING,
     RADIUS,
     SHOW_BUDGET_MS,
+    FUTURE_IMPORT,
+    SHARED_RUNTIME_SCHEMA,
     Splash,
     show_splash,
 )
@@ -34,14 +36,13 @@ def app():
     return QApplication.instance() or QApplication([])
 
 
-def test_shared_engine_splash_is_not_published_yet():
-    try:
-        importlib.import_module("voxprint_engine.ui.splash")
-    except ModuleNotFoundError:
-        missing = True
-    else:
-        missing = False
-    assert missing
+def test_shared_splash_adapter_names_voxprint_common():
+    assert FUTURE_IMPORT == "voxprint_common.ui.splash"
+    assert SHARED_RUNTIME_SCHEMA == 1
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module(FUTURE_IMPORT)
+    splash = (ROOT / "canvas" / "ui" / "splash.py").read_text(encoding="utf-8")
+    assert "voxprint_engine" not in splash
     main = (ROOT / "canvas" / "app" / "main.py").read_text(encoding="utf-8")
     assert "from canvas.ui.splash import Splash, show_splash" in main
 

@@ -11,6 +11,8 @@ import os
 import sys
 from pathlib import Path
 
+from PIL import Image
+
 _STAGES = (
     ("queued", 0),
     ("waiting_gpu", 5),
@@ -29,7 +31,8 @@ _CODES = {
     8: "io_error",
     130: "cancelled",
 }
-_PREFIX = b"VOXPRINT rgb "
+class _NotPng(Exception):
+    """The upscale input is not a PNG Pillow can decode."""
 
 
 def main(argv: list[str]) -> int:
@@ -103,7 +106,21 @@ def main(argv: list[str]) -> int:
             }
         )
         return code
-    width, height = _write_output(source, output)
+    try:
+        width, height = _png_size(source)
+    except _NotPng:
+        _emit(
+            {
+                "protocol": 1,
+                "type": "error",
+                "id": job,
+                "code": "bad_input",
+                "message": "cannot identify image file",
+                "retryable": False,
+            }
+        )
+        return 2
+    width, height = _write_output(output, width, height)
     _emit(
         {
             "protocol": 1,
@@ -143,17 +160,22 @@ def _emit(message: dict[str, object]) -> None:
     print(json.dumps(body), flush=True)
 
 
-def _write_output(source: str, output: str) -> tuple[int, int]:
-    raw = Path(source).read_bytes() if Path(source).is_file() else b""
-    if not raw.startswith(_PREFIX):
-        Path(output).write_bytes(b"dry-run")
-        return 3840, 2160
-    header, _, _body = raw.partition(b"\n")
-    parts = header.decode("ascii").split()
-    width, height = int(parts[2]), int(parts[3])
+def _png_size(source: str) -> tuple[int, int]:
+    path = Path(source)
+    try:
+        with Image.open(path) as image:
+            image.load()
+            if image.format != "PNG":
+                raise _NotPng()
+            return image.size
+    except (OSError, ValueError) as exc:
+        raise _NotPng() from exc
+
+
+def _write_output(output: str, width: int, height: int) -> tuple[int, int]:
     factor = 3840 // max(width, height)
     out_w, out_h = width * factor, height * factor
-    Path(output).write_bytes(_PREFIX + f"{out_w} {out_h}\n".encode("ascii") + bytes((4, 5, 6)) * (out_w * out_h))
+    Image.new("RGB", (out_w, out_h), (4, 5, 6)).save(output, format="AVIF")
     return out_w, out_h
 
 

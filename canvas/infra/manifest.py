@@ -1,8 +1,9 @@
-"""Shared suite manifest, schema 1.
+"""Shared suite manifest, SHARED-RUNTIME schema 1.
 
 The file is ``manifest.json`` in the shared directory. Another suite app may
 already own it. Canvas reads that shape, keeps keys it does not use, and
-writes the same shape back.
+writes the same shape back. Package ``voxprint-common`` will own this helper;
+until then the implementation stays here and ``FUTURE_IMPORT`` names the swap.
 """
 from __future__ import annotations
 
@@ -25,7 +26,10 @@ if sys.platform == "win32":
 else:
     import fcntl
 
-SCHEMA = 1
+# Local SHARED-RUNTIME schema 1. The future import is ``voxprint_common.runtime``.
+FUTURE_IMPORT = "voxprint_common.runtime"
+SHARED_RUNTIME_SCHEMA = 1
+SCHEMA = SHARED_RUNTIME_SCHEMA
 MANIFEST_NAME = "manifest.json"
 LOCK_NAME = "manifest.lock"
 TMP_NAME = "manifest.json.tmp"

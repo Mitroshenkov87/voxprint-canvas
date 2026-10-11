@@ -63,9 +63,12 @@ _SEXUAL: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("exact", "de", ("sex",)),
 )
 
-_AGE_DIGIT = re.compile(r"\b(?:1[0-7]|[1-9])\s*(?:years?\s*old|year\s*old|yo|jahre?\s*alt|jaehrig|лет|года)\b")
-_AGE_COMPACT = re.compile(r"\b(?:1[0-7]|[1-9])yo\b")
-_UNDER = re.compile(r"\b(?:under|unter|младше)\s*(?:18|1[0-7]|[1-9])\b")
+# The number is a whole token under 18. "30" and "85" do not match, and a digit
+# inside a longer number does not match.
+_AGE_NUMBER = r"(?<!\d)\b(?:1[0-7]|[1-9])(?!\d)"
+_AGE_DIGIT = re.compile(_AGE_NUMBER + r"\s*(?:years?\s*old|year\s*old|yo|jahre?\s*alt|jaehrig|лет|года)\b")
+_AGE_COMPACT = re.compile(_AGE_NUMBER + r"yo\b")
+_UNDER = re.compile(r"\b(?:under|unter|младше)\s*(?:18|1[0-7]|[1-9])(?!\d)\b")
 _WORD_AGE = (
     "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
     "thirteen", "fourteen", "fifteen", "sixteen", "seventeen",
@@ -81,7 +84,7 @@ _RU_WORD_AGE = (
 )
 _RU_WORD_AGE_RE = re.compile(r"\b(?:" + "|".join(_RU_WORD_AGE) + r")\s*(?:лет|года|год)\b")
 _DECLARED_AGE = re.compile(
-    r"\b(?:age|aged|возраст)\s*(?:1[0-7]|[1-9])\b|\b(?:1[0-7]|[1-9])\s*летн"
+    r"\b(?:age|aged|возраст)\s*(?:1[0-7]|[1-9])(?!\d)\b|" + _AGE_NUMBER + r"\s*летн"
 )
 
 
@@ -92,6 +95,19 @@ class TextSignals:
     minor: bool
     sexual: bool
     minor_sexual: bool = False
+
+
+@dataclass(frozen=True)
+class ScanTrace:
+    """Lexicon hits for one prompt. ``age`` is an explicit age under 18."""
+
+    minor: bool
+    sexual: bool
+    minor_sexual: bool
+    age: bool
+    minor_terms: tuple[str, ...]
+    sexual_terms: tuple[str, ...]
+    minor_sexual_terms: tuple[str, ...]
 
 
 def _cyrillic_count(token: str) -> int:
@@ -144,19 +160,44 @@ def tokenise(text: str) -> list[str]:
     return primary + _glue(primary) + extra
 
 
-def _matches(tokens: list[str], mode: str, needles: tuple[str, ...]) -> bool:
+# A stem is a prefix of an inflected form, not a substring. The remainder is empty,
+# starts with a vowel, or is one of these endings. "секс" does not match "секстант".
+_INFLECTION = frozenset("аеёиоуыэюяьъaeiouy")
+_ENDINGS = (
+    "граф", "ный", "ная", "ное", "ные", "ного", "ному", "ным", "ными", "ных",
+    "ний", "няя", "нее", "ние", "него", "нему", "ним", "ними", "них",
+    "ский", "ская", "ское", "ские", "ского", "скому", "ским", "скими", "ских",
+    "ка", "ки", "ку", "кой", "ке", "ок",
+)
+
+
+def _stem_match(token: str, needle: str) -> bool:
+    """True when ``needle`` is the token or its morphological stem."""
+    if not token.startswith(needle):
+        return False
+    rest = token[len(needle):]
+    if rest == "" or rest[0] in _INFLECTION:
+        return True
+    return any(rest.startswith(ending) for ending in _ENDINGS)
+
+
+def _needle_hit(tokens: list[str], mode: str, needle: str) -> bool:
     if mode == "exact":
-        wanted = set(needles)
-        return any(token in wanted for token in tokens)
+        return any(token == needle for token in tokens)
     if mode == "prefix":
-        return any(token.startswith(needle) for token in tokens for needle in needles)
+        return any(token.startswith(needle) for token in tokens)
     if mode == "stem":
-        return any(needle in token for token in tokens for needle in needles)
+        return any(_stem_match(token, needle) for token in tokens)
     raise RuntimeError("unknown term mode")
 
 
-def _group_hit(tokens: list[str], groups: tuple[tuple[str, str, tuple[str, ...]], ...]) -> bool:
-    return any(_matches(tokens, mode, needles) for mode, _lang, needles in groups)
+def _hits(tokens: list[str], groups: tuple[tuple[str, str, tuple[str, ...]], ...]) -> tuple[str, ...]:
+    found: list[str] = []
+    for mode, _lang, needles in groups:
+        for needle in needles:
+            if _needle_hit(tokens, mode, needle):
+                found.append(needle)
+    return tuple(found)
 
 
 def _age_hit(text: str) -> bool:
@@ -171,10 +212,26 @@ def _age_hit(text: str) -> bool:
     )
 
 
+def explain(text: str) -> ScanTrace:
+    """Terms and the age flag that ``scan`` used. This is the lexicon half of a refusal trace."""
+    tokens = tokenise(text)
+    minor_terms = _hits(tokens, _MINOR)
+    sexual_terms = _hits(tokens, _SEXUAL)
+    minor_sexual_terms = _hits(tokens, _MINOR_SEXUAL)
+    age = _age_hit(text)
+    minor_sexual = bool(minor_sexual_terms)
+    return ScanTrace(
+        minor=minor_sexual or bool(minor_terms) or age,
+        sexual=bool(sexual_terms),
+        minor_sexual=minor_sexual,
+        age=age,
+        minor_terms=minor_terms,
+        sexual_terms=sexual_terms,
+        minor_sexual_terms=minor_sexual_terms,
+    )
+
+
 def scan(text: str) -> TextSignals:
     """Return minor and sexual signals. A minor signal alone does not block."""
-    tokens = tokenise(text)
-    minor_sexual = _group_hit(tokens, _MINOR_SEXUAL)
-    minor = minor_sexual or _group_hit(tokens, _MINOR) or _age_hit(text)
-    sexual = _group_hit(tokens, _SEXUAL)
-    return TextSignals(minor=minor, sexual=sexual, minor_sexual=minor_sexual)
+    detail = explain(text)
+    return TextSignals(minor=detail.minor, sexual=detail.sexual, minor_sexual=detail.minor_sexual)

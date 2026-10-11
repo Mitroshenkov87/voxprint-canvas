@@ -87,6 +87,8 @@ def download_snapshot(
     spec: ModelSpec, root: Path, progress: Callable[[str], None] | None = None,
 ) -> Path:
     """Fetch the first snapshot whose files can all be verified."""
+    if spec.status == "disabled":
+        raise SnapshotError("this model is not available for download")
     primary = weight_dir(root, spec.repo)
     try:
         _fill(spec, primary, spec.files, spec.revision, fallback=False, progress=progress)

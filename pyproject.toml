@@ -12,6 +12,7 @@ dependencies = [
     "pillow==12.3.0",
     "imagecodecs==2026.10.10",
     "onnxruntime-gpu==1.31.0",
+    "psutil==7.0.0",
 ]
 
 [project.optional-dependencies]

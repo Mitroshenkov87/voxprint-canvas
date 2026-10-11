@@ -840,7 +840,7 @@
       "text_encoder": "Qwen/Qwen2.5-VL-7B-Instruct",
       "text_encoder_offload": "model-cpu-offload",
       "vram_hint_gb": 21,
-      "min_vram_gb": 24,
+      "min_vram_gb": 16,
       "status": "ready",
       "files": {
         "model_index.json": {
@@ -1346,6 +1346,35 @@
           "uri": ""
         }
       ]
+    },
+    {
+      "id": "z-image-turbo-svdquant-int4",
+      "role": "generator",
+      "tier": "16gb",
+      "repo": "nunchaku-ai/nunchaku-z-image-turbo",
+      "licence": "unconfirmed",
+      "runtime": "nunchaku",
+      "status": "disabled",
+      "pipeline_classes": [
+        "ZImagePipeline",
+        "ZImageImg2ImgPipeline",
+        "ZImageInpaintPipeline",
+        "ZImageControlNetPipeline",
+        "ZImageControlNetInpaintPipeline"
+      ],
+      "quant": "int4",
+      "quant_backend": "nunchaku-svdquant",
+      "quality_gate": "pending",
+      "steps": 8,
+      "guidance_scale": 0.0,
+      "text_encoder": "Qwen/Qwen3-4B",
+      "text_encoder_offload": "group-offload",
+      "variant": "svdquant-int4",
+      "vram_hint_gb": 12,
+      "min_vram_gb": 16,
+      "text_base": "z-image-turbo",
+      "files": {},
+      "sources": []
     }
   ]
 }

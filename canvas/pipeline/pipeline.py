@@ -109,15 +109,16 @@ class Pipeline:
         """Run one request and return a picture the window may show.
 
         The suite GPU lock is held while the picture is made. Native output uses
-        the model's frame for the aspect. 4K output generates the model's ~2K
-        frame, unloads the generator, text encoder, and VAE, and asks Voxprint
-        AI Enlarge to make the long side 3840 only when free GPU memory is above
-        Enlarge's declared need. The lock is released for that spawn and taken
-        again afterwards. The enlarged picture is released before it is
+        the model's frame for the aspect. ``2k`` generates the model's ~2K frame
+        and does not upscale. 4K output generates the model's ~2K frame, unloads
+        the generator, text encoder, and VAE, and asks Voxprint AI Enlarge to
+        make the long side 3840 only when free GPU memory is above Enlarge's
+        declared need. The lock is released for that spawn and taken again
+        afterwards. The enlarged picture is released before it is
         returned. A stage that does not fit the memory budget stops the job.
         """
-        if output not in {"native", "4k"}:
-            raise ValueError("output is native or 4k")
+        if output not in {"native", "2k", "4k"}:
+            raise ValueError("output is native, 2k, or 4k")
         if mode not in visible_modes(self.tier):
             raise ModeUnavailable()
         needed = required_roles(mode)
@@ -131,7 +132,7 @@ class Pipeline:
             self.paused = False
             screened = self.gate.release_request(prompt, mode.value, inputs)
             try:
-                width, height = self._frame(mode, aspect, output == "4k")
+                width, height = self._frame(mode, aspect, output in {"2k", "4k"})
                 if output == "4k" and not _enlarge_ready(self.enlarge):
                     raise EnlargeMissing()
                 if probe is not None:
@@ -143,7 +144,7 @@ class Pipeline:
                 image = self._reviewed(raw, prompt)
                 if probe is not None:
                     probe.mark("generate-end")
-                if output == "native":
+                if output != "4k":
                     return image
                 return self._upscale(image, probe, prompt, hold)
             except ModelNotReady as exc:

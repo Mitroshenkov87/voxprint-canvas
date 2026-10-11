@@ -55,7 +55,7 @@ def test_missing_role_and_hidden_mode_skip_the_generator():
     else:
         raise AssertionError("expected a missing image")
     try:
-        pipeline.generate("a red boat", Mode.INSTRUCTION, [PendingInput(ImageRole.INIT, rgb())])
+        pipeline.generate("a red boat", Mode.TEXT_CREATIVE)
     except ModeUnavailable:
         pass
     else:

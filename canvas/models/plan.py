@@ -72,7 +72,7 @@ def build_plan(catalog: Catalog, screened: ScreenedInput, tier: Tier) -> CallPla
     turbo = _one(catalog, turbo_id)
     control = _one(catalog, control_id)
 
-    if mode is Mode.TEXT_CREATIVE or mode is Mode.INSTRUCTION:
+    if mode is Mode.TEXT_CREATIVE:
         if tier is not Tier.GB24:
             raise ModeUnavailable()
     if mode is Mode.TEXT:
@@ -96,8 +96,9 @@ def build_plan(catalog: Catalog, screened: ScreenedInput, tier: Tier) -> CallPla
         )
     if mode is Mode.INSTRUCTION:
         edit = _one(catalog, "qwen-image-edit-2511-fp8")
+        offload = "group-offload" if tier is Tier.GB16 else edit.text_encoder_offload
         return _plan(
-            mode, tier, PIPELINE_EDIT, (edit,), edit.steps, edit.guidance_scale, edit.text_encoder_offload,
+            mode, tier, PIPELINE_EDIT, (edit,), edit.steps, edit.guidance_scale, offload,
         )
     assert_never(mode)
 

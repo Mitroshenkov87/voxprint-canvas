@@ -35,3 +35,29 @@ def test_scripts_are_noninteractive_and_name_the_exit_codes():
     assert "set -eu" in shell
     windows = (root / "vm_test.ps1").read_text(encoding="utf-8")
     assert "exit $LASTEXITCODE" in windows
+    assert "--vram-cap-gb" in shell
+    assert "--vram-cap-gb" in windows
+
+
+def test_vram_cap_jobs_cover_t2i_inpaint_and_edit(tmp_path):
+    from tools.vm_test import vram_cap_jobs
+
+    jobs = vram_cap_jobs(tmp_path, 16)
+    names = [name for name, _dest, _args in jobs]
+    assert names == ["t2i-2k", "inpaint-2k", "qwen-edit"]
+    text = " ".join(jobs[0][2])
+    assert "--vram-cap-gb 16" in text
+    assert "--output-size 2k" in text
+    assert "--mask" in " ".join(jobs[1][2])
+    assert "--edit-instruction" in " ".join(jobs[2][2])
+
+
+def test_vram_cap_without_a_gpu_is_exit_3(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr("tools.vm_test._gpu_present", lambda: False)
+    monkeypatch.setenv("VOXPRINT_VM_RESULTS", str(tmp_path))
+    assert main(["--vram-cap-gb", "16", "--json", "--tag", "cap"]) == 3
+    body = json.loads(capsys.readouterr().out)
+    assert body["mode"] == "vram-cap"
+    assert body["peak_vram_mib"] == 0
+    assert body["peak_allocated_bytes"] == 0
+    assert body["seconds_per_image"] == {}

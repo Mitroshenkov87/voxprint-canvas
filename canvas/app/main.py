@@ -11,7 +11,7 @@ from PySide6.QtWidgets import QApplication
 
 from canvas.app.identity import version_label
 from canvas.app.i18n import text
-from canvas.app.info import APP_VERSION
+from canvas.app.info import APP_NAME, APP_VERSION
 from canvas.app.platform import GpuCheck, check_gpu, current_os_check
 from canvas.app.selftest import selftest_report
 from canvas.app.updates import check_for_update
@@ -54,7 +54,7 @@ EXIT_FEATURE_UNAVAILABLE = 4
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="voxprint-canvas",
-        description="Voxprint AI Canvas",
+        description=APP_NAME,
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=_EXIT_CODES,
     )

@@ -102,7 +102,7 @@ def test_dry_run_honours_explicit_output_and_exit_codes(tmp_path, monkeypatch):
         assert blocked.value.code in {"model_missing", "gpu_unsupported"}
         if blocked.value.code == "model_missing":
             assert blocked.value.retryable is True
-            assert "Download the upscale model in Voxprint AI Enlarge" in str(blocked.value)
+            assert "Download the upscale model in VOXPrint AI Enlarge" in str(blocked.value)
             assert "nomos" not in str(blocked.value)
         else:
             assert blocked.value.retryable is False

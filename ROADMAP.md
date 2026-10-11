@@ -1,6 +1,6 @@
 # Roadmap
 
-The next version of Voxprint AI Canvas is listed below. Items under Later are plans, not promises.
+The next version of VOXPrint AI Canvas is listed below. Items under Later are plans, not promises.
 
 ## Next version
 
@@ -8,7 +8,7 @@ The next version of Voxprint AI Canvas is listed below. Items under Later are pl
 
 - Text to image, and image to image: restyle, inpaint and outpaint, and pose, depth, and edge guidance.
 - Grouped aspect ratios.
-- 4K output through Voxprint AI Enlarge.
+- 4K output through VOXPrint AI Enlarge.
 - Automatic model choice from GPU memory: 16 GB, and 24 GB and above.
 - Smart memory placement on 16 GB cards. Components load one at a time, so full-quality BF16 models fit.
 - Modern output formats: AVIF, JPEG XL, and WebP.

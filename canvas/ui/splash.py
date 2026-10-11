@@ -63,6 +63,7 @@ class Splash(QWidget):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setFixedSize(LOGICAL_W + 2 * MARGIN, LOGICAL_H + 2 * MARGIN)
+        self.setWindowTitle(APP_NAME)
         self.version_line = splash_line()
         self.stage = ""
         self.progress: float | None = None

@@ -1,4 +1,4 @@
-"""Launch Voxprint AI Canvas."""
+"""Launch VOXPrint AI Canvas."""
 from __future__ import annotations
 
 from canvas.app.main import main

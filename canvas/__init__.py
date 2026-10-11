@@ -1,4 +1,4 @@
-"""Voxprint AI Canvas, the local text-to-image app of the Voxprint AI Media Suite."""
+"""VOXPrint AI Canvas, the local text-to-image app of the VOXPrint AI Suite."""
 
 from canvas.app.identity import version
 

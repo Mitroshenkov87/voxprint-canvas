@@ -111,7 +111,7 @@ class Pipeline:
         The suite GPU lock is held while the picture is made. Native output uses
         the model's frame for the aspect. ``2k`` generates the model's ~2K frame
         and does not upscale. 4K output generates the model's ~2K frame, unloads
-        the generator, text encoder, and VAE, and asks Voxprint AI Enlarge to
+        the generator, text encoder, and VAE, and asks VOXPrint AI Enlarge to
         make the long side 3840 only when free GPU memory is above Enlarge's
         declared need. The lock is released for that spawn and taken again
         afterwards. The enlarged picture is released before it is

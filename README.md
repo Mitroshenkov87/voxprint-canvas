@@ -1,6 +1,6 @@
-# Voxprint AI Canvas
+# VOXPrint AI Canvas
 
-Local text-to-image and image-to-image generation for the Voxprint AI Media Suite. Everything runs on your own GPU; no cloud service is required.
+Local text-to-image and image-to-image generation for the VOXPrint AI Suite. Everything runs on your own GPU; no cloud service is required.
 
 > Status: 0.1.0 release candidate.
 
@@ -9,6 +9,14 @@ Text to image uses Z-Image-Turbo in BF16 on every tier. Image to image covers re
 Instruction editing is coming soon. A written instruction will change a picture you already have. It will run on 16 GB cards and on 24 GB cards.
 
 Third-party add-ons are off until you turn them on. Third-party weights are provided by their authors, who are responsible for the licence and training data. Voxprint does not host or redistribute them. Output defaults to AVIF, with JPEG XL and WebP beside it.
+
+## Install
+
+Windows setup places the app in `C:\Program Files\VOXPrint AI Suite\Canvas\`. The Start menu folder is VOXPrint AI Suite. The window program is `voxprint-canvas.exe` and the command line is `voxprint-canvas-cli.exe`.
+
+Linux setup places the app in `/opt/voxprint-ai-suite/canvas/`.
+
+Pictures, models, and the shared manifest stay in `%LOCALAPPDATA%\Voxprint` on Windows and `~/.local/share/voxprint` on Linux. An upgrade removes the previous program folder and its shortcuts, and leaves that data in place.
 
 ## Requirements
 

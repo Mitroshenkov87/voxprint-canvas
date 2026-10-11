@@ -20,8 +20,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from canvas.infra.layout import ENLARGE_LINUX, enlarge_executable
 from canvas.infra.manifest import ManifestError, load_manifest
-from canvas.infra.paths import shared_dir, voxprint_home
+from canvas.infra.paths import shared_dir
 
 if sys.platform == "win32":
     import winreg
@@ -57,7 +58,12 @@ def socket_path(app: str, ipc_base: str) -> str:
 
 
 def find_app(pascal: str, kebab: str) -> AppInstall | None:
-    """Override, registry or desktop entry, shared manifest, install paths, then PATH."""
+    """Override, then the suite manifest, the suite registry, the default path, and PATH.
+
+    ``CANVAS_ENLARGE_EXE`` is an explicit pin. The product order for Enlarge is
+    the shared manifest (and the suite registry when the manifest has no
+    executable), then the default suite path, then PATH.
+    """
     override = os.environ.get("CANVAS_ENLARGE_EXE", "").strip() if kebab == "enlarge" else ""
     if override:
         parts = _split_command(override)
@@ -68,29 +74,20 @@ def find_app(pascal: str, kebab: str) -> AppInstall | None:
             return None
         version = os.environ.get("CANVAS_ENLARGE_VERSION", "").strip()
         return AppInstall(parts, version, f"voxprint-{kebab}")
-    if sys.platform == "win32":
-        found = _from_windows_registry(pascal, kebab)
-    else:
-        found = _from_desktop_dirs(pascal, kebab)
-    if found is not None:
-        return found
     found = _from_shared_manifest(kebab)
     if found is not None:
         return found
-    found = _from_install_paths(kebab)
+    found = _from_suite_registry(pascal, kebab)
     if found is not None:
         return found
-    program = f"voxprint-{kebab}.exe" if sys.platform == "win32" else f"voxprint-{kebab}"
-    which = shutil.which(program)
-    if which is None and sys.platform == "win32":
-        which = shutil.which(f"voxprint-{kebab}")
-    if which is None:
-        return None
-    return AppInstall([which], "", f"voxprint-{kebab}")
+    found = _from_default_path(kebab)
+    if found is not None:
+        return found
+    return _from_path(kebab)
 
 
 def _program_names(kebab: str) -> tuple[str, ...]:
-    plain = f"voxprint-{kebab}"
+    plain = ENLARGE_LINUX if kebab == "enlarge" else f"voxprint-{kebab}"
     if sys.platform == "win32":
         return (f"{plain}.exe", plain)
     return (plain,)
@@ -120,42 +117,26 @@ def _from_shared_manifest(kebab: str) -> AppInstall | None:
     return None
 
 
-def _from_install_paths(kebab: str) -> AppInstall | None:
-    """Standard Enlarge install locations, then ``~/.local/bin``."""
-    names = _program_names(kebab)
-    home = voxprint_home()
-    candidates: list[Path] = []
-    for name in names:
-        candidates.extend((
-            home / "Enlarge" / name,
-            home / "enlarge" / name,
-            home / "Enlarge" / "venv" / "Scripts" / name,
-            home / "enlarge" / "venv" / "Scripts" / name,
-            home / "Enlarge" / "venv" / "bin" / name,
-            home / "enlarge" / "venv" / "bin" / name,
-            Path.home() / ".local" / "bin" / name,
-            Path.home() / ".local" / "share" / "voxprint" / "enlarge" / "venv" / "bin" / name,
-        ))
+def _from_suite_registry(pascal: str, kebab: str) -> AppInstall | None:
+    """Windows suite registry, or a Linux desktop entry."""
     if sys.platform == "win32":
-        bases = (
-            os.environ.get("LOCALAPPDATA", ""),
-            os.environ.get("ProgramFiles", ""),
-            os.environ.get("ProgramFiles(x86)", ""),
-        )
-        for base in bases:
-            if not base:
-                continue
-            root = Path(base)
-            for name in names:
-                candidates.extend((
-                    root / "Voxprint" / "Enlarge" / name,
-                    root / "Voxprint" / "enlarge" / name,
-                    root / "Voxprint" / "Enlarge" / "venv" / "Scripts" / name,
-                ))
-    for candidate in candidates:
-        found = _as_install(candidate, kebab)
-        if found is not None:
-            return found
+        return _from_windows_registry(pascal, kebab)
+    return _from_desktop_dirs(pascal, kebab)
+
+
+def _from_default_path(kebab: str) -> AppInstall | None:
+    """The suite install path for Enlarge. Other apps are not guessed here."""
+    if kebab != "enlarge":
+        return None
+    return _as_install(enlarge_executable(), kebab)
+
+
+def _from_path(kebab: str) -> AppInstall | None:
+    """PATH, after the manifest, the registry, and the default path."""
+    for name in _program_names(kebab):
+        which = shutil.which(name)
+        if which:
+            return AppInstall([which], "", f"voxprint-{kebab}")
     return None
 
 

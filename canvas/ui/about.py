@@ -12,7 +12,7 @@ class AboutDialog(QDialog):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("About")
+        self.setWindowTitle(f"About {APP_NAME}")
         self.version_line = version_label()
         layout = QVBoxLayout(self)
         title = QLabel(APP_NAME)

@@ -60,7 +60,8 @@ def test_installer_selects_a_tier_and_shares_the_voxprint_group(monkeypatch, cap
     assert "default image pack" in iss
     windows = Path("installer/windows/install.ps1").read_text(encoding="utf-8")
     assert "canvas.models.tiers" in windows
-    assert "canvas.app.provision" in windows
+    assert "voxprint_common.mdl" in windows
+    assert "3051bc64700964705bf5cee5182829d1311560a38a9f7436195f26481e4fa239" in windows
     assert "Checking Python..." in windows
     assert "uv.exe" in windows
     assert "could not install Python" in windows
@@ -70,5 +71,6 @@ def test_installer_selects_a_tier_and_shares_the_voxprint_group(monkeypatch, cap
     assert 'Name=VOXPrint AI Canvas' in script
     assert "/opt/voxprint-ai-suite/canvas" in script
     assert "canvas.models.tiers" in script
-    assert "canvas.app.provision" in script
+    assert "voxprint_common.mdl" in script
+    assert "3051bc64700964705bf5cee5182829d1311560a38a9f7436195f26481e4fa239" in script
     assert "Checking Python..." in script

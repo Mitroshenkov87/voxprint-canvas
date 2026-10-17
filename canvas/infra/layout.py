@@ -4,6 +4,8 @@ The window, the Start menu, and the installer use the suite display name.
 Package names, the repository slug, URLs, and per-user data paths stay
 lower-case. An upgrade removes the previous program folder and its shortcuts.
 It leaves the per-user data folder and the shared manifest in place.
+On Windows the previous folder comes only from the machine uninstall key,
+and only a path under Program Files that is not a link is removed.
 """
 from __future__ import annotations
 
@@ -48,6 +50,8 @@ _APP_PAYLOAD = frozenset({
     "NOTICE",
     "BUILD.json",
     "constraints.txt",
+    "constraints-cuda.txt",
+    "mdl.json",
     "install.ps1",
     "install.sh",
     "voxprint-canvas.cmd",
@@ -101,6 +105,46 @@ def previous_from_registry(values: Mapping[str, str]) -> PreviousInstall | None:
     return PreviousInstall(Path(location), group)
 
 
+_FILE_ATTRIBUTE_REPARSE_POINT = 0x400
+
+
+def _same_path(left: Path, right: Path) -> bool:
+    return os.path.normcase(os.path.abspath(left)) == os.path.normcase(os.path.abspath(right))
+
+
+def _is_under(path: Path, parent: Path) -> bool:
+    """True when ``path`` is strictly inside ``parent`` without following links."""
+    child = os.path.normcase(os.path.abspath(path))
+    root = os.path.normcase(os.path.abspath(parent))
+    if child == root:
+        return False
+    prefix = root if root.endswith(os.sep) else root + os.sep
+    return child.startswith(prefix)
+
+
+def _path_has_reparse(path: Path) -> bool:
+    """True when any existing component is a symlink, junction, or other reparse point."""
+    cursor = path
+    seen: set[Path] = set()
+    while cursor not in seen:
+        seen.add(cursor)
+        try:
+            if cursor.is_symlink():
+                return True
+            info = cursor.lstat()
+        except OSError:
+            info = None
+        if info is not None:
+            attrs = getattr(info, "st_file_attributes", 0) or 0
+            if attrs & _FILE_ATTRIBUTE_REPARSE_POINT:
+                return True
+        parent = cursor.parent
+        if parent == cursor:
+            return False
+        cursor = parent
+    return False
+
+
 def _is_inside(path: Path, parent: Path) -> bool:
     try:
         path.resolve().relative_to(parent.resolve())
@@ -126,23 +170,36 @@ def plan_migration(
     user_data: Path,
     shortcut_dirs: Sequence[Path] = (),
     legacy_files: Sequence[Path] = (),
+    program_files: Path | None = None,
+    platform: str | None = None,
 ) -> tuple[Removal, ...]:
     """Removals for one upgrade.
 
-    A previous program folder outside the data directory is removed.
-    A previous folder inside the data directory loses the shipped app files
-    and keeps ``tier.txt``. Shortcuts from the old Start-menu group are removed.
-    The data root and ``shared/`` are never listed.
+    On Windows a previous install is removed only when it is under Program Files
+    and no component is a link. Anything else is skipped and logged.
+    On Linux a previous folder inside the data directory loses the shipped app
+    files and keeps ``tier.txt``. Shortcuts from the old Start-menu group are
+    removed. The data root and ``shared/`` are never listed.
     """
+    system = sys.platform if platform is None else platform
+    root = Path(os.environ.get("ProgramFiles", r"C:\Program Files")) if program_files is None else program_files
     planned: list[Removal] = []
-    new_resolved = new_install.resolve()
     for item in previous:
         old = item.install_dir
-        try:
-            old_resolved = old.resolve()
-        except OSError:
-            old_resolved = old
-        if old_resolved == new_resolved or _protected(old, user_data):
+        if system == "win32" and _path_has_reparse(old):
+            print(f"Setup skipped a linked install path: {old}")
+            continue
+        if _same_path(old, new_install) or _protected(old, user_data):
+            continue
+        if system == "win32":
+            if _is_inside(old, user_data):
+                print(f"Setup skipped an install path in the user data folder: {old}")
+                continue
+            if not _is_under(old, root):
+                print(f"Setup skipped an install path outside Program Files: {old}")
+                continue
+            if old.exists():
+                planned.append(Removal(old, "tree" if old.is_dir() else "file"))
             continue
         if _is_inside(old, user_data):
             for name in sorted(_APP_PAYLOAD):
@@ -154,10 +211,18 @@ def plan_migration(
         if old.exists():
             planned.append(Removal(old, "tree" if old.is_dir() else "file"))
     for folder in shortcut_dirs:
-        if not folder.is_dir() or _protected(folder, user_data):
+        if _protected(folder, user_data):
+            continue
+        if system == "win32" and _path_has_reparse(folder):
+            print(f"Setup skipped a linked path: {folder}")
+            continue
+        if not folder.is_dir():
             continue
         for name in OLD_SHORTCUTS:
             link = folder / name
+            if system == "win32" and _path_has_reparse(link):
+                print(f"Setup skipped a linked path: {link}")
+                continue
             if link.is_file():
                 planned.append(Removal(link, "file"))
         planned.append(Removal(folder, "dir-if-empty"))
@@ -167,11 +232,20 @@ def plan_migration(
     return tuple(planned)
 
 
-def apply_migration(removals: Sequence[Removal], *, user_data: Path) -> list[Path]:
+def apply_migration(
+    removals: Sequence[Removal],
+    *,
+    user_data: Path,
+    system: str | None = None,
+) -> list[Path]:
     """Perform removals. A protected path is skipped even if it was planned."""
+    platform = sys.platform if system is None else system
     removed: list[Path] = []
     for item in removals:
         if _protected(item.path, user_data):
+            continue
+        if platform == "win32" and _path_has_reparse(item.path):
+            print(f"Setup skipped a linked path: {item.path}")
             continue
         if item.kind == "file":
             if item.path.is_file() or item.path.is_symlink():
@@ -179,12 +253,16 @@ def apply_migration(removals: Sequence[Removal], *, user_data: Path) -> list[Pat
                 removed.append(item.path)
             continue
         if item.kind == "tree":
+            if platform == "win32" and (item.path.is_symlink() or item.path.is_file()):
+                print(f"Setup skipped a linked path: {item.path}")
+                continue
             if item.path.is_symlink() or item.path.is_file():
                 item.path.unlink()
                 removed.append(item.path)
             elif item.path.is_dir():
-                _remove_tree(item.path)
-                removed.append(item.path)
+                _remove_tree(item.path, system=platform)
+                if not item.path.exists():
+                    removed.append(item.path)
             continue
         if item.kind == "dir-if-empty":
             if item.path.is_dir() and not any(item.path.iterdir()):
@@ -195,20 +273,31 @@ def apply_migration(removals: Sequence[Removal], *, user_data: Path) -> list[Pat
     return removed
 
 
-def _remove_tree(path: Path) -> None:
-    for child in sorted(path.rglob("*"), reverse=True):
-        if child.is_symlink() or child.is_file():
+def _remove_tree(path: Path, *, system: str) -> None:
+    if system == "win32" and _path_has_reparse(path):
+        print(f"Setup skipped a linked path: {path}")
+        return
+    children = sorted(path.iterdir(), key=lambda item: str(item), reverse=True)
+    for child in children:
+        if system == "win32" and _path_has_reparse(child):
+            print(f"Setup skipped a linked path: {child}")
+            continue
+        if child.is_dir() and not child.is_symlink():
+            _remove_tree(child, system=system)
+        else:
             child.unlink()
-        elif child.is_dir():
-            child.rmdir()
-    path.rmdir()
+    try:
+        path.rmdir()
+    except OSError:
+        print(f"Setup left a folder in place because a linked path is inside it: {path}")
 
 
 def _windows_registry_values() -> list[dict[str, str]]:
     if winreg is None:
         return []
     found: list[dict[str, str]] = []
-    for root in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+    # The per-user uninstall key is writable without elevation, so it is ignored.
+    for root in (winreg.HKEY_LOCAL_MACHINE,):
         try:
             with winreg.OpenKey(root, UNINSTALL_SUBKEY) as key:
                 values: dict[str, str] = {}
@@ -266,6 +355,7 @@ def migrate(
     legacy_files: Sequence[Path] | None = None,
     platform: str | None = None,
     home: Path | None = None,
+    program_files: Path | None = None,
 ) -> list[Path]:
     """Remove the previous install. User data and the shared manifest stay."""
     system = sys.platform if platform is None else platform
@@ -291,8 +381,10 @@ def migrate(
         user_data=data,
         shortcut_dirs=shortcuts,
         legacy_files=extras,
+        program_files=program_files,
+        platform=system,
     )
-    return apply_migration(planned, user_data=data)
+    return apply_migration(planned, user_data=data, system=system)
 
 
 def main(argv: list[str] | None = None) -> int:

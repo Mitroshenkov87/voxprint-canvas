@@ -47,7 +47,7 @@ def build_number(env: Mapping[str, str] | None = None) -> int:
 
 
 def version_label(env: Mapping[str, str] | None = None) -> str:
-    """``0.1.0 RC · build N "Yotzer"``."""
+    """``0.1.0 RC · build N "Tavnit"``."""
     data = load_build()
     channel = str(data.get("channel") or "").strip()
     head = f"{version()} {channel}".strip()

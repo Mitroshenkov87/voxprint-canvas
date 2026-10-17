@@ -38,7 +38,7 @@ def test_display_name_and_install_paths():
     assert "%LOCALAPPDATA%\\Voxprint" in readme
     assert "~/.local/share/voxprint" in readme
     notes = Path("docs/RELEASE-NOTES-TEMPLATE.md").read_text(encoding="utf-8")
-    assert 'VOXPrint AI Canvas X.Y.Z RC · build N "Yotzer"' in notes
+    assert 'VOXPrint AI Canvas X.Y.Z RC · build N "Tavnit"' in notes
 
 
 def test_suite_registry_beats_the_default_enlarge_path(tmp_path, monkeypatch):
@@ -53,7 +53,7 @@ def test_suite_registry_beats_the_default_enlarge_path(tmp_path, monkeypatch):
     assert found is recorded
 
 
-def test_upgrade_keeps_user_data_and_removes_the_old_program(tmp_path):
+def test_upgrade_keeps_user_data_and_removes_the_old_program(tmp_path, capsys):
     user = tmp_path / "Local" / "Voxprint"
     shared = user / "shared"
     shared.mkdir(parents=True)
@@ -82,7 +82,7 @@ def test_upgrade_keeps_user_data_and_removes_the_old_program(tmp_path):
         legacy_files=[],
         platform="win32",
     )
-    assert not venv.exists()
+    assert (venv / "python.exe").read_text(encoding="utf-8") == "old"
     assert tier.read_text(encoding="utf-8") == "24gb"
     assert manifest.read_text(encoding="utf-8") == "{}\n"
     assert user.is_dir()
@@ -91,9 +91,10 @@ def test_upgrade_keeps_user_data_and_removes_the_old_program(tmp_path):
     assert not (menu / "Uninstall Voxprint AI Canvas.lnk").exists()
     assert (menu / "VOXPrint AI Enlarge.lnk").read_text(encoding="utf-8") == "keep"
     assert (new / "keep.txt").read_text(encoding="utf-8") == "new"
+    assert "user data folder" in capsys.readouterr().out
 
 
-def test_upgrade_removes_an_old_program_folder_outside_user_data(tmp_path):
+def test_upgrade_skips_an_install_path_outside_program_files(tmp_path, capsys):
     user = tmp_path / "Local" / "Voxprint"
     (user / "shared").mkdir(parents=True)
     (user / "shared" / "manifest.json").write_text("{}\n", encoding="utf-8")
@@ -109,8 +110,93 @@ def test_upgrade_removes_an_old_program_folder_outside_user_data(tmp_path):
         legacy_files=[],
         platform="win32",
     )
-    assert not old.exists()
+    assert old.is_dir()
+    assert (old / "venv").is_dir()
+    assert "outside Program Files" in capsys.readouterr().out
     assert (user / "shared" / "manifest.json").is_file()
+
+
+def test_upgrade_removes_a_program_files_install(tmp_path):
+    user = tmp_path / "Local" / "Voxprint"
+    (user / "shared").mkdir(parents=True)
+    (user / "shared" / "manifest.json").write_text("{}\n", encoding="utf-8")
+    program = tmp_path / "Program Files"
+    old = program / "VOXPrint AI Suite" / "Canvas-old"
+    (old / "venv").mkdir(parents=True)
+    new = program / "VOXPrint AI Suite" / "Canvas"
+    new.mkdir(parents=True)
+    migrate(
+        new,
+        registry=[{"InstallLocation": str(old)}],
+        user_data=user,
+        shortcut_dirs=[],
+        legacy_files=[],
+        platform="win32",
+        program_files=program,
+    )
+    assert not old.exists()
+    assert new.is_dir()
+    assert (user / "shared" / "manifest.json").is_file()
+
+
+def test_upgrade_skips_a_linked_program_files_install(tmp_path, capsys):
+    user = tmp_path / "Local" / "Voxprint"
+    (user / "shared").mkdir(parents=True)
+    program = tmp_path / "Program Files"
+    secret = tmp_path / "secret"
+    secret.mkdir()
+    (secret / "keep.txt").write_text("keep", encoding="utf-8")
+    link = program / "VOXPrint AI Suite" / "Old"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(secret, target_is_directory=True)
+    new = program / "VOXPrint AI Suite" / "Canvas"
+    new.mkdir()
+    migrate(
+        new,
+        registry=[{"InstallLocation": str(link)}],
+        user_data=user,
+        shortcut_dirs=[],
+        legacy_files=[],
+        platform="win32",
+        program_files=program,
+    )
+    assert (secret / "keep.txt").read_text(encoding="utf-8") == "keep"
+    assert link.is_symlink()
+    assert "linked install path" in capsys.readouterr().out
+
+
+def test_upgrade_does_not_follow_a_link_inside_program_files(tmp_path, capsys):
+    user = tmp_path / "Local" / "Voxprint"
+    (user / "shared").mkdir(parents=True)
+    program = tmp_path / "Program Files"
+    old = program / "VOXPrint AI Suite" / "Canvas-old"
+    old.mkdir(parents=True)
+    (old / "plain.txt").write_text("x", encoding="utf-8")
+    secret = tmp_path / "secret"
+    secret.mkdir()
+    (secret / "keep.txt").write_text("keep", encoding="utf-8")
+    link = old / "joined"
+    link.symlink_to(secret, target_is_directory=True)
+    new = program / "VOXPrint AI Suite" / "Canvas"
+    new.mkdir()
+    migrate(
+        new,
+        registry=[{"InstallLocation": str(old)}],
+        user_data=user,
+        shortcut_dirs=[],
+        legacy_files=[],
+        platform="win32",
+        program_files=program,
+    )
+    assert (secret / "keep.txt").read_text(encoding="utf-8") == "keep"
+    assert link.is_symlink()
+    assert "linked path" in capsys.readouterr().out
+
+
+def test_windows_uninstall_lookup_uses_hklm_only():
+    text = Path("canvas/infra/layout.py").read_text(encoding="utf-8")
+    assert "HKEY_LOCAL_MACHINE" in text
+    assert "HKEY_CURRENT_USER" not in text
 
 
 def test_upgrade_never_deletes_the_data_root(tmp_path):

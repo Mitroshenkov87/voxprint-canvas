@@ -154,7 +154,7 @@ jobs:
         env:
           VOXPRINT_HOME: /home/runner/.cache/voxprint-gate
         run: |
-          .venv/bin/python -c "from canvas.models.provision import install_supporting; from canvas.models.registry import load_catalog; install_supporting(load_catalog(), print)"
+          .venv/bin/python -c 'from canvas.infra.paths import models_dir; from canvas.models.registry import load_catalog; from canvas.models.snapshots import download_snapshot; root = models_dir(); catalog = load_catalog(); roles = ("prompt-guard", "zero-shot", "face-detector", "age", "nsfw"); [download_snapshot(spec, root) for spec in catalog.models if spec.role in roles]'
       - name: Real-weight checks
         env:
           VOXPRINT_REQUIRE_GATE: "1"
@@ -196,3 +196,190 @@ jobs:
           MKL_NUM_THREADS: "1"
           TOKENIZERS_PARALLELISM: "false"
         run: .venv/bin/python -m pytest tests/test_enhance_weights.py
+  windows-install:
+    runs-on: windows-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - name: Free disk space
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "SilentlyContinue"
+          @(
+            "C:\Program Files (x86)\Android",
+            "C:\Program Files\Android",
+            "C:\Program Files (x86)\Microsoft Visual Studio",
+            "C:\Program Files\Microsoft Visual Studio",
+            "C:\Program Files (x86)\Microsoft SQL Server",
+            "C:\Program Files\Microsoft SQL Server",
+            "C:\Program Files (x86)\Google",
+            "C:\Program Files\Google",
+            "C:\hostedtoolcache\windows\go",
+            "C:\hostedtoolcache\windows\Ruby",
+            "C:\hostedtoolcache\windows\PyPy",
+            "C:\hostedtoolcache\windows\node"
+          ) | ForEach-Object {
+            if (Test-Path $_) { Remove-Item $_ -Recurse -Force }
+          }
+          Get-PSDrive -Name C | Format-List
+      - name: Inno Setup 6
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $stage = "installer\windows\staging"
+          New-Item -ItemType Directory -Force $stage | Out-Null
+          Copy-Item -Path canvas -Destination $stage -Recurse
+          Copy-Item -Path tools -Destination $stage -Recurse
+          New-Item -ItemType Directory -Force (Join-Path $stage "scripts") | Out-Null
+          Copy-Item "scripts/vm_test.sh" (Join-Path $stage "scripts/vm_test.sh")
+          Copy-Item "scripts/vm_test.ps1" (Join-Path $stage "scripts/vm_test.ps1")
+          foreach ($name in @("pyproject.toml", "README.md", "LICENSE", "NOTICE", "BUILD.json", "constraints.txt", "constraints-cuda.txt", "mdl.json")) {
+            Copy-Item $name (Join-Path $stage $name)
+          }
+          $uvZip = Join-Path $env:TEMP "uv-windows.zip"
+          $uvDir = Join-Path $env:TEMP "uv-windows"
+          Invoke-WebRequest -Uri "https://github.com/astral-sh/uv/releases/download/0.13.0/uv-x86_64-pc-windows-msvc.zip" -OutFile $uvZip
+          if (Test-Path $uvDir) { Remove-Item -Recurse -Force $uvDir }
+          Expand-Archive -Path $uvZip -DestinationPath $uvDir -Force
+          $uvExe = Get-ChildItem -Path $uvDir -Recurse -Filter uv.exe | Select-Object -First 1
+          if (-not $uvExe) { throw "uv.exe was not in the download" }
+          Copy-Item $uvExe.FullName (Join-Path $stage "uv.exe")
+          Copy-Item installer\windows\install.ps1 (Join-Path $stage "install.ps1")
+          Copy-Item installer\windows\voxprint-canvas.cmd (Join-Path $stage "voxprint-canvas.cmd")
+          Get-ChildItem $stage -Recurse -Directory -Filter __pycache__ | Remove-Item -Recurse -Force
+          $iscc = @(
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+            "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $iscc) { throw "Inno Setup was not installed" }
+          New-Item -ItemType Directory -Force dist | Out-Null
+          & $iscc "/Odist" "installer\windows\voxprint-canvas.iss"
+          if ($LASTEXITCODE -ne 0) { throw "the setup compiler failed" }
+          if (-not (Test-Path "dist\VoxprintCanvasSetup.exe")) { throw "the setup executable is missing" }
+      - name: Run install.ps1
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $source = (Resolve-Path "installer\windows\staging").Path
+          $install = Join-Path $env:ProgramFiles "VOXPrint AI Suite\Canvas"
+          if (Test-Path -LiteralPath $install) { Remove-Item -LiteralPath $install -Recurse -Force }
+          New-Item -ItemType Directory -Force -Path $install | Out-Null
+          Copy-Item -Path (Join-Path $source "*") -Destination $install -Recurse -Force
+          $script = Join-Path $install "install.ps1"
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script
+          if ($LASTEXITCODE -ne 0) { throw "install.ps1 exited $LASTEXITCODE" }
+          Write-Host "install.ps1 exited 0"
+          $programFiles = [System.IO.Path]::GetFullPath($env:ProgramFiles).TrimEnd('\') + '\'
+          if (-not $install.StartsWith($programFiles, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "install dir is not under Program Files: $install"
+          }
+          $cfgPath = Join-Path $install "venv\pyvenv.cfg"
+          if (-not (Test-Path -LiteralPath $cfgPath)) { throw "venv pyvenv.cfg is missing" }
+          $pyHome = $null
+          $executable = $null
+          foreach ($line in Get-Content -LiteralPath $cfgPath) {
+            if ($line.StartsWith("home = ")) { $pyHome = $line.Substring(7).Trim() }
+            if ($line.StartsWith("executable = ")) { $executable = $line.Substring(13).Trim() }
+          }
+          if ($executable) {
+            $base = $executable
+          } elseif ($pyHome) {
+            $base = Join-Path $pyHome "python.exe"
+          } else {
+            throw "pyvenv.cfg has no base interpreter"
+          }
+          $baseFull = [System.IO.Path]::GetFullPath($base)
+          $prefix = $install.TrimEnd('\') + '\'
+          if (-not $baseFull.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "venv base interpreter is outside the install dir: $baseFull"
+          }
+          foreach ($rootName in @("LOCALAPPDATA", "APPDATA", "TEMP", "TMP")) {
+            $root = [Environment]::GetEnvironmentVariable($rootName)
+            if ([string]::IsNullOrWhiteSpace($root)) { continue }
+            $user = [System.IO.Path]::GetFullPath($root).TrimEnd('\') + '\'
+            if ($baseFull.StartsWith($user, [System.StringComparison]::OrdinalIgnoreCase)) {
+              throw "venv base interpreter is in a user-writable folder: $baseFull"
+            }
+          }
+          Write-Host "venv base interpreter is under the install dir: $baseFull"
+          $pythonRoot = (Join-Path $install "python").TrimEnd('\') + '\'
+          if (-not $baseFull.StartsWith($pythonRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "venv base interpreter is outside {app}\python: $baseFull"
+          }
+          if ($baseFull -match 'cpython-3\.14-windows-x86_64-none') {
+            throw "venv base interpreter still uses the uv alias link: $baseFull"
+          }
+          $cursor = $baseFull
+          while (-not [string]::IsNullOrWhiteSpace($cursor)) {
+            if (Test-Path -LiteralPath $cursor) {
+              $attrs = [System.IO.File]::GetAttributes($cursor)
+              if (($attrs -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "venv base interpreter path contains a link: $cursor"
+              }
+            }
+            $parent = [System.IO.Path]::GetDirectoryName($cursor)
+            if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $cursor) { break }
+            $cursor = $parent
+          }
+          Write-Host "venv base interpreter starts with {app}\python: $baseFull"
+          $site = Join-Path $install "venv\Lib\site-packages"
+          $versionPy = Join-Path $site "torch\version.py"
+          if (-not (Test-Path -LiteralPath $versionPy)) { throw "torch\version.py is missing: $versionPy" }
+          $torchText = Get-Content -LiteralPath $versionPy -Raw
+          if (-not $torchText.Contains("13.0")) { throw "torch.version.cuda is not 13.0: $versionPy" }
+          function Assert-Dist([string]$Prefix, [string]$Version) {
+            $found = $false
+            foreach ($dir in @(Get-ChildItem -LiteralPath $site -Directory)) {
+              if ($dir.Name.StartsWith($Prefix, [System.StringComparison]::OrdinalIgnoreCase) -and $dir.Name.EndsWith(".dist-info", [System.StringComparison]::OrdinalIgnoreCase)) {
+                $meta = Join-Path $dir.FullName "METADATA"
+                $raw = Get-Content -LiteralPath $meta -Raw
+                if ($raw.Contains("Version: $Version")) { $found = $true }
+              }
+            }
+            if (-not $found) { throw "missing $Prefix $Version under $site" }
+          }
+          Assert-Dist "torch-" "2.11.0+cu130"
+          Assert-Dist "torchvision-" "0.26.0+cu130"
+          $gpuDist = "onnx" + "runtime" + "_gpu-"
+          Assert-Dist $gpuDist "1.31.0"
+          $cpuDist = "onnx" + "runtime" + "-"
+          foreach ($dir in @(Get-ChildItem -LiteralPath $site -Directory)) {
+            if ($dir.Name.StartsWith($cpuDist, [System.StringComparison]::OrdinalIgnoreCase) -and $dir.Name.EndsWith(".dist-info", [System.StringComparison]::OrdinalIgnoreCase)) {
+              throw "CPU onnx runtime dist-info is installed: $($dir.Name)"
+            }
+          }
+          Write-Host "torch.version.cuda is 13.0 from files under the install dir"
+      - name: A failing install.ps1 makes Setup exit non-zero
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $marker = "C:\voxprint-setup-broke.txt"
+          if (Test-Path $marker) { Remove-Item -Force $marker }
+          @(
+            'param([string]$Scope = "All")'
+            'Set-Content -LiteralPath "C:\voxprint-setup-broke.txt" -Value "broke"'
+            'exit 9'
+          ) | Set-Content -LiteralPath "installer\windows\staging\install.ps1" -Encoding ascii
+          if (Test-Path "installer\windows\staging\venv") {
+            Remove-Item -Recurse -Force "installer\windows\staging\venv"
+          }
+          $iscc = @(
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+            "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $iscc) { throw "Inno Setup was not installed" }
+          & $iscc "/Odist" "installer\windows\voxprint-canvas.iss"
+          if ($LASTEXITCODE -ne 0) { throw "the setup compiler failed" }
+          $log = "C:\voxprint-setup.log"
+          if (Test-Path $log) { Remove-Item -Force $log }
+          $setup = Start-Process -FilePath (Resolve-Path "dist\VoxprintCanvasSetup.exe") -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/SP-","/NORESTART","/LOG=$log" -Wait -PassThru
+          $code = $setup.ExitCode
+          Write-Host "Setup exited $code"
+          if (Test-Path $log) { Get-Content $log -Tail 40 }
+          if (-not (Test-Path $marker)) { throw "Setup did not run install.ps1 (exit $code)" }
+          if ($code -eq 0) { throw "a broken install.ps1 left Setup at exit 0" }
+          if ($code -ne 9) { throw "Setup exited $code instead of install.ps1's exit 9" }
+          Write-Host "Broken install.ps1 made Setup exit $code"

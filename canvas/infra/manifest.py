@@ -36,6 +36,7 @@ TMP_NAME = "manifest.json.tmp"
 APP_ID = "canvas"
 LOCK_TIMEOUT_S = 30.0
 _KINDS = frozenset({"runtime", "wheels", "model", "tool"})
+_SHARED_ROOTS = frozenset({"models", "runtime", "voices", "cache"})
 _KIND_FROM_OLD = {"pack": "model", "suite": "tool", "wheels": "wheels", "runtime": "runtime", "model": "model", "tool": "tool"}
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 _SHA_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -166,6 +167,8 @@ def register_component(
         raise ManifestError("component kind is not valid")
     digest = _require_sha(sha256)
     relative = _safe_relative(path)
+    if _is_shared_root(relative):
+        raise ManifestError("a shared root is not registered")
 
     def change(components: dict[str, Component]) -> str:
         existing = components.get(component_id)
@@ -340,7 +343,7 @@ def _dump(component: Component) -> dict[str, Any]:
 
 
 def _delete_tree(shared: Path, component: Component, remaining: dict[str, Component]) -> None:
-    if component.path in ("", "."):
+    if component.path in ("", ".") or _keeps_shared_tree(component.path):
         return
     for other in remaining.values():
         if other.path == component.path:
@@ -376,6 +379,30 @@ def _side_path(components: dict[str, Component], path: str, sha256: str) -> str:
         candidate = f"{stem}-{suffix}-{number}"
         number += 1
     return _safe_relative(candidate)
+
+
+def _path_parts(path: str) -> tuple[str, ...]:
+    return tuple(part for part in path.replace("\\", "/").split("/") if part not in ("", "."))
+
+
+def _is_shared_root(path: str) -> bool:
+    """True for models, runtime, voices, or cache themselves."""
+    parts = _path_parts(path)
+    return len(parts) == 1 and parts[0] in _SHARED_ROOTS
+
+
+def _keeps_shared_tree(path: str) -> bool:
+    """True when deleting this path would remove a shared root or the runtime tree.
+
+    A model folder directly under ``models/`` may be removed. The models root,
+    and anything under runtime, voices, or cache, stays on disk.
+    """
+    parts = _path_parts(path)
+    if not parts:
+        return True
+    if parts[0] in {"runtime", "voices", "cache"}:
+        return True
+    return len(parts) == 1 and parts[0] == "models"
 
 
 def _require_id(component_id: str) -> None:

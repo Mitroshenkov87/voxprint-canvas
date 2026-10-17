@@ -1,14 +1,10 @@
-# PyPI is the only general index. torch and torchvision are pinned to the
-# CUDA 13.0 wheel index. torchao and every other package stay on PyPI.
+# PyPI is the only general index. torch and torchvision are installed with
+# an explicit --index of the CUDA 13.0 wheel index and --index-strategy.
+# uv pip rejects a sources table in a uv.toml ("sources is only applicable
+# in the context of a project"), so the pin lives on the install command.
 index-url = "https://pypi.org/simple"
 
 [[index]]
 name = "pytorch-cu130"
 url = "https://download.pytorch.org/whl/cu130"
 explicit = true
-
-[sources]
-torch = { index = "pytorch-cu130" }
-torchvision = { index = "pytorch-cu130" }
-
-override-dependencies = ["torch==2.11.0+cu130", "torchvision==0.26.0+cu130"]

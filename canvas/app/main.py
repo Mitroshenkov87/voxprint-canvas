@@ -392,13 +392,9 @@ def _progress(message: str, window: MainWindow | None) -> None:
 
 
 def _confirm(window: MainWindow | None, notice: str) -> bool:
-    if window is None:
-        return True
-    window.status.setText(notice)
-    app = QApplication.instance()
-    if app is not None:
-        app.processEvents()
-    return window.confirm_download(notice)
+    """Missing weights are installed in VOXPrint MDL, not from this window."""
+    del window, notice
+    return False
 
 
 def _instruction_removed(as_json: bool) -> int:

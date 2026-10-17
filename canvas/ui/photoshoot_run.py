@@ -4,7 +4,7 @@ from __future__ import annotations
 import random
 import uuid
 from pathlib import Path
-from typing import assert_never
+from typing import TYPE_CHECKING, assert_never
 
 from voxprint_common.i18n import tr
 from voxprint_common.ui.simple_image import Phase
@@ -18,11 +18,14 @@ from canvas.models.modes import Mode
 from canvas.models.registry import load_catalog
 from canvas.models.snapshots import SnapshotError
 from canvas.pipeline.enhance import open_rewriter
-from canvas.pipeline.photoshoot import SYSTEM_PROMPT
-from canvas.pipeline.series import SeriesResult, run_series
+from canvas.pipeline.photoshoot import SYSTEM_PROMPT, Scenario
+from canvas.pipeline.series import SeriesFrame, SeriesResult, run_series
+
+if TYPE_CHECKING:
+    from canvas.ui.shell_screen import ShellWindow
 from canvas.safety.image import RawImage
 from canvas.safety.inputs import ImageRole, PendingInput
-from canvas.ui.shell_layout import job_from
+from canvas.ui.shell_layout import SimpleLayout, job_from
 from canvas.ui.styles import look_for
 
 
@@ -35,7 +38,7 @@ class _Halt(Exception):
         self.unavailable = unavailable
 
 
-def run_photoshoot(window: object) -> None:
+def run_photoshoot(window: ShellWindow) -> None:
     """Write the scenario, check it, and generate the series.
 
     Args:
@@ -74,7 +77,7 @@ def run_photoshoot(window: object) -> None:
             return bar.writer(prompt)
         return _model_reply(window, prompt)
 
-    def generate(line: str, seed: int, hero: object | None, strength: float) -> RawImage | None:
+    def generate(line: str, seed: int, hero: SeriesFrame | None, strength: float) -> RawImage | None:
         used = _seed(bar.seed_mode, base_seed, seed)
         prompt = _compose(layout, line, style)
         # The first kept frame is the init image. Simple mode uses strength 0.45.
@@ -103,7 +106,7 @@ def run_photoshoot(window: object) -> None:
         window._photoshoot_frame = raw
         return raw
 
-    def on_scenario(scenario: object) -> None:
+    def on_scenario(scenario: Scenario) -> None:
         bar.show_scenario(scenario.subject_block, scenario.shots)
         window.view.refresh()
         bar.sync()
@@ -150,7 +153,7 @@ def run_photoshoot(window: object) -> None:
     _finish(window, result, idea)
 
 
-def _finish(window: object, result: SeriesResult, idea: str) -> None:
+def _finish(window: ShellWindow, result: SeriesResult, idea: str) -> None:
     layout = window.shell.layout
     layout.set_prompt(idea)
     if result.stopped == "idea" or result.stopped == "scenario":
@@ -166,7 +169,7 @@ def _finish(window: object, result: SeriesResult, idea: str) -> None:
     window.photoshoot.sync()
 
 
-def _remember(window: object, line: str, picture: Path) -> None:
+def _remember(window: ShellWindow, line: str, picture: Path) -> None:
     layout = window.shell.layout
     idea = layout.prompt
     raw = getattr(window, "_photoshoot_frame", None)
@@ -188,7 +191,7 @@ def _remember(window: object, line: str, picture: Path) -> None:
     layout.set_prompt(idea)
 
 
-def _compose(layout: object, line: str, style: str) -> str:
+def _compose(layout: SimpleLayout, line: str, style: str) -> str:
     look = look_for(style)
     policy = layout.prompt_policy()
     return " ".join(part for part in (policy.template, line.strip(), look.suffix) if part)
@@ -214,7 +217,7 @@ def _strength(name: str) -> float:
     raise ValueError(name)
 
 
-def _model_reply(window: object, prompt: str) -> str:
+def _model_reply(window: ShellWindow, prompt: str) -> str:
     try:
         rewriter = open_rewriter(load_catalog(), window.tier, models_dir(), max_new_tokens=3072)
     except (SnapshotError, OSError) as exc:

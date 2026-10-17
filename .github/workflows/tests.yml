@@ -236,7 +236,7 @@ jobs:
           New-Item -ItemType Directory -Force (Join-Path $stage "scripts") | Out-Null
           Copy-Item "scripts/vm_test.sh" (Join-Path $stage "scripts/vm_test.sh")
           Copy-Item "scripts/vm_test.ps1" (Join-Path $stage "scripts/vm_test.ps1")
-          foreach ($name in @("pyproject.toml", "README.md", "LICENSE", "NOTICE", "BUILD.json", "constraints.txt")) {
+          foreach ($name in @("pyproject.toml", "README.md", "LICENSE", "NOTICE", "BUILD.json", "constraints.txt", "constraints-cuda.txt")) {
             Copy-Item $name (Join-Path $stage $name)
           }
           $uvZip = Join-Path $env:TEMP "uv-windows.zip"
@@ -297,6 +297,38 @@ jobs:
             }
           }
           Write-Host "venv base interpreter is under the install dir: $baseFull"
+          $pythonRoot = (Join-Path $install "python").TrimEnd('\') + '\'
+          if (-not $baseFull.StartsWith($pythonRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "venv base interpreter is outside {app}\python: $baseFull"
+          }
+          Write-Host "venv base interpreter starts with {app}\python: $baseFull"
+          $site = Join-Path $install "venv\Lib\site-packages"
+          $versionPy = Join-Path $site "torch\version.py"
+          if (-not (Test-Path -LiteralPath $versionPy)) { throw "torch\version.py is missing: $versionPy" }
+          $torchText = Get-Content -LiteralPath $versionPy -Raw
+          if (-not $torchText.Contains("13.0")) { throw "torch.version.cuda is not 13.0: $versionPy" }
+          function Assert-Dist([string]$Prefix, [string]$Version) {
+            $found = $false
+            foreach ($dir in @(Get-ChildItem -LiteralPath $site -Directory)) {
+              if ($dir.Name.StartsWith($Prefix, [System.StringComparison]::OrdinalIgnoreCase) -and $dir.Name.EndsWith(".dist-info", [System.StringComparison]::OrdinalIgnoreCase)) {
+                $meta = Join-Path $dir.FullName "METADATA"
+                $raw = Get-Content -LiteralPath $meta -Raw
+                if ($raw.Contains("Version: $Version")) { $found = $true }
+              }
+            }
+            if (-not $found) { throw "missing $Prefix $Version under $site" }
+          }
+          Assert-Dist "torch-" "2.11.0+cu130"
+          Assert-Dist "torchvision-" "0.26.0+cu130"
+          $gpuDist = "onnx" + "runtime" + "_gpu-"
+          Assert-Dist $gpuDist "1.31.0"
+          $cpuDist = "onnx" + "runtime" + "-"
+          foreach ($dir in @(Get-ChildItem -LiteralPath $site -Directory)) {
+            if ($dir.Name.StartsWith($cpuDist, [System.StringComparison]::OrdinalIgnoreCase) -and $dir.Name.EndsWith(".dist-info", [System.StringComparison]::OrdinalIgnoreCase)) {
+              throw "CPU onnx runtime dist-info is installed: $($dir.Name)"
+            }
+          }
+          Write-Host "torch.version.cuda is 13.0 from files under the install dir"
       - name: A failing install.ps1 makes Setup exit non-zero
         shell: pwsh
         run: |
@@ -304,6 +336,7 @@ jobs:
           $marker = "C:\voxprint-setup-broke.txt"
           if (Test-Path $marker) { Remove-Item -Force $marker }
           @(
+            'param([string]$Scope = "All")'
             'Set-Content -LiteralPath "C:\voxprint-setup-broke.txt" -Value "broke"'
             'exit 9'
           ) | Set-Content -LiteralPath "installer\windows\staging\install.ps1" -Encoding ascii

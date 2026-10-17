@@ -2,6 +2,13 @@
 # Per-user data stays in %LOCALAPPDATA%\Voxprint.
 # The setup does not contain GPU libraries or model files.
 # Missing dependencies are installed here, before the first picture.
+# Scope Machine writes only under the install folder and runs elevated.
+# Scope User writes the profile and runs as the original user.
+# Scope All is the direct script path: profile writes stay in-process and every path is checked for links.
+param(
+    [ValidateSet("All", "Machine", "User", "Cleanup")]
+    [string]$Scope = "All"
+)
 $ErrorActionPreference = "Stop"
 if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
     $PSNativeCommandUseErrorActionPreference = $false
@@ -15,13 +22,13 @@ $Runtime = Join-Path $Shared ($RuntimeRel -replace '/', '\')
 $RuntimePy = Join-Path $Runtime "Scripts\python.exe"
 $RuntimeCfg = Join-Path $Runtime "pyvenv.cfg"
 $RuntimeSite = Join-Path $Runtime "Lib\site-packages"
-$Fetch = $null
 $PythonDir = Join-Path $App "python"
 $PythonBin = Join-Path $PythonDir "bin"
 $UvCache = Join-Path $App "uv-cache"
 $PipCache = Join-Path $App "pip-cache"
 $Work = Join-Path $App "setup-work"
 $AdminTemp = Join-Path $App "setup-temp"
+$Fetch = Join-Path $Work "wheels"
 $UserRoots = @()
 foreach ($envName in @("LOCALAPPDATA", "APPDATA", "TEMP", "TMP")) {
     $raw = [Environment]::GetEnvironmentVariable($envName)
@@ -32,9 +39,11 @@ foreach ($envName in @("LOCALAPPDATA", "APPDATA", "TEMP", "TMP")) {
 $Trt = Join-Path $Shared "tensorrt-10"
 $WindowsPythonUrl = "https://www.python.org/ftp/python/3.14.8/python-3.14.8-amd64.exe"
 $TorchIndex = "https://download.pytorch.org/whl/cu130"
-$LogDir = Join-Path $env:LOCALAPPDATA "Voxprint\logs"
-$Transcript = Join-Path $LogDir "canvas-install.log"
-$TranscriptOn = $false
+$Constraints = Join-Path $App "constraints.txt"
+$CudaConstraints = Join-Path $App "constraints-cuda.txt"
+$script:TranscriptOn = $false
+$script:Uv = Join-Path $App "uv.exe"
+$script:Base = $null
 
 function Test-StorePythonAlias([string]$CommandPath) {
     if ([string]::IsNullOrWhiteSpace($CommandPath)) {
@@ -43,6 +52,125 @@ function Test-StorePythonAlias([string]$CommandPath) {
     $root = Join-Path $env:LOCALAPPDATA "Microsoft\WindowsApps"
     $full = [System.IO.Path]::GetFullPath($CommandPath)
     return $full.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+function Assert-NoReparse([string]$Path) {
+    # Fail closed. A junction or symlink on any existing component would redirect an admin write.
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        throw "Setup stopped because this path is empty."
+    }
+    $cursor = [System.IO.Path]::GetFullPath($Path)
+    while (-not [string]::IsNullOrWhiteSpace($cursor)) {
+        $attrs = $null
+        try {
+            $attrs = [System.IO.File]::GetAttributes($cursor)
+        } catch {
+            $attrs = $null
+        }
+        if ($null -ne $attrs -and (($attrs -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
+            throw "Setup stopped because this path contains a link: $cursor"
+        }
+        $parent = [System.IO.Path]::GetDirectoryName($cursor)
+        if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $cursor) {
+            break
+        }
+        $cursor = $parent
+    }
+}
+
+function Assert-AdminPath([string]$Path) {
+    # Elevated setup only runs files under the install folder. Program Files
+    # needs admin rights to write. Profile, roaming, and temp folders do not.
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        throw "Setup will not run an empty program path."
+    }
+    $full = [System.IO.Path]::GetFullPath($Path)
+    $root = [System.IO.Path]::GetFullPath($App)
+    if (-not $root.EndsWith('\')) { $root = $root + '\' }
+    if (-not $full.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Setup will not run a program outside the install folder."
+    }
+    foreach ($userRoot in $UserRoots) {
+        $prefix = $userRoot
+        if (-not $prefix.EndsWith('\')) { $prefix = $prefix + '\' }
+        if ($full.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "Setup will not run a program from a user-writable folder."
+        }
+    }
+}
+
+function Reset-InstallerEnvironment([string]$Mode) {
+    # Scrub inherited UV_*, PIP_*, PYTHON*, VIRTUAL_ENV, CONDA_*, and proxy overrides.
+    $prefixes = @("UV_", "PIP_", "PYTHON", "CONDA_")
+    $exact = @(
+        "VIRTUAL_ENV",
+        "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "FTP_PROXY",
+        "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "SSL_CERT_FILE", "SSL_CERT_DIR", "GIT_SSL_CAINFO"
+    )
+    foreach ($name in @([Environment]::GetEnvironmentVariables().Keys)) {
+        $drop = $false
+        foreach ($prefix in $prefixes) {
+            if ($name.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+                $drop = $true
+            }
+        }
+        foreach ($item in $exact) {
+            if ($name.Equals($item, [System.StringComparison]::OrdinalIgnoreCase)) {
+                $drop = $true
+            }
+        }
+        if ($drop) {
+            Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue
+        }
+    }
+    $env:UV_PYTHON_INSTALL_DIR = $PythonDir
+    $env:UV_PYTHON_BIN_DIR = $PythonBin
+    $env:UV_NO_CONFIG = "1"
+    $env:UV_MANAGED_PYTHON = "1"
+    $env:PYTHONNOUSERSITE = "1"
+    Set-Location -LiteralPath $App
+    if ($Mode -eq "User") {
+        $userCache = Join-Path $env:LOCALAPPDATA "Voxprint\uv-cache"
+        $userTemp = Join-Path $env:LOCALAPPDATA "Voxprint\setup-temp"
+        Assert-NoReparse $userCache
+        Assert-NoReparse $userTemp
+        New-Item -ItemType Directory -Force $userCache, $userTemp | Out-Null
+        $env:UV_CACHE_DIR = $userCache
+        $env:PIP_CACHE_DIR = $userTemp
+        $env:TEMP = $userTemp
+        $env:TMP = $userTemp
+        return
+    }
+    Assert-NoReparse $App
+    Assert-NoReparse $PythonDir
+    Assert-NoReparse $UvCache
+    Assert-NoReparse $PipCache
+    Assert-NoReparse $Work
+    Assert-NoReparse $AdminTemp
+    New-Item -ItemType Directory -Force $PythonDir, $PythonBin, $UvCache, $PipCache, $Work, $AdminTemp | Out-Null
+    $env:UV_CACHE_DIR = $UvCache
+    $env:PIP_CACHE_DIR = $PipCache
+    $env:TEMP = $AdminTemp
+    $env:TMP = $AdminTemp
+}
+
+function Start-SetupLog([string]$Path) {
+    $dir = Split-Path -Parent $Path
+    Assert-NoReparse $dir
+    New-Item -ItemType Directory -Force $dir | Out-Null
+    try {
+        Start-Transcript -Path $Path -Force | Out-Null
+        $script:TranscriptOn = $true
+    } catch {
+        Write-Host "The install log could not be opened: $Path"
+    }
+}
+
+function Stop-SetupLog {
+    if ($script:TranscriptOn) {
+        try { Stop-Transcript | Out-Null } catch { }
+        $script:TranscriptOn = $false
+    }
 }
 
 function Test-SuiteGpuPackages([string]$Python) {
@@ -72,6 +200,7 @@ if gpu not in found or name in found:
     sys.exit(1)
 sys.exit(0)
 "@
+    Assert-NoReparse $Work
     New-Item -ItemType Directory -Force $Work | Out-Null
     $probe = Join-Path $Work ("voxprint-gpu-probe-" + [guid]::NewGuid().ToString("n") + ".py")
     Set-Content -LiteralPath $probe -Value $code -Encoding ascii
@@ -82,27 +211,6 @@ sys.exit(0)
         return $LASTEXITCODE -eq 0
     } finally {
         Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
-    }
-}
-
-function Assert-AdminPath([string]$Path) {
-    # Elevated setup only runs files under the install folder. Program Files
-    # needs admin rights to write. Profile, roaming, and temp folders do not.
-    if ([string]::IsNullOrWhiteSpace($Path)) {
-        throw "Setup will not run an empty program path."
-    }
-    $full = [System.IO.Path]::GetFullPath($Path)
-    $root = [System.IO.Path]::GetFullPath($App)
-    if (-not $root.EndsWith('\')) { $root = $root + '\' }
-    if (-not $full.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase)) {
-        throw "Setup will not run a program outside the install folder."
-    }
-    foreach ($userRoot in $UserRoots) {
-        $prefix = $userRoot
-        if (-not $prefix.EndsWith('\')) { $prefix = $prefix + '\' }
-        if ($full.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
-            throw "Setup will not run a program from a user-writable folder."
-        }
     }
 }
 
@@ -158,36 +266,50 @@ function Test-SuiteGpuFiles([string]$SitePackages) {
 
 function Install-SuiteGpuPackages([string]$Python, [string]$Target) {
     Assert-AdminPath $Python
-    Assert-AdminPath $Uv
-    New-Item -ItemType Directory -Force $Fetch | Out-Null
-    $into = @("--python", $Python, "--find-links", $Fetch, "-c", $Constraints)
+    Assert-AdminPath $script:Uv
+    if (-not (Test-Path -LiteralPath $Fetch)) {
+        Assert-NoReparse $Fetch
+        New-Item -ItemType Directory -Force $Fetch | Out-Null
+    }
+    $into = @("pip", "install", "--no-config", "--python", $Python, "--find-links", $Fetch, "-c", $Constraints, "-c", $CudaConstraints)
     if (-not [string]::IsNullOrWhiteSpace($Target)) {
+        Assert-NoReparse $Target
         New-Item -ItemType Directory -Force $Target | Out-Null
         $into += @("--target", $Target)
     }
-    & $Uv pip install @into --index $TorchIndex --index-strategy unsafe-best-match "torch==2.11.0+cu130" "torchvision==0.26.0+cu130"
+    & $script:Uv @into --index $TorchIndex --index-strategy unsafe-best-match "torch==2.11.0+cu130" "torchvision==0.26.0+cu130"
     if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
-    & $Uv pip install @into --index-url "https://pypi.org/simple" "onnxruntime-gpu==1.31.0"
+    & $script:Uv @into --index-url "https://pypi.org/simple" "onnxruntime-gpu==1.31.0"
     if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
     $cpu = "onnx" + "runtime"
     if (-not [string]::IsNullOrWhiteSpace($Target)) {
         if (Test-MetadataVersion $Target ($cpu + "-") "") {
-            & $Uv pip uninstall --python $Python --target $Target $cpu
+            & $script:Uv pip uninstall --no-config --python $Python --target $Target $cpu
             if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
         }
     } else {
-        & $Uv pip uninstall --python $Python $cpu
+        & $script:Uv pip uninstall --no-config --python $Python $cpu
         if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
     }
 }
 
 function Clear-WheelFetch {
     if ($Fetch -and (Test-Path -LiteralPath $Fetch)) {
-        Remove-Item -LiteralPath $Fetch -Recurse -Force -ErrorAction SilentlyContinue
+        try {
+            Assert-NoReparse $Fetch
+            Remove-Item -LiteralPath $Fetch -Recurse -Force -ErrorAction SilentlyContinue
+        } catch {
+            Write-Host $_
+        }
     }
     foreach ($dir in @($AdminTemp, $UvCache, $PipCache)) {
         if ($dir -and (Test-Path -LiteralPath $dir)) {
-            Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+            try {
+                Assert-NoReparse $dir
+                Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+            } catch {
+                Write-Host $_
+            }
         }
     }
 }
@@ -200,159 +322,246 @@ function Invoke-Py([string[]]$ArgList) {
     }
 }
 
-New-Item -ItemType Directory -Force $LogDir | Out-Null
-try {
-    Start-Transcript -Path $Transcript -Force | Out-Null
-    $TranscriptOn = $true
-} catch {
-    Write-Host "The install log could not be opened: $Transcript"
-}
-
-try {
-    Write-Host "Checking Python..."
-    $uv = Join-Path $App "uv.exe"
-    if (-not (Test-Path $uv)) {
-        throw "uv.exe is not bundled next to install.ps1. Install Python 3.14 from $WindowsPythonUrl and run this setup again."
-    }
-    New-Item -ItemType Directory -Force $PythonDir, $PythonBin, $UvCache, $PipCache, $Work, $AdminTemp | Out-Null
-    # Keep uv, pip, and child temp files inside the install folder. A user
-    # uv.toml or the default profile install dir must not redirect them.
-    $env:UV_PYTHON_INSTALL_DIR = $PythonDir
-    $env:UV_PYTHON_BIN_DIR = $PythonBin
-    $env:UV_CACHE_DIR = $UvCache
-    $env:UV_NO_CONFIG = "1"
-    $env:UV_MANAGED_PYTHON = "1"
-    $env:PYTHONNOUSERSITE = "1"
-    $env:PIP_CACHE_DIR = $PipCache
-    $env:TEMP = $AdminTemp
-    $env:TMP = $AdminTemp
-    foreach ($name in @("PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP", "PYTHONUSERBASE")) {
-        if (Test-Path "Env:$name") { Remove-Item "Env:$name" }
-    }
-    Write-Host "Installing Python with uv..."
-    Assert-AdminPath $uv
-    & $uv python install 3.14 --reinstall --no-registry --install-dir $PythonDir
-    if ($LASTEXITCODE -ne 0) {
-        throw "uv could not install Python 3.14. Install Python 3.14 from $WindowsPythonUrl and run this setup again."
-    }
-    $found = (& $uv python find 3.14 --managed-python | Out-String).Trim()
-    if ($LASTEXITCODE -ne 0 -or -not $found) {
-        throw "uv installed Python 3.14 but the interpreter could not be found. Install Python 3.14 from $WindowsPythonUrl and run this setup again."
-    }
-    $Base = (($found -split '\r?\n') | Where-Object { $_.Trim() } | Select-Object -Last 1).Trim()
-    if (-not (Test-Path $Base)) {
-        throw "uv reported Python at '$Base', but that file does not exist. Install Python 3.14 from $WindowsPythonUrl and run this setup again."
-    }
-    Assert-AdminPath $Base
-
-    # The shared runtime is user-writable. Never execute its python.exe.
-    # Packages are installed with the uv interpreter via --target.
-    # A standalone interpreter (python.exe at the runtime root, no pyvenv.cfg) is left alone.
-    $runtimeVenv = (Test-Path -LiteralPath $RuntimePy) -and (Test-Path -LiteralPath $RuntimeCfg)
-    if (-not $runtimeVenv) {
-        $occupied = Get-ChildItem -Force $Runtime -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($occupied) {
-            throw "The suite runtime is already installed. Canvas will not replace it."
-        }
-        New-Item -ItemType Directory -Force $Shared | Out-Null
-        # --without-pip keeps venv from launching the new interpreter. That
-        # interpreter lives in the user-writable shared tree.
-        & $Base -m venv --without-pip $Runtime
-        if ($LASTEXITCODE -ne 0) { throw "Python could not create the suite runtime." }
-    }
-
-    Assert-AdminPath $Base
-    if (-not (Test-Path $Py)) {
-        & $Base -m venv $Venv
-        if ($LASTEXITCODE -ne 0) { throw "Python could not create the environment." }
-    } else {
-        & $Base -m venv --upgrade $Venv
-        if ($LASTEXITCODE -ne 0) { throw "Python could not refresh the environment." }
-    }
-
-    $Constraints = Join-Path $App "constraints.txt"
-    if (-not (Test-Path $Constraints)) {
+function Assert-ConstraintFiles {
+    if (-not (Test-Path -LiteralPath $Constraints)) {
         throw "constraints.txt is missing from the setup. The install cannot continue."
     }
-    Invoke-Py @("-m", "pip", "install", "--upgrade", "pip")
-    # PyPI is the main index. torch and torchvision come from the CUDA 13.0 index.
-    # torchao is installed from PyPI with an exact pin.
-    $Uv = Join-Path $App "uv.exe"
-    if (-not (Test-Path $Uv)) {
-        Invoke-Py @("-m", "pip", "install", "--index-url", "https://pypi.org/simple", "uv==0.13.0")
-        $Uv = Join-Path $Venv "Scripts\uv.exe"
+    if (-not (Test-Path -LiteralPath $CudaConstraints)) {
+        throw "constraints-cuda.txt is missing from the setup. The install cannot continue."
     }
-    if (-not (Test-Path $Uv)) {
-        throw "uv 0.13.0 is required to install PyTorch."
+}
+
+function Resolve-BundledUv {
+    $bundled = Join-Path $App "uv.exe"
+    if (Test-Path -LiteralPath $bundled) {
+        Assert-AdminPath $bundled
+        $script:Uv = $bundled
+        return
     }
-    $Fetch = Join-Path $Work ("voxprint-wheels-" + [guid]::NewGuid().ToString("n"))
-    New-Item -ItemType Directory -Force $Fetch | Out-Null
-    $runtimeReady = Test-SuiteGpuFiles $RuntimeSite
-    $appReady = Test-SuiteGpuPackages $Py
-    if ($runtimeReady -and $appReady) {
-        Write-Host "PyTorch is already installed."
-    } else {
-        Write-Host "Installing PyTorch..."
+    $local = Join-Path $Venv "Scripts\uv.exe"
+    if (Test-Path -LiteralPath $local) {
+        Assert-AdminPath $local
+        $script:Uv = $local
+        return
+    }
+    throw "uv 0.13.0 is required to install PyTorch."
+}
+
+function Resolve-BasePython {
+    $cfg = Join-Path $Venv "pyvenv.cfg"
+    if (Test-Path -LiteralPath $cfg) {
+        $pyHome = $null
+        $executable = $null
+        foreach ($line in Get-Content -LiteralPath $cfg) {
+            if ($line.StartsWith("home = ")) { $pyHome = $line.Substring(7).Trim() }
+            if ($line.StartsWith("executable = ")) { $executable = $line.Substring(13).Trim() }
+        }
+        if ($executable -and (Test-Path -LiteralPath $executable)) {
+            Assert-AdminPath $executable
+            return $executable
+        }
+        if ($pyHome) {
+            $candidate = Join-Path $pyHome "python.exe"
+            if (Test-Path -LiteralPath $candidate) {
+                Assert-AdminPath $candidate
+                return $candidate
+            }
+        }
+    }
+    $found = Get-ChildItem -LiteralPath $PythonDir -Filter python.exe -Recurse -File -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if (-not $found) {
+        throw "uv installed Python 3.14 but the interpreter could not be found. Install Python 3.14 from $WindowsPythonUrl and run this setup again."
+    }
+    Assert-AdminPath $found.FullName
+    return $found.FullName
+}
+
+function Move-OccupiedRuntimeAside {
+    # A non-venv tree is user data. Rename it and build a new runtime beside the backup.
+    Assert-NoReparse $Runtime
+    $stamp = Get-Date -Format "yyyyMMddHHmmss"
+    $backup = "$Runtime.bak-$stamp"
+    $suffix = 0
+    while (Test-Path -LiteralPath $backup) {
+        $suffix += 1
+        $backup = "$Runtime.bak-$stamp-$suffix"
+    }
+    Write-Host "Moving the existing suite runtime aside: $backup"
+    Move-Item -LiteralPath $Runtime -Destination $backup
+}
+
+function Ensure-SharedRuntime([string]$BasePython) {
+    Assert-NoReparse $Shared
+    $runtimeVenv = (Test-Path -LiteralPath $RuntimePy) -and (Test-Path -LiteralPath $RuntimeCfg)
+    if ($runtimeVenv) {
+        return
+    }
+    if (Test-Path -LiteralPath $Runtime) {
+        $occupied = Get-ChildItem -Force -LiteralPath $Runtime -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($occupied) {
+            Move-OccupiedRuntimeAside
+        }
+    }
+    Assert-NoReparse $Shared
+    New-Item -ItemType Directory -Force $Shared | Out-Null
+    Assert-AdminPath $BasePython
+    # --without-pip keeps venv from launching the new interpreter. That
+    # interpreter lives in the user-writable shared tree.
+    & $BasePython -m venv --without-pip $Runtime
+    if ($LASTEXITCODE -ne 0) { throw "Python could not create the suite runtime." }
+}
+
+function Invoke-Machine {
+    Reset-InstallerEnvironment "Machine"
+    Start-SetupLog (Join-Path $Work "canvas-install.log")
+    try {
+        Write-Host "Checking Python..."
+        if (-not (Test-Path -LiteralPath $script:Uv)) {
+            throw "uv.exe is not bundled next to install.ps1. Install Python 3.14 from $WindowsPythonUrl and run this setup again."
+        }
+        Assert-ConstraintFiles
+        Assert-AdminPath $script:Uv
+        Write-Host "Installing Python with uv..."
+        & $script:Uv python install 3.14 --reinstall --no-registry --no-config --install-dir $PythonDir
+        if ($LASTEXITCODE -ne 0) {
+            throw "uv could not install Python 3.14. Install Python 3.14 from $WindowsPythonUrl and run this setup again."
+        }
+        $found = (& $script:Uv python find 3.14 --managed-python --no-config | Out-String).Trim()
+        if ($LASTEXITCODE -ne 0 -or -not $found) {
+            throw "uv installed Python 3.14 but the interpreter could not be found. Install Python 3.14 from $WindowsPythonUrl and run this setup again."
+        }
+        $script:Base = (($found -split '\r?\n') | Where-Object { $_.Trim() } | Select-Object -Last 1).Trim()
+        if (-not (Test-Path -LiteralPath $script:Base)) {
+            throw "uv reported Python at '$script:Base', but that file does not exist. Install Python 3.14 from $WindowsPythonUrl and run this setup again."
+        }
+        Assert-AdminPath $script:Base
+        Write-Host "Python is $script:Base"
+        if (-not (Test-Path -LiteralPath $Py)) {
+            & $script:Base -m venv $Venv
+            if ($LASTEXITCODE -ne 0) { throw "Python could not create the environment." }
+        } else {
+            & $script:Base -m venv --upgrade $Venv
+            if ($LASTEXITCODE -ne 0) { throw "Python could not refresh the environment." }
+        }
+        Invoke-Py @("-m", "pip", "--isolated", "install", "--upgrade", "pip")
+        if (-not (Test-Path -LiteralPath $script:Uv)) {
+            Invoke-Py @("-m", "pip", "--isolated", "install", "--index-url", "https://pypi.org/simple", "uv==0.13.0")
+        }
+        Resolve-BundledUv
+        Assert-NoReparse $Fetch
+        New-Item -ItemType Directory -Force $Fetch | Out-Null
+        $appReady = Test-SuiteGpuPackages $Py
+        if ($appReady) {
+            Write-Host "PyTorch is already installed."
+        } else {
+            Write-Host "Installing PyTorch..."
+            Invoke-Py @(
+                "-m", "pip", "--isolated", "download", "-c", $Constraints, "-c", $CudaConstraints,
+                "torch==2.11.0+cu130", "torchvision==0.26.0+cu130",
+                "--index-url", $TorchIndex, "--extra-index-url", "https://pypi.org/simple", "-d", $Fetch
+            )
+        }
         Invoke-Py @(
-            "-m", "pip", "download", "-c", $Constraints,
-            "torch==2.11.0+cu130", "torchvision==0.26.0+cu130",
-            "--index-url", $TorchIndex, "--extra-index-url", "https://pypi.org/simple", "-d", $Fetch
-        )
-        Invoke-Py @(
-            "-m", "pip", "download", "-c", $Constraints,
+            "-m", "pip", "--isolated", "download", "-c", $Constraints, "-c", $CudaConstraints,
             "onnxruntime-gpu==1.31.0", "torchao==0.18.0",
             "--index-url", "https://pypi.org/simple", "-d", $Fetch
         )
-    }
-    if (-not $runtimeReady) {
-        Write-Host "Repairing the suite runtime..."
-        Install-SuiteGpuPackages $Base $RuntimeSite
-        if (-not (Test-SuiteGpuFiles $RuntimeSite)) {
-            Write-Host "CUDA 13.0 PyTorch is still missing from $RuntimeSite"
-            Get-ChildItem -LiteralPath $RuntimeSite -Directory -ErrorAction SilentlyContinue |
-                Where-Object { $_.Name -like "*.dist-info" } |
-                ForEach-Object { Write-Host $_.Name }
-            throw "CUDA 13.0 PyTorch is still missing."
+        if (-not $appReady) {
+            Install-SuiteGpuPackages $Py ""
+            if (-not (Test-SuiteGpuPackages $Py)) { throw "Setup stopped." }
         }
+        Assert-AdminPath $script:Uv
+        Assert-AdminPath $Py
+        & $script:Uv pip install --no-config --python $Py --index-url https://pypi.org/simple "torchao==0.18.0"
+        if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
+        & $script:Uv pip install --no-config --python $Py --index $TorchIndex --index-url https://pypi.org/simple --index-strategy unsafe-best-match -c $Constraints -c $CudaConstraints "${App}[gen]"
+        if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
+        & $Py -m canvas.infra.layout migrate --install-dir $App
+        if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
+    } finally {
+        Stop-SetupLog
     }
-    if (-not $appReady) {
-        Install-SuiteGpuPackages $Py ""
-        if (-not (Test-SuiteGpuPackages $Py)) { throw "Setup stopped." }
-    }
-    Assert-AdminPath $Uv
-    Assert-AdminPath $Py
-    & $Uv pip install --python $Py --index-url https://pypi.org/simple "torchao==0.18.0"
-    if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
-    & $Uv pip install --python $Py --index-url https://pypi.org/simple -c $Constraints "${App}[gen]"
-    if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
-    & $Py -m canvas.infra.layout migrate --install-dir $App
-    if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
-    & $Py -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 14) else 1)"
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "TensorRT is skipped on Python 3.14."
-    } elseif (-not (Get-ChildItem -Force $Trt -ErrorAction SilentlyContinue | Select-Object -First 1)) {
-        New-Item -ItemType Directory -Force $Trt | Out-Null
-        Invoke-Py @("-m", "pip", "install", "-c", $Constraints, "--target", $Trt, "--upgrade-strategy", "only-if-needed", "tensorrt-cu13==10.16.1.11")
-    }
+}
 
-    Write-Host "Installing the default image pack..."
-    Invoke-Py @("-m", "canvas.app.provision")
-    $tierDir = Join-Path $env:LOCALAPPDATA "Voxprint\Canvas"
-    New-Item -ItemType Directory -Force $tierDir | Out-Null
-    & $Py -m canvas.models.tiers | Set-Content -Encoding ascii (Join-Path $tierDir "tier.txt")
-    if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
-    Invoke-Py @("-m", "canvas.app.main", "--register-models")
+function Invoke-User {
+    if ($Scope -eq "All") {
+        Write-Host "Profile folders are written by this process because -Scope All was requested. Each path is checked for links."
+    }
+    Reset-InstallerEnvironment "User"
+    $logDir = Join-Path $env:LOCALAPPDATA "Voxprint\logs"
+    Start-SetupLog (Join-Path $logDir "canvas-install.log")
+    try {
+        Assert-ConstraintFiles
+        Resolve-BundledUv
+        $script:Base = Resolve-BasePython
+        Write-Host "Python is $script:Base"
+        Ensure-SharedRuntime $script:Base
+        $runtimeReady = $false
+        if (Test-Path -LiteralPath $RuntimeSite) {
+            Assert-NoReparse $RuntimeSite
+            $runtimeReady = Test-SuiteGpuFiles $RuntimeSite
+        }
+        if (-not $runtimeReady) {
+            Write-Host "Repairing the suite runtime..."
+            Install-SuiteGpuPackages $script:Base $RuntimeSite
+            if (-not (Test-SuiteGpuFiles $RuntimeSite)) {
+                Write-Host "CUDA 13.0 PyTorch is still missing from $RuntimeSite"
+                Get-ChildItem -LiteralPath $RuntimeSite -Directory -ErrorAction SilentlyContinue |
+                    Where-Object { $_.Name -like "*.dist-info" } |
+                    ForEach-Object { Write-Host $_.Name }
+                throw "CUDA 13.0 PyTorch is still missing."
+            }
+        }
+        & $Py -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 14) else 1)"
+        Assert-NoReparse $Trt
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "TensorRT is skipped on Python 3.14."
+        } elseif (-not (Get-ChildItem -Force -LiteralPath $Trt -ErrorAction SilentlyContinue | Select-Object -First 1)) {
+            New-Item -ItemType Directory -Force $Trt | Out-Null
+            Invoke-Py @("-m", "pip", "--isolated", "install", "-c", $Constraints, "--target", $Trt, "--upgrade-strategy", "only-if-needed", "tensorrt-cu13==10.16.1.11")
+        }
+        $dataRoot = Join-Path $env:LOCALAPPDATA "Voxprint"
+        Assert-NoReparse $dataRoot
+        Write-Host "Installing the default image pack..."
+        Invoke-Py @("-m", "canvas.app.provision")
+        $tierDir = Join-Path $dataRoot "Canvas"
+        Assert-NoReparse $tierDir
+        New-Item -ItemType Directory -Force $tierDir | Out-Null
+        $tierFile = Join-Path $tierDir "tier.txt"
+        Assert-NoReparse $tierFile
+        & $Py -m canvas.models.tiers | Set-Content -Encoding ascii $tierFile
+        if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
+        Invoke-Py @("-m", "canvas.app.main", "--register-models")
+        Write-Host "Installed."
+    } finally {
+        Stop-SetupLog
+    }
+}
+
+function Invoke-Cleanup {
+    Reset-InstallerEnvironment "Machine"
     Clear-WheelFetch
-    Write-Host "Installed."
-    if ($TranscriptOn) {
-        Stop-Transcript | Out-Null
-        $TranscriptOn = $false
+}
+
+Write-Host "Setup scope: $Scope"
+try {
+    switch ($Scope) {
+        "Machine" { Invoke-Machine }
+        "User" { Invoke-User }
+        "Cleanup" { Invoke-Cleanup }
+        "All" {
+            Invoke-Machine
+            Invoke-User
+            Invoke-Cleanup
+        }
+        default { throw "Setup stopped because the scope is not Machine, User, Cleanup, or All." }
     }
 } catch {
     Write-Host $_
-    Clear-WheelFetch
-    if ($TranscriptOn) {
-        try { Stop-Transcript | Out-Null } catch { }
+    if ($Scope -ne "User") {
+        Clear-WheelFetch
     }
+    Stop-SetupLog
     exit 1
 }

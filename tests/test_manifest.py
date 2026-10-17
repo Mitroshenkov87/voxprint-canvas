@@ -290,7 +290,13 @@ def test_cpu_onnxruntime_dist_is_not_installed():
         name = requirement.split(";")[0].split("[")[0].split()[0].lower().replace("_", "-")
         assert name != "onnxruntime"
     root = Path(__file__).resolve().parents[1]
-    for relative in ("pyproject.toml", "constraints.txt", "installer/linux/install.sh", "installer/windows/install.ps1"):
+    for relative in (
+        "pyproject.toml",
+        "constraints.txt",
+        "constraints-cuda.txt",
+        "installer/linux/install.sh",
+        "installer/windows/install.ps1",
+    ):
         text = (root / relative).read_text(encoding="utf-8")
         assert "onnxruntime-gpu" in text
         assert re.findall(r"onnxruntime(?!-gpu)", text) == []
@@ -371,7 +377,8 @@ def test_installers_use_the_suite_runtime():
     assert "tensorrt-10" in windows
     assert "onnxruntime-gpu" in linux
     assert "onnxruntime-gpu" in windows
-    assert "$SHARED/wheels" in linux
+    assert "$SHARED/wheels" not in linux
+    assert 'WHEELS="$APP/setup-work/wheels"' in linux
     assert "Voxprint\\shared" in windows
     assert "Installing the default image pack..." in linux
     assert "Installing the default image pack..." in windows
@@ -403,8 +410,18 @@ def test_installers_resolve_numpy_from_pypi_and_pin_cuda_torch():
         assert "PyTorch is already installed." in script
         assert "TensorRT is skipped on Python 3.14." in script
     assert "PyTorch wheels are already downloaded." in linux
-    assert "voxprint-wheels-" in windows
-    assert 'Join-Path $Work ("voxprint-wheels-' in windows
+    assert 'WHEELS="$APP/setup-work/wheels"' in linux
+    assert '--find-links "$WHEELS"' in linux
+    assert "$SHARED/wheels" not in linux
+    assert "UV_NO_CONFIG" in linux
+    assert "--no-config" in linux
+    assert "--isolated" in linux
+    assert "constraints-cuda.txt" in linux
+    assert "VIRTUAL_ENV" in linux
+    assert "CONDA_" in linux
+    assert "HTTP_PROXY" in linux
+    assert 'cd "$APP"' in linux
+    assert 'Join-Path $Work "wheels"' in windows
     assert 'Join-Path $env:TEMP ("voxprint-wheels-' not in windows
     assert 'Join-Path $Work ("voxprint-gpu-probe-' in windows
     assert 'Join-Path $env:TEMP ("voxprint-gpu-probe-' not in windows
@@ -440,14 +457,39 @@ def test_installers_resolve_numpy_from_pypi_and_pin_cuda_torch():
     assert "WindowsApps" in windows
     assert "pip uninstall" in linux
     assert "pip uninstall" in windows
+    assert "Assert-NoReparse" in windows
+    assert "ReparsePoint" in windows
+    assert "UV_NO_CONFIG" in windows
+    assert "--no-config" in windows
+    assert "--isolated" in windows
+    assert "constraints-cuda.txt" in windows
+    assert "VIRTUAL_ENV" in windows
+    assert "CONDA_" in windows
+    assert "HTTP_PROXY" in windows
+    assert "Set-Location -LiteralPath $App" in windows
+    assert "Move-Item -LiteralPath $Runtime" in windows
+    assert ".bak-" in windows
+    assert "The suite runtime is already installed" not in windows
+    assert "Remove-Item -LiteralPath $Runtime" not in windows
+    assert 'ValidateSet("All", "Machine", "User", "Cleanup")' in windows
+    assert "torch==2.11.0+cu130" in Path("constraints-cuda.txt").read_text(encoding="utf-8")
+    assert "torchvision==0.26.0+cu130" in Path("constraints-cuda.txt").read_text(encoding="utf-8")
+    assert "onnxruntime-gpu==1.31.0" in Path("constraints-cuda.txt").read_text(encoding="utf-8")
     iss = Path("installer/windows/voxprint-canvas.iss").read_text(encoding="utf-8")
     assert "CurStepChanged" in iss
     assert "ssPostInstall" in iss
     assert "SuppressibleMsgBox" in iss
     assert "ExitProcess" in iss
     assert "[Run]" not in iss
+    assert "[UninstallRun]" not in iss
     assert "Started := Exec(" in iss
-    assert "ExecAsOriginalUser" not in iss
+    post, uninstall = iss.split("procedure CurUninstallStepChanged", 1)
+    assert "ExecAsOriginalUser" in post
+    assert "-Scope Machine" in post
+    assert "-Scope User" in post
+    assert "-Scope Cleanup" in post
+    assert "ExpandConstant('{app}')" in post
+    assert "ExecAsOriginalUser" not in uninstall
     assert "icacls.exe" not in iss
     assert "CurUninstallStepChanged" in iss
     assert "usUninstall" in iss

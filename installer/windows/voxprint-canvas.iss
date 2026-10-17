@@ -6,8 +6,8 @@
 ; Windows 11 24H2 or newer, 64-bit.
 ; The setup copies the app. It does not embed GPU libraries or model files.
 ; install.ps1 installs missing dependencies, including the default image pack, and runs: python -m canvas.models.tiers
-; CurStepChanged runs that script and Setup exits non-zero when it fails.
-; An upgrade keeps the AppId, ignores the previous directory, and the setup script removes the old folder and shortcuts.
+; CurStepChanged runs the machine scope elevated, then the user scope as the original user.
+; Setup exits non-zero when either scope fails. Uninstall stays elevated and does not drop privileges.
 
 #define MyAppName "VOXPrint AI Canvas"
 #define MySuiteName "VOXPrint AI Suite"
@@ -47,21 +47,33 @@ Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 procedure ExitProcess(uExitCode: Cardinal);
   external 'ExitProcess@kernel32.dll stdcall';
 
-procedure CurStepChanged(CurStep: TSetupStep);
+procedure RunSetup(const Params: String; const DropPrivileges: Boolean);
 var
   ResultCode: Integer;
   Started: Boolean;
 begin
-  if CurStep <> ssPostInstall then
-    Exit;
-  Started := Exec(
-    ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
-    ExpandConstant('-NoProfile -ExecutionPolicy Bypass -File "{app}\install.ps1"'),
-    '',
-    SW_SHOW,
-    ewWaitUntilTerminated,
-    ResultCode
-  );
+  if DropPrivileges then
+  begin
+    Started := ExecAsOriginalUser(
+      ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+      Params,
+      ExpandConstant('{app}'),
+      SW_SHOW,
+      ewWaitUntilTerminated,
+      ResultCode
+    );
+  end
+  else
+  begin
+    Started := Exec(
+      ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+      Params,
+      ExpandConstant('{app}'),
+      SW_SHOW,
+      ewWaitUntilTerminated,
+      ResultCode
+    );
+  end;
   if not Started then
   begin
     SuppressibleMsgBox('VOXPrint AI Canvas could not start its setup script.', mbError, MB_OK, IDOK);
@@ -69,12 +81,21 @@ begin
   end;
   if ResultCode <> 0 then
   begin
-    SuppressibleMsgBox('VOXPrint AI Canvas setup failed. The log is %LOCALAPPDATA%\Voxprint\logs\canvas-install.log.', mbError, MB_OK, IDOK);
+    SuppressibleMsgBox('VOXPrint AI Canvas setup failed. The machine log is {app}\setup-work\canvas-install.log. The user log is %LOCALAPPDATA%\Voxprint\logs\canvas-install.log.', mbError, MB_OK, IDOK);
     if (ResultCode > 0) and (ResultCode <= 255) then
       ExitProcess(ResultCode)
     else
       ExitProcess(1);
   end;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep <> ssPostInstall then
+    Exit;
+  RunSetup(ExpandConstant('-NoProfile -ExecutionPolicy Bypass -File "{app}\install.ps1" -Scope Machine'), False);
+  RunSetup(ExpandConstant('-NoProfile -ExecutionPolicy Bypass -File "{app}\install.ps1" -Scope User'), True);
+  RunSetup(ExpandConstant('-NoProfile -ExecutionPolicy Bypass -File "{app}\install.ps1" -Scope Cleanup'), False);
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);

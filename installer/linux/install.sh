@@ -3,6 +3,7 @@
 # The archive does not contain GPU libraries or model files.
 # Missing dependencies are installed here, before the first picture.
 # Per-user data stays in ~/.local/share/voxprint.
+# Wheels used by a privileged install live under /opt, not the user profile.
 set -eu
 
 SRC=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
@@ -18,11 +19,27 @@ VENV="$APP/venv"
 SHARED="$DATA/shared"
 RUNTIME_REL="runtime/py314-torch2.11-cu130"
 RUNTIME="$SHARED/$RUNTIME_REL"
+WHEELS="$APP/setup-work/wheels"
 APP_DIR="$HOME/.local/share/applications"
 DIR_DIR="$HOME/.local/share/desktop-directories"
 BIN_DIR="$HOME/.local/bin"
 LINUX_PYTHON_URL="https://github.com/astral-sh/python-build-standalone/releases/download/20261009/cpython-3.14.8%2B20261009-x86_64-unknown-linux-gnu-install_only.tar.gz"
 TORCH_INDEX="https://download.pytorch.org/whl/cu130"
+
+scrub_environment() {
+  # Drop inherited index, mirror, proxy, and interpreter overrides before any download.
+  names=$(env | sed 's/=.*//')
+  for name in $names; do
+    case "$name" in
+      UV_*|PIP_*|PYTHON*|VIRTUAL_ENV|CONDA_*|HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|NO_PROXY|FTP_PROXY|http_proxy|https_proxy|all_proxy|no_proxy|ftp_proxy|REQUESTS_CA_BUNDLE|CURL_CA_BUNDLE|SSL_CERT_FILE|SSL_CERT_DIR|GIT_SSL_CAINFO)
+        unset "$name" || true
+        ;;
+    esac
+  done
+  export UV_NO_CONFIG=1
+}
+
+scrub_environment
 echo "Checking Python..."
 if [ -x "$RUNTIME/bin/python3" ]; then
   PY="$RUNTIME/bin/python3"
@@ -43,16 +60,21 @@ if ! mkdir -p "$APP"; then
   echo "VOXPrint AI Canvas needs permission to create $APP." >&2
   exit 1
 fi
-mkdir -p "$APP_DIR" "$DIR_DIR" "$BIN_DIR" "$SHARED/wheels" "$SHARED/tensorrt-10"
+cd "$APP"
+mkdir -p "$APP_DIR" "$DIR_DIR" "$BIN_DIR" "$WHEELS" "$SHARED/tensorrt-10"
 "$PY" -m venv "$VENV"
 if [ ! -f "$SRC/constraints.txt" ]; then
   echo "constraints.txt is missing from the setup. The install cannot continue." >&2
   exit 1
 fi
-"$VENV/bin/python" -m pip install --upgrade pip
+if [ ! -f "$SRC/constraints-cuda.txt" ]; then
+  echo "constraints-cuda.txt is missing from the setup. The install cannot continue." >&2
+  exit 1
+fi
+"$VENV/bin/python" -m pip --isolated install --upgrade pip
 # PyPI is the main index. torch and torchvision come from the CUDA 13.0 index.
 # torchao is installed from PyPI with an exact pin.
-"$VENV/bin/python" -m pip install --index-url https://pypi.org/simple "uv==0.13.0"
+"$VENV/bin/python" -m pip --isolated install --index-url https://pypi.org/simple "uv==0.13.0"
 UV="$VENV/bin/uv"
 
 gpu_ready() {
@@ -82,13 +104,14 @@ sys.exit(0)
 }
 
 install_gpu() {
-  "$UV" pip install --python "$1" --index "$TORCH_INDEX" --index-strategy unsafe-best-match \
-    --find-links "$SHARED/wheels" -c "$SRC/constraints.txt" \
+  "$UV" pip install --no-config --python "$1" --index "$TORCH_INDEX" --index-strategy unsafe-best-match \
+    --find-links "$WHEELS" -c "$SRC/constraints.txt" -c "$SRC/constraints-cuda.txt" \
     "torch==2.11.0+cu130" "torchvision==0.26.0+cu130"
-  "$UV" pip install --python "$1" --index-url https://pypi.org/simple -c "$SRC/constraints.txt" \
+  "$UV" pip install --no-config --python "$1" --index-url https://pypi.org/simple \
+    -c "$SRC/constraints.txt" -c "$SRC/constraints-cuda.txt" \
     "onnxruntime-gpu==1.31.0"
   cpu=$(printf '%s%s' onnx runtime)
-  "$UV" pip uninstall --python "$1" "$cpu"
+  "$UV" pip uninstall --no-config --python "$1" "$cpu"
 }
 
 runtime_ready=0
@@ -101,20 +124,20 @@ if gpu_ready "$VENV/bin/python"; then
 fi
 if [ "$runtime_ready" -eq 1 ] && [ "$app_ready" -eq 1 ]; then
   echo "PyTorch is already installed."
-elif find "$SHARED/wheels" -name 'torch-2.11.0*.whl' -print -quit 2>/dev/null | grep -q .; then
+elif find "$WHEELS" -name 'torch-2.11.0*.whl' -print -quit 2>/dev/null | grep -q .; then
   echo "PyTorch wheels are already downloaded."
 else
   echo "Installing PyTorch..."
-  "$VENV/bin/python" -m pip download -c "$SRC/constraints.txt" \
+  "$VENV/bin/python" -m pip --isolated download -c "$SRC/constraints.txt" -c "$SRC/constraints-cuda.txt" \
     "torch==2.11.0+cu130" "torchvision==0.26.0+cu130" \
-    --index-url "$TORCH_INDEX" --extra-index-url https://pypi.org/simple -d "$SHARED/wheels"
+    --index-url "$TORCH_INDEX" --extra-index-url https://pypi.org/simple -d "$WHEELS"
 fi
-"$VENV/bin/python" -m pip download -c "$SRC/constraints.txt" \
+"$VENV/bin/python" -m pip --isolated download -c "$SRC/constraints.txt" -c "$SRC/constraints-cuda.txt" \
   "onnxruntime-gpu==1.31.0" "torchao==0.18.0" \
-  --index-url https://pypi.org/simple -d "$SHARED/wheels"
+  --index-url https://pypi.org/simple -d "$WHEELS"
 if [ "$runtime_ready" -eq 0 ]; then
   echo "Repairing the suite runtime..."
-  "$PY" -m pip install --upgrade pip
+  "$PY" -m pip --isolated install --upgrade pip
   install_gpu "$PY"
   if ! gpu_ready "$PY"; then
     echo "CUDA 13.0 PyTorch is still missing." >&2
@@ -128,13 +151,15 @@ if [ "$app_ready" -eq 0 ]; then
     exit 1
   fi
 fi
-"$UV" pip install --python "$VENV/bin/python" --index-url https://pypi.org/simple "torchao==0.18.0"
-"$UV" pip install --python "$VENV/bin/python" --index-url https://pypi.org/simple -c "$SRC/constraints.txt" \
+"$UV" pip install --no-config --python "$VENV/bin/python" --index-url https://pypi.org/simple "torchao==0.18.0"
+"$UV" pip install --no-config --python "$VENV/bin/python" \
+  --index "$TORCH_INDEX" --index-url https://pypi.org/simple --index-strategy unsafe-best-match \
+  -c "$SRC/constraints.txt" -c "$SRC/constraints-cuda.txt" \
   "$SRC[gen]"
 if "$VENV/bin/python" -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 14) else 1)"; then
   echo "TensorRT is skipped on Python 3.14." >&2
 elif [ -z "$(find "$SHARED/tensorrt-10" -mindepth 1 -print -quit 2>/dev/null)" ]; then
-  "$VENV/bin/python" -m pip install -c "$SRC/constraints.txt" --target "$SHARED/tensorrt-10" \
+  "$VENV/bin/python" -m pip --isolated install -c "$SRC/constraints.txt" --target "$SHARED/tensorrt-10" \
     --upgrade-strategy only-if-needed "tensorrt-cu13==10.16.1.11"
 fi
 "$VENV/bin/python" -m canvas.infra.layout migrate --install-dir "$APP"

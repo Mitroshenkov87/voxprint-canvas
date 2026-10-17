@@ -21,6 +21,7 @@ def test_release_workflow_publishes_a_prerelease_from_the_build_file():
     assert "voxprint-canvas.iss" in text
     assert "installer/linux/install.sh" in text
     assert "constraints.txt" in text
+    assert "constraints-cuda.txt" in text
     assert "uv.exe" in text
     notes = Path("docs/release-notes/0.1.0-rc.1.md").read_text(encoding="utf-8")
     assert notes.startswith("New:")
@@ -49,9 +50,13 @@ def test_windows_ci_builds_the_installer_and_runs_install_ps1():
     assert "ISCC.exe" in text
     assert "voxprint-setup-broke.txt" in text
     assert "a broken install.ps1 left Setup at exit 0" in text
+    assert 'param([string]$Scope = "All")' in text
     assert 'Remove-Item -Recurse -Force "installer\\windows\\staging\\venv"' in text
     assert "venv base interpreter is outside the install dir" in text
+    assert "venv base interpreter is outside {app}\\python" in text
+    assert "torch.version.cuda is not 13.0" in text
     assert "pyvenv.cfg" in text
+    assert "constraints-cuda.txt" in text
 
 
 def test_release_ships_tools_and_vm_scripts():

@@ -236,7 +236,7 @@ jobs:
           New-Item -ItemType Directory -Force (Join-Path $stage "scripts") | Out-Null
           Copy-Item "scripts/vm_test.sh" (Join-Path $stage "scripts/vm_test.sh")
           Copy-Item "scripts/vm_test.ps1" (Join-Path $stage "scripts/vm_test.ps1")
-          foreach ($name in @("pyproject.toml", "README.md", "LICENSE", "NOTICE", "BUILD.json", "constraints.txt", "constraints-cuda.txt")) {
+          foreach ($name in @("pyproject.toml", "README.md", "LICENSE", "NOTICE", "BUILD.json", "constraints.txt", "constraints-cuda.txt", "mdl.json")) {
             Copy-Item $name (Join-Path $stage $name)
           }
           $uvZip = Join-Path $env:TEMP "uv-windows.zip"

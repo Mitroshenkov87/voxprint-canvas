@@ -13,6 +13,7 @@ dependencies = [
     "imagecodecs==2026.10.10",
     "onnxruntime-gpu==1.31.0",
     "psutil==7.0.0",
+    "voxprint-common @ https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.2.4/voxprint_common-0.2.4-py3-none-any.whl ; python_version >= '3.14'",
 ]
 
 [project.optional-dependencies]

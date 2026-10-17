@@ -1,6 +1,9 @@
 """The two-mode window: text to image, and image to image."""
 from __future__ import annotations
 
+import subprocess
+import sys
+from pathlib import Path
 from typing import Callable, NamedTuple, assert_never
 
 from PySide6.QtCore import Qt, QPointF, QRectF, QSize, QUrl
@@ -21,7 +24,6 @@ from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
     QLabel,
-    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QTabWidget,
@@ -66,6 +68,15 @@ def _mode_label(mode: Mode) -> str:
     else:
         assert_never(mode)
     return text(key)
+
+
+def _mdl_argv() -> list[str]:
+    """``voxprint-mdl --gui --app canvas``, preferring the interpreter's folder."""
+    name = "voxprint-mdl.exe" if sys.platform == "win32" else "voxprint-mdl"
+    # absolute() keeps a venv symlink in place. resolve() would follow it into the base interpreter.
+    bundled = Path(sys.executable).absolute().parent / name
+    program = str(bundled) if bundled.is_file() else name
+    return [program, "--gui", "--app", "canvas"]
 
 
 def _aspect_label(name: str) -> str:
@@ -149,6 +160,9 @@ class MainWindow(QWidget):
         self.revert_button.clicked.connect(self._revert)
         self.revert_button.setEnabled(False)
         self.action_icons = load_approved()
+        self.models_button = QPushButton(text("button.models"))
+        self.models_button.setObjectName("models")
+        self.models_button.clicked.connect(self._manage_models)
         self.about_button = QPushButton(text("button.about"))
         self.about_button.setObjectName("about")
         self.about_button.clicked.connect(self._about)
@@ -171,6 +185,7 @@ class MainWindow(QWidget):
         title_row = QHBoxLayout()
         title_row.addWidget(title)
         title_row.addStretch(1)
+        title_row.addWidget(self.models_button)
         title_row.addWidget(self.about_button)
         layout.addLayout(title_row)
         layout.addWidget(tabs)
@@ -292,15 +307,12 @@ class MainWindow(QWidget):
     def _about(self) -> None:
         AboutDialog(self).exec()
 
-    def confirm_download(self, notice: str) -> bool:
-        """Ask before an optional pack download. The notice has the size and the estimate."""
-        answer = QMessageBox.question(
-            self,
-            text("dialog.download"),
-            notice,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        return answer == QMessageBox.StandardButton.Yes
+    def _manage_models(self) -> None:
+        """Open VOXPrint MDL for this app. Canvas does not download models itself."""
+        try:
+            subprocess.Popen(_mdl_argv())
+        except OSError:
+            self.status.setText(text("models.missing"))
 
     def _set_busy(self, busy: bool) -> None:
         self._busy = busy

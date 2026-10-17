@@ -1,5 +1,7 @@
 """The two tabs, the format list, and the neutral status line."""
 import os
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -8,7 +10,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QLabel, QMessageBox, QPlainTextEdit, QTabWidget
+from PySide6.QtWidgets import QApplication, QLabel, QPlainTextEdit, QTabWidget
 
 from canvas.app.identity import splash_line, version_label
 from canvas.app.info import (
@@ -24,7 +26,7 @@ from canvas.models.sizes import ASPECT_GROUPS
 from canvas.infra.enlarge import EnlargeError
 from canvas.safety.gate import GenerationBlocked
 from canvas.ui.about import AboutDialog
-from canvas.ui.main_window import EnhanceReply, MainWindow
+from canvas.ui.main_window import EnhanceReply, MainWindow, _mdl_argv
 from canvas.ui.splash import Splash
 
 
@@ -294,17 +296,28 @@ def test_enhance_keeps_the_prompt_and_shows_a_note_when_the_rewrite_is_refused(a
     window.close()
 
 
-def test_confirm_download_uses_the_notice(app, monkeypatch):
+def test_manage_models_opens_voxprint_mdl(app, monkeypatch):
     del app
-    seen: list[str] = []
-
-    def question(parent, title, notice, buttons):
-        del parent, buttons
-        seen.append(f"{title}:{notice}")
-        return QMessageBox.StandardButton.No
-
-    monkeypatch.setattr("canvas.ui.main_window.QMessageBox.question", question)
+    seen: list[list[str]] = []
+    monkeypatch.setattr("canvas.ui.main_window.subprocess.Popen", lambda argv: seen.append(list(argv)))
     window = MainWindow(lambda prompt, mode, fmt: "ok", Tier.GB16)
-    assert window.confirm_download("ControlNet lite is 1.0 GB. Estimated time 1 minute.") is False
-    assert seen == ["Download:ControlNet lite is 1.0 GB. Estimated time 1 minute."]
+    assert window.models_button.text() == "Manage models"
+    window.models_button.click()
+    assert seen[0][1:] == ["--gui", "--app", "canvas"]
+    assert seen[0][0].replace("\\", "/").endswith(("voxprint-mdl", "voxprint-mdl.exe"))
     window.close()
+
+
+def test_mdl_launcher_stays_beside_a_symlinked_interpreter(tmp_path, monkeypatch):
+    real = tmp_path / "runtime" / "bin"
+    real.mkdir(parents=True)
+    (real / "python").write_text("#!/bin/sh\n", encoding="utf-8")
+    venv_bin = tmp_path / "venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    link = venv_bin / "python"
+    link.symlink_to(real / "python")
+    launcher = venv_bin / ("voxprint-mdl.exe" if sys.platform == "win32" else "voxprint-mdl")
+    launcher.write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setattr("canvas.ui.main_window.sys.executable", str(link))
+    argv = _mdl_argv()
+    assert Path(argv[0]) == launcher

@@ -69,6 +69,14 @@
       "en": "About",
       "ru": "О программе"
     },
+    "button.models": {
+      "en": "Manage models",
+      "ru": "Управление моделями"
+    },
+    "models.missing": {
+      "en": "VOXPrint MDL is not installed.",
+      "ru": "VOXPrint MDL не установлен."
+    },
     "tooltip.enhance": {
       "en": "Improve the prompt",
       "ru": "Улучшить запрос"

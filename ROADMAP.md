@@ -22,4 +22,4 @@ Plans, not promises.
 - Faster engines on your own GPU, with TensorRT.
 - A full command-line interface with JSON output.
 - More languages in the UI.
-- Automatic model choice when several generators or editors are installed. A local prompt classifier tags the request topic (Russian text in the picture, portrait, adult, landscape, photo edit, and others) and picks the best installed model for that topic from a table of our own evaluation results. The window shows the choice, and you can pick a different model.
+- An automatic model selector picks among the generators and editors that are installed, using our own evaluation table. The window shows the choice and lets you override it.

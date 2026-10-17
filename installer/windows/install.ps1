@@ -414,6 +414,81 @@ function Test-SuiteGpuFiles([string]$SitePackages) {
     return ((Test-MetadataVersion $SitePackages "torch-" "2.11.0+cu130") -and (Test-MetadataVersion $SitePackages "torchvision-" "0.26.0+cu130") -and (Test-MetadataVersion $SitePackages $gpuName "1.31.0") -and -not $cpu)
 }
 
+function Test-TorchCudaFiles([string]$SitePackages) {
+    $versionPy = Join-Path $SitePackages "torch\version.py"
+    if (-not (Test-Path -LiteralPath $versionPy)) {
+        return $false
+    }
+    $text = Get-Content -LiteralPath $versionPy -Raw -ErrorAction SilentlyContinue
+    if (-not $text -or -not $text.Contains("13.0")) {
+        return $false
+    }
+    return Test-MetadataVersion $SitePackages "torch-" "2.11.0+cu130"
+}
+
+function Test-CpuOnnxDist([string]$SitePackages) {
+    if (-not (Test-Path -LiteralPath $SitePackages)) {
+        return $false
+    }
+    $cpuName = "onnx" + "runtime" + "-"
+    foreach ($dir in @(Get-ChildItem -LiteralPath $SitePackages -Directory -ErrorAction SilentlyContinue)) {
+        $name = $dir.Name
+        if ($name.StartsWith($cpuName, [System.StringComparison]::OrdinalIgnoreCase) -and $name.EndsWith(".dist-info", [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $true
+        }
+    }
+    return $false
+}
+
+function Install-PinnedPackage([string]$Python, [string]$Target, [string]$IndexUrl, [string]$Strategy, [string]$Package) {
+    Assert-AdminPath $Python
+    Assert-AdminPath $script:Uv
+    if (-not (Test-Path -LiteralPath $Fetch)) {
+        Assert-NoReparse $Fetch
+        New-Item -ItemType Directory -Force $Fetch | Out-Null
+    }
+    $into = @("pip", "install", "--no-config", "--python", $Python, "--find-links", $Fetch, "-c", $Constraints, "-c", $CudaConstraints)
+    if (-not [string]::IsNullOrWhiteSpace($Target)) {
+        Assert-NoReparse $Target
+        New-Item -ItemType Directory -Force $Target | Out-Null
+        $into += @("--target", $Target)
+    }
+    if ($Strategy) {
+        & $script:Uv @into --index $IndexUrl --index-strategy $Strategy $Package
+    } else {
+        & $script:Uv @into --index-url $IndexUrl $Package
+    }
+    if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
+}
+
+function Repair-SharedRuntimePackages {
+    # Other suite apps share this tree. Install a pin only when it is missing
+    # or the CUDA build is wrong. Do not reinstall a package that already matches.
+    $visionOk = Test-MetadataVersion $RuntimeSite "torchvision-" "0.26.0+cu130"
+    $gpuName = "onnx" + "runtime" + "_gpu-"
+    $gpuOk = Test-MetadataVersion $RuntimeSite $gpuName "1.31.0"
+    $cpu = Test-CpuOnnxDist $RuntimeSite
+    if (-not (Test-TorchCudaFiles $RuntimeSite)) {
+        Write-Host "Repairing torch in the suite runtime..."
+        Install-PinnedPackage $script:Base $RuntimeSite $TorchIndex "unsafe-best-match" "torch==2.11.0+cu130"
+    }
+    if (-not $visionOk) {
+        Write-Host "Repairing torchvision in the suite runtime..."
+        Install-PinnedPackage $script:Base $RuntimeSite $TorchIndex "unsafe-best-match" "torchvision==0.26.0+cu130"
+    }
+    if (-not $gpuOk) {
+        Write-Host "Repairing ONNX Runtime in the suite runtime..."
+        Install-PinnedPackage $script:Base $RuntimeSite "https://pypi.org/simple" "" "onnxruntime-gpu==1.31.0"
+    }
+    if ($cpu) {
+        $cpuPackage = "onnx" + "runtime"
+        Assert-AdminPath $script:Uv
+        Assert-AdminPath $script:Base
+        & $script:Uv pip uninstall --no-config --python $script:Base --target $RuntimeSite $cpuPackage
+        if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
+    }
+}
+
 function Install-SuiteGpuPackages([string]$Python, [string]$Target) {
     Assert-AdminPath $Python
     Assert-AdminPath $script:Uv
@@ -627,8 +702,17 @@ function Invoke-Machine {
             Install-SuiteGpuPackages $Py ""
             if (-not (Test-SuiteGpuPackages $Py)) { throw "Setup stopped." }
         }
+        $CommonUrl = "https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.2.4/voxprint_common-0.2.4-py3-none-any.whl"
+        $CommonSha = "3051bc64700964705bf5cee5182829d1311560a38a9f7436195f26481e4fa239"
+        $CommonWheel = Join-Path $Fetch "voxprint_common-0.2.4-py3-none-any.whl"
+        Assert-NoReparse $CommonWheel
+        Invoke-WebRequest -Uri $CommonUrl -OutFile $CommonWheel
+        $got = (Get-FileHash -Algorithm SHA256 -Path $CommonWheel).Hash.ToLowerInvariant()
+        if ($got -ne $CommonSha) { throw "voxprint-common 0.2.4 failed the SHA-256 check." }
         Assert-AdminPath $script:Uv
         Assert-AdminPath $Py
+        & $script:Uv pip install --no-config --python $Py $CommonWheel
+        if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
         & $script:Uv pip install --no-config --python $Py --index-url https://pypi.org/simple "torchao==0.18.0"
         if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
         & $script:Uv pip install --no-config --python $Py --index $TorchIndex --index-url https://pypi.org/simple --index-strategy unsafe-best-match -c $Constraints -c $CudaConstraints "${App}[gen]"
@@ -660,7 +744,7 @@ function Invoke-User {
         }
         if (-not $runtimeReady) {
             Write-Host "Repairing the suite runtime..."
-            Install-SuiteGpuPackages $script:Base $RuntimeSite
+            Repair-SharedRuntimePackages
             if (-not (Test-SuiteGpuFiles $RuntimeSite)) {
                 Write-Host "CUDA 13.0 PyTorch is still missing from $RuntimeSite"
                 Get-ChildItem -LiteralPath $RuntimeSite -Directory -ErrorAction SilentlyContinue |
@@ -679,8 +763,10 @@ function Invoke-User {
         }
         $dataRoot = Join-Path $env:LOCALAPPDATA "Voxprint"
         Assert-NoReparse $dataRoot
+        $Mdl = Join-Path $App "mdl.json"
+        if (-not (Test-Path -LiteralPath $Mdl)) { throw "mdl.json is missing from the setup. The install cannot continue." }
         Write-Host "Installing the default image pack..."
-        Invoke-Py @("-m", "canvas.app.provision")
+        Invoke-Py @("-m", "voxprint_common.mdl", "download", "--app", "canvas", "--manifest", $Mdl)
         $tierDir = Join-Path $dataRoot "Canvas"
         Assert-NoReparse $tierDir
         New-Item -ItemType Directory -Force $tierDir | Out-Null

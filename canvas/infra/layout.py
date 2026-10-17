@@ -51,6 +51,7 @@ _APP_PAYLOAD = frozenset({
     "BUILD.json",
     "constraints.txt",
     "constraints-cuda.txt",
+    "mdl.json",
     "install.ps1",
     "install.sh",
     "voxprint-canvas.cmd",

@@ -325,27 +325,36 @@ def test_optional_pack_notice_includes_size_and_estimate():
     assert roles.index("prompt-guard") < roles.index("generator")
 
 
-def test_repair_refetches_a_broken_pack(monkeypatch, tmp_path):
+def test_repair_does_not_download_a_model(monkeypatch, tmp_path):
     monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
     shared = shared_dir()
     register_component(
         shared, "z-image-turbo-bf16-16gb", kind="model", version="1",
         path="models/Tongyi-MAI--Z-Image-Turbo", sha256=_SHA, app="canvas",
     )
-    calls: list[str] = []
+    assert repair(load_catalog(), lambda _note: None) == []
+    assert not (shared / "models" / "Tongyi-MAI--Z-Image-Turbo").exists()
 
-    def fake_download(spec, root, progress=None):
-        calls.append(spec.id)
-        if progress is not None:
-            progress("repairing")
-        return root
 
-    monkeypatch.setattr("canvas.models.provision.download_snapshot", fake_download)
-    notes: list[str] = []
-    fixed = repair(load_catalog(), notes.append)
-    assert calls == ["z-image-turbo-bf16-16gb"]
-    assert fixed == ["z-image-turbo-bf16-16gb"]
-    assert any("Repairing" in note for note in notes)
+def test_shared_roots_are_not_registered_or_deleted(monkeypatch, tmp_path):
+    monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
+    shared = shared_dir()
+    for root_name in ("models", "runtime", "voices", "cache"):
+        with pytest.raises(ManifestError):
+            register_component(
+                shared, f"root-{root_name}", kind="model", version="1",
+                path=root_name, sha256=_SHA, app="canvas",
+            )
+    runtime = shared / "runtime" / "py314-torch2.11-cu130"
+    marker = runtime / "py.marker"
+    marker.parent.mkdir(parents=True)
+    marker.write_text("runtime", encoding="utf-8")
+    register_component(
+        shared, "python-3.14", kind="runtime", version="3.14.8",
+        path="runtime/py314-torch2.11-cu130", sha256=_SHA, app="canvas",
+    )
+    assert unregister_app(shared, "canvas") == ["python-3.14"]
+    assert marker.is_file()
 
 
 def test_repair_leaves_an_enlarge_component_alone(monkeypatch, tmp_path):
@@ -354,13 +363,8 @@ def test_repair_leaves_an_enlarge_component_alone(monkeypatch, tmp_path):
         shared_dir(), "z-image-turbo-bf16-16gb", kind="model", version="1",
         path="models/Tongyi-MAI--Z-Image-Turbo", sha256=_SHA, app="enlarge",
     )
-    calls: list[str] = []
-    monkeypatch.setattr(
-        "canvas.models.provision.download_snapshot",
-        lambda spec, root, progress=None: calls.append(spec.id),
-    )
     assert repair(load_catalog(), lambda _note: None) == []
-    assert calls == []
+    assert not (shared_dir() / "models" / "Tongyi-MAI--Z-Image-Turbo").exists()
 
 
 def test_installers_use_the_suite_runtime():
@@ -485,6 +489,14 @@ def test_installers_resolve_numpy_from_pypi_and_pin_cuda_torch():
     assert "$RuntimePy = $RootPy" not in windows
     assert "venv --upgrade $Runtime" not in windows
     assert "venv --upgrade $Venv" in windows
+    assert "Repair-SharedRuntimePackages" in windows
+    assert "Install-SuiteGpuPackages $Base $RuntimeSite" not in windows
+    assert "if (-not (Test-TorchCudaFiles $RuntimeSite))" in windows
+    assert "if (-not $visionOk)" in windows
+    assert "if (-not $gpuOk)" in windows
+    assert "Repairing torch in the suite runtime..." in windows
+    assert "Repairing torchvision in the suite runtime..." in windows
+    assert "Repairing ONNX Runtime in the suite runtime..." in windows
     assert '--index-url "$TORCH_INDEX"' in linux
     assert "--extra-index-url https://pypi.org/simple" in linux
     assert "onnxruntime-gpu==1.31.0" in linux

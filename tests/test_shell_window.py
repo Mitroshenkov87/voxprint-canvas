@@ -10,7 +10,7 @@ import pytest
 pytest.importorskip("PySide6")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QFont, QFontMetrics
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
+    QSlider,
     QSpinBox,
     QWidget,
 )
@@ -27,7 +28,7 @@ from canvas.models.modes import Tier
 from canvas.ui.shell_layout import open_layout
 from canvas.ui.shell_screen import ShellWindow
 from tests.fakes import World
-from voxprint_common.i18n import set_language
+from voxprint_common.i18n import set_language, tr
 from voxprint_common.ui.simple_image import Phase
 
 
@@ -62,6 +63,10 @@ def test_simple_mode_hides_expert_words_and_keeps_picture_tools(app, home: Path)
     assert setup.findChild(QPushButton, "setup-change-pose") is not None
     assert setup.findChild(QPushButton, "setup-change-depth") is not None
     assert setup.findChild(QPushButton, "setup-change-edge") is not None
+    assert setup.findChild(QLabel, "setupTitle") is not None
+    assert setup.findChild(QLabel, "setup-hint-source").text()
+    assert setup.findChild(QLabel, "setup-hint-variation").text()
+    assert setup.findChild(QLabel, "setup-hint-restyle").text()
     assert setup.findChild(QPushButton, "setup-instruction-on") is None
     setup.findChild(QPushButton, "setup-change-inpaint").click()
     assert window.shell.layout.get("canvas.change") == "inpaint"
@@ -166,6 +171,10 @@ def test_mask_and_picture_wizards_open(app, home: Path, tmp_path: Path) -> None:
     mask = window.mask_wizard()
     board = mask.findChild(QWidget, "maskSurface")
     assert board is not None
+    assert mask.findChild(QLabel, "maskTitle") is not None
+    assert mask.findChild(QLabel, "maskHint").text() == text("canvas.mask.hint")
+    slider = mask.findChild(QSlider, "maskSize")
+    assert slider is not None and slider.minimum() < slider.value() < slider.maximum()
     mask.findChild(QPushButton, "maskUse").click()
     assert window._mask is not None
     assert window.shell.layout.get("canvas.change") == "inpaint"
@@ -174,6 +183,74 @@ def test_mask_and_picture_wizards_open(app, home: Path, tmp_path: Path) -> None:
     check = window.diagnostics_wizard()
     assert check.findChild(QPushButton, "checkRun") is not None
     assert check.findChild(QLabel, "checkReport").text() == ""
+
+
+def test_a_finished_picture_keeps_the_result_actions(app, home: Path) -> None:
+    state = home / "state"
+    state.mkdir(parents=True, exist_ok=True)
+    payload = {"schema": 1, "items": [{"id": "pic-01", "prompt": "a red boat", "presets": [], "seed": 3}]}
+    (state / "image-history.json").write_text(json.dumps(payload) + "\n", encoding="utf-8")
+    window = _window(home)
+    labels = [action.text() for action in window.view.history_menu("pic-01").actions()]
+    assert tr("simple.history.delete") in labels
+    assert tr("simple.history.show_folder") in labels
+    window.resize(1280, 800)
+    window.show()
+    window.view._select("pic-01")
+    app.processEvents()
+    bar = window.findChild(QWidget, "actionBar")
+    assert bar is not None and bar.isVisible()
+    for name in ("moreLike", "savePicture", "openFolder", "usePrompt", "useInput", "deletePicture"):
+        button = bar.findChild(QPushButton, name)
+        assert button is not None and button.isVisible() and button.text()
+    result = window.findChild(QLabel, "result")
+    assert result is not None and result.pixmap() is not None and not result.pixmap().isNull()
+
+
+def test_the_badge_names_the_active_preset_until_a_hand_edit(app, home: Path) -> None:
+    window = _window(home)
+    window.resize(1280, 800)
+    window.show()
+    window.set_expert(True)
+    app.processEvents()
+    badge = window.findChild(QLabel, "expertChip")
+    reset = window.findChild(QPushButton, "expertResetAll")
+    assert badge.text() == tr("simple.quality.balanced")
+    assert reset.text() == text("canvas.expert.reset")
+    assert reset.isEnabled() is False
+    window.shell.layout.set_value("shell.steps", 33)
+    window.view.refresh()
+    app.processEvents()
+    assert badge.text() == text("canvas.expert.custom")
+    assert reset.isEnabled() is True
+
+
+def test_russian_buttons_keep_their_full_labels(app, home: Path, monkeypatch) -> None:
+    monkeypatch.setenv("LANG", "ru_RU.UTF-8")
+    monkeypatch.setenv("LC_ALL", "ru_RU.UTF-8")
+    set_language("ru")
+    window = _window(home)
+    window.resize(1280, 800)
+    window.show()
+    window.set_expert(True)
+    app.processEvents()
+    expected = {
+        "chip-quality-balanced": "Сбалансировано",
+        "expertToggle": "Режим эксперта",
+    }
+    for name, words in expected.items():
+        button = window.findChild(QPushButton, name)
+        assert button.text() == words
+        font = QFont(button.font())
+        font.setWeight(QFont.Weight.DemiBold)
+        advance = QFontMetrics(font).horizontalAdvance(words)
+        assert button.width() >= advance + 28
+    setup = window.setup_wizard()
+    assert setup.findChild(QPushButton, "setup-source-words").text() == "описания"
+    assert setup.findChild(QPushButton, "setup-source-picture").text() == "картинки"
+    assert setup.findChild(QPushButton, "setup-variation-varied").text() == "Творчески"
+    mask = window.mask_wizard()
+    assert mask.findChild(QLabel, "maskNeed").text() == text("canvas.mask.need")
 
 
 def test_the_new_screen_does_not_mention_temporary_editing() -> None:

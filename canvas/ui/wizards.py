@@ -5,20 +5,25 @@ from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QImage, QMouseEvent, QPainter, QPaintEvent, QPixmap
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QImage, QMouseEvent, QPainter, QPaintEvent, QPixmap
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
     QDialog,
     QDoubleSpinBox,
     QFileDialog,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
+    QSizePolicy,
+    QSlider,
     QVBoxLayout,
     QWidget,
 )
+
+from canvas.ui.shell_chrome import shell_style
 
 from canvas.app.i18n import text
 from canvas.safety.image import RawImage
@@ -51,32 +56,87 @@ class SetupWizard(QDialog):
         super().__init__(parent)
         self.setObjectName("setupWizard")
         self.setWindowTitle(text("canvas.setup.title"))
+        self.setStyleSheet(shell_style())
+        self.setFixedWidth(520)
         self._on_choose = on_choose
         self._groups: list[QButtonGroup] = []
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(10)
+        title = QLabel(text("canvas.setup.title"))
+        title.setObjectName("setupTitle")
+        layout.addWidget(title)
         for key, options in _SETUP_ROWS:
-            label = QLabel(text(key))
-            label.setObjectName(f"setup-label-{key.rsplit('.', 1)[-1]}")
-            layout.addWidget(label)
-            row = QHBoxLayout()
-            group = QButtonGroup(self)
-            group.setExclusive(True)
-            self._groups.append(group)
-            current = values.get(key, "")
-            for option in options:
-                button = QPushButton(text(f"{key}.{option}"))
-                button.setObjectName(f"setup-{key.rsplit('.', 1)[-1]}-{option}")
-                button.setCheckable(True)
-                button.setChecked(option == current)
-                button.clicked.connect(lambda _checked=False, key=key, option=option: self._pick(key, option))
-                group.addButton(button)
-                row.addWidget(button)
-            row.addStretch(1)
-            layout.addLayout(row)
+            layout.addWidget(self._group(key, options, values.get(key, "")))
         done = QPushButton(text("canvas.setup.done"))
         done.setObjectName("setupDone")
+        _fit_button(done)
         done.clicked.connect(self.accept)
-        layout.addWidget(done)
+        layout.addWidget(done, 0, Qt.AlignmentFlag.AlignLeft)
+
+    def _group(self, key: str, options: tuple[str, ...], current: str) -> QWidget:
+        suffix = key.rsplit(".", 1)[-1]
+        host = QWidget()
+        host.setObjectName(f"setup-group-{suffix}")
+        column = QVBoxLayout(host)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(4)
+        label = QLabel(text(key))
+        label.setObjectName(f"setup-label-{suffix}")
+        column.addWidget(label)
+        group = QButtonGroup(self)
+        group.setExclusive(True)
+        self._groups.append(group)
+        if key == "canvas.change":
+            grid = QGridLayout()
+            grid.setHorizontalSpacing(16)
+            grid.setVerticalSpacing(2)
+            for index, option in enumerate(options):
+                grid.addWidget(
+                    self._option(group, key, suffix, option, current),
+                    index // 2 * 2,
+                    index % 2,
+                    Qt.AlignmentFlag.AlignLeft,
+                )
+                grid.addWidget(
+                    self._hint(f"{key}.{option}.hint", f"setup-hint-{option}"),
+                    index // 2 * 2 + 1,
+                    index % 2,
+                )
+            column.addLayout(grid)
+            return host
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        for option in options:
+            row.addWidget(self._option(group, key, suffix, option, current))
+        row.addStretch(1)
+        column.addLayout(row)
+        column.addWidget(self._hint(f"{key}.help", f"setup-hint-{suffix}"))
+        return host
+
+    def _option(
+        self,
+        group: QButtonGroup,
+        key: str,
+        suffix: str,
+        option: str,
+        current: str,
+    ) -> QPushButton:
+        button = QPushButton(text(f"{key}.{option}"))
+        button.setObjectName(f"setup-{suffix}-{option}")
+        button.setCheckable(True)
+        button.setChecked(option == current)
+        button.clicked.connect(lambda _checked=False, key=key, option=option: self._pick(key, option))
+        group.addButton(button)
+        _fit_button(button)
+        return button
+
+    def _hint(self, key: str, name: str) -> QLabel:
+        hint = QLabel(text(key))
+        hint.setObjectName(name)
+        hint.setProperty("setupHint", True)
+        hint.setWordWrap(True)
+        return hint
 
     def _pick(self, key: str, option: str) -> None:
         self._on_choose(key, option)
@@ -95,6 +155,7 @@ class PictureWizard(QDialog):
         super().__init__(parent)
         self.setObjectName("pictureWizard")
         self.setWindowTitle(text("canvas.picture.title"))
+        self.setStyleSheet(shell_style())
         self._on_use = on_use
         self._path: Path | None = None
         self._preview = QLabel(text("canvas.picture.empty"))
@@ -104,9 +165,11 @@ class PictureWizard(QDialog):
         open_button = QPushButton(text("canvas.picture.open"))
         open_button.setObjectName("pictureOpen")
         open_button.clicked.connect(self._open)
+        _fit_button(open_button)
         use_button = QPushButton(text("canvas.picture.use"))
         use_button.setObjectName("pictureUse")
         use_button.clicked.connect(self._use)
+        _fit_button(use_button)
         row = QHBoxLayout()
         row.addWidget(open_button)
         row.addWidget(use_button)
@@ -158,16 +221,37 @@ class MaskWizard(QDialog):
         super().__init__(parent)
         self.setObjectName("maskWizard")
         self.setWindowTitle(text("canvas.mask.title"))
+        self.setStyleSheet(shell_style())
         self._on_use = on_use
         self._board: _MaskBoard | None = None
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(8)
+        title = QLabel(text("canvas.mask.title"))
+        title.setObjectName("maskTitle")
+        layout.addWidget(title)
         if picture is None:
             note = QLabel(text("canvas.mask.need"))
             note.setObjectName("maskNeed")
             note.setWordWrap(True)
             layout.addWidget(note)
             return
+        hint = QLabel(text("canvas.mask.hint"))
+        hint.setObjectName("maskHint")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
         self._board = _MaskBoard(picture)
+        size_label = QLabel(text("canvas.mask.size"))
+        size_label.setObjectName("maskSizeLabel")
+        slider = QSlider(Qt.Orientation.Horizontal)
+        slider.setObjectName("maskSize")
+        slider.setRange(8, 64)
+        slider.setValue(24)
+        slider.valueChanged.connect(self._board.set_brush_size)
+        self._board.set_brush_size(slider.value())
+        size_row = QHBoxLayout()
+        size_row.addWidget(size_label)
+        size_row.addWidget(slider, 1)
         brush = QPushButton(text("canvas.mask.brush"))
         brush.setObjectName("maskBrush")
         brush.clicked.connect(lambda: self._board.set_eraser(False) if self._board is not None else None)
@@ -181,11 +265,12 @@ class MaskWizard(QDialog):
         use_button.setObjectName("maskUse")
         use_button.clicked.connect(self._use)
         row = QHBoxLayout()
-        row.addWidget(brush)
-        row.addWidget(eraser)
-        row.addWidget(clear)
-        row.addWidget(use_button)
+        for button in (brush, eraser, clear, use_button):
+            _fit_button(button)
+            row.addWidget(button)
+        row.addStretch(1)
         layout.addWidget(self._board, 1)
+        layout.addLayout(size_row)
         layout.addLayout(row)
 
     def _use(self) -> None:
@@ -216,6 +301,7 @@ class AddonsWizard(QDialog):
         super().__init__(parent)
         self.setObjectName("addonsWizard")
         self.setWindowTitle(text("canvas.addons.title"))
+        self.setStyleSheet(shell_style())
         self._on_save = on_save
         notice = QLabel(text("notice.third_party"))
         notice.setObjectName("thirdPartyNotice")
@@ -230,6 +316,7 @@ class AddonsWizard(QDialog):
         save = QPushButton(text("canvas.addons.save"))
         save.setObjectName("addonsSave")
         save.clicked.connect(self._save)
+        _fit_button(save)
         layout = QVBoxLayout(self)
         layout.addWidget(notice)
         layout.addWidget(QLabel(text("canvas.addons.path")))
@@ -262,6 +349,7 @@ class DiagnosticsWizard(QDialog):
         super().__init__(parent)
         self.setObjectName("diagnosticsWizard")
         self.setWindowTitle(text("canvas.check.title"))
+        self.setStyleSheet(shell_style())
         self._on_check = on_check
         self._on_update = on_update
         self._deep = QCheckBox(text("canvas.check.deep"))
@@ -269,9 +357,11 @@ class DiagnosticsWizard(QDialog):
         run = QPushButton(text("canvas.check.run"))
         run.setObjectName("checkRun")
         run.clicked.connect(self._run)
+        _fit_button(run)
         update = QPushButton(text("canvas.check.update"))
         update.setObjectName("checkUpdate")
         update.clicked.connect(self._update)
+        _fit_button(update)
         self._report = QLabel("")
         self._report.setObjectName("checkReport")
         self._report.setWordWrap(True)
@@ -312,6 +402,15 @@ class _MaskBoard(QWidget):
         self._mask.fill(Qt.GlobalColor.transparent)
         self._eraser = False
         self._drawing = False
+        self._diameter = 24
+
+    def set_brush_size(self, diameter: int) -> None:
+        """Set the brush diameter in screen pixels.
+
+        Args:
+            diameter: Width of the stroke on the board.
+        """
+        self._diameter = max(2, int(diameter))
 
     def set_eraser(self, enabled: bool) -> None:
         """Paint with the eraser when ``enabled`` is true.
@@ -366,8 +465,22 @@ class _MaskBoard(QWidget):
         painter = QPainter(self._mask)
         if self._eraser:
             painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
+        scale = self._mask.width() / self.width()
+        radius = max(1, int(self._diameter * scale / 2))
         painter.setBrush(QColor(255, 255, 255, 255))
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawEllipse(x - 6, y - 6, 12, 12)
+        painter.drawEllipse(x - radius, y - radius, radius * 2, radius * 2)
         painter.end()
         self.update()
+
+
+def _fit_button(button: QPushButton) -> None:
+    words = button.text()
+    if not words:
+        return
+    font = QFont(button.font())
+    if button.isCheckable():
+        font.setWeight(QFont.Weight.DemiBold)
+    advance = QFontMetrics(font).horizontalAdvance(words)
+    button.setMinimumWidth(advance + 36)
+    button.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)

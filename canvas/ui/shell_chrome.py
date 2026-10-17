@@ -4,9 +4,9 @@ Colours come from the shared tokens. This module does not invent a palette.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction, QFontMetrics
-from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QPushButton, QSplitter, QVBoxLayout, QWidget
+from PySide6.QtCore import QPoint, QSize, Qt
+from PySide6.QtGui import QAction, QColor, QFont, QFontMetrics, QIcon, QImage, QPainter, QPixmap
+from PySide6.QtWidgets import QComboBox, QLabel, QPushButton, QSizePolicy, QSplitter, QVBoxLayout, QWidget
 
 from voxprint_common.i18n import tr
 from voxprint_common.ui.presets import PresetMatch
@@ -19,6 +19,7 @@ from voxprint_common.ui.theme import (
     PRIMARY_BORDER,
     ROOT_PLAIN,
     TEXT,
+    TEXT_MUTED,
     TEXT_ON_PRIMARY,
     build_shell_style,
 )
@@ -36,8 +37,26 @@ def shell_style() -> str:
 QMainWindow#shell, QWidget#shellColumn, QWidget#simpleRoot, QDialog {{
     background: {ROOT_PLAIN}; color: {TEXT};
 }}
+QDialog#setupWizard, QDialog#pictureWizard, QDialog#maskWizard,
+QDialog#addonsWizard, QDialog#diagnosticsWizard {{
+    background: {CARD_PLAIN}; border: 1px solid {CONTROL_BORDER};
+}}
 QLabel {{
     color: {TEXT}; background: transparent;
+}}
+QLabel#setupHint, QLabel[setupHint="true"], QLabel#maskHint {{
+    color: {TEXT_MUTED};
+}}
+QLabel#setupTitle, QLabel#maskTitle {{
+    font-size: 18px;
+}}
+QSlider::groove:horizontal {{
+    height: 6px; background: {CONTROL_BG};
+    border: 1px solid {CONTROL_BORDER}; border-radius: 3px;
+}}
+QSlider::handle:horizontal {{
+    width: 16px; margin: -6px 0; border-radius: 8px;
+    background: {PRIMARY}; border: 1px solid {PRIMARY_BORDER};
 }}
 QLabel#footer, QLabel#emptyHint, QLabel[presetLabel="true"], QLabel#maskNeed,
 QLabel#thirdPartyNotice, QLabel#picturePreview {{
@@ -132,11 +151,13 @@ def polish(window):
     _output(window)
     _detail(window)
     _mask_button(window)
-    _labels(window)
     _result(window)
+    _thumbs(window)
     if window.view._expert_panel.isVisible():
         _reap(window)
         _status(window)
+    _labels(window)
+    _fit_controls(window)
 
 
 def _toolbar(window, row):
@@ -174,21 +195,23 @@ def _status(window):
     if badge is None:
         row = QWidget()
         row.setObjectName("expertStatus")
-        layout = QHBoxLayout(row)
+        layout = QVBoxLayout(row)
         layout.setContentsMargins(0, 0, 0, 8)
+        layout.setSpacing(6)
         badge = QLabel()
         badge.setObjectName("expertChip")
+        badge.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         reset = QPushButton(text("canvas.expert.reset"))
         reset.setObjectName("expertResetAll")
         reset.clicked.connect(lambda: _reset(window))
-        layout.addWidget(badge)
-        layout.addWidget(reset, 1)
+        layout.addWidget(badge, 0, Qt.AlignmentFlag.AlignLeft)
+        layout.addWidget(reset, 0, Qt.AlignmentFlag.AlignLeft)
         window._expert_badge = badge
         window._expert_reset = reset
         panel_layout.insertWidget(0, row)
-    custom = _custom(window)
-    window._expert_badge.setText(text("canvas.expert.custom") if custom else text("canvas.expert.preset"))
-    window._expert_reset.setEnabled(custom)
+    window._expert_reset.setText(text("canvas.expert.reset"))
+    window._expert_badge.setText(_preset_name(window))
+    window._expert_reset.setEnabled(_custom(window))
 
 
 def _reset(window):
@@ -203,6 +226,20 @@ def _custom(window):
         if status is not None and status.kind is not PresetMatch.EXACT:
             return True
     return False
+
+
+def _preset_name(window):
+    """The quality preset's own name, or Custom after a hand edit."""
+    if _custom(window):
+        return text("canvas.expert.custom")
+    for row in window.shell.layout.rows:
+        if row.row_id != "quality":
+            continue
+        selected = str(window.shell.layout.presets.get("quality", row.default))
+        current = next((choice for choice in row.choices if choice.value == selected), None)
+        if current is not None:
+            return tr(current.label_key)
+    return text("canvas.expert.preset")
 
 
 def _size_menu(window):
@@ -341,7 +378,117 @@ def _result(window):
     bar = window.view.root.findChild(QWidget, "actionBar")
     if bar is None:
         return
-    bar.setVisible(window.shell.layout.phase is not Phase.EMPTY)
+    ready = window.shell.layout.phase is not Phase.EMPTY
+    bar.setVisible(ready)
+    if not ready:
+        return
+    row = bar.layout()
+    if row is None or bar.findChild(QPushButton, "useInput") is not None:
+        return
+    use = QPushButton(tr("simple.history.use_input"))
+    use.setObjectName("useInput")
+    use.clicked.connect(lambda: _history_action(window, "use_input"))
+    delete = QPushButton(tr("simple.history.delete"))
+    delete.setObjectName("deletePicture")
+    delete.clicked.connect(lambda: _history_delete(window))
+    at = _stretch_index(row)
+    row.insertWidget(at, use)
+    row.insertWidget(at + 1, delete)
+
+
+def _history_action(window, action):
+    item_id = window.shell.layout.selected
+    if item_id:
+        window.view._notify_history(action, item_id)
+
+
+def _history_delete(window):
+    item_id = window.shell.layout.selected
+    if item_id:
+        window.view._ask_delete(item_id)
+
+
+def _stretch_index(row):
+    for index in range(row.count()):
+        if row.itemAt(index).spacerItem() is not None:
+            return index
+    return row.count()
+
+
+def _thumbs(window):
+    """Give each history item its own placeholder, so the strip is not one picture repeated."""
+    buttons = sorted(
+        (
+            button
+            for button in window.findChildren(QPushButton)
+            if button.objectName().startswith("thumb-")
+        ),
+        key=lambda button: button.objectName(),
+    )
+    for index, button in enumerate(buttons):
+        button.setIcon(QIcon(_thumb(index)))
+        button.setIconSize(QSize(80, 80))
+
+
+def _thumb(index):
+    image = QImage(80, 80, QImage.Format.Format_RGB32)
+    painter = QPainter(image)
+    kind = index % 6
+    hue = (index * 47) % 360
+    _thumb_scene(painter, kind, hue)
+    painter.end()
+    return QPixmap.fromImage(image)
+
+
+def _thumb_scene(painter, kind, hue):
+    base = QColor.fromHsv(hue, 90, 70)
+    accent = QColor.fromHsv((hue + 40) % 360, 140, 210)
+    light = QColor.fromHsv((hue + 180) % 360, 80, 230)
+    painter.fillRect(0, 0, 80, 80, base)
+    if kind == 0:
+        painter.setBrush(accent)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawEllipse(48, 10, 22, 22)
+        painter.setBrush(QColor.fromHsv(hue, 60, 46))
+        painter.drawPolygon(
+            [QPoint(0, 62), QPoint(28, 34), QPoint(58, 70), QPoint(80, 48), QPoint(80, 80), QPoint(0, 80)]
+        )
+        return
+    if kind == 1:
+        painter.setBrush(QColor.fromHsv(hue, 40, 150))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawEllipse(18, 8, 44, 44)
+        painter.setBrush(accent)
+        painter.drawRoundedRect(22, 48, 36, 28, 8, 8)
+        return
+    if kind == 2:
+        painter.setPen(Qt.PenStyle.NoPen)
+        for left, height, colour in ((6, 48, accent), (24, 62, light), (42, 36, accent), (58, 54, light)):
+            painter.setBrush(colour)
+            painter.drawRect(left, 80 - height, 14, height)
+        return
+    if kind == 3:
+        painter.setBrush(QColor.fromHsv(hue, 50, 40))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRect(0, 52, 80, 28)
+        painter.setBrush(accent)
+        painter.drawEllipse(28, 22, 24, 30)
+        return
+    if kind == 4:
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(accent)
+        painter.drawEllipse(8, 14, 36, 36)
+        painter.setBrush(light)
+        painter.drawEllipse(32, 28, 36, 36)
+        return
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor.fromHsv(hue, 30, 24))
+    painter.drawRect(0, 0, 80, 80)
+    painter.setBrush(light)
+    for spot in ((12, 16), (30, 28), (58, 14), (46, 42), (18, 50), (66, 36)):
+        painter.drawEllipse(spot[0], spot[1], 4, 4)
+    painter.setBrush(accent)
+    painter.drawEllipse(50, 48, 16, 16)
 
 
 def _labels(window):
@@ -360,8 +507,42 @@ def _reserve(widget, pad):
     if not words:
         return
     width = QFontMetrics(widget.font()).horizontalAdvance(words) + pad
-    if widget.minimumWidth() < width:
-        widget.setMinimumWidth(width)
+    widget.setMinimumWidth(width)
+
+
+def _fit_controls(window):
+    """Give every labelled button the width of its text, in this locale."""
+    for button in window.findChildren(QPushButton):
+        if not button.text() or button.objectName().startswith("thumb-"):
+            continue
+        _fit_text(button)
+    badge = getattr(window, "_expert_badge", None)
+    if badge is not None and badge.text():
+        _reserve(badge, 20)
+
+
+def _fit_text(button):
+    words = button.text()
+    font = QFont(button.font())
+    font.setWeight(QFont.Weight.DemiBold)
+    pad = 16
+    if button.objectName() == "generate":
+        font.setPixelSize(16)
+        pad = 22
+    elif button.property("chip") or button.objectName() in {"expertToggle", "useInput", "deletePicture"}:
+        pad = 18
+    elif _in_action_bar(button):
+        pad = 18
+    advance = QFontMetrics(font).horizontalAdvance(words)
+    button.setMinimumWidth(advance + pad * 2)
+    policy = button.sizePolicy()
+    policy.setHorizontalPolicy(QSizePolicy.Policy.Minimum)
+    button.setSizePolicy(policy)
+
+
+def _in_action_bar(button):
+    parent = button.parentWidget()
+    return parent is not None and parent.objectName() == "actionBar"
 
 
 def _reap(window):

@@ -466,11 +466,11 @@
     },
     "canvas.expert.custom": {
       "en": "Custom",
-      "ru": "Свой"
+      "ru": "Свои настройки"
     },
     "canvas.expert.reset": {
       "en": "Reset to preset",
-      "ru": "Вернуть набор"
+      "ru": "Сбросить к пресету"
     },
     "canvas.setup.title": {
       "en": "Picture setup",
@@ -519,6 +519,14 @@
     "canvas.mask.need": {
       "en": "Open a picture first.",
       "ru": "Сначала откройте картинку."
+    },
+    "canvas.mask.hint": {
+      "en": "Paint the area that should change.",
+      "ru": "Закрасьте область, которую нужно изменить"
+    },
+    "canvas.mask.size": {
+      "en": "Brush size",
+      "ru": "Размер кисти"
     },
     "canvas.addons.title": {
       "en": "Add-ons",
@@ -585,16 +593,16 @@
       "ru": "Начать с"
     },
     "canvas.source.words": {
-      "en": "Words",
-      "ru": "Слова"
+      "en": "A description",
+      "ru": "описания"
     },
     "canvas.source.picture": {
       "en": "A picture",
-      "ru": "Картинка"
+      "ru": "картинки"
     },
     "canvas.source.help": {
-      "en": "Choose words or a picture.",
-      "ru": "Выберите слова или картинку."
+      "en": "A description starts from words. A picture starts from an image you choose.",
+      "ru": "Описания начинают с текста. Картинки — с выбранного изображения."
     },
     "canvas.variation": {
       "en": "Variation",
@@ -605,12 +613,12 @@
       "ru": "Быстро"
     },
     "canvas.variation.varied": {
-      "en": "More varied",
-      "ru": "Больше разнообразия"
+      "en": "Creative",
+      "ru": "Творчески"
     },
     "canvas.variation.help": {
-      "en": "How much the picture can change.",
-      "ru": "Насколько картинка может отличаться."
+      "en": "Quick is faster. Creative tries more ideas.",
+      "ru": "Быстро заканчивает раньше. Творчески пробует больше идей."
     },
     "canvas.change": {
       "en": "Change",
@@ -633,16 +641,40 @@
       "ru": "Повторить позу"
     },
     "canvas.change.depth": {
-      "en": "Use a depth map",
-      "ru": "Использовать карту глубины"
+      "en": "Depth map",
+      "ru": "Карта глубины"
     },
     "canvas.change.edge": {
-      "en": "Use the edges",
-      "ru": "Использовать контуры"
+      "en": "Outlines",
+      "ru": "Контуры"
     },
     "canvas.change.help": {
       "en": "What to change in the picture.",
       "ru": "Что изменить в картинке."
+    },
+    "canvas.change.restyle.hint": {
+      "en": "Redraws the picture in a new look.",
+      "ru": "Перерисовывает картинку в новом виде."
+    },
+    "canvas.change.inpaint.hint": {
+      "en": "Paints over one area and replaces it.",
+      "ru": "Закрашивает область и заменяет её."
+    },
+    "canvas.change.outpaint.hint": {
+      "en": "Grows the picture past its edges.",
+      "ru": "Продолжает картинку за её края."
+    },
+    "canvas.change.pose.hint": {
+      "en": "Keeps the pose from the picture.",
+      "ru": "Повторяет позу с картинки."
+    },
+    "canvas.change.depth.hint": {
+      "en": "Follows what is near and what is far.",
+      "ru": "Повторяет ближнее и дальнее."
+    },
+    "canvas.change.edge.hint": {
+      "en": "Follows the outlines in the picture.",
+      "ru": "Повторяет контуры картинки."
     },
     "canvas.format": {
       "en": "File type",

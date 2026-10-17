@@ -9,13 +9,13 @@ Status is `done`, `TODO`, `NEEDS OWNER DECISION`, `pending Yitro`, or `removed (
 | --- | --- | --- | --- |
 | App name | Window title | Simple title | done |
 | About | About button | Overflow Settings opens About | done |
-| Start from words | Text tab | More, then Picture setup: Words | done |
+| Start from words | Text tab | More, then Picture setup: A description | done |
 | img2img (restyle) | Image tab, Restyle | More, then Picture setup: Restyle, plus Use a picture | done |
 | inpaint | Image tab, Inpaint; `generate --mask` | More, then Picture setup: Paint over. Edit the mask appears after a picture is chosen | done |
 | Extend | Image tab, Outpaint | More, then Picture setup: Extend, plus the mask editor | done |
 | structure guidance, pose | Image tab, Pose | More, then Picture setup: Copy the pose, plus Use a picture | done |
-| structure guidance, depth | Image tab, Depth | More, then Picture setup: Use a depth map, plus Use a picture | done |
-| structure guidance, edges | Image tab, Edge | More, then Picture setup: Use the edges, plus Use a picture | done |
+| structure guidance, depth | Image tab, Depth | More, then Picture setup: Depth map, plus Use a picture | done |
+| structure guidance, edges | Image tab, Edge | More, then Picture setup: Outlines, plus Use a picture | done |
 | Instruction editing | Image tab; `generate --edit-instruction` | removed (owner decision 2026-10-17) | removed (owner decision 2026-10-17) |
 | Prompt | Prompt box | Simple prompt | done |
 | Improve prompt | Enhance | Simple Improve prompt, same field | done |
@@ -32,11 +32,11 @@ Status is `done`, `TODO`, `NEEDS OWNER DECISION`, `pending Yitro`, or `removed (
 | In-app model download | Download question | More, then Manage models (MDL) | done |
 | Splash | Startup splash | Startup splash | done |
 | Quick picture | Text mode | More, then Picture setup: Quick | done |
-| More varied picture | Creative mode on 24 GB | More, then Picture setup: More varied | done |
+| More varied picture | Creative mode on 24 GB | More, then Picture setup: Creative | done |
 | Look | (styles were not a separate control) | Simple Look chips | done |
 | How many pictures | (not on the old window) | Simple count chips, 1 / 2 / 4 | done |
 | Light, medium, strong | (not a separate old control) | Shown on the Output row only when 4K is chosen | done |
-| History | (not on the old window) | Simple history strip | done |
+| History | (not on the old window) | Simple history strip. A finished picture shows More like this, Save, Open folder, Use prompt again, Use as input, and Delete. Each history item's menu still has Open folder and Delete | done |
 | Steps, guidance, seed, sampler, negative prompt | (not on the old window) | Expert panel | done |
 | VRAM cap | `--vram-cap-gb` | Expert VRAM limit, and the command | done |
 | Adult content | (not on the old window) | Expert. It changes only the prompt policy | done |

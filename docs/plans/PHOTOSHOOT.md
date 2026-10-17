@@ -4,11 +4,11 @@
 
 **Goal:** Add Photoshoot («Фотосессия») as an extended mode of Improve prompt. The user writes the idea in the normal prompt field. One primary action writes the scenario, checks it, and generates 6, 12, or 20 pictures of one subject.
 
-**Architecture:** «Фотосессия» is a selected option beside «Улучшить запрос», not a panel the user assembles. Generate stays the only primary button. It asks Qwen3-4B, the Z-Image text encoder already used by Improve prompt, for a JSON scenario, copies a fixed subject block into every shot, runs the existing gate, and generates the series one frame at a time. Simple mode shows that shot list read-only beside the progress grid. A hero frame plus moderate img2img is the consistency path. No new model pack, no InsightFace, no training, and no Qwen-Image-Edit.
+**Architecture:** «Фотосессия» is a selected option beside «Улучшить запрос». While it is selected, the shell Create button is hidden and the panel's Create button is the only primary. That button asks Qwen3-4B, the Z-Image text encoder already used by Improve prompt, for a JSON scenario, copies a fixed subject block into every shot, runs the existing gate, and generates the series one frame at a time. There is no manual scenario step. Simple rows show the shot text, a drag handle, and one menu. The camera field stays in Expert. A hero frame plus img2img at strength 0.45 is the consistency path. No new model pack, no InsightFace, no training, and no Qwen-Image-Edit.
 
 **Tech Stack:** PySide6 shell on `ui/shell-migration`, `voxprint-common` simple screen (pin `f4e95cc`), diffusers 0.41.0, Z-Image-Turbo BF16 (`Tongyi-MAI/Z-Image-Turbo` `f332072`), Qwen3-4B causal LM via tied embeddings.
 
-Aleksandr, via Suite Lead: «Фотосессия создается автоматически через расширенный режим автоулучшения». Whether this joins the first release remains Aleksandr's decision.
+Aleksandr, via Suite Lead: «Фотосессия создается автоматически через расширенный режим автоулучшения». Aleksandr, via Suite Lead: «Фотосессию включаем в первый релиз». The feature is its own pull request, based on `ui/shell-migration`, and it must not block that shell pull request. Rebase it onto `main` after the shell pull request merges.
 
 ## Global Constraints
 
@@ -18,7 +18,7 @@ Aleksandr, via Suite Lead: «Фотосессия создается автом�
 - The Adult content switch only changes the prompt policy, as it does everywhere else.
 - A reference photo of a real person is out of scope for v1.
 - Simple mode is not a sparse form. While Photoshoot is selected, the screen shows 2–5 everyday preset rows, each with a visible selected chip. Fine technical parameters stay in Expert.
-- There is one primary action. Generate («Создать» / "Generate") writes the scenario and creates the series. There is no «Составить сценарий» step and no second primary button.
+- There is one primary action. While Photoshoot is open, the shell Create button is hidden. The panel Create button («Создать» / "Generate") writes the scenario and creates the series. There is no «Составить сценарий» step.
 - New user-facing strings live in the Canvas i18n catalogs `canvas/ui/locales/en.json` and `canvas/ui/locales/ru.json`. Reused shell strings stay in `voxprint-common`.
 - Z-Image weights stay BF16 on both tiers. The 16 GB FP8 generator is not a shipping path.
 
@@ -44,7 +44,7 @@ While the option is selected, the shell picture-count chips (`simple.count`, 1 /
 
 ### One action
 
-«Создать» / "Generate" is the only primary button. With Photoshoot selected it does all of this, in order, without a confirmation screen:
+While Photoshoot is selected, the shell Create button is hidden. The panel's «Создать» / "Generate" is the only primary button. It does all of this, in order, without a confirmation screen:
 
 1. Gate the idea. A block stops the series. The idea is not rewritten.
 2. Ask the enhancer for the scenario and the shot lines.
@@ -55,13 +55,13 @@ Cancel (`simple.cancel`) is visible during that whole run. Cancel stops before t
 
 ### Shot list during the run
 
-The generated lines appear as soon as the scenario is accepted, in a read-only list beside the progress grid (above it when the stage is narrow). Simple rows are plain. They show the subject block, the place, the scene, and the pose. They do not show a lens, a millimetre value, or an angle. A row has no drag handle and no menu.
+The generated lines appear as soon as the scenario is accepted, beside the progress grid (above it when the stage is narrow). The shot text comes first. Each simple row has a drag handle and one `⋯` menu. The row shows the subject block, the place, the scene, and the pose. It does not show a lens, a millimetre value, or an angle.
 
 Example, simple Russian row: «Жёлтый керамический чайник с синей ручкой, кухонный стол, крупно».
 
 The progress line is «Кадр {current} из {total}». The five preset rows stay visible and frozen, with the same selected chips. The grid fills one cell at a time.
 
-These actions stay visible on the progress screen, not behind Expert. They are plain buttons. Generate is the only primary, and it is disabled while the run is busy.
+These actions stay visible on the progress screen, not behind Expert. They are plain buttons. The panel Create button is the only primary, and it is disabled while the run is busy. The shell Create button stays hidden.
 
 - Cancel (`simple.cancel`)
 - Open the series folder (`photoshoot.folder`)
@@ -318,13 +318,13 @@ A reference photo of a real person is out of scope for v1. **NEEDS OWNER DECISIO
 
 Expert keeps the fine controls. Count, style, and place stay on the simple rows because a simple screen needs 2–5 preset rows and those choices are plain words.
 
-The shot list becomes editable only in Expert. Each row has a drag handle and one `⋯` menu: Edit (`photoshoot.shot.edit`), Duplicate (`photoshoot.shot.duplicate`), Delete (`simple.history.delete`). The camera field (`photoshoot.expert.camera`) is on the row, for example "50 mm, three-quarter angle". Simple rows do not show that field. Edits apply to a shot that has not started. The series does not pause for them.
+Each row shows the shot text first, then a drag handle and one `⋯` menu: Edit (`photoshoot.shot.edit`), Duplicate (`photoshoot.shot.duplicate`), Delete (`simple.history.delete`). Those controls are on the simple rows. The camera field (`photoshoot.expert.camera`) is Expert only, for example "50 mm, three-quarter angle". Edits apply to a shot that has not started. The series does not pause for them.
 
 Stays in Expert:
 
 | Control | Values | Notes |
 | --- | --- | --- |
-| Shot row | Drag handle, `⋯` menu | Edit, duplicate, delete. Hidden in simple mode. |
+| Shot row | Drag handle, `⋯` menu | Edit, duplicate, delete. Shown in simple mode. The shot text comes first. |
 | Camera | Free text | Lens and angle, such as "50 mm". Hidden in simple mode. Omitted from the simple prompt. |
 | Seed | In order, Same seed, Random | Default In order. Same seed does not lock identity. See section 3. |
 | How close | Looser 0.65, Usual 0.45, Closer 0.30 | Img2img strength. Hidden in simple mode, which uses 0.45. |
@@ -344,20 +344,20 @@ The per-shot style override is the expert form of style. The series-wide style i
 
 ## 7. Effort and recommendation
 
-Whether Photoshoot joins the first release remains Aleksandr's decision. The flow above is the one to build. Do not build the older separate panel, the manual «Составить сценарий» step, or a simple-mode shot editor.
+Aleksandr included Photoshoot in the first release. Build it on its own branch from `ui/shell-migration`. Do not block the shell pull request, and rebase onto `main` only after that pull request merges. Do not build a manual «Составить сценарий» step. The simple rows keep the drag handle and the one menu. The camera field stays in Expert. The hero frame uses the existing img2img path at strength 0.45.
 
 The shell is still mid-migration (`pending Yitro` in `docs/ui/FEATURE-MAP.md` for the image surface and the live expert settings). History has no series fields. The safety wiring has to be right before a batch of pictures of a person can run. The expensive parts are the scenario validator, the batch loop with Cancel, the series folder, and the gate on every text and every frame. The preset rows are part of that screen, not a later polish, because a sparse form would fail the suite rule.
 
 ### Minimal version
 
-- The Photoshoot option on the Improve row, the five preset rows, and Generate as the only primary
+- The Photoshoot option on the Improve row, the five preset rows, and one panel Create button while the shell Create button is hidden
 - Automatic scenario, then the gate, then the series, with Cancel
-- Read-only plain shot list beside the progress grid
+- Shot text first, with a drag handle and one menu, beside the progress grid. The camera field stays in Expert
 - Scenario JSON, verbatim subject block, place-mode check, and the gate order in section 5
 - Text-to-image with the subject block on every line, then the hero frame and img2img at 0.45
 - Series folder, `series.json`, and history items. Strip grouping waits on `voxprint-common` if the writer cannot store `series_id`
 - Overview sheet and ZIP of the kept frames
-- Expert: drag handle, `⋯` menu, camera field, seed, strength, per-shot shape, and per-shot style
+- Expert: camera field, seed, strength, per-shot shape, and per-shot style. The drag handle and the menu are already on the simple rows
 
 Consistency of the subject block alone is low for faces and moderate for a distinctive object. With the hero frame it is a rough likeness. The UI must not call it a matched identity.
 
@@ -365,8 +365,8 @@ Consistency of the subject block alone is low for faces and moderate for a disti
 
 - Create `canvas/pipeline/photoshoot.py` for the prompt, the JSON types, and the validator
 - Create `canvas/pipeline/series.py` for the one-frame loop, Cancel, the folder, the overview sheet, and the ZIP
-- Create `canvas/ui/photoshoot_bar.py` for the option, the chips, and the read-only list
-- Modify `canvas/ui/shell_screen.py` so Generate runs the series when the option is selected
+- Create `canvas/ui/photoshoot_bar.py` for the option, the chips, the shot rows, and the panel Create button
+- Modify `canvas/ui/shell_screen.py` so the panel Create button runs the series when the option is selected
 - Modify `canvas/ui/locales/en.json` and `ru.json` with the table in section 1
 - Test `tests/test_photoshoot.py`: ages copied, a dropped age discards the shot, a blocked idea or scenario stops the series, a blocked frame does not rewrite the line, place mode, the 6–20 bounds, and simple lines omit the camera
 
@@ -381,4 +381,4 @@ Static Qt mock, 1280×800, offscreen, shared dark tokens from `voxprint-common` 
 - `docs/plans/photoshoot/photoshoot-progress-ru.png`
 - `docs/plans/photoshoot/photoshoot-progress-en.png`
 
-The ready screen shows the idea in the normal prompt field, «Фотосессия» selected beside Improve prompt, the five rows with 6, Photo, and Same place selected, and Generate as the only primary. The progress screen shows the same rows frozen, a read-only plain shot list beside the grid, Cancel, and the folder, overview sheet, and ZIP actions. Simple rows have no drag handle, no `⋯` menu, and no lens text.
+The pictures in this folder are the earlier static mock. The shipping screens, grabbed at 1280×800 from a fresh window, are `docs/ui/screens/photoshoot-ready-en.png`, `photoshoot-ready-ru.png`, `photoshoot-progress-en.png`, and `photoshoot-progress-ru.png` on the feature branch. On those screens the shell Create button is hidden, the panel Create button is the only primary, simple rows show the shot text, a drag handle, and one menu, and the camera field stays in Expert.

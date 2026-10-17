@@ -16,7 +16,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PIL import Image, ImageDraw
 from PySide6.QtCore import QSize
 from PySide6.QtGui import QColor, QPainter
-from PySide6.QtWidgets import QApplication, QComboBox, QLabel, QProgressBar, QPushButton, QSpinBox, QWidget
+from PySide6.QtWidgets import QApplication, QComboBox, QLabel, QLineEdit, QProgressBar, QPushButton, QSpinBox, QWidget
 
 from canvas.models.modes import Tier
 from canvas.ui.shell_layout import open_layout
@@ -270,6 +270,126 @@ def _pixel(image, x: int, y: int) -> tuple[int, int, int]:
 
 def _distance(one: tuple[int, int, int], other: tuple[int, int, int]) -> int:
     return abs(one[0] - other[0]) + abs(one[1] - other[1]) + abs(one[2] - other[2])
+
+
+def photoshoot_shots(destination: Path) -> None:
+    """Write fresh EN and RU Photoshoot shots at 1280×800.
+
+    Args:
+        destination: Directory for ``photoshoot-ready-*.png`` and ``photoshoot-progress-*.png``.
+    """
+    destination.mkdir(parents=True, exist_ok=True)
+    existing = QApplication.instance()
+    app = existing if isinstance(existing, QApplication) else QApplication([])
+    ideas = {
+        "en": "Yellow ceramic teapot with a blue handle",
+        "ru": "Жёлтый чайник с синей ручкой",
+    }
+    for language, idea in ideas.items():
+        os.environ["LANG"] = "ru_RU.UTF-8" if language == "ru" else "en_US.UTF-8"
+        os.environ["LC_ALL"] = os.environ["LANG"]
+        set_language(language)
+        home = Path(tempfile.mkdtemp(prefix=f"photoshoot-shot-{language}-"))
+        os.environ["VOXPRINT_HOME"] = str(home)
+        ready = _photoshoot_window(home / "ready", idea)
+        _save_photoshoot(app, ready, destination / f"photoshoot-ready-{language}.png", progress=False)
+        ready.close()
+        progress = _photoshoot_window(home / "progress", idea)
+        _run_progress(app, progress, idea, destination / f"photoshoot-progress-{language}.png")
+        progress.close()
+
+
+def _photoshoot_window(state: Path, idea: str) -> ShellWindow:
+    state.mkdir(parents=True, exist_ok=True)
+    shell = open_layout(state, gate=World().gate(), enlarge_installed=False)
+    window = ShellWindow(shell, tier=Tier.GB16, enlarge=object(), runner=lambda *_args: rgb(), improver=lambda prompt: prompt)
+    window.view.set_prompt_text(idea)
+    return window
+
+
+def _save_photoshoot(app: QApplication, window: ShellWindow, path: Path, *, progress: bool) -> None:
+    window.setFixedSize(SHOT)
+    window.show()
+    mode = window.findChild(QPushButton, "photoshootMode")
+    if mode is None:
+        raise SystemExit(f"{path.name} is missing Photoshoot")
+    mode.click()
+    app.processEvents()
+    _expect_photoshoot(window, path.name, progress=progress)
+    _check(window, path.name)
+    shot = window.grab()
+    if shot.size() != SHOT:
+        raise SystemExit(f"{path.name} is {shot.width()}x{shot.height()}")
+    shot.save(str(path))
+
+
+def _run_progress(app: QApplication, window: ShellWindow, idea: str, path: Path) -> None:
+    import canvas.ui.photoshoot_run as photoshoot_run
+
+    photoshoot_run.selectable = lambda: (object(),)
+    calls = {"n": 0}
+
+    def runner(job, inputs):
+        del job, inputs
+        calls["n"] += 1
+        if calls["n"] == 2:
+            _save_mid_series(app, window, path)
+        return rgb()
+
+    window._runner = runner
+    window.photoshoot.writer = lambda _prompt: _scenario(idea)
+    window.setFixedSize(SHOT)
+    window.show()
+    window.findChild(QPushButton, "photoshootMode").click()
+    app.processEvents()
+    window.findChild(QPushButton, "photoshootCreate").click()
+    app.processEvents()
+    if calls["n"] < 2 or not path.is_file():
+        raise SystemExit(f"{path.name} was not saved during the series")
+
+
+def _save_mid_series(app: QApplication, window: ShellWindow, path: Path) -> bool:
+    if path.is_file():
+        return True
+    app.processEvents()
+    _expect_photoshoot(window, path.name, progress=True)
+    _check(window, path.name)
+    shot = window.grab()
+    if shot.size() != SHOT:
+        raise SystemExit(f"{path.name} is {shot.width()}x{shot.height()}")
+    shot.save(str(path))
+    return True
+
+
+def _expect_photoshoot(window: ShellWindow, name: str, *, progress: bool) -> None:
+    generate = window.findChild(QPushButton, "generate")
+    primary = window.findChild(QPushButton, "photoshootCreate")
+    if generate is None or generate.isVisible():
+        raise SystemExit(f"{name} still shows the shell Create button")
+    if primary is None or not primary.isVisible():
+        raise SystemExit(f"{name} is missing the panel Create button")
+    if not window.findChild(QPushButton, "chip-photoshoot-count-6").isChecked():
+        raise SystemExit(f"{name} does not select 6 shots")
+    if progress:
+        if not window.findChild(QPushButton, "photoshootCancel").isVisible():
+            raise SystemExit(f"{name} is missing Cancel")
+        cameras = [item for item in window.findChildren(QLineEdit, "photoshootCamera") if item.isVisible()]
+        if cameras:
+            raise SystemExit(f"{name} shows the camera in simple mode")
+        if not any(item.isVisible() for item in window.findChildren(QPushButton, "photoshootHandle")):
+            raise SystemExit(f"{name} is missing the drag handle")
+        sheet = window.findChild(QPushButton, "photoshootSheet")
+        if sheet is None or sheet.text() not in {"Overview sheet", "Обзорный лист"}:
+            raise SystemExit(f"{name} is missing the overview sheet")
+
+
+def _scenario(idea: str) -> str:
+    shots = []
+    scenes = ["close view", "three-quarter view", "from above", "from the side", "by the window", "among cups"]
+    for scene in scenes:
+        shots.append({"scene": scene, "pose": "still", "camera": "50 mm", "place": "kitchen table"})
+    body = {"subject_block": idea, "descriptors": [idea], "place": "kitchen table", "shots": shots}
+    return json.dumps(body)
 
 
 if __name__ == "__main__":

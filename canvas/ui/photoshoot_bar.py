@@ -1,7 +1,8 @@
 """Photoshoot controls on the shared simple screen.
 
-The option sits beside Improve prompt. The shot list is read-only until Expert
-is on. Generate stays the only primary button.
+The option sits beside Improve prompt. While it is on, the shell Create button
+is hidden and the panel's Create button is the only primary action. Camera
+detail stays in Expert. The drag handle and the one menu stay on every row.
 """
 from __future__ import annotations
 
@@ -24,7 +25,17 @@ from PySide6.QtWidgets import (
 
 from voxprint_common.i18n import tr
 from voxprint_common.ui.simple_image import Phase
-from voxprint_common.ui.theme import CARD_PLAIN, CONTROL_BG, CONTROL_BORDER, TEXT
+from voxprint_common.ui.theme import (
+    CARD_PLAIN,
+    CONTROL_BG,
+    CONTROL_BORDER,
+    PRIMARY,
+    PRIMARY_BORDER,
+    PRIMARY_DISABLED_BG,
+    PRIMARY_DISABLED_TEXT,
+    TEXT,
+    TEXT_ON_PRIMARY,
+)
 
 from canvas.pipeline.photoshoot import Shot, assemble_line
 
@@ -37,6 +48,7 @@ class ShotRow:
     plain: str
     started: bool
     status: str
+    editing: bool
     widget: QWidget
     label: QLabel
     editor: QLineEdit
@@ -61,6 +73,7 @@ class PhotoshootBar:
         self.seed_mode = "series"
         self.strength = "medium"
         self.writer = None
+        self._stop = False
         self.rows: list[ShotRow] = []
         self.subject = ""
         self.folder = None
@@ -77,7 +90,7 @@ class PhotoshootBar:
             index: Row index in the current list.
         """
         row = self.rows[index]
-        text = row.editor.text().strip() if self._expert() else row.plain
+        text = row.editor.text().strip() if self._expert() or row.editing else row.plain
         camera = row.camera.text().strip()
         if self._expert() and camera:
             return f"{text}, {camera}" if text else camera
@@ -153,6 +166,11 @@ class PhotoshootBar:
         busy = self.window.shell.layout.phase is Phase.BUSY
         for button in self._mode_buttons:
             button.setEnabled(not busy)
+        shell_generate = self.window.findChild(QPushButton, "generate")
+        if shell_generate is not None:
+            shell_generate.setVisible(not self.enabled)
+        self.primary.setVisible(self.enabled)
+        self.primary.setEnabled(self.enabled and not busy)
         self.board.setVisible(self._showing)
         stack = getattr(self.window.view, "_stack", None)
         if stack is not None:
@@ -161,18 +179,19 @@ class PhotoshootBar:
         self.sync_expert(self._expert())
 
     def sync_expert(self, enabled: bool) -> None:
-        """Show the drag handle, menu, and camera only in Expert.
+        """Show the camera field only in Expert. The handle and menu stay.
 
         Args:
             enabled: True when Expert mode is on.
         """
         self._expert_row.setVisible(enabled and self.enabled)
         for row in self.rows:
-            row.handle.setVisible(enabled)
-            row.menu.setVisible(enabled)
+            row.handle.setVisible(True)
+            row.menu.setVisible(True)
             row.camera.setVisible(enabled)
-            row.editor.setVisible(enabled)
-            row.label.setVisible(not enabled)
+            editing = enabled or row.editing
+            row.editor.setVisible(editing)
+            row.label.setVisible(not editing)
 
     def _expert(self) -> bool:
         return bool(self.window._expert.enabled())
@@ -287,6 +306,18 @@ class PhotoshootBar:
             line.addWidget(button)
         line.addStretch(1)
         column.addWidget(host)
+        self.primary = QPushButton(tr("simple.generate"))
+        self.primary.setObjectName("photoshootCreate")
+        self.primary.setAutoDefault(False)
+        self.primary.setMinimumHeight(44)
+        self.primary.setStyleSheet(
+            f"QPushButton#photoshootCreate {{ background: {PRIMARY}; color: {TEXT_ON_PRIMARY}; "
+            f"border: 1px solid {PRIMARY_BORDER}; font-weight: 600; padding: 8px 22px; border-radius: 8px; }}"
+            f"QPushButton#photoshootCreate:disabled {{ background: {PRIMARY_DISABLED_BG}; "
+            f"color: {PRIMARY_DISABLED_TEXT}; }}"
+        )
+        self.primary.clicked.connect(self.window.view._generate)
+        column.addWidget(self.primary)
         return host
 
     def _expert_button(self, name: str, key: str, checked: bool) -> QPushButton:
@@ -351,7 +382,7 @@ class PhotoshootBar:
         self.cancel = QPushButton(tr("simple.cancel"))
         self.cancel.setObjectName("photoshootCancel")
         self.cancel.setAutoDefault(False)
-        self.cancel.clicked.connect(self.window.shell.layout.cancel)
+        self.cancel.clicked.connect(self.cancel_series)
         footer.addWidget(self.folder_button)
         footer.addWidget(self.sheet)
         footer.addWidget(self.zip_button)
@@ -394,8 +425,9 @@ class PhotoshootBar:
         widget = QWidget()
         line = QHBoxLayout(widget)
         line.setContentsMargins(0, 0, 0, 0)
-        handle = QPushButton(tr("photoshoot.handle"))
+        handle = QPushButton(tr("photoshoot.handle.glyph"))
         handle.setObjectName("photoshootHandle")
+        handle.setToolTip(tr("photoshoot.handle"))
         handle.setAutoDefault(False)
         handle.setProperty("chip", True)
         handle.released.connect(lambda button=handle: self._drop(button))
@@ -418,7 +450,7 @@ class PhotoshootBar:
         line.addWidget(camera)
         layout = self._list_host.layout()
         layout.insertWidget(max(0, layout.count() - 1), widget)
-        self.rows.append(ShotRow(shot, plain, False, "waiting", widget, label, editor, camera, handle, menu))
+        self.rows.append(ShotRow(shot, plain, False, "waiting", False, widget, label, editor, camera, handle, menu))
         self.sync_expert(self._expert())
 
     def _drop(self, handle: QPushButton) -> None:
@@ -436,10 +468,17 @@ class PhotoshootBar:
         if index < 0 or self.rows[index].started:
             return
         menu = QMenu(button)
-        menu.addAction(tr("photoshoot.shot.edit"), lambda: self.rows[index].editor.setFocus())
+        menu.addAction(tr("photoshoot.shot.edit"), lambda: self._edit(index))
         menu.addAction(tr("photoshoot.shot.duplicate"), lambda: self._duplicate(index))
         menu.addAction(tr("simple.history.delete"), lambda: self._delete(index))
         menu.exec(button.mapToGlobal(button.rect().bottomLeft()))
+
+    def _edit(self, index: int) -> None:
+        if index < 0 or index >= len(self.rows) or self.rows[index].started:
+            return
+        self.rows[index].editing = True
+        self.sync_expert(self._expert())
+        self.rows[index].editor.setFocus()
 
     def _duplicate(self, index: int) -> None:
         if len(self.rows) >= 20 or self.rows[index].started:
@@ -477,6 +516,11 @@ class PhotoshootBar:
             name = widget.objectName()
             if name == f"preset-{row_id}" or name.startswith(f"chip-{row_id}-") or name.startswith(f"reset-{row_id}"):
                 widget.setVisible(visible)
+
+    def cancel_series(self) -> None:
+        """Stop after the frame that already finished. Finished frames stay."""
+        self._stop = True
+        self.window.shell.layout.cancel()
 
     def _open_folder(self) -> None:
         _open_path(self.folder)

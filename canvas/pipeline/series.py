@@ -8,8 +8,9 @@ import zlib
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, Protocol, assert_never
+from typing import Literal, assert_never
 
+from canvas.app.i18n import text
 from canvas.pipeline.enhance import stated_ages
 from canvas.pipeline.photoshoot import (
     PlaceMode,
@@ -21,17 +22,10 @@ from canvas.pipeline.photoshoot import (
     scenario_request,
     validate_scenario,
 )
+from canvas.safety.gate import AgeGate, SafetyError
+from canvas.safety.image import RawImage, SafeImage
 
 StopCode = Literal["", "idea", "scenario", "cancelled"]
-
-
-class _Pixels(Protocol):
-    width: int
-    height: int
-    data: bytes
-
-    def to_bytes(self) -> bytes:
-        """RGB bytes, three per pixel."""
 
 
 @dataclass(frozen=True)
@@ -54,9 +48,8 @@ def run_series(
     strength: float,
     include_camera: Callable[[], bool],
     rewrite: Callable[[str], str],
-    review_prompt: Callable[[str], str | None],
+    age_gate: AgeGate,
     generate: Callable[[str, int, object | None, float], object | None],
-    review_image: Callable[[object, str], str | None],
     cancelled: Callable[[], bool],
     folder: Path,
     on_scenario: Callable[[Scenario], None] | None = None,
@@ -77,9 +70,8 @@ def run_series(
         strength: Img2img strength for shots after the hero.
         include_camera: True when Expert keeps the camera clause on the line.
         rewrite: One language-model call. The argument is the user message.
-        review_prompt: None when the text may continue, otherwise a sentence.
+        age_gate: The minors gate. ``review_prompt`` and ``review_image`` are called by name.
         generate: Returns pixels, or None when that frame is blocked.
-        review_image: None when the pixels may be kept.
         cancelled: True when the user has cancelled.
         folder: Series directory. Created only after the scenario is accepted.
         on_scenario: Shows the accepted shots before the first frame.
@@ -92,14 +84,14 @@ def run_series(
     request = scenario_request(idea, count, style, mode)
     if request is None:
         return SeriesResult("scenario", "", (), None)
-    reason = review_prompt(idea)
+    reason = _refuse_prompt(age_gate, idea)
     if reason:
         return SeriesResult("idea", reason, (), None)
     scenario = _scenario(idea, count, mode, request, rewrite)
     if scenario is None or len(scenario.shots) < 6:
         return SeriesResult("scenario", "", (), None)
     lines = [assemble_line(scenario.subject_block, shot, include_camera=True) for shot in scenario.shots]
-    reason = review_prompt("\n".join(lines))
+    reason = _refuse_prompt(age_gate, "\n".join(lines))
     if reason:
         return SeriesResult("scenario", reason, (), None)
     if on_scenario is not None:
@@ -123,19 +115,25 @@ def run_series(
             blocked.append(index)
             _status(on_status, index, "blocked")
             continue
-        shot_reason = review_prompt(line)
+        shot_reason = _refuse_prompt(age_gate, line)
         if shot_reason:
             blocked.append(index)
             _status(on_status, index, "blocked")
             continue
         _status(on_status, index, "drawing")
+        if cancelled():
+            _write_meta(folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept)
+            return SeriesResult("cancelled", "", tuple(kept), folder)
         image = generate(line, seed + index, hero, strength)
-        if image is None or review_image(image, line):
+        width = 0 if image is None else image.width
+        height = 0 if image is None else image.height
+        pixels = None if image is None else _released_frame(age_gate, image, line)
+        if pixels is None:
             blocked.append(index)
             _status(on_status, index, "blocked")
             continue
         path = folder / f"{index + 1:02}.png"
-        _write_png(path, image.width, image.height, image.to_bytes())
+        _write_png(path, width, height, pixels)
         kept.append(path)
         saved_lines.append(line)
         seeds.append(seed + index)
@@ -145,6 +143,34 @@ def run_series(
         _write_meta(folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept)
     _write_meta(folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept)
     return SeriesResult("", "", tuple(kept), folder)
+
+
+def _refuse_prompt(age_gate: AgeGate, prompt: str) -> str | None:
+    """The gate's own sentence, or None when ``prompt`` may continue.
+
+    A failure stops this text. The words are not sent back to the rewriter.
+    """
+    try:
+        age_gate.review_prompt(prompt)
+    except SafetyError as exc:
+        return exc.user_message
+    except Exception:
+        return text("gate.unavailable")
+    return None
+
+
+def _released_frame(age_gate: AgeGate, image: object, line: str) -> bytes | None:
+    """Pixels ``review_image`` released, or None when the frame is dropped."""
+    raw = RawImage(image.width, image.height, image.to_bytes())
+    try:
+        released = age_gate.review_image(raw, line)
+    except SafetyError:
+        return None
+    except Exception:
+        return None
+    if isinstance(released, SafeImage):
+        return released.data
+    return image.to_bytes()
 
 
 def _status(callback: Callable[[int, str], None] | None, index: int, status: str) -> None:

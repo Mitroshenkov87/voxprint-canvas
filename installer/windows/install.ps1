@@ -69,6 +69,31 @@ sys.exit(0)
     }
 }
 
+function Test-MetadataVersion([string]$SitePackages, [string]$NamePrefix, [string]$Version) {
+    if (-not (Test-Path -LiteralPath $SitePackages)) {
+        return $false
+    }
+    $dirs = @(Get-ChildItem -LiteralPath $SitePackages -Directory -ErrorAction SilentlyContinue)
+    foreach ($dir in $dirs) {
+        $name = $dir.Name
+        if (-not $name.StartsWith($NamePrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+            continue
+        }
+        if (-not $name.EndsWith(".dist-info", [System.StringComparison]::OrdinalIgnoreCase)) {
+            continue
+        }
+        $meta = Join-Path $dir.FullName "METADATA"
+        if (-not (Test-Path -LiteralPath $meta)) {
+            continue
+        }
+        $raw = Get-Content -LiteralPath $meta -Raw -ErrorAction SilentlyContinue
+        if ($raw -and $raw.Contains("Version: $Version")) {
+            return $true
+        }
+    }
+    return $false
+}
+
 function Test-SuiteGpuFiles([string]$SitePackages) {
     if (-not (Test-Path -LiteralPath $SitePackages)) {
         return $false
@@ -78,16 +103,20 @@ function Test-SuiteGpuFiles([string]$SitePackages) {
         return $false
     }
     $text = Get-Content -LiteralPath $versionPy -Raw -ErrorAction SilentlyContinue
-    if (-not $text -or $text -notmatch 'cuda\s*=\s*[''"]13\.0') {
+    if (-not $text -or -not $text.Contains("13.0")) {
         return $false
     }
-    $torchDist = @(Get-ChildItem -LiteralPath $SitePackages -Directory -Filter "torch-2.11.0+cu130*.dist-info" -ErrorAction SilentlyContinue)
-    $visionDist = @(Get-ChildItem -LiteralPath $SitePackages -Directory -Filter "torchvision-0.26.0+cu130*.dist-info" -ErrorAction SilentlyContinue)
-    $gpuName = "onnx" + "runtime" + "_gpu"
-    $cpuName = "onnx" + "runtime"
-    $gpuDist = @(Get-ChildItem -LiteralPath $SitePackages -Directory -Filter ($gpuName + "-*.dist-info") -ErrorAction SilentlyContinue)
-    $cpuDist = @(Get-ChildItem -LiteralPath $SitePackages -Directory -Filter ($cpuName + "-*.dist-info") -ErrorAction SilentlyContinue)
-    return ($torchDist.Count -gt 0 -and $visionDist.Count -gt 0 -and $gpuDist.Count -gt 0 -and $cpuDist.Count -eq 0)
+    $gpuName = "onnx" + "runtime" + "_gpu-"
+    $cpuName = "onnx" + "runtime" + "-"
+    $cpu = $false
+    $dirs = @(Get-ChildItem -LiteralPath $SitePackages -Directory -ErrorAction SilentlyContinue)
+    foreach ($dir in $dirs) {
+        $name = $dir.Name
+        if ($name.StartsWith($cpuName, [System.StringComparison]::OrdinalIgnoreCase) -and $name.EndsWith(".dist-info", [System.StringComparison]::OrdinalIgnoreCase)) {
+            $cpu = $true
+        }
+    }
+    return ((Test-MetadataVersion $SitePackages "torch-" "2.11.0+cu130") -and (Test-MetadataVersion $SitePackages "torchvision-" "0.26.0+cu130") -and (Test-MetadataVersion $SitePackages $gpuName "1.31.0") -and -not $cpu)
 }
 
 function Install-SuiteGpuPackages([string]$Python, [string]$Target) {
@@ -103,11 +132,14 @@ function Install-SuiteGpuPackages([string]$Python, [string]$Target) {
     if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
     $cpu = "onnx" + "runtime"
     if (-not [string]::IsNullOrWhiteSpace($Target)) {
-        & $Uv pip uninstall --python $Python --target $Target $cpu
+        if (Test-MetadataVersion $Target ($cpu + "-") "") {
+            & $Uv pip uninstall --python $Python --target $Target $cpu
+            if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
+        }
     } else {
         & $Uv pip uninstall --python $Python $cpu
+        if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
     }
-    if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
 }
 
 function Clear-WheelFetch {
@@ -151,8 +183,10 @@ try {
         throw "uv reported Python at '$Base', but that file does not exist. Install Python 3.14 from $WindowsPythonUrl and run this setup again."
     }
 
-    # The shared runtime is user-writable. Never execute its python.exe.
-    # A standalone tree (python.exe at the runtime root, no pyvenv.cfg) is left alone.
+    # The shared runtime is user-writable. Execute its python.exe only when this
+    # setup just created the venv. An existing tree is not run and not upgraded.
+    # A standalone interpreter (python.exe at the runtime root, no pyvenv.cfg) is left alone.
+    $createdRuntime = $false
     $runtimeVenv = (Test-Path -LiteralPath $RuntimePy) -and (Test-Path -LiteralPath $RuntimeCfg)
     if (-not $runtimeVenv) {
         $occupied = Get-ChildItem -Force $Runtime -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -162,6 +196,7 @@ try {
         New-Item -ItemType Directory -Force $Shared | Out-Null
         & $Base -m venv $Runtime
         if ($LASTEXITCODE -ne 0) { throw "Python could not create the suite runtime." }
+        $createdRuntime = $true
     }
 
     if (-not (Test-Path $Py)) {
@@ -189,7 +224,11 @@ try {
     }
     $Fetch = Join-Path $env:TEMP ("voxprint-wheels-" + [guid]::NewGuid().ToString("n"))
     New-Item -ItemType Directory -Force $Fetch | Out-Null
-    $runtimeReady = Test-SuiteGpuFiles $RuntimeSite
+    if ($createdRuntime) {
+        $runtimeReady = Test-SuiteGpuPackages $RuntimePy
+    } else {
+        $runtimeReady = Test-SuiteGpuFiles $RuntimeSite
+    }
     $appReady = Test-SuiteGpuPackages $Py
     if ($runtimeReady -and $appReady) {
         Write-Host "PyTorch is already installed."
@@ -208,8 +247,13 @@ try {
     }
     if (-not $runtimeReady) {
         Write-Host "Repairing the suite runtime..."
-        Install-SuiteGpuPackages $Base $RuntimeSite
-        if (-not (Test-SuiteGpuFiles $RuntimeSite)) { throw "Setup stopped." }
+        if ($createdRuntime) {
+            Install-SuiteGpuPackages $RuntimePy ""
+            if (-not (Test-SuiteGpuPackages $RuntimePy)) { throw "CUDA 13.0 PyTorch is still missing." }
+        } else {
+            Install-SuiteGpuPackages $Base $RuntimeSite
+            if (-not (Test-SuiteGpuFiles $RuntimeSite)) { throw "CUDA 13.0 PyTorch is still missing." }
+        }
     }
     if (-not $appReady) {
         Install-SuiteGpuPackages $Py ""

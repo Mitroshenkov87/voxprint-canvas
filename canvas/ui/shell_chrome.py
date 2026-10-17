@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QLabel,
     QLayout,
+    QWidgetItem,
     QPushButton,
     QSizePolicy,
     QSplitter,
@@ -160,6 +161,7 @@ def polish(window):
     Args:
         window: The shell window.
     """
+    _adopt_rows(window)
     _size_menu(window)
     _output(window)
     _detail(window)
@@ -237,6 +239,15 @@ def _size_menu(window):
 def _insert_after_orientation(label, combo):
     host = label.parentWidget().layout()
     if host is None:
+        return
+    if isinstance(host, _Flow) and _label_index(host, label) >= 0:
+        insert = _label_index(host, label) + 1
+        while insert < host.count():
+            widget = host.itemAt(insert).widget()
+            if widget is None or not str(widget.objectName()).startswith("orient-"):
+                break
+            insert += 1
+        host.insertWidget(insert, combo)
         return
     for index in range(host.count()):
         line = host.itemAt(index).layout()
@@ -640,6 +651,44 @@ def _wrap_rows(window):
     _flow_heights(window, shown)
 
 
+def _adopt_rows(window):
+    """Move each shared chip row (Yitro ``pillRow``) onto the Canvas flow.
+
+    The Canvas flow keeps the style row on one line and lets the size menu sit
+    after the orientation chips. Rows already on the Canvas flow are left alone.
+    """
+    hosts = list(getattr(window, "_flow_hosts", None) or [])
+    for host in window.view.root.findChildren(QWidget, "pillRow"):
+        old = host.layout()
+        if old is None or isinstance(old, _Flow):
+            if host not in hosts and isinstance(old, _Flow):
+                hosts.append(host)
+            continue
+        spacing = old.spacing()
+        widgets = []
+        while old.count():
+            taken = old.takeAt(0)
+            widget = taken.widget() if taken is not None else None
+            if widget is not None:
+                widgets.append(widget)
+        QWidget().setLayout(old)
+        flow = _Flow()
+        flow.setSpacing(spacing if spacing >= 0 else 8)
+        host.setLayout(flow)
+        for widget in widgets:
+            flow.addWidget(widget)
+        hosts.append(host)
+    window._flow_hosts = [host for host in hosts if _alive(host)]
+
+
+def _alive(widget):
+    try:
+        widget.objectName()
+    except RuntimeError:
+        return False
+    return True
+
+
 def _flow_heights(window, enabled):
     hosts = getattr(window, "_flow_hosts", None)
     if not hosts:
@@ -669,6 +718,12 @@ class _Flow(QLayout):
 
     def addItem(self, item):  # noqa: N802
         self._items.append(item)
+
+    def insertWidget(self, index, widget):  # noqa: N802
+        """Put ``widget`` at ``index`` in the row."""
+        self.addChildWidget(widget)
+        self._items.insert(max(0, min(index, len(self._items))), QWidgetItem(widget))
+        self.invalidate()
 
     def count(self):
         return len(self._items)

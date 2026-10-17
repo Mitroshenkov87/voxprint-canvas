@@ -59,17 +59,6 @@
       "optional": true
     },
     {
-      "id": "qwen-image-edit-2511-fp8",
-      "version": "placeholder",
-      "vram_tier": "24gb",
-      "status": "unavailable",
-      "reason": "placeholder",
-      "files": [],
-      "display_name": "qwen-image-edit-2511-fp8",
-      "on_demand": true,
-      "optional": true
-    },
-    {
       "id": "qwen3guard-gen-0.6b",
       "version": "placeholder",
       "vram_tier": "any",
@@ -121,39 +110,6 @@
       "reason": "placeholder",
       "files": [],
       "display_name": "nsfw-image-detection",
-      "on_demand": true,
-      "optional": true
-    },
-    {
-      "id": "qwen-image-edit-2511-int4-r256-mirror",
-      "version": "placeholder",
-      "vram_tier": "16gb",
-      "status": "unavailable",
-      "reason": "placeholder",
-      "files": [],
-      "display_name": "qwen-image-edit-2511-int4-r256-mirror",
-      "on_demand": true,
-      "optional": true
-    },
-    {
-      "id": "qwen-image-edit-2511-int4-r256",
-      "version": "placeholder",
-      "vram_tier": "16gb",
-      "status": "unavailable",
-      "reason": "placeholder",
-      "files": [],
-      "display_name": "qwen-image-edit-2511-int4-r256",
-      "on_demand": true,
-      "optional": true
-    },
-    {
-      "id": "qwen-image-edit-2511-int4-r128",
-      "version": "placeholder",
-      "vram_tier": "16gb",
-      "status": "unavailable",
-      "reason": "placeholder",
-      "files": [],
-      "display_name": "qwen-image-edit-2511-int4-r128",
       "on_demand": true,
       "optional": true
     },

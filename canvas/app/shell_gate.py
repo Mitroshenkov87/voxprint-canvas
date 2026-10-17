@@ -52,12 +52,14 @@ class ContentCheck:
             return text("gate.unavailable")
         return None
 
-    def review_result(self, prompt: str, item_id: str) -> str | None:
+    def review_result(self, prompt: str, item_id: str, output: object = None) -> str | None:
         """Review the staged picture. A missing picture is refused.
 
         Args:
             prompt: The words that produced the picture.
             item_id: Id passed to ``stage``.
+            output: The shell's copy of the output (Yitro). The age gate always
+                reviews the full staged pixels, so this copy is not trusted.
         """
         raw = self._staged.pop(item_id, None)
         if raw is None:

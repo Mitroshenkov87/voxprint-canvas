@@ -131,6 +131,7 @@ class ShellWindow(QMainWindow):
         self._expert.subscribe(self.view.set_expert)
         if self._expert.enabled():
             self.view.set_expert(True)
+        _busy_first(shell.layout)
         self._split = mount(self)
         self.setCentralWidget(self._split)
         self._chrome_ready = True
@@ -263,7 +264,7 @@ class ShellWindow(QMainWindow):
             self.view.refresh()
             return current
 
-    def _on_generate(self) -> None:
+    def _on_generate(self, settings: object = None) -> None:
         layout = self.shell.layout
         if not selectable():
             layout.unavailable(text("canvas.models.missing"))
@@ -505,3 +506,25 @@ def _check_text(report: dict[str, object]) -> str:
         f"{text('canvas.check.encoders')}: {marks}",
     ]
     return "\n".join(str(line) for line in lines)
+
+
+def _busy_first(layout) -> None:
+    """Keep the Canvas order: the job runs after the layout is busy.
+
+    Yitro calls the generate hook before the busy phase. Canvas runs the whole
+    job inside the hook and finishes or refuses it there, so the hook must run
+    after ``generate`` has reviewed the prompt and set the busy phase.
+    """
+    original = layout.generate
+
+    def generate(hook=None) -> bool:
+        if hook is None:
+            return original()
+        if layout.phase is Phase.BUSY:
+            return True
+        if not original():
+            return False
+        hook(layout.live_settings())
+        return True
+
+    layout.generate = generate

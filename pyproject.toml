@@ -7,16 +7,15 @@ license = "Apache-2.0"
 requires-python = ">=3.14"
 authors = [{ name = "Aleksandr Mitroshenkov" }]
 dependencies = [
-    # Shared shell. Replace this commit with the UI release tag when it is cut.
+    # Shared shell, Yitro (v0.2.5).
     # Do not pin the moving branch name.
-    "voxprint-common[ui] @ git+https://github.com/Mitroshenkov87/voxprint-common@f4e95ccfa25780abaf50412cb095a7843725102a",
+    "voxprint-common[ui] @ git+https://github.com/Mitroshenkov87/voxprint-common@8a94b531cb4f3526425a80a86a1e64624b5de606",
     "PySide6==6.12.0",
     "numpy==2.5.4",
     "pillow==12.3.0",
     "imagecodecs==2026.10.10",
     "onnxruntime-gpu==1.31.0",
     "psutil==7.0.0",
-    "voxprint-common @ https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.2.4/voxprint_common-0.2.4-py3-none-any.whl ; python_version >= '3.14'",
 ]
 
 [project.optional-dependencies]

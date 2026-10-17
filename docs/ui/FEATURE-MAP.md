@@ -3,7 +3,7 @@
 Where each current window and command lives on the shared screen.
 Status is `done`, `TODO`, `NEEDS OWNER DECISION`, `pending Yitro`, or `removed (owner decision 2026-10-17)`.
 
-`pending Yitro` waits for the shared image surface in voxprint-common PR 13. The pin stays at `f4e95cc` until that tag's SHA arrives. The source picture and the mask will opt into the image-surface slots. The generator will receive the live settings `shell.steps`, `shell.guidance`, `shell.sampler`, `shell.seed`, and `shell.resolution`.
+`pending Yitro` waits for the shared image surface in voxprint-common PR 13. Pinned to Yitro (v0.2.5, `8a94b53`). The source picture and the mask will opt into the image-surface slots. The generator will receive the live settings `shell.steps`, `shell.guidance`, `shell.sampler`, `shell.seed`, and `shell.resolution`.
 
 | Feature | Old place | New place | Status |
 | --- | --- | --- | --- |

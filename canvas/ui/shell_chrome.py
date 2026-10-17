@@ -718,22 +718,36 @@ class _Flow(QLayout):
         inner = max(0, width - margins.left() - margins.right())
         origin_x = margins.left() if rect is None else rect.x() + margins.left()
         origin_y = margins.top() if rect is None else rect.y() + margins.top()
+        lines = []
+        current = []
         x = 0
-        y = 0
         line_height = 0
         for item in self._items:
             if _flow_hidden(item):
                 continue
             item_width, item_height = _flow_size(item)
             if x and x + item_width > inner:
+                lines.append((current, line_height))
+                current = []
                 x = 0
-                y += line_height + spacing
                 line_height = 0
-            if rect is not None:
-                item.setGeometry(QRect(origin_x + x, origin_y + y, item_width, item_height))
+            current.append((item, item_width, item_height))
             x += item_width + spacing
             line_height = max(line_height, item_height)
-        return margins.top() + y + line_height + margins.bottom()
+        if current:
+            lines.append((current, line_height))
+        y = 0
+        for index, (row, row_height) in enumerate(lines):
+            x = 0
+            for item, item_width, item_height in row:
+                if rect is not None:
+                    offset = (row_height - item_height) // 2
+                    item.setGeometry(QRect(origin_x + x, origin_y + y + offset, item_width, item_height))
+                x += item_width + spacing
+            y += row_height
+            if index + 1 < len(lines):
+                y += spacing
+        return margins.top() + y + margins.bottom()
 
 
 def _flow_hidden(item):

@@ -22,6 +22,8 @@
   "canvas.expert.reset": "Reset to preset",
   "simple.output.install": "Install",
   "simple.revert": "Revert to my prompt",
+  "setting.shell.addons": "Add-ons (LoRA)",
+  "setting.shell.lora_weight": "LoRA strength",
   "canvas.picture.title": "Use a picture",
   "canvas.picture.open": "Open",
   "canvas.picture.use": "Use this picture",

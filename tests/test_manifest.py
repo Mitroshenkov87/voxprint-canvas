@@ -3,8 +3,10 @@ import hashlib
 import importlib
 import json
 import multiprocessing
+import os
 import re
 import subprocess
+import sys
 from multiprocessing.synchronize import Event as ProcessEvent
 from importlib import metadata
 from pathlib import Path
@@ -290,7 +292,13 @@ def test_cpu_onnxruntime_dist_is_not_installed():
         name = requirement.split(";")[0].split("[")[0].split()[0].lower().replace("_", "-")
         assert name != "onnxruntime"
     root = Path(__file__).resolve().parents[1]
-    for relative in ("pyproject.toml", "constraints.txt", "installer/linux/install.sh", "installer/windows/install.ps1"):
+    for relative in (
+        "pyproject.toml",
+        "constraints.txt",
+        "constraints-cuda.txt",
+        "installer/linux/install.sh",
+        "installer/windows/install.ps1",
+    ):
         text = (root / relative).read_text(encoding="utf-8")
         assert "onnxruntime-gpu" in text
         assert re.findall(r"onnxruntime(?!-gpu)", text) == []
@@ -371,7 +379,8 @@ def test_installers_use_the_suite_runtime():
     assert "tensorrt-10" in windows
     assert "onnxruntime-gpu" in linux
     assert "onnxruntime-gpu" in windows
-    assert "$SHARED/wheels" in linux
+    assert "$SHARED/wheels" not in linux
+    assert 'WHEELS="$APP/setup-work/wheels"' in linux
     assert "Voxprint\\shared" in windows
     assert "Installing the default image pack..." in linux
     assert "Installing the default image pack..." in windows
@@ -387,17 +396,95 @@ def test_installers_resolve_numpy_from_pypi_and_pin_cuda_torch():
     assert "torch-backend" not in config
     assert 'name = "pytorch-cu130"' in config
     assert "explicit = true" in config
-    assert 'torch = { index = "pytorch-cu130" }' in config
-    assert 'torchvision = { index = "pytorch-cu130" }' in config
-    sources = config.split("[sources]", 1)[1]
-    assert "torchao" not in sources
+    assert "[sources]" not in config
+    assert "override-dependencies" not in config
+    assert "torchao" not in config
     for script in (linux, windows):
-        assert "uv.cu130.toml" in script
-        assert "--config-file" in script
+        assert "--index-strategy" in script
+        assert "unsafe-best-match" in script
+        assert "--find-links" in script
+        assert "--config-file" not in script
         assert "torch==2.11.0+cu130" in script
         assert "torchvision==0.26.0+cu130" in script
         assert "torchao==0.18.0" in script
+        assert "[gen]" in script
+        assert "Repairing the suite runtime..." in script
+        assert "PyTorch is already installed." in script
         assert "TensorRT is skipped on Python 3.14." in script
+    assert "PyTorch wheels are already downloaded." in linux
+    assert 'WHEELS="$APP/setup-work/wheels"' in linux
+    assert '--find-links "$WHEELS"' in linux
+    assert "$SHARED/wheels" not in linux
+    assert "UV_NO_CONFIG" in linux
+    assert "--no-config" in linux
+    assert "--isolated" in linux
+    assert "constraints-cuda.txt" in linux
+    assert "VIRTUAL_ENV" in linux
+    assert "CONDA_" in linux
+    assert "HTTP_PROXY" in linux
+    assert 'cd "$APP"' in linux
+    assert 'APP_PYTHON="$APP/python"' in linux
+    assert "refuse_symlink" in linux
+    assert "SUDO_USER" in linux
+    assert "PYTHONNOUSERSITE" in linux
+    assert "handoff_tree" in linux
+    assert 'chown -R "$SUDO_USER" "$1"' in linux
+    assert '"$1" -s -c' in linux
+    assert 'as_user "$VENV/bin/python" -m canvas.infra.layout migrate --install-dir "$APP"' in linux
+    assert "VOXPRINT_HOME must be an absolute path." in linux
+    assert 'getent passwd "$SUDO_USER"' in linux
+    assert 'HOME="$USER_HOME"' in linux
+    assert 'APP_DIR="$USER_HOME/.local/share/applications"' in linux
+    assert "Moving the existing suite runtime aside:" in linux
+    assert 'as_user mv -- "$RUNTIME"' in linux
+    assert 'chown -R "$SUDO_USER" "$RUNTIME"' in linux
+    assert "The suite runtime is already installed" not in linux
+    assert 'as_user ln -sfn "$VENV/bin/voxprint-canvas" "$BIN_DIR/voxprint-canvas"' in linux
+    assert 'as_user cp "$desktop_file" "$APP_DIR/voxprint-canvas.desktop"' in linux
+    move = linux.split("move_occupied_runtime_aside()", 1)[1].split(
+        'if [ "${VOXPRINT_INSTALL_LIB:-}" = "1" ]', 1
+    )[0]
+    assert "rm " not in move
+    assert "--without-pip" in linux
+    assert 'gpu_ready "$RUNTIME' not in linux
+    assert 'install_gpu "$RUNTIME' not in linux
+    assert 'Join-Path $Work "wheels"' in windows
+    assert 'Join-Path $env:TEMP ("voxprint-wheels-' not in windows
+    assert 'Join-Path $Work ("voxprint-gpu-probe-' in windows
+    assert 'Join-Path $env:TEMP ("voxprint-gpu-probe-' not in windows
+    assert "UV_PYTHON_INSTALL_DIR" in windows
+    assert "UV_PYTHON_BIN_DIR" in windows
+    assert "UV_CACHE_DIR" in windows
+    assert "PYTHONNOUSERSITE" in windows
+    assert "--without-pip" in windows
+    assert "Assert-AdminPath" in windows
+    assert "function Resolve-ContainedPath" in windows
+    assert "GetFinalPathNameByHandleW" in windows
+    assert "this link points outside the Python folder" in windows
+    assert 'Resolve-ContainedPath $script:Base $PythonDir' in windows
+    assert 'Resolve-ContainedPath $executable $PythonDir' in windows
+    assert '$env:VOXPRINT_INSTALL_LIB -ne "1"' in windows
+    assert "Test-Elevated" in windows
+    assert "Test-PathUnder" in windows
+    assert "Get-MachineProgramFiles" in windows
+    assert "ProgramFilesDir" in windows
+    assert "USERPROFILE" in windows
+    assert "an elevated install must live under Program Files" in windows
+    assert 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion' in windows
+    assert "python install 3.14 --reinstall" in windows
+    assert "Get-Command py" not in windows
+    assert "voxprint-gpu-probe-" in windows
+    assert "-c $code" not in windows
+    assert "pyvenv.cfg" in windows
+    assert "--target" in windows
+    assert "Test-SuiteGpuFiles" in windows
+    assert "Remove-Item -LiteralPath $Fetch" in windows
+    assert "& $RuntimePy" not in windows
+    assert "Test-SuiteGpuPackages $RuntimePy" not in windows
+    assert "Install-SuiteGpuPackages $RuntimePy" not in windows
+    assert "$RuntimePy = $RootPy" not in windows
+    assert "venv --upgrade $Runtime" not in windows
+    assert "venv --upgrade $Venv" in windows
     assert '--index-url "$TORCH_INDEX"' in linux
     assert "--extra-index-url https://pypi.org/simple" in linux
     assert "onnxruntime-gpu==1.31.0" in linux
@@ -405,6 +492,58 @@ def test_installers_resolve_numpy_from_pypi_and_pin_cuda_torch():
     assert '"--index-url", "https://pypi.org/simple"' in windows
     assert "uv==0.13.0" in linux
     assert "uv==0.13.0" in windows
+    assert "Start-Transcript" in windows
+    assert "canvas-install.log" in windows
+    assert "WindowsApps" in windows
+    assert "pip uninstall" in linux
+    assert "pip uninstall" in windows
+    assert "Assert-NoReparse" in windows
+    assert "ReparsePoint" in windows
+    assert "UV_NO_CONFIG" in windows
+    assert "--no-config" in windows
+    assert "--isolated" in windows
+    assert "constraints-cuda.txt" in windows
+    assert "VIRTUAL_ENV" in windows
+    assert "CONDA_" in windows
+    assert "HTTP_PROXY" in windows
+    assert "Set-Location -LiteralPath $App" in windows
+    ensure = windows.split("function Ensure-SharedRuntime", 1)[1].split("function Invoke-Machine", 1)[0]
+    assert ensure.index("Assert-NoReparse $Runtime") < ensure.index("venv --without-pip")
+    machine = windows.split("function Invoke-Machine", 1)[1].split("function Invoke-User", 1)[0]
+    assert machine.index("Resolve-ContainedPath $script:Base $PythonDir") < machine.index("Assert-AdminPath $script:Base")
+    assert "Move-Item -LiteralPath $Runtime" in windows
+    assert ".bak-" in windows
+    assert "The suite runtime is already installed" not in windows
+    assert "Remove-Item -LiteralPath $Runtime" not in windows
+    assert 'ValidateSet("All", "Machine", "User", "Cleanup")' in windows
+    assert "torch==2.11.0+cu130" in Path("constraints-cuda.txt").read_text(encoding="utf-8")
+    assert "torchvision==0.26.0+cu130" in Path("constraints-cuda.txt").read_text(encoding="utf-8")
+    assert "onnxruntime-gpu==1.31.0" in Path("constraints-cuda.txt").read_text(encoding="utf-8")
+    iss = Path("installer/windows/voxprint-canvas.iss").read_text(encoding="utf-8")
+    assert "CurStepChanged" in iss
+    assert "ssPostInstall" in iss
+    assert "SuppressibleMsgBox" in iss
+    assert "ExitProcess" in iss
+    assert "[Run]" not in iss
+    assert "[UninstallRun]" not in iss
+    assert "Started := Exec(" in iss
+    post, uninstall = iss.split("procedure CurUninstallStepChanged", 1)
+    assert "ExecAsOriginalUser" in post
+    assert "-Scope Machine" in post
+    assert "-Scope User" in post
+    assert "-Scope Cleanup" in post
+    assert "function RunSetup" in iss
+    step = post.split("procedure CurStepChanged", 1)[1]
+    assert step.index("-Scope Cleanup") < step.index("ExitProcess")
+    assert "if Code = 0 then" in step
+    assert "ExpandConstant('{app}')" in post
+    assert "ExpandConstant('{app}\\setup-work\\canvas-install.log')" in post
+    assert "ExpandConstant('{localappdata}\\Voxprint\\logs\\canvas-install.log')" in post
+    assert "ExecAsOriginalUser" not in uninstall
+    assert "-I -m canvas.app.main --unregister-models" in uninstall
+    assert "icacls.exe" not in iss
+    assert "CurUninstallStepChanged" in iss
+    assert "usUninstall" in iss
 
 
 def test_wheel_repair_pins_torch_to_cuda_and_torchao_to_pypi(monkeypatch, tmp_path):
@@ -441,3 +580,200 @@ def test_tensorrt_on_python_314_is_skipped(monkeypatch):
     restore_tensorrt(notes.append)
     assert called == []
     assert notes == ["TensorRT is skipped on Python 3.14."]
+
+
+def _source_install_functions(env, script, cwd):
+    return subprocess.run(
+        ["sh", "-c", script],
+        cwd=cwd,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="The Linux installer script runs on Linux.")
+def test_sudo_install_uses_the_passwd_home_not_root(tmp_path):
+    home = tmp_path / "alice"
+    home.mkdir()
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    (bindir / "id").write_text("#!/bin/sh\necho 0\n", encoding="utf-8")
+    (bindir / "getent").write_text(
+        "#!/bin/sh\nprintf '%s\\n' 'alice:x:1000:1000:Alice:" + str(home) + ":/bin/sh'\n",
+        encoding="utf-8",
+    )
+    for path in bindir.iterdir():
+        path.chmod(0o755)
+    env = os.environ.copy()
+    env["PATH"] = str(bindir) + os.pathsep + env.get("PATH", "")
+    env["VOXPRINT_INSTALL_LIB"] = "1"
+    env["HOME"] = "/root"
+    env["SUDO_USER"] = "alice"
+    env.pop("VOXPRINT_HOME", None)
+    env["XDG_DATA_HOME"] = "/root/.local/share"
+    root = Path(__file__).resolve().parents[1]
+    script = """
+. ./installer/linux/install.sh
+user=$(installing_user_home)
+USER_HOME=$user
+PROFILE_XDG=$(profile_xdg)
+data=$(data_root)
+printf '%s\\n' "$user" "$data" "$PROFILE_XDG"
+"""
+    result = _source_install_functions(env, script, root)
+    user, data, xdg = result.stdout.splitlines()
+    assert user == str(home)
+    assert data == str(home / ".local" / "share" / "voxprint")
+    assert xdg == str(home / ".local" / "share")
+
+    inside = home / ".config" / "share"
+    inside.mkdir(parents=True)
+    env["XDG_DATA_HOME"] = str(inside)
+    result = _source_install_functions(env, script, root)
+    user, data, xdg = result.stdout.splitlines()
+    assert user == str(home)
+    assert data == str(inside / "voxprint")
+    assert xdg == str(inside)
+
+    env["VOXPRINT_HOME"] = "relative/voxprint"
+    script_relative = """
+. ./installer/linux/install.sh
+USER_HOME=$HOME
+PROFILE_XDG=$HOME/.local/share
+data_root
+"""
+    rejected = subprocess.run(
+        ["sh", "-c", script_relative],
+        cwd=root,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert rejected.returncode != 0
+    assert "absolute path" in rejected.stderr
+    env.pop("VOXPRINT_HOME", None)
+    finished = subprocess.run(
+        ["sh", "-c", ". ./installer/linux/install.sh\nUSER_HOME=$HOME\nhandoff_parents relative\nprintf '%s\\n' done\n"],
+        cwd=root,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert finished.stdout.strip() == "done"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="The Linux installer script runs on Linux.")
+def test_linux_setup_moves_a_standalone_runtime_aside(tmp_path):
+    home = tmp_path / "alice"
+    runtime = home / ".local" / "share" / "voxprint" / "shared" / "runtime" / "py314-torch2.11-cu130"
+    binary = runtime / "bin" / "python3"
+    binary.parent.mkdir(parents=True)
+    binary.write_text("#!/bin/sh\n", encoding="utf-8")
+    binary.chmod(0o755)
+    marker = runtime / "keep-me.txt"
+    marker.write_text("user data", encoding="utf-8")
+    env = os.environ.copy()
+    env["VOXPRINT_INSTALL_LIB"] = "1"
+    env["HOME"] = str(home)
+    env.pop("SUDO_USER", None)
+    root = Path(__file__).resolve().parents[1]
+    script = """
+. ./installer/linux/install.sh
+USER_HOME=$1
+SHARED=$2
+RUNTIME=$3
+move_occupied_runtime_aside
+"""
+    shared = runtime.parent.parent
+    result = subprocess.run(
+        ["sh", "-c", script, "sh", str(home), str(shared), str(runtime)],
+        cwd=root,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "Moving the existing suite runtime aside:" in result.stdout
+    assert not runtime.exists()
+    backups = list(runtime.parent.glob(runtime.name + ".bak-*"))
+    assert len(backups) == 1
+    assert (backups[0] / "keep-me.txt").read_text(encoding="utf-8") == "user data"
+    assert (backups[0] / "bin" / "python3").is_file()
+
+
+def _windows_junction(link: Path, target: Path) -> None:
+    subprocess.run(
+        ["cmd", "/c", "mklink", "/J", str(link), str(target)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows reparse points are checked by the Windows installer.")
+def test_windows_follows_a_python_junction_only_inside_the_install(tmp_path):
+    py_root = tmp_path / "python"
+    real = py_root / "real"
+    real.mkdir(parents=True)
+    real_exe = real / "python.exe"
+    real_exe.write_bytes(b"")
+    alias = py_root / "cpython-3.14-windows-x86_64-none"
+    _windows_junction(alias, real)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "python.exe").write_bytes(b"")
+    escape = py_root / "escape"
+    _windows_junction(escape, outside)
+    linked_root_target = tmp_path / "linked-real"
+    (linked_root_target / "real").mkdir(parents=True)
+    (linked_root_target / "real" / "python.exe").write_bytes(b"")
+    linked_root = tmp_path / "linked-python"
+    _windows_junction(linked_root, linked_root_target)
+    root = Path(__file__).resolve().parents[1]
+    env = os.environ.copy()
+    env["VOXPRINT_INSTALL_SCRIPT"] = str(root / "installer" / "windows" / "install.ps1")
+    env["PYROOT"] = str(py_root)
+    env["INSIDE"] = str(alias / "python.exe")
+    env["ESCAPE"] = str(escape / "python.exe")
+    env["LINKROOT"] = str(linked_root)
+    env["ROOTLINK"] = str(linked_root / "real" / "python.exe")
+    script = r"""
+$ErrorActionPreference = "Stop"
+$env:VOXPRINT_INSTALL_LIB = "1"
+. $env:VOXPRINT_INSTALL_SCRIPT
+$resolved = Resolve-ContainedPath $env:INSIDE $env:PYROOT
+Write-Output ("RESOLVED=" + $resolved)
+try {
+    Resolve-ContainedPath $env:ESCAPE $env:PYROOT | Out-Null
+    Write-Output "ESCAPE_ACCEPTED"
+} catch {
+    if ($_.Exception.Message -notlike "*outside the Python folder*") { throw }
+    Write-Output "ESCAPE_REJECTED"
+}
+try {
+    Resolve-ContainedPath $env:ROOTLINK $env:LINKROOT | Out-Null
+    Write-Output "ROOT_ACCEPTED"
+} catch {
+    if ($_.Exception.Message -notlike "*contains a link*") { throw }
+    Write-Output "ROOT_REJECTED"
+}
+"""
+    result = subprocess.run(
+        ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+        cwd=root,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    resolved = next(line for line in lines if line.startswith("RESOLVED=")).split("=", 1)[1]
+    assert resolved.lower() == str(real_exe).lower()
+    assert "cpython-3.14-windows-x86_64-none" not in resolved.lower()
+    assert "ESCAPE_REJECTED" in lines
+    assert "ROOT_REJECTED" in lines

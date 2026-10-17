@@ -28,7 +28,7 @@ jobs:
           name="voxprint-canvas-${tag}-linux-x86_64"
           root="dist/${name}"
           mkdir -p "$root"
-          cp -a canvas tools pyproject.toml README.md LICENSE NOTICE BUILD.json constraints.txt "$root/"
+          cp -a canvas tools pyproject.toml README.md LICENSE NOTICE BUILD.json constraints.txt constraints-cuda.txt "$root/"
           mkdir -p "$root/scripts"
           cp -a scripts/vm_test.sh scripts/vm_test.ps1 "$root/scripts/"
           cp installer/linux/install.sh "$root/install.sh"
@@ -58,7 +58,7 @@ jobs:
           New-Item -ItemType Directory -Force (Join-Path $stage "scripts") | Out-Null
           Copy-Item "scripts/vm_test.sh" (Join-Path $stage "scripts/vm_test.sh")
           Copy-Item "scripts/vm_test.ps1" (Join-Path $stage "scripts/vm_test.ps1")
-          foreach ($name in @("pyproject.toml", "README.md", "LICENSE", "NOTICE", "BUILD.json", "constraints.txt")) {
+          foreach ($name in @("pyproject.toml", "README.md", "LICENSE", "NOTICE", "BUILD.json", "constraints.txt", "constraints-cuda.txt")) {
             Copy-Item $name (Join-Path $stage $name)
           }
           $uvZip = Join-Path $env:TEMP "uv-windows.zip"

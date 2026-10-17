@@ -1,0 +1,5 @@
+# Exact CUDA builds. The installer passes this file with constraints.txt.
+# torch==2.11.0+cu130 satisfies torch==2.11.0, and this file keeps the CUDA build.
+torch==2.11.0+cu130
+torchvision==0.26.0+cu130
+onnxruntime-gpu==1.31.0

@@ -6,3 +6,4 @@ safetensors
 pillow
 opencv-python-headless>=4.11
 easyocr
+# optional, only for the q_int4 arm (Apache-2.0): nunchaku

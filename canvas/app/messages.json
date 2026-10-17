@@ -124,6 +124,14 @@
       "en": "Edge",
       "ru": "Контур"
     },
+    "mode.instruction": {
+      "en": "Instruction edit",
+      "ru": "Правка по инструкции"
+    },
+    "edit.unavailable": {
+      "en": "Editing is temporarily unavailable: we're preparing a model for 16 GB GPUs",
+      "ru": "Редактирование временно недоступно: готовим модель для видеокарт от 16 ГБ"
+    },
     "notice.responsibility": {
       "en": "Do not use the app to create content that is illegal or socially unacceptable; you are responsible for what you create.",
       "ru": "Не используйте приложение для создания незаконного или социально неприемлемого контента; вы отвечаете за то, что создаёте."
@@ -183,6 +191,10 @@
     "error.cancelled": {
       "en": "The download was cancelled.",
       "ru": "Загрузка отменена."
+    },
+    "error.memory": {
+      "en": "Instruction edit needs {need} GB of system memory. This PC has {have} GB.",
+      "ru": "Для правки по инструкции нужно {need} ГБ оперативной памяти. На этом компьютере {have} ГБ."
     },
     "error.offload": {
       "en": "This pipeline cannot offload weights.",
@@ -328,6 +340,14 @@
       "en": "Creative Z-Image",
       "ru": "Creative Z-Image"
     },
+    "pack.edit": {
+      "en": "Qwen-Image-Edit-2511",
+      "ru": "Qwen-Image-Edit-2511"
+    },
+    "pack.edit_int4": {
+      "en": "Qwen-Image-Edit-2511 INT4",
+      "ru": "Qwen-Image-Edit-2511 INT4"
+    },
     "pack.turbo": {
       "en": "Z-Image-Turbo",
       "ru": "Z-Image-Turbo"
@@ -335,6 +355,10 @@
     "download.notice": {
       "en": "{title} is {size}. Estimated time {duration}.",
       "ru": "{title}: {size}. Примерное время: {duration}."
+    },
+    "download.runtime": {
+      "en": "Nunchaku INT4 runtime is {size}. Estimated time {duration}.",
+      "ru": "Среда Nunchaku INT4: {size}. Примерное время: {duration}."
     },
     "unit.gb": {
       "en": "{value} GB",
@@ -379,6 +403,22 @@
     "unit.second.many": {
       "en": "seconds",
       "ru": "секунд"
+    },
+    "nunchaku.unavailable": {
+      "en": "The INT4 generator is not available yet.",
+      "ru": "Генератор INT4 пока недоступен."
+    },
+    "nunchaku.missing_file": {
+      "en": "The INT4 runtime is missing a file.",
+      "ru": "В среде выполнения INT4 не хватает файла."
+    },
+    "nunchaku.no_wheel": {
+      "en": "The INT4 runtime has no wheel for this PC.",
+      "ru": "Для этого компьютера нет пакета среды выполнения INT4."
+    },
+    "nunchaku.unpinned": {
+      "en": "The INT4 runtime wheel is not pinned.",
+      "ru": "Пакет среды выполнения INT4 не закреплён."
     },
     "edit.removed": {
       "en": "Instruction editing has been removed.",

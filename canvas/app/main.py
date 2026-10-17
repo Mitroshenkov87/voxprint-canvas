@@ -23,7 +23,9 @@ from canvas.infra.gpu import probe_gpu
 from canvas.infra.models_users import register, unregister
 from canvas.infra.paths import models_dir, shared_dir
 from canvas.infra.vram import peak_allocated_bytes, set_vram_cap_gb
+from canvas.models.features import INSTRUCTION_EDIT, instruction_edit_flag
 from canvas.models.loader import ModelNotReady, ZImageGenerator, load_catalog_stack
+from canvas.models.nunchaku import NunchakuUnavailable
 from canvas.models.provision import DownloadDeclined, ensure_plan, install_defaults, install_supporting, repair
 from canvas.models.runtime import InferenceUnavailable
 from canvas.models.modes import Mode, Tier
@@ -32,7 +34,7 @@ from canvas.models.registry import load_catalog
 from canvas.models.snapshots import SnapshotError
 from canvas.pipeline.bf16_schedule import VramRefused
 from canvas.pipeline.enhance import EnhanceResult, fallback_message, open_rewriter, resolve_prompt, rewrite_text
-from canvas.pipeline.schedule import last_image_seconds, reset_image_seconds
+from canvas.pipeline.schedule import SystemMemoryRefused, last_image_seconds, reset_image_seconds
 from canvas.pipeline.pipeline import CoolingDown, EnlargeMissing, JobError, Pipeline
 from canvas.safety.gate import AgeGate, SafetyError
 from canvas.ui.main_window import EnhanceReply, MainWindow
@@ -45,8 +47,10 @@ _EXIT_CODES = (
     "exit codes:\n"
     "  0  the picture was written\n"
     "  1  the request failed\n"
-    "  2  the command or this machine cannot run"
+    "  2  the command or this machine cannot run\n"
+    "  4  feature unavailable"
 )
+EXIT_FEATURE_UNAVAILABLE = 4
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -77,7 +81,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     generate.add_argument("--prompt", default="", help="text prompt for a new picture")
     generate.add_argument("--edit-instruction", default="", help="instruction for editing --input")
-    generate.add_argument("--input", default="", help="image for inpaint, used with --mask")
+    generate.add_argument("--input", default="", help="image to edit, used with --edit-instruction")
     generate.add_argument("--aspect", default="1:1")
     generate.add_argument("--out", required=True)
     generate.add_argument("--mask", default="", help="mask image for inpaint, used with --input")
@@ -136,6 +140,7 @@ def _callback(tier: Tier, window_box: list[MainWindow | None], enlarge: EnlargeC
         except (
             SafetyError, SnapshotError, DownloadDeclined, InferenceUnavailable, ModelNotReady,
             ModeUnavailable, BaseNotSelected, JobError, CoolingDown, EnlargeMissing, EnlargeError, VramRefused,
+            SystemMemoryRefused, NunchakuUnavailable,
         ) as exc:
             return str(exc)
         if note:
@@ -215,12 +220,14 @@ def _load_rgb(path: Path) -> RawImage:
 
 
 def _pending_init(path: Path) -> PendingInput:
-    """An unscreened init image for inpaint."""
+    """An unscreened init image for instruction edit."""
     return PendingInput(ImageRole.INIT, _load_rgb(path))
 
 
 def _inputs(args: argparse.Namespace, mode: Mode) -> tuple[PendingInput, ...]:
     """Images the command supplied. Text has none. Inpaint adds the mask."""
+    if mode is Mode.INSTRUCTION:
+        return (_pending_init(Path(args.input)),)
     if mode is Mode.INPAINT:
         return (
             _pending_init(Path(args.input)),
@@ -263,6 +270,7 @@ def _generate(args: argparse.Namespace) -> int:
     if args.enhance and mode is not Mode.TEXT:
         return _emit({"ok": False, "error": "Enhance applies to a prompt."}, as_json, 2)
     outcome: EnhanceResult | None = None
+    edit_route = ""
     active = active_prompt
     reset_image_seconds()
     progress = lambda message: print(message, file=sys.stderr)
@@ -280,6 +288,8 @@ def _generate(args: argparse.Namespace) -> int:
         screened = gate.release_request(active, mode.value, source)
         try:
             plan = build_plan(catalog, screened, gpu.tier)
+            if mode is Mode.INSTRUCTION:
+                edit_route = plan.model_id
         finally:
             screened.wipe()
         ensure_plan(catalog, plan, progress, confirm=None)
@@ -292,13 +302,13 @@ def _generate(args: argparse.Namespace) -> int:
     except (
         SafetyError, SnapshotError, DownloadDeclined, InferenceUnavailable, ModelNotReady,
         ModeUnavailable, BaseNotSelected, JobError, CoolingDown, EnlargeMissing, EnlargeError, VramRefused,
-        OSError,
+        SystemMemoryRefused, NunchakuUnavailable, OSError,
     ) as exc:
         return _emit({"ok": False, "error": str(exc)}, as_json, 1)
     if outcome is not None and outcome.fallback and not as_json:
         print(fallback_message(outcome), file=sys.stderr)
     return _emit(
-        _generate_payload(path, active_prompt, outcome, time.perf_counter() - started),
+        _generate_payload(path, active_prompt, outcome, time.perf_counter() - started, edit_route=edit_route),
         as_json,
         0,
     )
@@ -354,7 +364,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _generate_payload(
-    path: Path, original: str, outcome: EnhanceResult | None, seconds: float,
+    path: Path, original: str, outcome: EnhanceResult | None, seconds: float, *, edit_route: str = "",
 ) -> dict[str, object]:
     """JSON body for one generate command. Both prompts are present when enhancing."""
     if outcome is None:
@@ -382,6 +392,8 @@ def _generate_payload(
     peak = peak_allocated_bytes()
     if peak is not None:
         body["peak_allocated_bytes"] = peak
+    if edit_route:
+        body["edit_route"] = edit_route
     return body
 
 
@@ -409,6 +421,24 @@ def _instruction_removed(as_json: bool) -> int:
     else:
         print(message, file=sys.stderr)
     return 2
+
+
+def _feature_unavailable(as_json: bool) -> int:
+    """Exit 4. JSON and a plain run both use the English catalog line."""
+    flag = instruction_edit_flag()
+    message = text("edit.unavailable", "en")
+    body = {
+        "ok": False,
+        "error": "feature_unavailable",
+        "feature": INSTRUCTION_EDIT,
+        "reason": flag.reason,
+        "message": message,
+    }
+    if as_json:
+        print(json.dumps(body))
+    else:
+        print(message, file=sys.stderr)
+    return EXIT_FEATURE_UNAVAILABLE
 
 
 def _apply_vram_cap(args: argparse.Namespace) -> int | None:

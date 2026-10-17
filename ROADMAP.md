@@ -14,6 +14,7 @@ The next version of VOXPrint AI Canvas is listed below. Items under Later are pl
 - Modern output formats: AVIF, JPEG XL, and WebP.
 - Opt-in third-party add-ons.
 - Enhance a prompt before generating. The button improves the prompt with the Qwen3-4B text encoder that ships with Z-Image-Turbo. This ships in 0.1.0-rc.4.
+- Instruction editing is coming soon. A written instruction will change a picture you already have. It will run on 16 GB cards and on 24 GB cards.
 
 ## Later
 

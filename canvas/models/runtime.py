@@ -15,10 +15,13 @@ from PIL import Image
 
 from canvas.app.i18n import text
 from canvas.infra.vram import reset_peak_allocated
+from canvas.models.edit import EditLoadError, load_edit_pipeline
+from canvas.models.int4_edit import load_int4_edit_pipeline
 from canvas.models.modes import Tier
 from canvas.models.pins import (
     PIPELINE_CONTROL,
     PIPELINE_CONTROL_INPAINT,
+    PIPELINE_EDIT,
     PIPELINE_IMG2IMG,
     PIPELINE_INPAINT,
     PIPELINE_TEXT,
@@ -41,7 +44,7 @@ class InferenceUnavailable(Exception):
 
 
 def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, height: int, tier: Tier, *,
-           seed: int = 0, control_file: Path | None = None) -> RawImage:
+           seed: int = 0, control_file: Path | None = None, weight_name: str = "") -> RawImage:
     """Run one pinned snapshot. ``folder`` is a local diffusers tree."""
     reset_peak_allocated()
     torch = _import_torch()
@@ -104,6 +107,17 @@ def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, he
                     controlnet_conditioning_scale=0.75,
                     **common,
                 )
+        elif pipeline_name == PIPELINE_EDIT:
+            try:
+                if plan.quant == "int4":
+                    if not weight_name:
+                        raise EditLoadError("the INT4 transformer is missing")
+                    pipe = load_int4_edit_pipeline(folder / weight_name, folder, dtype)
+                else:
+                    pipe = load_edit_pipeline(folder, dtype, low_vram=tier is Tier.GB16)
+            except EditLoadError as exc:
+                raise InferenceUnavailable(exc.detail) from exc
+            result = _timed(pipe, image=_pil(_frame(screened, "init")), **common)
         else:
             raise InferenceUnavailable(f"unknown pipeline {pipeline_name}")
         image = result.images[0].convert("RGB")
@@ -121,7 +135,7 @@ def _timed(pipe: Any, **kwargs: Any) -> Any:
 
 
 def _call_guidance(plan: CallPlan) -> dict[str, float]:
-    """The guidance argument for this plan."""
+    """The guidance argument for this plan. Instruction edit uses true CFG."""
     kind = plan.guidance_kind
     if kind == "true_cfg_scale":
         value = 4.0 if plan.guidance_scale is None else plan.guidance_scale

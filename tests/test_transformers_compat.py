@@ -84,6 +84,7 @@ def test_installed_stack_meets_the_pin():
     assert (5, 14, 0) <= _version(transformers.__version__) < (6, 0, 0)
     assert _version(diffusers.__version__) == (0, 41, 0)
     assert diffusers.ZImagePipeline.__name__ == "ZImagePipeline"
+    assert diffusers.QwenImageEditPlusPipeline.__name__ == "QwenImageEditPlusPipeline"
     assert diffusers.ZImageControlNetPipeline.__name__ == "ZImageControlNetPipeline"
     assert callable(get_qwen_prompt_embeds)
 

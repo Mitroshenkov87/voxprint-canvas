@@ -42,7 +42,13 @@ def weight_dir(root: Path, repo: str, *, fallback: bool = False) -> Path:
 
 
 def snapshot_repo(spec: ModelSpec) -> str:
-    """Folder key for one registry row."""
+    """Folder key for one registry row.
+
+    INT4 ranks of one upstream repo keep separate trees, so downloading r256
+    does not leave r128 looking incomplete.
+    """
+    if spec.quant == "int4" and spec.id:
+        return f"{spec.repo}/{spec.id}"
     return spec.repo
 
 

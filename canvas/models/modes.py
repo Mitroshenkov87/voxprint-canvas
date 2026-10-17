@@ -26,6 +26,7 @@ class Mode(Enum):
     POSE = "pose"
     DEPTH = "depth"
     EDGE = "edge"
+    INSTRUCTION = "instruction"
 
 
 # Full speed headroom is the suite rule, clamped to the 2-3 GB band used at install.
@@ -58,7 +59,7 @@ def select_tier(total_gb: float) -> Tier | None:
 
 
 def visible_modes(tier: Tier) -> tuple[Mode, ...]:
-    """Modes the UI may offer. Creative stays on 24 GB."""
+    """Modes the UI may offer. Creative stays on 24 GB. Instruction edit is on both tiers."""
     shared = (
         Mode.TEXT,
         Mode.RESTYLE,
@@ -67,6 +68,7 @@ def visible_modes(tier: Tier) -> tuple[Mode, ...]:
         Mode.POSE,
         Mode.DEPTH,
         Mode.EDGE,
+        Mode.INSTRUCTION,
     )
     if tier is Tier.GB16:
         return shared
@@ -79,7 +81,7 @@ def required_roles(mode: Mode) -> tuple[ImageRole, ...]:
     """Images a mode needs. Text needs none. Every supplied image is still screened."""
     if mode is Mode.TEXT or mode is Mode.TEXT_CREATIVE:
         return ()
-    if mode is Mode.RESTYLE:
+    if mode is Mode.RESTYLE or mode is Mode.INSTRUCTION:
         return (ImageRole.INIT,)
     if mode is Mode.INPAINT or mode is Mode.OUTPAINT:
         return (ImageRole.INIT, ImageRole.MASK)
@@ -98,6 +100,6 @@ def mode_group(mode: Mode) -> str:
         return "text"
     if mode is Mode.RESTYLE or mode is Mode.INPAINT or mode is Mode.OUTPAINT:
         return "image"
-    if mode is Mode.POSE or mode is Mode.DEPTH or mode is Mode.EDGE:
+    if mode is Mode.POSE or mode is Mode.DEPTH or mode is Mode.EDGE or mode is Mode.INSTRUCTION:
         return "image"
     assert_never(mode)

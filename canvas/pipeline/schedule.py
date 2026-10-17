@@ -1,17 +1,43 @@
-"""Choose the 16 GB schedule from the VRAM budget.
+"""Choose the 16 GB schedule from the VRAM budget and the system RAM.
 
-Group offload runs the text encoder and frees it, keeps one transformer block
-group on the GPU, then decodes with the VAE. The planning peak is 14.5 GB at
-2048×1152 and 2048×2048. At 23.5 GB and above the weights stay resident.
+Plan B is group offload: the text encoder runs and is freed, the transformer
+keeps one block group on the GPU, then the VAE decodes. The planning peak is
+14.5 GB at 2048×1152 and 2048×2048. Qwen-Image-Edit keeps its FP8 weights in
+system RAM, so a machine under 40 GB is refused before any weight is loaded.
+
+Plan A, the Nunchaku SVDQuant INT4 generator, is selected only when that
+registry row is enabled. Instruction edit on 16 GB uses the INT4 edit route
+when ``int4_edit`` is true. The planning peak for that route is 12 GB.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from typing import assert_never
 
+import psutil
+
+from canvas.app.i18n import text
 from canvas.models.modes import TIER_24_MIN_GB, Mode
+from canvas.pipeline.bf16_schedule import GpuLedger, VramRefused
+from canvas.pipeline.vram_probe import PeakVramProbe
 
 PEAK_TARGET_GB = 14.5
+QWEN_MIN_RAM_GB = 40.0
+NUNCHAKU_PEAK_GB = 12.0
+
+# FP8 Qwen2.5-VL weights plus the image-token activations for one encode.
+# The encoder is freed before the transformer block group is loaded.
+EDIT_ENCODER_GB = 13.1
+EDIT_BLOCK_GB = 2.4
+EDIT_ACT_PER_MP_GB = 0.6
+EDIT_VAE_GB = 1.1
+
+# INT4 keeps the encoder, one transformer block, and the tiled VAE from overlapping.
+INT4_ENCODER_GB = 11.0
+INT4_BLOCK_GB = 6.0
+INT4_ACT_PER_MP_GB = 0.35
+INT4_VAE_GB = 1.1
 
 _image_seconds: float | None = None
 
@@ -21,6 +47,21 @@ class Placement(Enum):
 
     GROUP_OFFLOAD = "group-offload"
     RESIDENT = "resident"
+    NUNCHAKU_INT4 = "nunchaku-int4"
+
+
+class SystemMemoryRefused(Exception):
+    """Instruction edit would exhaust system RAM. The message names the requirement."""
+
+    def __init__(self, have_gb: float, need_gb: float = QWEN_MIN_RAM_GB) -> None:
+        self.have_gb = float(have_gb)
+        self.need_gb = float(need_gb)
+        shown = max(0, int(self.have_gb))
+        super().__init__(text("error.memory", need=f"{self.need_gb:.0f}", have=shown))
+
+    def __str__(self) -> str:
+        shown = max(0, int(self.have_gb))
+        return text("error.memory", need=f"{self.need_gb:.0f}", have=shown)
 
 
 @dataclass(frozen=True)
@@ -31,13 +72,106 @@ class ScheduleChoice:
     peak_target_gb: float
 
 
-def choose_schedule(budget_gb: float, mode: Mode, ram_gb: float) -> ScheduleChoice:
-    """Pick group offload under the 24 GB line, or the resident path at 23.5 GB and above."""
-    del mode, ram_gb
+@dataclass(frozen=True)
+class EditTrace:
+    """How one 16 GB instruction edit used the GPU."""
+
+    peak_gb: float
+    tiled: bool
+
+
+def system_ram_gb() -> float:
+    """Installed system RAM in GB."""
+    return float(psutil.virtual_memory().total) / (1024 ** 3)
+
+
+def choose_schedule(
+    budget_gb: float,
+    mode: Mode,
+    ram_gb: float,
+    *,
+    nunchaku_ready: bool = False,
+    int4_edit: bool = False,
+) -> ScheduleChoice:
+    """Pick Plan B under the 24 GB line, or the resident path at 23.5 GB and above.
+
+    Instruction edit is refused when system RAM is under 40 GB, on either tier.
+    On 16 GB, instruction edit uses INT4 when ``int4_edit`` is true. The INT4
+    generator replaces other 16 GB modes only when ``nunchaku_ready`` is true.
+    24 GB instruction edit stays resident on the FP8 pack.
+    """
+    if mode is Mode.INSTRUCTION and float(ram_gb) < QWEN_MIN_RAM_GB:
+        raise SystemMemoryRefused(ram_gb)
     budget = float(budget_gb)
     if budget >= TIER_24_MIN_GB:
         return ScheduleChoice(Placement.RESIDENT, 24.0)
+    if mode is Mode.INSTRUCTION and int4_edit:
+        return ScheduleChoice(Placement.NUNCHAKU_INT4, NUNCHAKU_PEAK_GB)
+    if nunchaku_ready and _nunchaku_mode(mode):
+        return ScheduleChoice(Placement.NUNCHAKU_INT4, NUNCHAKU_PEAK_GB)
     return ScheduleChoice(Placement.GROUP_OFFLOAD, PEAK_TARGET_GB)
+
+
+def edit_group_peak_gb(width: int, height: int) -> float:
+    """Planning peak for one 16 GB FP8 instruction edit. The encoder is the tall stage."""
+    megapixels = max(0.0, float(width) * float(height)) / 1_000_000.0
+    denoise = EDIT_BLOCK_GB + EDIT_ACT_PER_MP_GB * megapixels
+    return max(EDIT_ENCODER_GB, denoise, EDIT_VAE_GB)
+
+
+def int4_edit_peak_gb(width: int, height: int) -> float:
+    """Planning peak for one 16 GB INT4 instruction edit. The encoder is the tall stage."""
+    megapixels = max(0.0, float(width) * float(height)) / 1_000_000.0
+    denoise = INT4_BLOCK_GB + INT4_ACT_PER_MP_GB * megapixels
+    return max(INT4_ENCODER_GB, denoise, INT4_VAE_GB)
+
+
+def run_edit_int4(
+    *,
+    width: int,
+    height: int,
+    ledger: GpuLedger,
+    probe: PeakVramProbe | None = None,
+) -> EditTrace:
+    """Encode, free the encoder, denoise one INT4 block, then a tiled VAE decode."""
+    start = len(ledger.history)
+    try:
+        _stage(ledger, probe, "encoder", INT4_ENCODER_GB, "encode-gpu-start", "encode-gpu-end", "encode-free")
+        megapixels = max(0.0, float(width) * float(height)) / 1_000_000.0
+        _stage(
+            ledger, probe, "transformer", INT4_BLOCK_GB + INT4_ACT_PER_MP_GB * megapixels,
+            "denoise-start", "denoise-end", "transformer-free",
+        )
+        _stage(ledger, probe, "vae", INT4_VAE_GB, "decode-start", "decode-tiled", "decode-end", "vae-free")
+    except VramRefused:
+        ledger.drop_all()
+        raise
+    if ledger.held:
+        ledger.drop_all()
+    samples = ledger.history[start - 1 :] if ledger.history else [ledger.used_gb]
+    return EditTrace(max(samples), True)
+
+
+def run_edit_16gb(
+    *,
+    width: int,
+    height: int,
+    ledger: GpuLedger,
+    probe: PeakVramProbe | None = None,
+) -> EditTrace:
+    """Encode, free the encoder, denoise one block group, then a tiled VAE decode."""
+    start = len(ledger.history)
+    try:
+        _encode(ledger, probe)
+        _denoise(width, height, ledger, probe)
+        _decode(ledger, probe)
+    except VramRefused:
+        ledger.drop_all()
+        raise
+    if ledger.held:
+        ledger.drop_all()
+    samples = ledger.history[start - 1 :] if ledger.history else [ledger.used_gb]
+    return EditTrace(max(samples), True)
 
 
 def note_image_seconds(seconds: float) -> None:
@@ -55,3 +189,59 @@ def reset_image_seconds() -> None:
     """Clear the remembered diffusion time."""
     global _image_seconds
     _image_seconds = None
+
+
+def _nunchaku_mode(mode: Mode) -> bool:
+    """Z-Image-Turbo modes the INT4 generator can replace. Creative and edit stay out."""
+    if mode is Mode.TEXT or mode is Mode.RESTYLE or mode is Mode.INPAINT or mode is Mode.OUTPAINT:
+        return True
+    if mode is Mode.POSE or mode is Mode.DEPTH or mode is Mode.EDGE:
+        return True
+    if mode is Mode.TEXT_CREATIVE or mode is Mode.INSTRUCTION:
+        return False
+    assert_never(mode)
+
+
+def _mark(probe: PeakVramProbe | None, stage: str) -> None:
+    if probe is not None:
+        probe.mark(stage)
+
+
+def _stage(ledger: GpuLedger, probe: PeakVramProbe | None, name: str, gb: float, *marks: str) -> None:
+    """Take one INT4 stage when it fits under the 12 GB planning peak."""
+    if gb > NUNCHAKU_PEAK_GB or not ledger.take(name, gb):
+        raise VramRefused()
+    for mark in marks[:-1]:
+        _mark(probe, mark)
+    ledger.drop(name)
+    if marks:
+        _mark(probe, marks[-1])
+
+
+def _encode(ledger: GpuLedger, probe: PeakVramProbe | None) -> None:
+    if not ledger.take("encoder", EDIT_ENCODER_GB):
+        raise VramRefused()
+    _mark(probe, "encode-gpu-start")
+    _mark(probe, "encode-gpu-end")
+    ledger.drop("encoder")
+    _mark(probe, "encode-free")
+
+
+def _denoise(width: int, height: int, ledger: GpuLedger, probe: PeakVramProbe | None) -> None:
+    megapixels = max(0.0, float(width) * float(height)) / 1_000_000.0
+    if not ledger.take("transformer", EDIT_BLOCK_GB + EDIT_ACT_PER_MP_GB * megapixels):
+        raise VramRefused()
+    _mark(probe, "denoise-start")
+    _mark(probe, "denoise-end")
+    ledger.drop("transformer")
+    _mark(probe, "transformer-free")
+
+
+def _decode(ledger: GpuLedger, probe: PeakVramProbe | None) -> None:
+    if not ledger.take("vae", EDIT_VAE_GB):
+        raise VramRefused()
+    _mark(probe, "decode-start")
+    _mark(probe, "decode-tiled")
+    _mark(probe, "decode-end")
+    ledger.drop("vae")
+    _mark(probe, "vae-free")

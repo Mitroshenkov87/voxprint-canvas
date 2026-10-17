@@ -10,6 +10,10 @@ New:
 
 -
 
+Coming soon:
+
+- Instruction editing. A written instruction will change a picture you already have. It will run on 16 GB and 24 GB cards.
+
 Fixed:
 
 -

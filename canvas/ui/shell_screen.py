@@ -476,6 +476,7 @@ def _role(mode: Mode) -> ImageRole:
         or mode is Mode.TEXT_CREATIVE
         or mode is Mode.INPAINT
         or mode is Mode.OUTPAINT
+        or mode is Mode.INSTRUCTION
     ):
         raise _NeedImage(text("error.job"))
     assert_never(mode)

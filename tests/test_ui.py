@@ -15,6 +15,7 @@ from canvas.app.info import (
     APP_NAME,
     ENLARGE_HINT,
     ENLARGE_RELEASES,
+    INSTRUCTION_EDIT_UNAVAILABLE,
     RESPONSIBILITY,
     THIRD_PARTY_NOTICE,
 )
@@ -31,6 +32,11 @@ from canvas.ui.splash import Splash
 @pytest.fixture(scope="module")
 def app():
     return QApplication.instance() or QApplication([])
+
+
+def _item_enabled(box, label: str) -> bool:
+    item = box.model().item(box.findText(label))
+    return bool(item is not None and item.isEnabled())
 
 
 def _labels(box):
@@ -68,7 +74,29 @@ def _ink_span(icon) -> tuple[int, int]:
     return max(xs) - min(xs), max(ys) - min(ys)
 
 
-def test_16gb_hides_creative(app):
+def test_instruction_edit_control_follows_the_feature_flag(app, monkeypatch):
+    del app
+    monkeypatch.setattr("canvas.ui.main_window.instruction_edit_available", lambda catalog=None: True)
+    window = MainWindow(lambda prompt, mode, fmt: "ok", Tier.GB16)
+    assert "Instruction edit" in _labels(window.image_mode)
+    assert _item_enabled(window.image_mode, "Instruction edit") is True
+    assert window.instruction_note.isHidden()
+    window.close()
+
+
+def test_instruction_note_follows_the_russian_locale(app, monkeypatch):
+    del app
+    monkeypatch.setenv("LC_ALL", "ru_RU.UTF-8")
+    monkeypatch.setenv("LANG", "ru_RU.UTF-8")
+    monkeypatch.setenv("LC_MESSAGES", "ru_RU.UTF-8")
+    window = MainWindow(lambda prompt, mode, fmt: "ok", Tier.GB16)
+    assert window.instruction_note.text() == (
+        "Редактирование временно недоступно: готовим модель для видеокарт от 16 ГБ"
+    )
+    window.close()
+
+
+def test_16gb_offers_instruction_and_hides_creative(app):
     del app
     window = MainWindow(lambda prompt, mode, fmt: "ok", Tier.GB16)
     tabs = window.findChild(QTabWidget)
@@ -76,9 +104,12 @@ def test_16gb_hides_creative(app):
     assert tabs.tabText(0) == "Text to image"
     assert tabs.tabText(1) == "Image to image"
     assert _labels(window.creative) == ["Text to image"]
-    assert "Restyle" in _labels(window.image_mode)
+    assert "Instruction edit" in _labels(window.image_mode)
+    assert _item_enabled(window.image_mode, "Instruction edit") is False
     window.show()
     tabs.setCurrentIndex(1)
+    assert window.instruction_note.isVisible()
+    assert window.instruction_note.text() == INSTRUCTION_EDIT_UNAVAILABLE
     assert "Creative" not in _labels(window.creative)
     formats = _labels(window.format_box)
     assert formats == ["AVIF", "JPEG XL", "WebP"]
@@ -119,7 +150,7 @@ def test_16gb_hides_creative(app):
     window.close()
 
 
-def test_24gb_offers_creative_and_reports_status(app):
+def test_24gb_offers_creative_and_instruction_and_reports_status(app):
     del app
     seen = {}
 
@@ -135,8 +166,12 @@ def test_24gb_offers_creative_and_reports_status(app):
     labels = [label.text() for label in tabs.widget(0).findChildren(QLabel)]
     assert "Quality" not in labels
     assert "Creative" in _labels(window.creative)
-    assert "Restyle" in _labels(window.image_mode)
+    assert "Instruction edit" in _labels(window.image_mode)
+    assert _item_enabled(window.image_mode, "Instruction edit") is False
     window.show()
+    tabs.setCurrentIndex(1)
+    assert window.instruction_note.isVisible()
+    assert window.instruction_note.text() == INSTRUCTION_EDIT_UNAVAILABLE
     tabs.setCurrentIndex(0)
     window.prompt.setPlainText("a red boat")
     window.generate_button.click()

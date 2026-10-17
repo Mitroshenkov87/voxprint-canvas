@@ -35,6 +35,9 @@ def test_installers_fetch_gpu_libraries_and_the_default_pack():
         assert "https://download.pytorch.org/whl/cu130" in script
         assert "--register-models" in script
         assert "huggingface.co" not in script
+        folded = script.casefold()
+        assert "nunchaku" not in folded
+        assert "qwen-image-edit" not in folded
     assert "install.ps1" in iss
     assert "voxprint-canvas.cmd" in iss
     assert "staging\\*" in iss

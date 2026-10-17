@@ -85,7 +85,7 @@ QPushButton[chip="true"]:disabled {{
     color: {TEXT}; background: {CONTROL_BG}; border-color: {CONTROL_BORDER};
 }}
 QPushButton[styleChip="true"] {{
-    padding: 4px 6px;
+    padding: 6px 10px;
 }}
 """
 
@@ -106,7 +106,7 @@ def mount(window):
     column = QWidget()
     column.setObjectName("shellColumn")
     layout = QVBoxLayout(column)
-    layout.setContentsMargins(12, 4, 12, 4)
+    layout.setContentsMargins(12, 8, 12, 8)
     layout.setSpacing(8)
     _toolbar(window, view._top)
     layout.addWidget(view.root, 1)
@@ -785,7 +785,7 @@ def _fit_text(button):
         font.setPixelSize(16)
         pad = 22
     elif str(button.objectName()).startswith("chip-style-") and not str(button.objectName()).endswith("-custom"):
-        pad = 6
+        pad = 10
         button.setProperty("styleChip", True)
         button.setFixedHeight(36)
     elif button.property("chip"):

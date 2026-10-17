@@ -3,6 +3,7 @@ import hashlib
 import importlib
 import json
 import multiprocessing
+import os
 import re
 import subprocess
 from multiprocessing.synchronize import Event as ProcessEvent
@@ -424,6 +425,19 @@ def test_installers_resolve_numpy_from_pypi_and_pin_cuda_torch():
     assert 'APP_PYTHON="$APP/python"' in linux
     assert "refuse_symlink" in linux
     assert "SUDO_USER" in linux
+    assert 'getent passwd "$SUDO_USER"' in linux
+    assert 'HOME="$USER_HOME"' in linux
+    assert 'APP_DIR="$USER_HOME/.local/share/applications"' in linux
+    assert "Moving the existing suite runtime aside:" in linux
+    assert 'as_user mv -- "$RUNTIME"' in linux
+    assert 'chown -R "$SUDO_USER" "$RUNTIME"' in linux
+    assert "The suite runtime is already installed" not in linux
+    assert 'as_user ln -sfn "$VENV/bin/voxprint-canvas" "$BIN_DIR/voxprint-canvas"' in linux
+    assert 'as_user cp "$desktop_file" "$APP_DIR/voxprint-canvas.desktop"' in linux
+    move = linux.split("move_occupied_runtime_aside()", 1)[1].split(
+        'if [ "${VOXPRINT_INSTALL_LIB:-}" = "1" ]', 1
+    )[0]
+    assert "rm " not in move
     assert "--without-pip" in linux
     assert 'gpu_ready "$RUNTIME' not in linux
     assert 'install_gpu "$RUNTIME' not in linux
@@ -539,3 +553,96 @@ def test_tensorrt_on_python_314_is_skipped(monkeypatch):
     restore_tensorrt(notes.append)
     assert called == []
     assert notes == ["TensorRT is skipped on Python 3.14."]
+
+
+def _source_install_functions(env, script, cwd):
+    return subprocess.run(
+        ["sh", "-c", script],
+        cwd=cwd,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_sudo_install_uses_the_passwd_home_not_root(tmp_path):
+    home = tmp_path / "alice"
+    home.mkdir()
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    (bindir / "id").write_text("#!/bin/sh\necho 0\n", encoding="utf-8")
+    (bindir / "getent").write_text(
+        "#!/bin/sh\nprintf '%s\\n' 'alice:x:1000:1000:Alice:" + str(home) + ":/bin/sh'\n",
+        encoding="utf-8",
+    )
+    for path in bindir.iterdir():
+        path.chmod(0o755)
+    env = os.environ.copy()
+    env["PATH"] = str(bindir) + os.pathsep + env.get("PATH", "")
+    env["VOXPRINT_INSTALL_LIB"] = "1"
+    env["HOME"] = "/root"
+    env["SUDO_USER"] = "alice"
+    env.pop("VOXPRINT_HOME", None)
+    env["XDG_DATA_HOME"] = "/root/.local/share"
+    root = Path(__file__).resolve().parents[1]
+    script = """
+. ./installer/linux/install.sh
+user=$(installing_user_home)
+USER_HOME=$user
+PROFILE_XDG=$(profile_xdg)
+data=$(data_root)
+printf '%s\\n' "$user" "$data" "$PROFILE_XDG"
+"""
+    result = _source_install_functions(env, script, root)
+    user, data, xdg = result.stdout.splitlines()
+    assert user == str(home)
+    assert data == str(home / ".local" / "share" / "voxprint")
+    assert xdg == str(home / ".local" / "share")
+
+    inside = home / ".config" / "share"
+    inside.mkdir(parents=True)
+    env["XDG_DATA_HOME"] = str(inside)
+    result = _source_install_functions(env, script, root)
+    user, data, xdg = result.stdout.splitlines()
+    assert user == str(home)
+    assert data == str(inside / "voxprint")
+    assert xdg == str(inside)
+
+
+def test_linux_setup_moves_a_standalone_runtime_aside(tmp_path):
+    home = tmp_path / "alice"
+    runtime = home / ".local" / "share" / "voxprint" / "shared" / "runtime" / "py314-torch2.11-cu130"
+    binary = runtime / "bin" / "python3"
+    binary.parent.mkdir(parents=True)
+    binary.write_text("#!/bin/sh\n", encoding="utf-8")
+    binary.chmod(0o755)
+    marker = runtime / "keep-me.txt"
+    marker.write_text("user data", encoding="utf-8")
+    env = os.environ.copy()
+    env["VOXPRINT_INSTALL_LIB"] = "1"
+    env["HOME"] = str(home)
+    env.pop("SUDO_USER", None)
+    root = Path(__file__).resolve().parents[1]
+    script = """
+. ./installer/linux/install.sh
+USER_HOME=$1
+SHARED=$2
+RUNTIME=$3
+move_occupied_runtime_aside
+"""
+    shared = runtime.parent.parent
+    result = subprocess.run(
+        ["sh", "-c", script, "sh", str(home), str(shared), str(runtime)],
+        cwd=root,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "Moving the existing suite runtime aside:" in result.stdout
+    assert not runtime.exists()
+    backups = list(runtime.parent.glob(runtime.name + ".bak-*"))
+    assert len(backups) == 1
+    assert (backups[0] / "keep-me.txt").read_text(encoding="utf-8") == "user data"
+    assert (backups[0] / "bin" / "python3").is_file()

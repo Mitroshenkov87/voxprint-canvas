@@ -7,25 +7,12 @@
 set -eu
 
 SRC=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
-if [ -n "${VOXPRINT_HOME:-}" ]; then
-  DATA="$VOXPRINT_HOME"
-elif [ -n "${XDG_DATA_HOME:-}" ]; then
-  DATA="$XDG_DATA_HOME/voxprint"
-else
-  DATA="$HOME/.local/share/voxprint"
-fi
 APP="/opt/voxprint-ai-suite/canvas"
 VENV="$APP/venv"
-SHARED="$DATA/shared"
 RUNTIME_REL="runtime/py314-torch2.11-cu130"
-RUNTIME="$SHARED/$RUNTIME_REL"
 WHEELS="$APP/setup-work/wheels"
 APP_PYTHON="$APP/python"
 BASE="$APP_PYTHON/bin/python3"
-RUNTIME_SITE="$RUNTIME/lib/python3.14/site-packages"
-APP_DIR="$HOME/.local/share/applications"
-DIR_DIR="$HOME/.local/share/desktop-directories"
-BIN_DIR="$HOME/.local/bin"
 LINUX_PYTHON_URL="https://github.com/astral-sh/python-build-standalone/releases/download/20261009/cpython-3.14.8%2B20261009-x86_64-unknown-linux-gnu-install_only.tar.gz"
 TORCH_INDEX="https://download.pytorch.org/whl/cu130"
 
@@ -53,14 +40,129 @@ refuse_symlink() {
   done
 }
 
+installing_user_home() {
+  # sudo's default HOME is /root. Profile paths must use the installing user's home.
+  if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ]; then
+    home=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+    if [ -z "$home" ] || [ ! -d "$home" ]; then
+      echo "Setup stopped because the installing user's home could not be found." >&2
+      exit 1
+    fi
+    printf '%s\n' "$home"
+    return
+  fi
+  if [ -z "${HOME:-}" ] || [ ! -d "$HOME" ]; then
+    echo "Setup stopped because HOME is not set." >&2
+    exit 1
+  fi
+  printf '%s\n' "$HOME"
+}
+
+profile_xdg() {
+  fallback="$USER_HOME/.local/share"
+  if [ -z "${XDG_DATA_HOME:-}" ] || [ "${XDG_DATA_HOME#/}" = "$XDG_DATA_HOME" ]; then
+    printf '%s\n' "$fallback"
+    return
+  fi
+  case "$XDG_DATA_HOME" in
+    "$USER_HOME"|"$USER_HOME"/*)
+      printf '%s\n' "$XDG_DATA_HOME"
+      ;;
+    *)
+      if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ]; then
+        printf '%s\n' "$fallback"
+      else
+        printf '%s\n' "$XDG_DATA_HOME"
+      fi
+      ;;
+  esac
+}
+
+data_root() {
+  if [ -n "${VOXPRINT_HOME:-}" ]; then
+    printf '%s\n' "$VOXPRINT_HOME"
+    return
+  fi
+  printf '%s\n' "$PROFILE_XDG/voxprint"
+}
+
+under_user_home() {
+  case "$1" in
+    "$USER_HOME"|"$USER_HOME"/*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 as_user() {
   # A root install must not run or write the profile as root when sudo recorded the user.
   if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ]; then
-    sudo -u "$SUDO_USER" -- env UV_NO_CONFIG=1 "$@"
+    sudo -u "$SUDO_USER" -- env \
+      HOME="$USER_HOME" \
+      USER="$SUDO_USER" \
+      LOGNAME="$SUDO_USER" \
+      UV_NO_CONFIG=1 \
+      VOXPRINT_HOME="${VOXPRINT_HOME:-}" \
+      XDG_DATA_HOME="$PROFILE_XDG" \
+      "$@"
   else
     "$@"
   fi
 }
+
+handoff_dir() {
+  # A previous root install may own this directory. Give it back before the user renames it.
+  if [ "$(id -u)" -ne 0 ] || [ -z "${SUDO_USER:-}" ]; then
+    return 0
+  fi
+  if ! under_user_home "$1"; then
+    return 0
+  fi
+  if [ -d "$1" ]; then
+    refuse_symlink "$1"
+    chown "$SUDO_USER" "$1"
+  fi
+}
+
+handoff_parents() {
+  cursor=$1
+  while [ -n "$cursor" ] && [ "$cursor" != "/" ] && [ "$cursor" != "$USER_HOME" ]; do
+    handoff_dir "$cursor"
+    cursor=$(dirname "$cursor")
+  done
+}
+
+move_occupied_runtime_aside() {
+  # A standalone tree is user data. Rename it and build a new runtime beside the backup.
+  refuse_symlink "$SHARED"
+  refuse_symlink "$RUNTIME"
+  stamp=$(date +%Y%m%d%H%M%S)
+  backup="$RUNTIME.bak-$stamp"
+  suffix=0
+  while [ -e "$backup" ]; do
+    suffix=$((suffix + 1))
+    backup="$RUNTIME.bak-$stamp-$suffix"
+  done
+  echo "Moving the existing suite runtime aside: $backup"
+  if under_user_home "$RUNTIME" && [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ]; then
+    chown -R "$SUDO_USER" "$RUNTIME"
+  fi
+  handoff_parents "$(dirname "$RUNTIME")"
+  as_user mv -- "$RUNTIME" "$backup"
+}
+
+if [ "${VOXPRINT_INSTALL_LIB:-}" = "1" ]; then
+  return 0 2>/dev/null || exit 0
+fi
+
+USER_HOME=$(installing_user_home)
+PROFILE_XDG=$(profile_xdg)
+DATA=$(data_root)
+SHARED="$DATA/shared"
+RUNTIME="$SHARED/$RUNTIME_REL"
+RUNTIME_SITE="$RUNTIME/lib/python3.14/site-packages"
+APP_DIR="$USER_HOME/.local/share/applications"
+DIR_DIR="$USER_HOME/.local/share/desktop-directories"
+BIN_DIR="$USER_HOME/.local/bin"
 
 scrub_environment
 if ! mkdir -p "$APP"; then
@@ -68,7 +170,7 @@ if ! mkdir -p "$APP"; then
   exit 1
 fi
 cd "$APP"
-mkdir -p "$APP_DIR" "$DIR_DIR" "$BIN_DIR" "$WHEELS"
+mkdir -p "$WHEELS"
 refuse_symlink "$APP"
 echo "Checking Python..."
 if [ ! -x "$BASE" ]; then
@@ -195,13 +297,13 @@ fi
   --index-url https://pypi.org/simple -d "$WHEELS"
 if [ "$runtime_ready" -eq 0 ]; then
   echo "Repairing the suite runtime..."
-  if [ -x "$RUNTIME/bin/python3" ] && [ ! -f "$RUNTIME/pyvenv.cfg" ]; then
-    echo "The suite runtime is already installed. Canvas will not replace it." >&2
-    exit 1
-  fi
   if [ ! -f "$RUNTIME/pyvenv.cfg" ]; then
+    if [ -d "$RUNTIME" ] && [ -n "$(find "$RUNTIME" -mindepth 1 -print -quit 2>/dev/null)" ]; then
+      move_occupied_runtime_aside
+    fi
     refuse_symlink "$SHARED"
     refuse_symlink "$RUNTIME"
+    handoff_parents "$SHARED"
     as_user mkdir -p "$SHARED"
     as_user "$BASE" -m venv --without-pip "$RUNTIME"
   fi
@@ -227,6 +329,7 @@ if "$VENV/bin/python" -c "import sys; raise SystemExit(0 if sys.version_info >= 
   echo "TensorRT is skipped on Python 3.14." >&2
 elif [ -z "$(find "$SHARED/tensorrt-10" -mindepth 1 -print -quit 2>/dev/null)" ]; then
   refuse_symlink "$SHARED/tensorrt-10"
+  handoff_parents "$SHARED/tensorrt-10"
   as_user mkdir -p "$SHARED/tensorrt-10"
   as_user "$VENV/bin/python" -m pip --isolated install -c "$SRC/constraints.txt" --target "$SHARED/tensorrt-10" \
     --upgrade-strategy only-if-needed "tensorrt-cu13==10.16.1.11"
@@ -235,6 +338,7 @@ fi
 echo "Installing the default image pack..."
 refuse_symlink "$DATA"
 refuse_symlink "$DATA/canvas/tier.txt"
+handoff_parents "$DATA"
 as_user "$VENV/bin/python" -m canvas.app.provision
 as_user mkdir -p "$DATA/canvas"
 as_user sh -c '"$1" -m canvas.models.tiers > "$2"' sh "$VENV/bin/python" "$DATA/canvas/tier.txt"
@@ -242,21 +346,19 @@ as_user "$VENV/bin/python" -m canvas.app.main --register-models
 refuse_symlink "$BIN_DIR"
 refuse_symlink "$APP_DIR"
 refuse_symlink "$DIR_DIR"
-ln -sfn "$VENV/bin/voxprint-canvas" "$BIN_DIR/voxprint-canvas"
-ln -sfn "$VENV/bin/voxprint-canvas-cli" "$BIN_DIR/voxprint-canvas-cli"
-if [ -w /usr/local/bin ] || [ "$(id -u)" -eq 0 ]; then
-  ln -sfn "$VENV/bin/voxprint-canvas" /usr/local/bin/voxprint-canvas
-  ln -sfn "$VENV/bin/voxprint-canvas-cli" /usr/local/bin/voxprint-canvas-cli
-fi
-
-cat > "$DIR_DIR/voxprint.directory" << 'EOF'
+handoff_parents "$BIN_DIR"
+handoff_parents "$APP_DIR"
+handoff_parents "$DIR_DIR"
+as_user mkdir -p "$APP_DIR" "$DIR_DIR" "$BIN_DIR"
+menu_file="$APP/setup-work/voxprint.directory"
+desktop_file="$APP/setup-work/voxprint-canvas.desktop"
+cat > "$menu_file" << 'EOF'
 [Desktop Entry]
 Version=1.0
 Type=Directory
 Name=VOXPrint AI Suite
 EOF
-
-cat > "$APP_DIR/voxprint-canvas.desktop" << EOF
+cat > "$desktop_file" << EOF
 [Desktop Entry]
 Version=1.0
 Type=Application
@@ -268,5 +370,13 @@ Terminal=false
 Categories=Graphics;
 StartupWMClass=voxprint-canvas
 EOF
+as_user cp "$menu_file" "$DIR_DIR/voxprint.directory"
+as_user cp "$desktop_file" "$APP_DIR/voxprint-canvas.desktop"
+as_user ln -sfn "$VENV/bin/voxprint-canvas" "$BIN_DIR/voxprint-canvas"
+as_user ln -sfn "$VENV/bin/voxprint-canvas-cli" "$BIN_DIR/voxprint-canvas-cli"
+if [ -w /usr/local/bin ] || [ "$(id -u)" -eq 0 ]; then
+  ln -sfn "$VENV/bin/voxprint-canvas" /usr/local/bin/voxprint-canvas
+  ln -sfn "$VENV/bin/voxprint-canvas-cli" /usr/local/bin/voxprint-canvas-cli
+fi
 
 echo "Installed."

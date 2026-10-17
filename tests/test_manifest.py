@@ -408,6 +408,14 @@ def test_installers_resolve_numpy_from_pypi_and_pin_cuda_torch():
     assert "Get-Command py" not in windows
     assert "voxprint-gpu-probe-" in windows
     assert "-c $code" not in windows
+    assert "pyvenv.cfg" in windows
+    assert "--target" in windows
+    assert "Test-SuiteGpuFiles" in windows
+    assert "Remove-Item -LiteralPath $Fetch" in windows
+    assert "& $RuntimePy" not in windows
+    assert "$RuntimePy = $RootPy" not in windows
+    assert "venv --upgrade $Runtime" not in windows
+    assert "venv --upgrade $Venv" in windows
     assert '--index-url "$TORCH_INDEX"' in linux
     assert "--extra-index-url https://pypi.org/simple" in linux
     assert "onnxruntime-gpu==1.31.0" in linux

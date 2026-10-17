@@ -10,10 +10,12 @@ $App = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Venv = Join-Path $App "venv"
 $Py = Join-Path $Venv "Scripts\python.exe"
 $Shared = Join-Path $env:LOCALAPPDATA "Voxprint\shared"
-$Wheels = Join-Path $Shared "wheels"
 $RuntimeRel = "runtime/py314-torch2.11-cu130"
 $Runtime = Join-Path $Shared ($RuntimeRel -replace '/', '\')
 $RuntimePy = Join-Path $Runtime "Scripts\python.exe"
+$RuntimeCfg = Join-Path $Runtime "pyvenv.cfg"
+$RuntimeSite = Join-Path $Runtime "Lib\site-packages"
+$Fetch = $null
 $Trt = Join-Path $Shared "tensorrt-10"
 $WindowsPythonUrl = "https://www.python.org/ftp/python/3.14.8/python-3.14.8-amd64.exe"
 $TorchIndex = "https://download.pytorch.org/whl/cu130"
@@ -67,15 +69,51 @@ sys.exit(0)
     }
 }
 
-function Install-SuiteGpuPackages([string]$Python) {
+function Test-SuiteGpuFiles([string]$SitePackages) {
+    if (-not (Test-Path -LiteralPath $SitePackages)) {
+        return $false
+    }
+    $versionPy = Join-Path $SitePackages "torch\version.py"
+    if (-not (Test-Path -LiteralPath $versionPy)) {
+        return $false
+    }
+    $text = Get-Content -LiteralPath $versionPy -Raw -ErrorAction SilentlyContinue
+    if (-not $text -or $text -notmatch 'cuda\s*=\s*[''"]13\.0') {
+        return $false
+    }
+    $torchDist = @(Get-ChildItem -LiteralPath $SitePackages -Directory -Filter "torch-2.11.0+cu130*.dist-info" -ErrorAction SilentlyContinue)
+    $visionDist = @(Get-ChildItem -LiteralPath $SitePackages -Directory -Filter "torchvision-0.26.0+cu130*.dist-info" -ErrorAction SilentlyContinue)
+    $gpuName = "onnx" + "runtime" + "_gpu"
+    $cpuName = "onnx" + "runtime"
+    $gpuDist = @(Get-ChildItem -LiteralPath $SitePackages -Directory -Filter ($gpuName + "-*.dist-info") -ErrorAction SilentlyContinue)
+    $cpuDist = @(Get-ChildItem -LiteralPath $SitePackages -Directory -Filter ($cpuName + "-*.dist-info") -ErrorAction SilentlyContinue)
+    return ($torchDist.Count -gt 0 -and $visionDist.Count -gt 0 -and $gpuDist.Count -gt 0 -and $cpuDist.Count -eq 0)
+}
+
+function Install-SuiteGpuPackages([string]$Python, [string]$Target) {
     New-Item -ItemType Directory -Force $Fetch | Out-Null
-    & $Uv pip install --python $Python --index $TorchIndex --index-strategy unsafe-best-match --find-links $Fetch -c $Constraints "torch==2.11.0+cu130" "torchvision==0.26.0+cu130"
+    $into = @("--python", $Python, "--find-links", $Fetch, "-c", $Constraints)
+    if (-not [string]::IsNullOrWhiteSpace($Target)) {
+        New-Item -ItemType Directory -Force $Target | Out-Null
+        $into += @("--target", $Target)
+    }
+    & $Uv pip install @into --index $TorchIndex --index-strategy unsafe-best-match "torch==2.11.0+cu130" "torchvision==0.26.0+cu130"
     if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
-    & $Uv pip install --python $Python --index-url "https://pypi.org/simple" -c $Constraints "onnxruntime-gpu==1.31.0"
+    & $Uv pip install @into --index-url "https://pypi.org/simple" "onnxruntime-gpu==1.31.0"
     if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
     $cpu = "onnx" + "runtime"
-    & $Uv pip uninstall --python $Python $cpu
+    if (-not [string]::IsNullOrWhiteSpace($Target)) {
+        & $Uv pip uninstall --python $Python --target $Target $cpu
+    } else {
+        & $Uv pip uninstall --python $Python $cpu
+    }
     if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
+}
+
+function Clear-WheelFetch {
+    if ($Fetch -and (Test-Path -LiteralPath $Fetch)) {
+        Remove-Item -LiteralPath $Fetch -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
 
 function Invoke-Py([string[]]$ArgList) {
@@ -113,12 +151,10 @@ try {
         throw "uv reported Python at '$Base', but that file does not exist. Install Python 3.14 from $WindowsPythonUrl and run this setup again."
     }
 
-    $RootPy = Join-Path $Runtime "python.exe"
-    if (Test-Path $RootPy) {
-        $RuntimePy = $RootPy
-    }
-    $Fresh = -not (Test-Path $RuntimePy)
-    if ($Fresh) {
+    # The shared runtime is user-writable. Never execute its python.exe.
+    # A standalone tree (python.exe at the runtime root, no pyvenv.cfg) is left alone.
+    $runtimeVenv = (Test-Path -LiteralPath $RuntimePy) -and (Test-Path -LiteralPath $RuntimeCfg)
+    if (-not $runtimeVenv) {
         $occupied = Get-ChildItem -Force $Runtime -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($occupied) {
             throw "The suite runtime is already installed. Canvas will not replace it."
@@ -126,13 +162,10 @@ try {
         New-Item -ItemType Directory -Force $Shared | Out-Null
         & $Base -m venv $Runtime
         if ($LASTEXITCODE -ne 0) { throw "Python could not create the suite runtime." }
-    } else {
-        & $Base -m venv --upgrade $Runtime
-        if ($LASTEXITCODE -ne 0) { throw "Python could not refresh the suite runtime." }
     }
 
     if (-not (Test-Path $Py)) {
-        & $RuntimePy -m venv $Venv
+        & $Base -m venv $Venv
         if ($LASTEXITCODE -ne 0) { throw "Python could not create the environment." }
     } else {
         & $Base -m venv --upgrade $Venv
@@ -156,7 +189,7 @@ try {
     }
     $Fetch = Join-Path $env:TEMP ("voxprint-wheels-" + [guid]::NewGuid().ToString("n"))
     New-Item -ItemType Directory -Force $Fetch | Out-Null
-    $runtimeReady = Test-SuiteGpuPackages $RuntimePy
+    $runtimeReady = Test-SuiteGpuFiles $RuntimeSite
     $appReady = Test-SuiteGpuPackages $Py
     if ($runtimeReady -and $appReady) {
         Write-Host "PyTorch is already installed."
@@ -175,13 +208,11 @@ try {
     }
     if (-not $runtimeReady) {
         Write-Host "Repairing the suite runtime..."
-        & $RuntimePy -m pip install --upgrade pip
-        if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
-        Install-SuiteGpuPackages $RuntimePy
-        if (-not (Test-SuiteGpuPackages $RuntimePy)) { throw "Setup stopped." }
+        Install-SuiteGpuPackages $Base $RuntimeSite
+        if (-not (Test-SuiteGpuFiles $RuntimeSite)) { throw "Setup stopped." }
     }
     if (-not $appReady) {
-        Install-SuiteGpuPackages $Py
+        Install-SuiteGpuPackages $Py ""
         if (-not (Test-SuiteGpuPackages $Py)) { throw "Setup stopped." }
     }
     & $Uv pip install --python $Py --index-url https://pypi.org/simple "torchao==0.18.0"
@@ -205,6 +236,7 @@ try {
     & $Py -m canvas.models.tiers | Set-Content -Encoding ascii (Join-Path $tierDir "tier.txt")
     if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
     Invoke-Py @("-m", "canvas.app.main", "--register-models")
+    Clear-WheelFetch
     Write-Host "Installed."
     if ($TranscriptOn) {
         Stop-Transcript | Out-Null
@@ -212,6 +244,7 @@ try {
     }
 } catch {
     Write-Host $_
+    Clear-WheelFetch
     if ($TranscriptOn) {
         try { Stop-Transcript | Out-Null } catch { }
     }

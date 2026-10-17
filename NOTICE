@@ -8,36 +8,3 @@ The GPU lock, model-user file, VRAM policy, thermal pause, palette, backdrop
 and audit script are adapted from other Voxprint programs, also Apache-2.0,
 Copyright Aleksandr Mitroshenkov: Voxprint AI Audiobook Builder and Voxprint AI
 Movie Dubber.
-
-Nunchaku SVDQuant runtime
-  tonera/vitoom-nunchaku
-  revision 85bad5510d409570527b018387491fd0c81e4727
-  Apache-2.0, as declared on the model card. The wheel METADATA was not unpacked.
-  Linux pin: nunchaku-1.3.0.dev20260622+cu13.0torch2.11-cp311-cp311-linux_x86_64.whl
-    sha256 02a762d94ed25ac572dbc59bb8109b0a9df6f9d875aa51228564e70307b3b68c
-  Windows pin: nunchaku-1.3.0.dev20260629+cu13.0torch2.11-cp312-cp312-win_amd64.whl
-    sha256 ddc015bfa6fc6b84957532823c23418f5b986cb61e3c02c97a646cfe2a1fd955
-
-Qwen-Image-Edit-2511 INT4
-  QuantFunc/Nunchaku-Qwen-Image-EDIT-2511
-  revision 4ca543a1e91db4183ee16fd5aa5950e0b02803e5
-  Apache-2.0
-  r256 nunchaku_qwen_image_edit_2511_best_quality_int4.safetensors
-    sha256 d47054ff853d8d9cd6812386d4611cfe36fa9d1a5447549c8f0aa37c8aa79302
-  r128 nunchaku_qwen_image_edit_2511_balance_int4.safetensors
-    sha256 ec36d349309057f245e77255c008fc97330f2bc280dc8d704de715bcbaf6841b
-  The FP8 text encoder, VAE, processor, and tokenizer stay on
-  Mitroshenkov87/voxprint-mirror-qwen-image-edit-2511 and
-  Qwen/Qwen-Image-Edit-2511, both Apache-2.0.
-  Mitroshenkov87/voxprint-mirror-qwen-image-edit-2511-int4 is the name reserved
-  for a later r256 mirror. That mirror is not published.
-
-Z-Image-Turbo INT4
-  nunchaku-ai/nunchaku-z-image-turbo
-  revision ca6bac69c3b0b2bdd31ca5196bf87c5f2a9eaedf
-  Apache-2.0
-  Registered and disabled. Text to image stays BF16.
-  r128 svdq-int4_r128-z-image-turbo.safetensors
-    sha256 dbf5aba0f7370d1fe88e52823d3d7b9ceb6fa006707f075baf9cfdaf362ea745
-  r256 svdq-int4_r256-z-image-turbo.safetensors
-    sha256 636328b27315b44ab37844feeeda03874050b30ef92fc9f339bb0cafcf5c01e8

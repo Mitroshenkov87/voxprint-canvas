@@ -143,14 +143,10 @@ def _catalog_keys(source: str) -> list[str]:
     return keys
 
 
-def test_edit_unavailable_is_the_shipped_sentence():
+def test_gate_unavailable_is_the_shipped_sentence():
     assert shipped_locales() == ("en", "ru")
-    assert text("edit.unavailable", "en") == (
-        "Editing is temporarily unavailable: we're preparing a model for 16 GB GPUs"
-    )
-    assert text("edit.unavailable", "ru") == (
-        "Редактирование временно недоступно: готовим модель для видеокарт от 16 ГБ"
-    )
+    assert text("gate.unavailable", "en") == "Image generation is unavailable."
+    assert text("gate.unavailable", "ru") == "Генерация изображений недоступна."
 
 
 def test_every_catalog_key_has_every_shipped_locale():
@@ -160,8 +156,8 @@ def test_every_catalog_key_has_every_shipped_locale():
 
 
 def test_a_missing_translation_fails_the_catalog_check():
-    gaps = locale_gaps({"locales": ["en", "ru"], "strings": {"edit.unavailable": {"en": "Editing"}}})
-    assert gaps == ["edit.unavailable missing ru"]
+    gaps = locale_gaps({"locales": ["en", "ru"], "strings": {"gate.unavailable": {"en": "Stopped"}}})
+    assert gaps == ["gate.unavailable missing ru"]
 
 
 def test_ui_code_has_no_hardcoded_text():
@@ -176,7 +172,7 @@ def test_ui_code_has_no_hardcoded_text():
             if key not in known:
                 errors.append(f"{path.relative_to(ROOT).as_posix()}: unknown catalog key {key}")
     assert errors == []
-    assert "edit.unavailable" in used
+    assert "gate.unavailable" in used
 
 
 def test_the_lint_flags_a_hardcoded_widget_and_allows_the_list():

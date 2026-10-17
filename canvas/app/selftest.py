@@ -13,12 +13,8 @@ from canvas.core.formats import OutputFormat, save_image
 from canvas.infra.gpu import probe_gpu
 from canvas.infra.paths import models_dir
 from canvas.infra.runtime import python_supports_tensorrt
-from canvas.models.edit import EDIT_ID, probe_edit_pack
-from canvas.models.edit_route import edit_route_report
-from canvas.models.features import INSTRUCTION_EDIT, instruction_edit_available
-from canvas.models.modes import Tier
 from canvas.models.registry import ModelSpec, load_catalog
-from canvas.models.snapshots import snapshot_ready, snapshot_status, weight_dir
+from canvas.models.snapshots import snapshot_ready, snapshot_status
 from canvas.models.verified import VerifiedCache
 from canvas.safety.adapters import FairFaceAge, NsfwViT, Qwen3GuardGen, SiglipZeroShot, YuNetFaces
 from canvas.safety.gate import SafetyError, issue
@@ -41,7 +37,6 @@ def selftest_report(
     gpu = check_gpu(probe_gpu())
     encoders = _encoders()
     catalog = load_catalog()
-    instruction_edit = "available" if instruction_edit_available(catalog) else "unavailable"
     cache = VerifiedCache.open(deep)
     try:
         models = [_model_row(spec, folder, cache) for spec in catalog.models if spec.files]
@@ -58,11 +53,6 @@ def selftest_report(
     notes: list[str] = []
     if not python_supports_tensorrt():
         notes.append(text("splash.tensorrt_skip", "en"))
-    routes = {
-        "16gb": edit_route_report(catalog, Tier.GB16, folder),
-        "24gb": edit_route_report(catalog, Tier.GB24, folder),
-    }
-    active = "" if gpu.tier is None else gpu.tier.value
     return {
         "ok": ok,
         "version": version_label(),
@@ -74,16 +64,9 @@ def selftest_report(
         },
         "encoders": encoders,
         "models": models,
-        "edit_route": {
-            "active_tier": active,
-            "active": routes.get(active, {}),
-            "16gb": routes["16gb"],
-            "24gb": routes["24gb"],
-        },
         "classifiers": classifiers,
         "notes": notes,
         "deep": deep,
-        INSTRUCTION_EDIT: instruction_edit,
     }
 
 
@@ -97,15 +80,7 @@ def _model_row(spec: ModelSpec, root: Path, cache: VerifiedCache) -> dict[str, o
     row: dict[str, object] = {"id": spec.id, "ok": True, "detail": ""}
     if spec.mirror_status:
         row["mirror_status"] = spec.mirror_status
-    if spec.id == EDIT_ID and not instruction_edit_available():
-        row["detail"] = "unavailable"
-        return row
     if state == "ready":
-        if spec.id == EDIT_ID:
-            detail = probe_edit_pack(weight_dir(root, spec.repo))
-            if detail:
-                row["ok"] = False
-                row["detail"] = detail
         return row
     if state == "not_downloaded":
         row["detail"] = "not_downloaded"

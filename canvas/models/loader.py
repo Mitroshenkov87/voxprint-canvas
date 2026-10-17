@@ -8,9 +8,7 @@ from typing import assert_never
 
 from canvas.app.i18n import text
 from canvas.infra.paths import models_dir
-from canvas.models.edit_route import int4_weight_name, select_edit_route
 from canvas.models.modes import Mode, Tier
-from canvas.models.nunchaku import NUNCHAKU_ID, load_nunchaku_generator, nunchaku_ready
 from canvas.models.pin import PinError, require_pin, verify_file
 from canvas.models.plan import CallPlan, build_plan
 from canvas.models.registry import Catalog, ModelSpec, RegistryError, load_catalog
@@ -23,13 +21,7 @@ from canvas.pipeline.bf16_schedule import (
     run_bf16_16gb,
     uses_bf16_16gb,
 )
-from canvas.pipeline.schedule import (
-    Placement,
-    choose_schedule,
-    run_edit_16gb,
-    run_edit_int4,
-    system_ram_gb,
-)
+from canvas.pipeline.schedule import Placement, choose_schedule
 from canvas.pipeline.vram_probe import PeakVramProbe
 from canvas.safety.adapters import FairFaceAge, NsfwViT, Qwen3GuardGen, SiglipZeroShot, YuNetFaces
 from canvas.safety.gate import SafetyStack, SafetyUnavailable
@@ -97,8 +89,7 @@ def load_catalog_stack(root: Path, catalog: Catalog | None = None) -> SafetyStac
 class ZImageGenerator:
     """Diffusers generator. ``generate`` accepts only a ``ScreenedInput``."""
 
-    def __init__(self, catalog: Catalog, tier: Tier, ledger: GpuLedger | None = None,
-                 ram_gb: float | None = None) -> None:
+    def __init__(self, catalog: Catalog, tier: Tier, ledger: GpuLedger | None = None) -> None:
         self.catalog = catalog
         self.tier = tier
         self.last_plan: CallPlan | None = None
@@ -109,7 +100,6 @@ class ZImageGenerator:
         self.probe: PeakVramProbe | None = None
         self.seed = 0
         self.models: Path | None = None
-        self.ram_gb = ram_gb
 
     def attach_probe(self, probe: PeakVramProbe | None) -> None:
         """Stage marks land on this probe. The pipeline calls it before ``generate``."""
@@ -136,38 +126,22 @@ class ZImageGenerator:
         if folder is None or width is None or height is None:
             raise ModelNotReady(plan)
         control_file = _control_file(self.catalog, plan, root)
-        weight_name = int4_weight_name(spec) if spec.quant == "int4" else ""
         try:
             return render(
                 plan, folder, screened, width, height, self.tier,
-                seed=self.seed, control_file=control_file, weight_name=weight_name,
+                seed=self.seed, control_file=control_file,
             )
         except ImportError as exc:
             raise ModelNotReady(plan) from exc
 
     def _schedule(self, plan: CallPlan, mode: Mode, width: int, height: int, prompt: str) -> None:
-        """Plan memory before weights move. 24 GB text stays resident and does not mark stages."""
-        if self.tier is Tier.GB24 and mode is not Mode.INSTRUCTION:
+        """Plan memory before weights move. 24 GB stays resident and does not mark stages."""
+        if self.tier is Tier.GB24:
             return
-        budget = 16.0 if self.tier is Tier.GB16 else 24.0
-        ready = False
-        if mode is not Mode.INSTRUCTION:
-            ready = nunchaku_ready(self.catalog.by_id(NUNCHAKU_ID))
-        int4_edit = mode is Mode.INSTRUCTION and select_edit_route(self.catalog, self.tier).quant == "int4"
-        ram = 0.0 if mode is not Mode.INSTRUCTION else self._ram()
-        choice = choose_schedule(budget, mode, ram, nunchaku_ready=ready, int4_edit=int4_edit)
-        if choice.placement is Placement.NUNCHAKU_INT4:
-            if mode is Mode.INSTRUCTION:
-                run_edit_int4(width=width, height=height, ledger=self.ledger, probe=self.probe)
-                return
-            load_nunchaku_generator(self.catalog.by_id(NUNCHAKU_ID))
-            raise ModelNotReady(plan)
+        choice = choose_schedule(16.0, mode, 0.0)
         if choice.placement is Placement.RESIDENT:
             return
         if choice.placement is Placement.GROUP_OFFLOAD:
-            if mode is Mode.INSTRUCTION:
-                run_edit_16gb(width=width, height=height, ledger=self.ledger, probe=self.probe)
-                return
             if uses_bf16_16gb(self.tier.value, plan):
                 run_bf16_16gb(
                     prompt=prompt,
@@ -181,11 +155,6 @@ class ZImageGenerator:
                 )
             return
         assert_never(choice.placement)
-
-    def _ram(self) -> float:
-        if self.ram_gb is not None:
-            return float(self.ram_gb)
-        return system_ram_gb()
 
 
 def download_safety(catalog: Catalog, root: Path) -> None:

@@ -103,7 +103,7 @@ def mount(window):
     column = QWidget()
     column.setObjectName("shellColumn")
     layout = QVBoxLayout(column)
-    layout.setContentsMargins(12, 8, 12, 8)
+    layout.setContentsMargins(12, 4, 12, 4)
     layout.setSpacing(8)
     _toolbar(window, view._top)
     layout.addWidget(view.root, 1)
@@ -718,6 +718,7 @@ class _Flow(QLayout):
         inner = max(0, width - margins.left() - margins.right())
         origin_x = margins.left() if rect is None else rect.x() + margins.left()
         origin_y = margins.top() if rect is None else rect.y() + margins.top()
+        squeeze = _squeeze(self._items, inner, spacing)
         lines = []
         current = []
         x = 0
@@ -726,6 +727,7 @@ class _Flow(QLayout):
             if _flow_hidden(item):
                 continue
             item_width, item_height = _flow_size(item)
+            item_width -= squeeze.get(id(item), 0)
             if x and x + item_width > inner:
                 lines.append((current, line_height))
                 current = []
@@ -750,6 +752,31 @@ class _Flow(QLayout):
         return margins.top() + y + margins.bottom()
 
 
+def _squeeze(items, inner, spacing):
+    """Trim style chip padding so the style row stays on one line.
+
+    Returns how many pixels to take from each style chip. Only chips that set
+    a ``tightWidth`` floor give up width; other items keep their full size.
+    """
+    shown = [item for item in items if not _flow_hidden(item)]
+    total = sum(_flow_size(item)[0] for item in shown) + spacing * max(0, len(shown) - 1)
+    over = total - inner
+    tight = [item for item in shown if item.widget() is not None and item.widget().property("tightWidth")]
+    if over <= 0 or not tight:
+        return {}
+    room = {id(item): max(0, _flow_size(item)[0] - int(item.widget().property("tightWidth"))) for item in tight}
+    if sum(room.values()) < over:
+        return {}
+    share = {}
+    left = over
+    for index, item in enumerate(tight):
+        want = -(-left // (len(tight) - index))
+        take = min(room[id(item)], want)
+        share[id(item)] = take
+        left -= take
+    return share
+
+
 def _flow_hidden(item):
     widget = item.widget()
     return widget is not None and not widget.isVisible()
@@ -762,6 +789,9 @@ def _flow_size(item):
     height = hint.height()
     if widget is not None:
         width = max(width, widget.minimumWidth())
+        natural = widget.property("naturalWidth")
+        if natural:
+            width = max(width, int(natural))
         height = max(height, widget.minimumHeight(), widget.sizeHint().height())
     return max(width, 1), max(height, 1)
 
@@ -781,7 +811,15 @@ def _fit_text(button):
     elif _in_action_bar(button):
         pad = 18
     advance = QFontMetrics(font).horizontalAdvance(words)
-    button.setMinimumWidth(advance + pad * 2)
+    style_chip = str(button.objectName()).startswith("chip-style-") and not str(button.objectName()).endswith("-custom")
+    if style_chip:
+        # The style row must stay on one line at 1280px, so these chips may
+        # give up padding (down to 6px a side) when the row is tight.
+        button.setProperty("tightWidth", advance + 12)
+        button.setProperty("naturalWidth", advance + pad * 2)
+        button.setMinimumWidth(advance + 12)
+    else:
+        button.setMinimumWidth(advance + pad * 2)
     policy = button.sizePolicy()
     policy.setHorizontalPolicy(QSizePolicy.Policy.Minimum)
     button.setSizePolicy(policy)

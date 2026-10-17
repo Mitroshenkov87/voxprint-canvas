@@ -5,6 +5,7 @@ from typing import Callable, NamedTuple, assert_never
 
 from PySide6.QtCore import Qt, QPointF, QRectF, QSize, QUrl
 from PySide6.QtGui import (
+    QStandardItemModel,
     QBrush,
     QColor,
     QDesktopServices,
@@ -234,7 +235,8 @@ class MainWindow(QWidget):
         index = self.image_mode.findData(Mode.INSTRUCTION)
         if index < 0:
             return
-        item = self.image_mode.model().item(index)  # type: ignore[attr-defined]
+        model = self.image_mode.model()
+        item = model.item(index) if isinstance(model, QStandardItemModel) else None
         if item is None:
             return
         item.setEnabled(ready)

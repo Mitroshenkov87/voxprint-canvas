@@ -489,6 +489,14 @@ def test_installers_resolve_numpy_from_pypi_and_pin_cuda_torch():
     assert "$RuntimePy = $RootPy" not in windows
     assert "venv --upgrade $Runtime" not in windows
     assert "venv --upgrade $Venv" in windows
+    assert "Repair-SharedRuntimePackages" in windows
+    assert "Install-SuiteGpuPackages $Base $RuntimeSite" not in windows
+    assert "if (-not (Test-TorchCudaFiles $RuntimeSite))" in windows
+    assert "if (-not $visionOk)" in windows
+    assert "if (-not $gpuOk)" in windows
+    assert "Repairing torch in the suite runtime..." in windows
+    assert "Repairing torchvision in the suite runtime..." in windows
+    assert "Repairing ONNX Runtime in the suite runtime..." in windows
     assert '--index-url "$TORCH_INDEX"' in linux
     assert "--extra-index-url https://pypi.org/simple" in linux
     assert "onnxruntime-gpu==1.31.0" in linux

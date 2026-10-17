@@ -68,8 +68,8 @@ sys.exit(0)
 }
 
 function Install-SuiteGpuPackages([string]$Python) {
-    New-Item -ItemType Directory -Force $Wheels | Out-Null
-    & $Uv pip install --python $Python --index $TorchIndex --index-strategy unsafe-best-match --find-links $Wheels -c $Constraints "torch==2.11.0+cu130" "torchvision==0.26.0+cu130"
+    New-Item -ItemType Directory -Force $Fetch | Out-Null
+    & $Uv pip install --python $Python --index $TorchIndex --index-strategy unsafe-best-match --find-links $Fetch -c $Constraints "torch==2.11.0+cu130" "torchvision==0.26.0+cu130"
     if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
     & $Uv pip install --python $Python --index-url "https://pypi.org/simple" -c $Constraints "onnxruntime-gpu==1.31.0"
     if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
@@ -95,44 +95,22 @@ try {
 
 try {
     Write-Host "Checking Python..."
-    $Base = $null
-    $pyLauncher = Get-Command py -ErrorAction SilentlyContinue
-    if ($pyLauncher -and -not (Test-StorePythonAlias $pyLauncher.Source)) {
-        foreach ($spec in @("-3.14", "-3")) {
-            & py $spec -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 14) else 1)"
-            if ($LASTEXITCODE -eq 0) {
-                $Base = $spec
-                break
-            }
-        }
+    $uv = Join-Path $App "uv.exe"
+    if (-not (Test-Path $uv)) {
+        throw "uv.exe is not bundled next to install.ps1. Install Python 3.14 from $WindowsPythonUrl and run this setup again."
     }
-    if (-not $Base) {
-        $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
-        if ($pythonCmd -and -not (Test-StorePythonAlias $pythonCmd.Source)) {
-            & $pythonCmd.Source -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 14) else 1)"
-            if ($LASTEXITCODE -eq 0) {
-                $Base = $pythonCmd.Source
-            }
-        }
+    Write-Host "Installing Python with uv..."
+    & $uv python install 3.14 --reinstall
+    if ($LASTEXITCODE -ne 0) {
+        throw "uv could not install Python 3.14. Install Python 3.14 from $WindowsPythonUrl and run this setup again."
     }
-    if (-not $Base) {
-        $uv = Join-Path $App "uv.exe"
-        if (-not (Test-Path $uv)) {
-            throw "Python 3.14 is not installed, and uv.exe is not bundled next to install.ps1. Install Python 3.14 from $WindowsPythonUrl and run this setup again."
-        }
-        Write-Host "Installing Python with uv..."
-        & $uv python install 3.14
-        if ($LASTEXITCODE -ne 0) {
-            throw "uv could not install Python 3.14. Install Python 3.14 from $WindowsPythonUrl and run this setup again."
-        }
-        $found = (& $uv python find 3.14 | Out-String).Trim()
-        if ($LASTEXITCODE -ne 0 -or -not $found) {
-            throw "uv installed Python 3.14 but the interpreter could not be found. Install Python 3.14 from $WindowsPythonUrl and run this setup again."
-        }
-        $Base = (($found -split '\r?\n') | Where-Object { $_.Trim() } | Select-Object -Last 1).Trim()
-        if (-not (Test-Path $Base)) {
-            throw "uv reported Python at '$Base', but that file does not exist. Install Python 3.14 from $WindowsPythonUrl and run this setup again."
-        }
+    $found = (& $uv python find 3.14 | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or -not $found) {
+        throw "uv installed Python 3.14 but the interpreter could not be found. Install Python 3.14 from $WindowsPythonUrl and run this setup again."
+    }
+    $Base = (($found -split '\r?\n') | Where-Object { $_.Trim() } | Select-Object -Last 1).Trim()
+    if (-not (Test-Path $Base)) {
+        throw "uv reported Python at '$Base', but that file does not exist. Install Python 3.14 from $WindowsPythonUrl and run this setup again."
     }
 
     $RootPy = Join-Path $Runtime "python.exe"
@@ -146,17 +124,19 @@ try {
             throw "The suite runtime is already installed. Canvas will not replace it."
         }
         New-Item -ItemType Directory -Force $Shared | Out-Null
-        if ($Base -eq "-3.14" -or $Base -eq "-3") {
-            & py $Base -m venv $Runtime
-        } else {
-            & $Base -m venv $Runtime
-        }
+        & $Base -m venv $Runtime
         if ($LASTEXITCODE -ne 0) { throw "Python could not create the suite runtime." }
+    } else {
+        & $Base -m venv --upgrade $Runtime
+        if ($LASTEXITCODE -ne 0) { throw "Python could not refresh the suite runtime." }
     }
 
     if (-not (Test-Path $Py)) {
         & $RuntimePy -m venv $Venv
         if ($LASTEXITCODE -ne 0) { throw "Python could not create the environment." }
+    } else {
+        & $Base -m venv --upgrade $Venv
+        if ($LASTEXITCODE -ne 0) { throw "Python could not refresh the environment." }
     }
 
     $Constraints = Join-Path $App "constraints.txt"
@@ -174,27 +154,25 @@ try {
     if (-not (Test-Path $Uv)) {
         throw "uv 0.13.0 is required to install PyTorch."
     }
+    $Fetch = Join-Path $env:TEMP ("voxprint-wheels-" + [guid]::NewGuid().ToString("n"))
+    New-Item -ItemType Directory -Force $Fetch | Out-Null
     $runtimeReady = Test-SuiteGpuPackages $RuntimePy
     $appReady = Test-SuiteGpuPackages $Py
-    New-Item -ItemType Directory -Force $Wheels | Out-Null
-    $torchWheel = Get-ChildItem -Path $Wheels -Filter "torch-2.11.0*.whl" -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($runtimeReady -and $appReady) {
         Write-Host "PyTorch is already installed."
-    } elseif ($torchWheel) {
-        Write-Host "PyTorch wheels are already downloaded."
     } else {
         Write-Host "Installing PyTorch..."
         Invoke-Py @(
             "-m", "pip", "download", "-c", $Constraints,
             "torch==2.11.0+cu130", "torchvision==0.26.0+cu130",
-            "--index-url", $TorchIndex, "--extra-index-url", "https://pypi.org/simple", "-d", $Wheels
+            "--index-url", $TorchIndex, "--extra-index-url", "https://pypi.org/simple", "-d", $Fetch
+        )
+        Invoke-Py @(
+            "-m", "pip", "download", "-c", $Constraints,
+            "onnxruntime-gpu==1.31.0", "torchao==0.18.0",
+            "--index-url", "https://pypi.org/simple", "-d", $Fetch
         )
     }
-    Invoke-Py @(
-        "-m", "pip", "download", "-c", $Constraints,
-        "onnxruntime-gpu==1.31.0", "torchao==0.18.0",
-        "--index-url", "https://pypi.org/simple", "-d", $Wheels
-    )
     if (-not $runtimeReady) {
         Write-Host "Repairing the suite runtime..."
         & $RuntimePy -m pip install --upgrade pip

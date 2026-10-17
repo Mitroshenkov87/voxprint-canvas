@@ -6,7 +6,7 @@
 ; Windows 11 24H2 or newer, 64-bit.
 ; The setup copies the app. It does not embed GPU libraries or model files.
 ; install.ps1 installs missing dependencies, including the default image pack, and runs: python -m canvas.models.tiers
-; CurStepChanged runs that script as the user who started Setup, then Setup exits non-zero when it fails.
+; CurStepChanged runs that script and Setup exits non-zero when it fails.
 ; An upgrade keeps the AppId, ignores the previous directory, and the setup script removes the old folder and shortcuts.
 
 #define MyAppName "VOXPrint AI Canvas"
@@ -47,56 +47,14 @@ Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 procedure ExitProcess(uExitCode: Cardinal);
   external 'ExitProcess@kernel32.dll stdcall';
 
-function OriginalAccount: String;
-var
-  ResultCode: Integer;
-  Path, Command: String;
-  Text: AnsiString;
-begin
-  Path := ExpandConstant('{tmp}\voxprint-account.txt');
-  Command := '/d /c "' + ExpandConstant('{sys}\whoami.exe') + '" > "' + Path + '"';
-  if not ExecAsOriginalUser(ExpandConstant('{sys}\cmd.exe'), Command, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
-  begin
-    Result := '';
-    Exit;
-  end;
-  if (ResultCode <> 0) or (not LoadStringFromFile(Path, Text)) then
-  begin
-    Result := '';
-    Exit;
-  end;
-  Result := Trim(String(Text));
-end;
-
-procedure GrantInstallFolder(const Account: String);
-var
-  ResultCode: Integer;
-  Params: String;
-begin
-  Params := ExpandConstant('"{app}"') + ' /grant "' + Account + ':(OI)(CI)M" /C';
-  if (not Exec(ExpandConstant('{sys}\icacls.exe'), Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode)) or (ResultCode <> 0) then
-  begin
-    SuppressibleMsgBox('VOXPrint AI Canvas could not prepare its install folder.', mbError, MB_OK, IDOK);
-    ExitProcess(1);
-  end;
-end;
-
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   ResultCode: Integer;
   Started: Boolean;
-  Account: String;
 begin
   if CurStep <> ssPostInstall then
     Exit;
-  Account := OriginalAccount;
-  if Account = '' then
-  begin
-    SuppressibleMsgBox('VOXPrint AI Canvas could not identify the account that started Setup.', mbError, MB_OK, IDOK);
-    ExitProcess(1);
-  end;
-  GrantInstallFolder(Account);
-  Started := ExecAsOriginalUser(
+  Started := Exec(
     ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
     ExpandConstant('-NoProfile -ExecutionPolicy Bypass -File "{app}\install.ps1"'),
     '',
@@ -125,7 +83,7 @@ var
 begin
   if CurUninstallStep <> usUninstall then
     Exit;
-  ExecAsOriginalUser(
+  Exec(
     ExpandConstant('{app}\venv\Scripts\python.exe'),
     '-m canvas.app.main --unregister-models',
     ExpandConstant('{app}'),

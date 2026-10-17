@@ -402,6 +402,10 @@ def test_installers_resolve_numpy_from_pypi_and_pin_cuda_torch():
         assert "Repairing the suite runtime..." in script
         assert "PyTorch is already installed." in script
         assert "TensorRT is skipped on Python 3.14." in script
+    assert "PyTorch wheels are already downloaded." in linux
+    assert "voxprint-wheels-" in windows
+    assert "python install 3.14 --reinstall" in windows
+    assert "Get-Command py" not in windows
     assert "voxprint-gpu-probe-" in windows
     assert "-c $code" not in windows
     assert '--index-url "$TORCH_INDEX"' in linux
@@ -422,12 +426,11 @@ def test_installers_resolve_numpy_from_pypi_and_pin_cuda_torch():
     assert "SuppressibleMsgBox" in iss
     assert "ExitProcess" in iss
     assert "[Run]" not in iss
-    assert "ExecAsOriginalUser" in iss
-    assert "whoami.exe" in iss
-    assert "icacls.exe" in iss
+    assert "Started := Exec(" in iss
+    assert "ExecAsOriginalUser" not in iss
+    assert "icacls.exe" not in iss
     assert "CurUninstallStepChanged" in iss
     assert "usUninstall" in iss
-    assert "Started := Exec(" not in iss
 
 
 def test_wheel_repair_pins_torch_to_cuda_and_torchao_to_pypi(monkeypatch, tmp_path):

@@ -20,6 +20,9 @@ SHARED="$DATA/shared"
 RUNTIME_REL="runtime/py314-torch2.11-cu130"
 RUNTIME="$SHARED/$RUNTIME_REL"
 WHEELS="$APP/setup-work/wheels"
+APP_PYTHON="$APP/python"
+BASE="$APP_PYTHON/bin/python3"
+RUNTIME_SITE="$RUNTIME/lib/python3.14/site-packages"
 APP_DIR="$HOME/.local/share/applications"
 DIR_DIR="$HOME/.local/share/desktop-directories"
 BIN_DIR="$HOME/.local/bin"
@@ -39,30 +42,44 @@ scrub_environment() {
   export UV_NO_CONFIG=1
 }
 
-scrub_environment
-echo "Checking Python..."
-if [ -x "$RUNTIME/bin/python3" ]; then
-  PY="$RUNTIME/bin/python3"
-elif [ -d "$RUNTIME" ] && [ -n "$(find "$RUNTIME" -mindepth 1 -print -quit 2>/dev/null)" ]; then
-  echo "The suite runtime is already installed. Canvas will not replace it." >&2
-  exit 1
-else
-  echo "Installing Python..."
-  mkdir -p "$RUNTIME"
-  archive=$(mktemp)
-  curl -fsSL -o "$archive" "$LINUX_PYTHON_URL"
-  tar -xzf "$archive" -C "$RUNTIME" --strip-components=1
-  rm -f "$archive"
-  PY="$RUNTIME/bin/python3"
-fi
+refuse_symlink() {
+  cursor=$1
+  while [ -n "$cursor" ] && [ "$cursor" != "/" ]; do
+    if [ -L "$cursor" ]; then
+      echo "Setup stopped because this path contains a link: $cursor" >&2
+      exit 1
+    fi
+    cursor=$(dirname "$cursor")
+  done
+}
 
+as_user() {
+  # A root install must not run or write the profile as root when sudo recorded the user.
+  if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ]; then
+    sudo -u "$SUDO_USER" -- env UV_NO_CONFIG=1 "$@"
+  else
+    "$@"
+  fi
+}
+
+scrub_environment
 if ! mkdir -p "$APP"; then
   echo "VOXPrint AI Canvas needs permission to create $APP." >&2
   exit 1
 fi
 cd "$APP"
-mkdir -p "$APP_DIR" "$DIR_DIR" "$BIN_DIR" "$WHEELS" "$SHARED/tensorrt-10"
-"$PY" -m venv "$VENV"
+mkdir -p "$APP_DIR" "$DIR_DIR" "$BIN_DIR" "$WHEELS"
+refuse_symlink "$APP"
+echo "Checking Python..."
+if [ ! -x "$BASE" ]; then
+  echo "Installing Python..."
+  mkdir -p "$APP_PYTHON"
+  archive="$APP/setup-work/python.tar.gz"
+  curl -fsSL -o "$archive" "$LINUX_PYTHON_URL"
+  tar -xzf "$archive" -C "$APP_PYTHON" --strip-components=1
+  rm -f "$archive"
+fi
+"$BASE" -m venv "$VENV"
 if [ ! -f "$SRC/constraints.txt" ]; then
   echo "constraints.txt is missing from the setup. The install cannot continue." >&2
   exit 1
@@ -114,9 +131,50 @@ install_gpu() {
   "$UV" pip uninstall --no-config --python "$1" "$cpu"
 }
 
+runtime_files_ready() {
+  version="$RUNTIME_SITE/torch/version.py"
+  if [ ! -f "$version" ] || ! grep -q "13.0" "$version"; then
+    return 1
+  fi
+  meta_ok() {
+    prefix=$1
+    wanted=$2
+    for dir in "$RUNTIME_SITE"/${prefix}*.dist-info; do
+      if [ -f "$dir/METADATA" ] && grep -q "Version: $wanted" "$dir/METADATA"; then
+        return 0
+      fi
+    done
+    return 1
+  }
+  meta_ok "torch-" "2.11.0+cu130" || return 1
+  meta_ok "torchvision-" "0.26.0+cu130" || return 1
+  gpu=$(printf '%s%s' onnx runtime)
+  meta_ok "${gpu}_gpu-" "1.31.0" || return 1
+  for dir in "$RUNTIME_SITE"/${gpu}-*.dist-info; do
+    if [ -d "$dir" ]; then
+      return 1
+    fi
+  done
+  return 0
+}
+
+install_runtime() {
+  refuse_symlink "$RUNTIME"
+  refuse_symlink "$RUNTIME_SITE"
+  as_user "$UV" pip install --no-config --python "$BASE" --target "$RUNTIME_SITE" \
+    --index "$TORCH_INDEX" --index-strategy unsafe-best-match \
+    --find-links "$WHEELS" -c "$SRC/constraints.txt" -c "$SRC/constraints-cuda.txt" \
+    "torch==2.11.0+cu130" "torchvision==0.26.0+cu130"
+  as_user "$UV" pip install --no-config --python "$BASE" --target "$RUNTIME_SITE" \
+    --index-url https://pypi.org/simple -c "$SRC/constraints.txt" -c "$SRC/constraints-cuda.txt" \
+    "onnxruntime-gpu==1.31.0"
+  cpu=$(printf '%s%s' onnx runtime)
+  as_user "$UV" pip uninstall --no-config --python "$BASE" --target "$RUNTIME_SITE" "$cpu"
+}
+
 runtime_ready=0
 app_ready=0
-if gpu_ready "$PY"; then
+if runtime_files_ready; then
   runtime_ready=1
 fi
 if gpu_ready "$VENV/bin/python"; then
@@ -137,9 +195,18 @@ fi
   --index-url https://pypi.org/simple -d "$WHEELS"
 if [ "$runtime_ready" -eq 0 ]; then
   echo "Repairing the suite runtime..."
-  "$PY" -m pip --isolated install --upgrade pip
-  install_gpu "$PY"
-  if ! gpu_ready "$PY"; then
+  if [ -x "$RUNTIME/bin/python3" ] && [ ! -f "$RUNTIME/pyvenv.cfg" ]; then
+    echo "The suite runtime is already installed. Canvas will not replace it." >&2
+    exit 1
+  fi
+  if [ ! -f "$RUNTIME/pyvenv.cfg" ]; then
+    refuse_symlink "$SHARED"
+    refuse_symlink "$RUNTIME"
+    as_user mkdir -p "$SHARED"
+    as_user "$BASE" -m venv --without-pip "$RUNTIME"
+  fi
+  install_runtime
+  if ! runtime_files_ready; then
     echo "CUDA 13.0 PyTorch is still missing." >&2
     exit 1
   fi
@@ -159,15 +226,22 @@ fi
 if "$VENV/bin/python" -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 14) else 1)"; then
   echo "TensorRT is skipped on Python 3.14." >&2
 elif [ -z "$(find "$SHARED/tensorrt-10" -mindepth 1 -print -quit 2>/dev/null)" ]; then
-  "$VENV/bin/python" -m pip --isolated install -c "$SRC/constraints.txt" --target "$SHARED/tensorrt-10" \
+  refuse_symlink "$SHARED/tensorrt-10"
+  as_user mkdir -p "$SHARED/tensorrt-10"
+  as_user "$VENV/bin/python" -m pip --isolated install -c "$SRC/constraints.txt" --target "$SHARED/tensorrt-10" \
     --upgrade-strategy only-if-needed "tensorrt-cu13==10.16.1.11"
 fi
 "$VENV/bin/python" -m canvas.infra.layout migrate --install-dir "$APP"
 echo "Installing the default image pack..."
-"$VENV/bin/python" -m canvas.app.provision
-mkdir -p "$DATA/canvas"
-"$VENV/bin/python" -m canvas.models.tiers > "$DATA/canvas/tier.txt"
-"$VENV/bin/python" -m canvas.app.main --register-models
+refuse_symlink "$DATA"
+refuse_symlink "$DATA/canvas/tier.txt"
+as_user "$VENV/bin/python" -m canvas.app.provision
+as_user mkdir -p "$DATA/canvas"
+as_user sh -c '"$1" -m canvas.models.tiers > "$2"' sh "$VENV/bin/python" "$DATA/canvas/tier.txt"
+as_user "$VENV/bin/python" -m canvas.app.main --register-models
+refuse_symlink "$BIN_DIR"
+refuse_symlink "$APP_DIR"
+refuse_symlink "$DIR_DIR"
 ln -sfn "$VENV/bin/voxprint-canvas" "$BIN_DIR/voxprint-canvas"
 ln -sfn "$VENV/bin/voxprint-canvas-cli" "$BIN_DIR/voxprint-canvas-cli"
 if [ -w /usr/local/bin ] || [ "$(id -u)" -eq 0 ]; then

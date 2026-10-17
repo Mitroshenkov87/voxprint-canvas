@@ -421,6 +421,12 @@ def test_installers_resolve_numpy_from_pypi_and_pin_cuda_torch():
     assert "CONDA_" in linux
     assert "HTTP_PROXY" in linux
     assert 'cd "$APP"' in linux
+    assert 'APP_PYTHON="$APP/python"' in linux
+    assert "refuse_symlink" in linux
+    assert "SUDO_USER" in linux
+    assert "--without-pip" in linux
+    assert 'gpu_ready "$RUNTIME' not in linux
+    assert 'install_gpu "$RUNTIME' not in linux
     assert 'Join-Path $Work "wheels"' in windows
     assert 'Join-Path $env:TEMP ("voxprint-wheels-' not in windows
     assert 'Join-Path $Work ("voxprint-gpu-probe-' in windows
@@ -467,6 +473,8 @@ def test_installers_resolve_numpy_from_pypi_and_pin_cuda_torch():
     assert "CONDA_" in windows
     assert "HTTP_PROXY" in windows
     assert "Set-Location -LiteralPath $App" in windows
+    ensure = windows.split("function Ensure-SharedRuntime", 1)[1].split("function Invoke-Machine", 1)[0]
+    assert ensure.index("Assert-NoReparse $Runtime") < ensure.index("venv --without-pip")
     assert "Move-Item -LiteralPath $Runtime" in windows
     assert ".bak-" in windows
     assert "The suite runtime is already installed" not in windows
@@ -489,6 +497,8 @@ def test_installers_resolve_numpy_from_pypi_and_pin_cuda_torch():
     assert "-Scope User" in post
     assert "-Scope Cleanup" in post
     assert "ExpandConstant('{app}')" in post
+    assert "ExpandConstant('{app}\\setup-work\\canvas-install.log')" in post
+    assert "ExpandConstant('{localappdata}\\Voxprint\\logs\\canvas-install.log')" in post
     assert "ExecAsOriginalUser" not in uninstall
     assert "icacls.exe" not in iss
     assert "CurUninstallStepChanged" in iss

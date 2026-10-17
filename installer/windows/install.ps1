@@ -393,6 +393,7 @@ function Move-OccupiedRuntimeAside {
 
 function Ensure-SharedRuntime([string]$BasePython) {
     Assert-NoReparse $Shared
+    Assert-NoReparse $Runtime
     $runtimeVenv = (Test-Path -LiteralPath $RuntimePy) -and (Test-Path -LiteralPath $RuntimeCfg)
     if ($runtimeVenv) {
         return
@@ -404,6 +405,7 @@ function Ensure-SharedRuntime([string]$BasePython) {
         }
     }
     Assert-NoReparse $Shared
+    Assert-NoReparse $Runtime
     New-Item -ItemType Directory -Force $Shared | Out-Null
     Assert-AdminPath $BasePython
     # --without-pip keeps venv from launching the new interpreter. That

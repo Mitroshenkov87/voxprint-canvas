@@ -451,6 +451,13 @@ def test_installers_resolve_numpy_from_pypi_and_pin_cuda_torch():
     assert "PYTHONNOUSERSITE" in windows
     assert "--without-pip" in windows
     assert "Assert-AdminPath" in windows
+    assert "Test-Elevated" in windows
+    assert "Test-PathUnder" in windows
+    assert "Get-MachineProgramFiles" in windows
+    assert "ProgramFilesDir" in windows
+    assert "USERPROFILE" in windows
+    assert "an elevated install must live under Program Files" in windows
+    assert 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion' in windows
     assert "python install 3.14 --reinstall" in windows
     assert "Get-Command py" not in windows
     assert "voxprint-gpu-probe-" in windows

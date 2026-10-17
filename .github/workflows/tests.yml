@@ -263,11 +263,20 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $script = "installer\windows\staging\install.ps1"
+          $source = (Resolve-Path "installer\windows\staging").Path
+          $install = Join-Path $env:ProgramFiles "VOXPrint AI Suite\Canvas"
+          if (Test-Path -LiteralPath $install) { Remove-Item -LiteralPath $install -Recurse -Force }
+          New-Item -ItemType Directory -Force -Path $install | Out-Null
+          Copy-Item -Path (Join-Path $source "*") -Destination $install -Recurse -Force
+          $script = Join-Path $install "install.ps1"
           & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script
           if ($LASTEXITCODE -ne 0) { throw "install.ps1 exited $LASTEXITCODE" }
           Write-Host "install.ps1 exited 0"
-          $cfgPath = Join-Path "installer\windows\staging\venv" "pyvenv.cfg"
+          $programFiles = [System.IO.Path]::GetFullPath($env:ProgramFiles).TrimEnd('\') + '\'
+          if (-not $install.StartsWith($programFiles, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "install dir is not under Program Files: $install"
+          }
+          $cfgPath = Join-Path $install "venv\pyvenv.cfg"
           if (-not (Test-Path -LiteralPath $cfgPath)) { throw "venv pyvenv.cfg is missing" }
           $pyHome = $null
           $executable = $null
@@ -282,7 +291,6 @@ jobs:
           } else {
             throw "pyvenv.cfg has no base interpreter"
           }
-          $install = (Resolve-Path "installer\windows\staging").Path
           $baseFull = [System.IO.Path]::GetFullPath($base)
           $prefix = $install.TrimEnd('\') + '\'
           if (-not $baseFull.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {

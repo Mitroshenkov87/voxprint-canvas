@@ -78,25 +78,65 @@ function Assert-NoReparse([string]$Path) {
     }
 }
 
+function Test-Elevated {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Get-MachineProgramFiles {
+    # HKLM is not writable by the user who launches an elevated setup. The
+    # ProgramFiles environment variable is, so it cannot authorize a path.
+    $roots = New-Object System.Collections.Generic.List[string]
+    $key = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion"
+    foreach ($name in @("ProgramFilesDir", "ProgramFilesDir (x86)")) {
+        $item = Get-ItemProperty -LiteralPath $key -Name $name -ErrorAction SilentlyContinue
+        if ($null -eq $item) { continue }
+        $raw = $item.$name
+        if ([string]::IsNullOrWhiteSpace([string]$raw)) { continue }
+        $full = [System.IO.Path]::GetFullPath([string]$raw)
+        if (-not $roots.Contains($full)) { $roots.Add($full) }
+    }
+    if ($roots.Count -eq 0) {
+        throw "Setup stopped because Program Files could not be read from Windows."
+    }
+    return $roots
+}
+
+function Test-PathUnder([string]$Path, [string]$Root) {
+    $full = [System.IO.Path]::GetFullPath($Path)
+    $base = [System.IO.Path]::GetFullPath($Root)
+    if ($full.Equals($base, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+    if (-not $base.EndsWith('\')) { $base = $base + '\' }
+    return $full.StartsWith($base, [System.StringComparison]::OrdinalIgnoreCase)
+}
+
 function Assert-AdminPath([string]$Path) {
-    # Elevated setup only runs files under the install folder. Program Files
-    # needs admin rights to write. Profile, roaming, and temp folders do not.
+    # An elevated process may run only a program under the install folder, and
+    # that folder must be Program Files. Downloads and other profile folders
+    # are writable before UAC, so they cannot authorize an elevated program.
     if ([string]::IsNullOrWhiteSpace($Path)) {
         throw "Setup will not run an empty program path."
     }
     $full = [System.IO.Path]::GetFullPath($Path)
-    $root = [System.IO.Path]::GetFullPath($App)
-    if (-not $root.EndsWith('\')) { $root = $root + '\' }
-    if (-not $full.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase)) {
+    Assert-NoReparse $full
+    if (-not (Test-PathUnder $full $App)) {
         throw "Setup will not run a program outside the install folder."
     }
     foreach ($userRoot in $UserRoots) {
-        $prefix = $userRoot
-        if (-not $prefix.EndsWith('\')) { $prefix = $prefix + '\' }
-        if ($full.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        if (Test-PathUnder $full $userRoot) {
             throw "Setup will not run a program from a user-writable folder."
         }
     }
+    if (-not (Test-Elevated)) { return }
+    $profile = [Environment]::GetEnvironmentVariable("USERPROFILE")
+    if (-not [string]::IsNullOrWhiteSpace($profile) -and (Test-PathUnder $full $profile)) {
+        throw "Setup will not run a program from a user-writable folder."
+    }
+    foreach ($adminRoot in @(Get-MachineProgramFiles)) {
+        if (Test-PathUnder $full $adminRoot) { return }
+    }
+    throw "Setup stopped because an elevated install must live under Program Files."
 }
 
 function Reset-InstallerEnvironment([string]$Mode) {
@@ -142,6 +182,7 @@ function Reset-InstallerEnvironment([string]$Mode) {
         return
     }
     Assert-NoReparse $App
+    Assert-AdminPath $App
     Assert-NoReparse $PythonDir
     Assert-NoReparse $UvCache
     Assert-NoReparse $PipCache

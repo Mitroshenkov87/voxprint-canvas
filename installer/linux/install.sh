@@ -87,6 +87,8 @@ install_gpu() {
     "torch==2.11.0+cu130" "torchvision==0.26.0+cu130"
   "$UV" pip install --python "$1" --index-url https://pypi.org/simple -c "$SRC/constraints.txt" \
     "onnxruntime-gpu==1.31.0"
+  cpu=$(printf '%s%s' onnx runtime)
+  "$UV" pip uninstall --python "$1" "$cpu"
 }
 
 runtime_ready=0

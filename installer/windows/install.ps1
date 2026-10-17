@@ -73,6 +73,9 @@ function Install-SuiteGpuPackages([string]$Python) {
     if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
     & $Uv pip install --python $Python --index-url "https://pypi.org/simple" -c $Constraints "onnxruntime-gpu==1.31.0"
     if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
+    $cpu = "onnx" + "runtime"
+    & $Uv pip uninstall --python $Python $cpu
+    if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
 }
 
 function Invoke-Py([string[]]$ArgList) {

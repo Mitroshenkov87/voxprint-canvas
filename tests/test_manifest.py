@@ -414,12 +414,19 @@ def test_installers_resolve_numpy_from_pypi_and_pin_cuda_torch():
     assert "Start-Transcript" in windows
     assert "canvas-install.log" in windows
     assert "WindowsApps" in windows
+    assert "pip uninstall" in linux
+    assert "pip uninstall" in windows
     iss = Path("installer/windows/voxprint-canvas.iss").read_text(encoding="utf-8")
     assert "CurStepChanged" in iss
     assert "ssPostInstall" in iss
     assert "SuppressibleMsgBox" in iss
     assert "ExitProcess" in iss
     assert "[Run]" not in iss
+    assert "ExecAsOriginalUser" in iss
+    assert "whoami.exe" in iss
+    assert "icacls.exe" in iss
+    assert "runasoriginaluser" in iss
+    assert "Started := Exec(" not in iss
 
 
 def test_wheel_repair_pins_torch_to_cuda_and_torchao_to_pypi(monkeypatch, tmp_path):

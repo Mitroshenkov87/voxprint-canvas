@@ -425,7 +425,8 @@ def test_installers_resolve_numpy_from_pypi_and_pin_cuda_torch():
     assert "ExecAsOriginalUser" in iss
     assert "whoami.exe" in iss
     assert "icacls.exe" in iss
-    assert "runasoriginaluser" in iss
+    assert "CurUninstallStepChanged" in iss
+    assert "usUninstall" in iss
     assert "Started := Exec(" not in iss
 
 

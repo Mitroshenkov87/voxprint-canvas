@@ -234,7 +234,7 @@ class MainWindow(QWidget):
         index = self.image_mode.findData(Mode.INSTRUCTION)
         if index < 0:
             return
-        item = self.image_mode.model().item(index)
+        item = self.image_mode.model().item(index)  # type: ignore[attr-defined]
         if item is None:
             return
         item.setEnabled(ready)

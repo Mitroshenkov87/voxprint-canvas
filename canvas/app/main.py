@@ -23,7 +23,7 @@ from canvas.infra.gpu import probe_gpu
 from canvas.infra.models_users import register, unregister
 from canvas.infra.paths import models_dir, shared_dir
 from canvas.infra.vram import peak_allocated_bytes, set_vram_cap_gb
-from canvas.models.features import INSTRUCTION_EDIT, instruction_edit_available, instruction_edit_flag
+from canvas.models.features import INSTRUCTION_EDIT, instruction_edit_flag
 from canvas.models.loader import ModelNotReady, ZImageGenerator, load_catalog_stack
 from canvas.models.nunchaku import NunchakuUnavailable
 from canvas.models.provision import DownloadDeclined, ensure_plan, install_defaults, install_supporting, repair
@@ -38,6 +38,8 @@ from canvas.pipeline.schedule import SystemMemoryRefused, last_image_seconds, re
 from canvas.pipeline.pipeline import CoolingDown, EnlargeMissing, JobError, Pipeline
 from canvas.safety.gate import AgeGate, SafetyError
 from canvas.ui.main_window import EnhanceReply, MainWindow
+from canvas.ui.shell_layout import canvas_state_dir, open_layout
+from canvas.ui.shell_screen import ShellWindow
 from canvas.ui.splash import Splash, show_splash
 
 
@@ -166,7 +168,8 @@ def _application() -> QApplication:
     return QApplication(sys.argv)
 
 
-def _launch(tier: Tier, splash: Splash | None = None, app: QApplication | None = None) -> None:
+def _launch(tier: Tier, splash: Splash | None = None, app: QApplication | None = None) -> int:
+    """Open the shared screen. A gate that cannot be built does not open a window."""
     if app is None:
         app = _application()
     if splash is None:
@@ -181,16 +184,22 @@ def _launch(tier: Tier, splash: Splash | None = None, app: QApplication | None =
     except (SnapshotError, OSError) as exc:
         stage(str(exc))
     enlarge = EnlargeClient()
-    window_box: list[MainWindow | None] = [None]
-    on_generate, on_enhance = _callback(tier, window_box, enlarge)
-    window = MainWindow(
-        on_generate, tier, glass=False, enlarge_ready=enlarge.ready(), on_enhance=on_enhance,
+    try:
+        stack = load_catalog_stack(models_dir(), load_catalog())
+        gate = AgeGate(stack)
+    except Exception as exc:
+        stage(str(exc))
+        splash.close()
+        return 1
+    window = ShellWindow(
+        open_layout(canvas_state_dir(), gate, enlarge_installed=enlarge.ready()),
+        tier=tier,
+        enlarge=enlarge,
     )
-    window_box[0] = window
-    window.resize(960, 720)
     window.show()
     splash.finish(window)
     app.exec()
+    return 0
 
 
 def _emit(payload: dict[str, object], as_json: bool, code: int) -> int:
@@ -230,8 +239,8 @@ def _inputs(args: argparse.Namespace, mode: Mode) -> tuple[PendingInput, ...]:
 def _generate(args: argparse.Namespace) -> int:
     """Download what is missing, generate one image, and write it."""
     as_json = bool(args.json)
-    if str(args.edit_instruction or "") and not instruction_edit_available():
-        return _feature_unavailable(as_json)
+    if str(args.edit_instruction or ""):
+        return _instruction_removed(as_json)
     os_result = current_os_check()
     if not os_result.ok:
         return _emit({"ok": False, "error": os_result.message}, as_json, 2)
@@ -246,31 +255,23 @@ def _generate(args: argparse.Namespace) -> int:
     catalog = load_catalog()
     root = models_dir()
     output = args.output_size if args.output_size in {"4k", "2k"} else "native"
-    instruction = str(args.edit_instruction or "")
     prompt = str(args.prompt or "")
     mask = str(args.mask or "")
-    if instruction and (prompt or mask):
-        return _emit({"ok": False, "error": "Use a prompt or an edit instruction."}, as_json, 2)
-    if instruction:
-        if not args.input:
-            return _emit({"ok": False, "error": "Instruction edit needs an input image."}, as_json, 2)
-        mode = Mode.INSTRUCTION
-        text = instruction
-    elif mask:
+    if mask:
         if not prompt or not args.input:
             return _emit({"ok": False, "error": "Inpaint needs a prompt, an input image, and a mask."}, as_json, 2)
         mode = Mode.INPAINT
-        text = prompt
+        active_prompt = prompt
     elif prompt:
         mode = Mode.TEXT
-        text = prompt
+        active_prompt = prompt
     else:
         return _emit({"ok": False, "error": "A prompt is required."}, as_json, 2)
     if args.enhance and mode is not Mode.TEXT:
         return _emit({"ok": False, "error": "Enhance applies to a prompt."}, as_json, 2)
     outcome: EnhanceResult | None = None
     edit_route = ""
-    active = text
+    active = active_prompt
     reset_image_seconds()
     progress = lambda message: print(message, file=sys.stderr)
     started = time.perf_counter()
@@ -307,7 +308,7 @@ def _generate(args: argparse.Namespace) -> int:
     if outcome is not None and outcome.fallback and not as_json:
         print(fallback_message(outcome), file=sys.stderr)
     return _emit(
-        _generate_payload(path, text, outcome, time.perf_counter() - started, edit_route=edit_route),
+        _generate_payload(path, active_prompt, outcome, time.perf_counter() - started, edit_route=edit_route),
         as_json,
         0,
     )
@@ -356,8 +357,10 @@ def main(argv: list[str] | None = None) -> int:
         print(gpu.message, file=sys.stderr)
         return 2
     _repair_shared(splash.set_stage)
-    _launch(gpu.tier, splash, app)
-    return 0
+    code = _launch(gpu.tier, splash, app)
+    if code is None:
+        return 0
+    return int(code)
 
 
 def _generate_payload(
@@ -408,6 +411,16 @@ def _confirm(window: MainWindow | None, notice: str) -> bool:
     if app is not None:
         app.processEvents()
     return window.confirm_download(notice)
+
+
+def _instruction_removed(as_json: bool) -> int:
+    """Exit 2. Instruction editing is not part of Canvas."""
+    message = text("edit.removed", "en")
+    if as_json:
+        print(json.dumps({"ok": False, "error": "removed", "message": message}))
+    else:
+        print(message, file=sys.stderr)
+    return 2
 
 
 def _feature_unavailable(as_json: bool) -> int:

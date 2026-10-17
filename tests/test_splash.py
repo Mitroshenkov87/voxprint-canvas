@@ -39,8 +39,8 @@ def app():
 def test_shared_splash_adapter_names_voxprint_common():
     assert FUTURE_IMPORT == "voxprint_common.ui.splash"
     assert SHARED_RUNTIME_SCHEMA == 1
-    with pytest.raises(ModuleNotFoundError):
-        importlib.import_module(FUTURE_IMPORT)
+    shared = importlib.import_module(FUTURE_IMPORT)
+    assert hasattr(shared, "Splash")
     splash = (ROOT / "canvas" / "ui" / "splash.py").read_text(encoding="utf-8")
     assert "voxprint_engine" not in splash
     main = (ROOT / "canvas" / "app" / "main.py").read_text(encoding="utf-8")

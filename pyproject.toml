@@ -4,9 +4,12 @@ version = "0.1.0"
 description = "Local text-to-image generation for the VOXPrint AI Suite."
 readme = "README.md"
 license = "Apache-2.0"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 authors = [{ name = "Aleksandr Mitroshenkov" }]
 dependencies = [
+    # Shared shell. Replace this commit with the UI release tag when it is cut.
+    # Do not pin the moving branch name.
+    "voxprint-common[ui] @ git+https://github.com/Mitroshenkov87/voxprint-common@f4e95ccfa25780abaf50412cb095a7843725102a",
     "PySide6==6.12.0",
     "numpy==2.5.4",
     "pillow==12.3.0",
@@ -51,10 +54,11 @@ build-backend = "setuptools.build_meta"
 include = ["canvas*"]
 
 [tool.setuptools.package-data]
+"canvas" = ["mdl.json"]
 "canvas.models" = ["catalog.json", "third_party.json", "turbo_transformer_index.json"]
 "canvas.app" = ["BUILD.json", "messages.json"]
 "canvas.infra" = ["uv.cu130.toml"]
-"canvas.ui" = ["art/splash.jpg", "art/splash@2x.jpg"]
+"canvas.ui" = ["art/splash.jpg", "art/splash@2x.jpg", "locales/*.json"]
 
 [tool.ruff]
 target-version = "py312"

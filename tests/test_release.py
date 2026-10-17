@@ -49,6 +49,7 @@ def test_windows_ci_builds_the_installer_and_runs_install_ps1():
     assert "ISCC.exe" in text
     assert "voxprint-setup-broke.txt" in text
     assert "a broken install.ps1 left Setup at exit 0" in text
+    assert 'Remove-Item -Recurse -Force "installer\\windows\\staging\\venv"' in text
 
 
 def test_release_ships_tools_and_vm_scripts():

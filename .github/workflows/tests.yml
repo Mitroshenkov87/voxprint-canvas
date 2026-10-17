@@ -277,6 +277,9 @@ jobs:
             'Set-Content -LiteralPath (Join-Path $env:TEMP "voxprint-setup-broke.txt") -Value "broke"'
             'exit 7'
           ) | Set-Content -LiteralPath "installer\windows\staging\install.ps1" -Encoding ascii
+          if (Test-Path "installer\windows\staging\venv") {
+            Remove-Item -Recurse -Force "installer\windows\staging\venv"
+          }
           $iscc = @(
             "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
             "$env:ProgramFiles\Inno Setup 6\ISCC.exe"

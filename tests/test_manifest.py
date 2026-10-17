@@ -458,6 +458,12 @@ def test_installers_resolve_numpy_from_pypi_and_pin_cuda_torch():
     assert "PYTHONNOUSERSITE" in windows
     assert "--without-pip" in windows
     assert "Assert-AdminPath" in windows
+    assert "function Resolve-ContainedPath" in windows
+    assert "GetFinalPathNameByHandleW" in windows
+    assert "this link points outside the Python folder" in windows
+    assert 'Resolve-ContainedPath $script:Base $PythonDir' in windows
+    assert 'Resolve-ContainedPath $executable $PythonDir' in windows
+    assert '$env:VOXPRINT_INSTALL_LIB -ne "1"' in windows
     assert "Test-Elevated" in windows
     assert "Test-PathUnder" in windows
     assert "Get-MachineProgramFiles" in windows
@@ -503,6 +509,8 @@ def test_installers_resolve_numpy_from_pypi_and_pin_cuda_torch():
     assert "Set-Location -LiteralPath $App" in windows
     ensure = windows.split("function Ensure-SharedRuntime", 1)[1].split("function Invoke-Machine", 1)[0]
     assert ensure.index("Assert-NoReparse $Runtime") < ensure.index("venv --without-pip")
+    machine = windows.split("function Invoke-Machine", 1)[1].split("function Invoke-User", 1)[0]
+    assert machine.index("Resolve-ContainedPath $script:Base $PythonDir") < machine.index("Assert-AdminPath $script:Base")
     assert "Move-Item -LiteralPath $Runtime" in windows
     assert ".bak-" in windows
     assert "The suite runtime is already installed" not in windows
@@ -695,3 +703,77 @@ move_occupied_runtime_aside
     assert len(backups) == 1
     assert (backups[0] / "keep-me.txt").read_text(encoding="utf-8") == "user data"
     assert (backups[0] / "bin" / "python3").is_file()
+
+
+def _windows_junction(link: Path, target: Path) -> None:
+    subprocess.run(
+        ["cmd", "/c", "mklink", "/J", str(link), str(target)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows reparse points are checked by the Windows installer.")
+def test_windows_follows_a_python_junction_only_inside_the_install(tmp_path):
+    py_root = tmp_path / "python"
+    real = py_root / "real"
+    real.mkdir(parents=True)
+    real_exe = real / "python.exe"
+    real_exe.write_bytes(b"")
+    alias = py_root / "cpython-3.14-windows-x86_64-none"
+    _windows_junction(alias, real)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "python.exe").write_bytes(b"")
+    escape = py_root / "escape"
+    _windows_junction(escape, outside)
+    linked_root_target = tmp_path / "linked-real"
+    (linked_root_target / "real").mkdir(parents=True)
+    (linked_root_target / "real" / "python.exe").write_bytes(b"")
+    linked_root = tmp_path / "linked-python"
+    _windows_junction(linked_root, linked_root_target)
+    root = Path(__file__).resolve().parents[1]
+    env = os.environ.copy()
+    env["VOXPRINT_INSTALL_SCRIPT"] = str(root / "installer" / "windows" / "install.ps1")
+    env["PYROOT"] = str(py_root)
+    env["INSIDE"] = str(alias / "python.exe")
+    env["ESCAPE"] = str(escape / "python.exe")
+    env["LINKROOT"] = str(linked_root)
+    env["ROOTLINK"] = str(linked_root / "real" / "python.exe")
+    script = r"""
+$ErrorActionPreference = "Stop"
+$env:VOXPRINT_INSTALL_LIB = "1"
+. $env:VOXPRINT_INSTALL_SCRIPT
+$resolved = Resolve-ContainedPath $env:INSIDE $env:PYROOT
+Write-Output ("RESOLVED=" + $resolved)
+try {
+    Resolve-ContainedPath $env:ESCAPE $env:PYROOT | Out-Null
+    Write-Output "ESCAPE_ACCEPTED"
+} catch {
+    if ($_.Exception.Message -notlike "*outside the Python folder*") { throw }
+    Write-Output "ESCAPE_REJECTED"
+}
+try {
+    Resolve-ContainedPath $env:ROOTLINK $env:LINKROOT | Out-Null
+    Write-Output "ROOT_ACCEPTED"
+} catch {
+    if ($_.Exception.Message -notlike "*contains a link*") { throw }
+    Write-Output "ROOT_REJECTED"
+}
+"""
+    result = subprocess.run(
+        ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+        cwd=root,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    resolved = next(line for line in lines if line.startswith("RESOLVED=")).split("=", 1)[1]
+    assert resolved.lower() == str(real_exe).lower()
+    assert "cpython-3.14-windows-x86_64-none" not in resolved.lower()
+    assert "ESCAPE_REJECTED" in lines
+    assert "ROOT_REJECTED" in lines

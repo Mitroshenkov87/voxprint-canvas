@@ -309,6 +309,21 @@ jobs:
           if (-not $baseFull.StartsWith($pythonRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
             throw "venv base interpreter is outside {app}\python: $baseFull"
           }
+          if ($baseFull -match 'cpython-3\.14-windows-x86_64-none') {
+            throw "venv base interpreter still uses the uv alias link: $baseFull"
+          }
+          $cursor = $baseFull
+          while (-not [string]::IsNullOrWhiteSpace($cursor)) {
+            if (Test-Path -LiteralPath $cursor) {
+              $attrs = [System.IO.File]::GetAttributes($cursor)
+              if (($attrs -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "venv base interpreter path contains a link: $cursor"
+              }
+            }
+            $parent = [System.IO.Path]::GetDirectoryName($cursor)
+            if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $cursor) { break }
+            $cursor = $parent
+          }
           Write-Host "venv base interpreter starts with {app}\python: $baseFull"
           $site = Join-Path $install "venv\Lib\site-packages"
           $versionPy = Join-Path $site "torch\version.py"

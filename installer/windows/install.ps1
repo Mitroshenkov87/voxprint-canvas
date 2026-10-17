@@ -13,7 +13,9 @@ $ErrorActionPreference = "Stop"
 if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
     $PSNativeCommandUseErrorActionPreference = $false
 }
-$App = Split-Path -Parent $MyInvocation.MyCommand.Path
+$scriptPath = $MyInvocation.MyCommand.Path
+if ([string]::IsNullOrWhiteSpace($scriptPath)) { $scriptPath = $PSCommandPath }
+$App = Split-Path -Parent $scriptPath
 $Venv = Join-Path $App "venv"
 $Py = Join-Path $Venv "Scripts\python.exe"
 $Shared = Join-Path $env:LOCALAPPDATA "Voxprint\shared"
@@ -109,6 +111,113 @@ function Test-PathUnder([string]$Path, [string]$Root) {
     if ($full.Equals($base, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
     if (-not $base.EndsWith('\')) { $base = $base + '\' }
     return $full.StartsWith($base, [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+function Test-PathInside([string]$Path, [string]$Root) {
+    $full = [System.IO.Path]::GetFullPath($Path)
+    $base = [System.IO.Path]::GetFullPath($Root)
+    if (-not $base.EndsWith('\')) { $base = $base + '\' }
+    return $full.StartsWith($base, [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+function Get-FinalPathName([string]$Path) {
+    # Windows PowerShell 5.1 has no Directory.ResolveLinkTarget. Follow every
+    # junction with the Win32 final-path call, then drop the \\?\ prefix.
+    if (-not ("VoxprintFinalPath" -as [type])) {
+        $definition = @(
+            "using System;"
+            "using System.Runtime.InteropServices;"
+            "using System.Text;"
+            "public static class VoxprintFinalPath {"
+            "    [DllImport(`"kernel32.dll`", CharSet = CharSet.Unicode, SetLastError = true)]"
+            "    public static extern IntPtr CreateFileW("
+            "        string lpFileName,"
+            "        uint dwDesiredAccess,"
+            "        uint dwShareMode,"
+            "        IntPtr lpSecurityAttributes,"
+            "        uint dwCreationDisposition,"
+            "        uint dwFlagsAndAttributes,"
+            "        IntPtr hTemplateFile);"
+            "    [DllImport(`"kernel32.dll`", CharSet = CharSet.Unicode, SetLastError = true)]"
+            "    public static extern uint GetFinalPathNameByHandleW("
+            "        IntPtr hFile,"
+            "        StringBuilder lpszFilePath,"
+            "        uint cchFilePath,"
+            "        uint dwFlags);"
+            "    [DllImport(`"kernel32.dll`", SetLastError = true)]"
+            "    public static extern bool CloseHandle(IntPtr hObject);"
+            "}"
+        ) -join "`n"
+        Add-Type -TypeDefinition $definition
+    }
+    $handle = [VoxprintFinalPath]::CreateFileW(
+        $Path,
+        [uint32]128,
+        [uint32]7,
+        [IntPtr]::Zero,
+        [uint32]3,
+        [uint32]0x02000000,
+        [IntPtr]::Zero
+    )
+    $invalid = New-Object IntPtr -1
+    if ($handle -eq $invalid) {
+        throw "Setup stopped because this path could not be opened: $Path"
+    }
+    try {
+        $builder = New-Object System.Text.StringBuilder 32768
+        $len = [VoxprintFinalPath]::GetFinalPathNameByHandleW($handle, $builder, [uint32]32768, [uint32]0)
+        if ($len -eq 0 -or $len -ge 32768) {
+            throw "Setup stopped because this path could not be resolved: $Path"
+        }
+        $resolved = $builder.ToString()
+        if ($len -lt $resolved.Length) {
+            $resolved = $resolved.Substring(0, [int]$len)
+        }
+    } finally {
+        [void][VoxprintFinalPath]::CloseHandle($handle)
+    }
+    if ($resolved.StartsWith("\\?\UNC\", [System.StringComparison]::OrdinalIgnoreCase)) {
+        $resolved = "\\" + $resolved.Substring(8)
+    } elseif ($resolved.StartsWith("\\?\")) {
+        $resolved = $resolved.Substring(4)
+    }
+    return [System.IO.Path]::GetFullPath($resolved)
+}
+
+function Resolve-ContainedPath([string]$Path, [string]$Root) {
+    # uv's managed Python alias is a junction inside {app}\python. Follow it
+    # only when every link stays inside that folder. A link on the folder
+    # itself, or a link that lands outside it, stops the setup.
+    if ([string]::IsNullOrWhiteSpace($Path) -or [string]::IsNullOrWhiteSpace($Root)) {
+        throw "Setup stopped because this path is empty."
+    }
+    $full = [System.IO.Path]::GetFullPath($Path)
+    $rootFull = [System.IO.Path]::GetFullPath($Root)
+    $cursor = $full
+    while (-not [string]::IsNullOrWhiteSpace($cursor)) {
+        $attrs = $null
+        try {
+            $attrs = [System.IO.File]::GetAttributes($cursor)
+        } catch {
+            $attrs = $null
+        }
+        if ($null -ne $attrs -and (($attrs -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
+            if (-not (Test-PathInside $cursor $rootFull)) {
+                throw "Setup stopped because this path contains a link: $cursor"
+            }
+        }
+        $parent = [System.IO.Path]::GetDirectoryName($cursor)
+        if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $cursor) {
+            break
+        }
+        $cursor = $parent
+    }
+    $resolved = Get-FinalPathName $full
+    if (-not (Test-PathUnder $resolved $rootFull)) {
+        throw "Setup stopped because this link points outside the Python folder: $full"
+    }
+    Assert-NoReparse $resolved
+    return $resolved
 }
 
 function Assert-AdminPath([string]$Path) {
@@ -398,12 +507,14 @@ function Resolve-BasePython {
             if ($line.StartsWith("executable = ")) { $executable = $line.Substring(13).Trim() }
         }
         if ($executable -and (Test-Path -LiteralPath $executable)) {
+            $executable = Resolve-ContainedPath $executable $PythonDir
             Assert-AdminPath $executable
             return $executable
         }
         if ($pyHome) {
             $candidate = Join-Path $pyHome "python.exe"
             if (Test-Path -LiteralPath $candidate) {
+                $candidate = Resolve-ContainedPath $candidate $PythonDir
                 Assert-AdminPath $candidate
                 return $candidate
             }
@@ -414,8 +525,9 @@ function Resolve-BasePython {
     if (-not $found) {
         throw "uv installed Python 3.14 but the interpreter could not be found. Install Python 3.14 from $WindowsPythonUrl and run this setup again."
     }
-    Assert-AdminPath $found.FullName
-    return $found.FullName
+    $resolved = Resolve-ContainedPath $found.FullName $PythonDir
+    Assert-AdminPath $resolved
+    return $resolved
 }
 
 function Move-OccupiedRuntimeAside {
@@ -478,6 +590,7 @@ function Invoke-Machine {
         if (-not (Test-Path -LiteralPath $script:Base)) {
             throw "uv reported Python at '$script:Base', but that file does not exist. Install Python 3.14 from $WindowsPythonUrl and run this setup again."
         }
+        $script:Base = Resolve-ContainedPath $script:Base $PythonDir
         Assert-AdminPath $script:Base
         Write-Host "Python is $script:Base"
         if (-not (Test-Path -LiteralPath $Py)) {
@@ -587,24 +700,26 @@ function Invoke-Cleanup {
     Clear-WheelFetch
 }
 
-Write-Host "Setup scope: $Scope"
-try {
-    switch ($Scope) {
-        "Machine" { Invoke-Machine }
-        "User" { Invoke-User }
-        "Cleanup" { Invoke-Cleanup }
-        "All" {
-            Invoke-Machine
-            Invoke-User
-            Invoke-Cleanup
+if ($env:VOXPRINT_INSTALL_LIB -ne "1") {
+    Write-Host "Setup scope: $Scope"
+    try {
+        switch ($Scope) {
+            "Machine" { Invoke-Machine }
+            "User" { Invoke-User }
+            "Cleanup" { Invoke-Cleanup }
+            "All" {
+                Invoke-Machine
+                Invoke-User
+                Invoke-Cleanup
+            }
+            default { throw "Setup stopped because the scope is not Machine, User, Cleanup, or All." }
         }
-        default { throw "Setup stopped because the scope is not Machine, User, Cleanup, or All." }
+    } catch {
+        Write-Host $_
+        if ((Test-Elevated) -or ($Scope -ne "User")) {
+            Clear-WheelFetch
+        }
+        Stop-SetupLog
+        exit 1
     }
-} catch {
-    Write-Host $_
-    if ((Test-Elevated) -or ($Scope -ne "User")) {
-        Clear-WheelFetch
-    }
-    Stop-SetupLog
-    exit 1
 }

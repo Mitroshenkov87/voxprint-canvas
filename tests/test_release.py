@@ -54,6 +54,8 @@ def test_windows_ci_builds_the_installer_and_runs_install_ps1():
     assert 'Remove-Item -Recurse -Force "installer\\windows\\staging\\venv"' in text
     assert "venv base interpreter is outside the install dir" in text
     assert "venv base interpreter is outside {app}\\python" in text
+    assert "venv base interpreter path contains a link" in text
+    assert "venv base interpreter still uses the uv alias link" in text
     assert "torch.version.cuda is not 13.0" in text
     assert "pyvenv.cfg" in text
     assert "constraints-cuda.txt" in text

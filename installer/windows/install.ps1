@@ -602,7 +602,7 @@ try {
     }
 } catch {
     Write-Host $_
-    if ($Scope -ne "User") {
+    if ((Test-Elevated) -or ($Scope -ne "User")) {
         Clear-WheelFetch
     }
     Stop-SetupLog

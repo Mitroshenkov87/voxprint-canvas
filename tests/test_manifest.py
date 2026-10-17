@@ -425,6 +425,10 @@ def test_installers_resolve_numpy_from_pypi_and_pin_cuda_torch():
     assert 'APP_PYTHON="$APP/python"' in linux
     assert "refuse_symlink" in linux
     assert "SUDO_USER" in linux
+    assert "PYTHONNOUSERSITE" in linux
+    assert "handoff_tree" in linux
+    assert 'chown -R "$SUDO_USER" "$1"' in linux
+    assert '"$1" -s -c' in linux
     assert 'getent passwd "$SUDO_USER"' in linux
     assert 'HOME="$USER_HOME"' in linux
     assert 'APP_DIR="$USER_HOME/.local/share/applications"' in linux
@@ -517,6 +521,10 @@ def test_installers_resolve_numpy_from_pypi_and_pin_cuda_torch():
     assert "-Scope Machine" in post
     assert "-Scope User" in post
     assert "-Scope Cleanup" in post
+    assert "function RunSetup" in iss
+    step = post.split("procedure CurStepChanged", 1)[1]
+    assert step.index("-Scope Cleanup") < step.index("ExitProcess")
+    assert "if Code = 0 then" in step
     assert "ExpandConstant('{app}')" in post
     assert "ExpandConstant('{app}\\setup-work\\canvas-install.log')" in post
     assert "ExpandConstant('{localappdata}\\Voxprint\\logs\\canvas-install.log')" in post

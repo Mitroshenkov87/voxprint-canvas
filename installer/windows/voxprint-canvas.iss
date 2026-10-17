@@ -47,11 +47,12 @@ Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 procedure ExitProcess(uExitCode: Cardinal);
   external 'ExitProcess@kernel32.dll stdcall';
 
-procedure RunSetup(const Params: String; const DropPrivileges: Boolean);
+function RunSetup(const Params: String; const DropPrivileges: Boolean): Integer;
 var
   ResultCode: Integer;
   Started: Boolean;
 begin
+  Result := 0;
   if DropPrivileges then
   begin
     Started := ExecAsOriginalUser(
@@ -77,25 +78,33 @@ begin
   if not Started then
   begin
     SuppressibleMsgBox('VOXPrint AI Canvas could not start its setup script.', mbError, MB_OK, IDOK);
-    ExitProcess(1);
+    Result := 1;
+    Exit;
   end;
   if ResultCode <> 0 then
   begin
     SuppressibleMsgBox('VOXPrint AI Canvas setup failed. The machine log is ' + ExpandConstant('{app}\setup-work\canvas-install.log') + '. The user log is ' + ExpandConstant('{localappdata}\Voxprint\logs\canvas-install.log') + '.', mbError, MB_OK, IDOK);
     if (ResultCode > 0) and (ResultCode <= 255) then
-      ExitProcess(ResultCode)
+      Result := ResultCode
     else
-      ExitProcess(1);
+      Result := 1;
   end;
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
+var
+  Code, CleanupCode: Integer;
 begin
   if CurStep <> ssPostInstall then
     Exit;
-  RunSetup(ExpandConstant('-NoProfile -ExecutionPolicy Bypass -File "{app}\install.ps1" -Scope Machine'), False);
-  RunSetup(ExpandConstant('-NoProfile -ExecutionPolicy Bypass -File "{app}\install.ps1" -Scope User'), True);
-  RunSetup(ExpandConstant('-NoProfile -ExecutionPolicy Bypass -File "{app}\install.ps1" -Scope Cleanup'), False);
+  Code := RunSetup(ExpandConstant('-NoProfile -ExecutionPolicy Bypass -File "{app}\install.ps1" -Scope Machine'), False);
+  if Code = 0 then
+    Code := RunSetup(ExpandConstant('-NoProfile -ExecutionPolicy Bypass -File "{app}\install.ps1" -Scope User'), True);
+  CleanupCode := RunSetup(ExpandConstant('-NoProfile -ExecutionPolicy Bypass -File "{app}\install.ps1" -Scope Cleanup'), False);
+  if Code = 0 then
+    Code := CleanupCode;
+  if Code <> 0 then
+    ExitProcess(Code);
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);

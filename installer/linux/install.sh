@@ -27,6 +27,7 @@ scrub_environment() {
     esac
   done
   export UV_NO_CONFIG=1
+  export PYTHONNOUSERSITE=1
 }
 
 refuse_symlink() {
@@ -101,6 +102,7 @@ as_user() {
       USER="$SUDO_USER" \
       LOGNAME="$SUDO_USER" \
       UV_NO_CONFIG=1 \
+      PYTHONNOUSERSITE=1 \
       VOXPRINT_HOME="${VOXPRINT_HOME:-}" \
       XDG_DATA_HOME="$PROFILE_XDG" \
       "$@"
@@ -129,6 +131,20 @@ handoff_parents() {
     handoff_dir "$cursor"
     cursor=$(dirname "$cursor")
   done
+}
+
+handoff_tree() {
+  # A previous root install may own files inside this directory. Give the tree back.
+  if [ "$(id -u)" -ne 0 ] || [ -z "${SUDO_USER:-}" ]; then
+    return 0
+  fi
+  if ! under_user_home "$1"; then
+    return 0
+  fi
+  if [ -d "$1" ]; then
+    refuse_symlink "$1"
+    chown -R "$SUDO_USER" "$1"
+  fi
 }
 
 move_occupied_runtime_aside() {
@@ -198,7 +214,7 @@ UV="$VENV/bin/uv"
 
 gpu_ready() {
   ort=$(printf '%s%s' onnx runtime)
-  "$1" -c "
+  "$1" -s -c "
 import importlib
 import importlib.metadata as meta
 import sys
@@ -295,6 +311,8 @@ fi
 "$VENV/bin/python" -m pip --isolated download -c "$SRC/constraints.txt" -c "$SRC/constraints-cuda.txt" \
   "onnxruntime-gpu==1.31.0" "torchao==0.18.0" \
   --index-url https://pypi.org/simple -d "$WHEELS"
+handoff_parents "$DATA"
+handoff_tree "$DATA"
 if [ "$runtime_ready" -eq 0 ]; then
   echo "Repairing the suite runtime..."
   if [ ! -f "$RUNTIME/pyvenv.cfg" ]; then
@@ -349,6 +367,9 @@ refuse_symlink "$DIR_DIR"
 handoff_parents "$BIN_DIR"
 handoff_parents "$APP_DIR"
 handoff_parents "$DIR_DIR"
+handoff_tree "$BIN_DIR"
+handoff_tree "$APP_DIR"
+handoff_tree "$DIR_DIR"
 as_user mkdir -p "$APP_DIR" "$DIR_DIR" "$BIN_DIR"
 menu_file="$APP/setup-work/voxprint.directory"
 desktop_file="$APP/setup-work/voxprint-canvas.desktop"

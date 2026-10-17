@@ -192,7 +192,7 @@ def _launch(tier: Tier, splash: Splash | None = None, app: QApplication | None =
         splash.close()
         return 1
     window = ShellWindow(
-        open_layout(canvas_state_dir(), gate, enlarge_installed=enlarge.ready()),
+        open_layout(canvas_state_dir(), gate=gate, enlarge_installed=enlarge.ready()),
         tier=tier,
         enlarge=enlarge,
     )

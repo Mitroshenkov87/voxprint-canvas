@@ -46,7 +46,7 @@ def home(monkeypatch, tmp_path: Path):
 
 
 def _window(home: Path, *, runner=None, improver=None) -> ShellWindow:
-    shell = open_layout(home / "state", World().gate(), enlarge_installed=False)
+    shell = open_layout(home / "state", gate=World().gate(), enlarge_installed=False)
     return ShellWindow(shell, tier=Tier.GB16, enlarge=object(), runner=runner, improver=improver)
 
 

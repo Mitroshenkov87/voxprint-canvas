@@ -56,7 +56,7 @@ def main() -> int:
 def _window(state: Path, tier: Tier) -> ShellWindow:
     state.mkdir(parents=True, exist_ok=True)
     _history(state / "image-history.json")
-    shell = open_layout(state, World().gate(), enlarge_installed=False)
+    shell = open_layout(state, gate=World().gate(), enlarge_installed=False)
     return ShellWindow(shell, tier=tier, enlarge=object(), runner=lambda *_args: rgb(), improver=lambda prompt: prompt)
 
 

@@ -58,7 +58,7 @@ def canvas_state_dir() -> Path:
     return path
 
 
-def open_layout(state_dir_path: Path, gate: AgeGate, *, enlarge_installed: bool = False) -> CanvasShell:
+def open_layout(state_dir_path: Path, *, gate: AgeGate, enlarge_installed: bool = False) -> CanvasShell:
     """Build the image screen for Canvas.
 
     ``gate`` is required. ``None`` and any stand-in are refused before the
@@ -79,7 +79,7 @@ def open_layout(state_dir_path: Path, gate: AgeGate, *, enlarge_installed: bool 
     presets = _presets(settings, enlarge_installed=enlarge_installed)
     names = state_names(surface)
     state_dir_path.mkdir(parents=True, exist_ok=True)
-    check = ContentCheck(gate)
+    check = ContentCheck(gate=gate)
     layout = SimpleLayout(
         presets=presets,
         settings=settings,

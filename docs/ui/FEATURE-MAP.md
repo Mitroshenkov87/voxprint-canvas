@@ -1,7 +1,9 @@
 # Canvas feature map
 
 Where each current window and command lives on the shared screen.
-Status is `done`, `TODO`, `NEEDS OWNER DECISION`, or `removed (owner decision 2026-10-17)`.
+Status is `done`, `TODO`, `NEEDS OWNER DECISION`, `pending Yitro`, or `removed (owner decision 2026-10-17)`.
+
+`pending Yitro` waits for the shared image surface in voxprint-common PR 13. The pin stays at `f4e95cc` until that tag's SHA arrives. The source picture and the mask will opt into the image-surface slots. The generator will receive the live settings `shell.steps`, `shell.guidance`, `shell.sampler`, `shell.seed`, and `shell.resolution`.
 
 | Feature | Old place | New place | Status |
 | --- | --- | --- | --- |
@@ -39,6 +41,13 @@ Status is `done`, `TODO`, `NEEDS OWNER DECISION`, or `removed (owner decision 20
 | VRAM cap | `--vram-cap-gb` | Expert VRAM limit, and the command | done |
 | Adult content | (not on the old window) | Expert. It changes only the prompt policy | done |
 | Exact size, including 2K | `--output-size 2k` | Expert Exact size, and the command | done |
+| Source picture | Use a picture; `generate --input` | Image surface source-picture slot, opt-in | pending Yitro |
+| Mask | Edit the mask; `generate --mask` | Image surface mask slot, opt-in | pending Yitro |
+| Structure guidance | Pose, depth, and edges | Image surface source-picture slot, opt-in | pending Yitro |
+| Expert steps | Expert panel | `shell.steps` in the live settings passed to the generator | pending Yitro |
+| Expert CFG | Expert panel | `shell.guidance` in the live settings passed to the generator | pending Yitro |
+| Expert sampler | Expert panel | `shell.sampler` in the live settings passed to the generator | pending Yitro |
+| Expert seed | Expert panel | `shell.seed` in the live settings passed to the generator | pending Yitro |
 | `generate --prompt` | Command | Simple prompt, and the command | done |
 | `generate --input` | Command | Use a picture, and the command | done |
 | `generate --mask` | Command | Edit the mask, and the command | done |

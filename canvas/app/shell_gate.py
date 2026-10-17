@@ -14,7 +14,7 @@ from canvas.safety.image import RawImage, SafeImage
 class ContentCheck:
     """Reviews prompts and finished pictures through one gate instance."""
 
-    def __init__(self, gate: AgeGate) -> None:
+    def __init__(self, *, gate: AgeGate) -> None:
         """Keep ``gate`` and review through it.
 
         Args:

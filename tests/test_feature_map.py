@@ -14,6 +14,14 @@ def test_feature_map_keeps_picture_tools_and_records_the_removal() -> None:
         "needs owner decision",
         "4k",
         "selftest",
+        "pending yitro",
+        "source-picture slot",
+        "mask slot",
+        "shell.steps",
+        "shell.guidance",
+        "shell.sampler",
+        "shell.seed",
+        "shell.resolution",
     ):
         assert phrase in folded
     assert "temporarily unavailable" not in folded

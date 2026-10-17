@@ -38,7 +38,7 @@ class RunStopped(Exception):
 class ShellRunner:
     """Turns one :class:`PictureJob` into pixels. The window reviews them again."""
 
-    def __init__(self, gate: AgeGate, tier: Tier, enlarge: object) -> None:
+    def __init__(self, *, gate: AgeGate, tier: Tier, enlarge: object) -> None:
         """Keep the gate the window already holds.
 
         Args:
@@ -68,9 +68,9 @@ class ShellRunner:
         _offer(generator, "guidance", job.guidance)
         _offer(generator, "sampler", job.sampler)
         pipeline = Pipeline(
-            self.gate,
-            generator,
-            self.tier,
+            gate=self.gate,
+            generator=generator,
+            tier=self.tier,
             use_gpu_lock=True,
             catalog=catalog,
             enlarge=self.enlarge,
@@ -100,7 +100,7 @@ class ShellRunner:
         return RawImage(safe.width, safe.height, safe.data)
 
 
-def improve_prompt(gate: AgeGate, prompt: str, *, tier: Tier) -> str:
+def improve_prompt(*, gate: AgeGate, prompt: str, tier: Tier) -> str:
     """Rewrite ``prompt`` with the same gate. Missing models leave the words as they are.
 
     Args:

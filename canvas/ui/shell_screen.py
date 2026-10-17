@@ -73,10 +73,14 @@ class ShellWindow(QMainWindow):
         self.tier = tier
         self._enlarge = enlarge if enlarge is not None else EnlargeClient()
         self._enlarge_ready = bool(getattr(self._enlarge, "ready", lambda: False)())
-        self._runner = runner if runner is not None else ShellRunner(shell.gate.age_gate, tier, self._enlarge)
+        self._runner = runner if runner is not None else ShellRunner(
+            gate=shell.gate.age_gate,
+            tier=tier,
+            enlarge=self._enlarge,
+        )
         if improver is None:
             def improver(prompt: str) -> str:
-                return improve_prompt(shell.gate.age_gate, prompt, tier=tier)
+                return improve_prompt(gate=shell.gate.age_gate, prompt=prompt, tier=tier)
         self._improver = improver
         self._picture: Path | None = None
         self._mask: RawImage | None = None

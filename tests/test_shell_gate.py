@@ -30,15 +30,15 @@ def test_constructing_the_layout_without_a_gate_fails(tmp_path: Path) -> None:
     with pytest.raises(TypeError):
         open_layout(tmp_path)  # type: ignore[call-arg]
     with pytest.raises(TypeError):
-        open_layout(tmp_path, None)  # type: ignore[arg-type]
+        open_layout(tmp_path, gate=None)  # type: ignore[arg-type]
     with pytest.raises(TypeError):
-        open_layout(tmp_path, _Allow())  # type: ignore[arg-type]
+        open_layout(tmp_path, gate=_Allow())  # type: ignore[arg-type]
 
 
 def test_adult_content_and_expert_values_leave_the_gate_blocking(tmp_path: Path) -> None:
     world = World()
     gate = world.gate()
-    shell = open_layout(tmp_path, gate)
+    shell = open_layout(tmp_path, gate=gate)
     assert shell.gate.age_gate is gate
     before = shell.layout.prompt_policy()
     assert before.template
@@ -81,7 +81,7 @@ def test_adult_content_and_expert_values_leave_the_gate_blocking(tmp_path: Path)
 
 
 def test_a_result_without_pixels_is_refused(tmp_path: Path) -> None:
-    shell = open_layout(tmp_path, World().gate())
+    shell = open_layout(tmp_path, gate=World().gate())
     shell.layout.set_prompt("a red bicycle")
     assert shell.layout.generate() is True
     assert shell.layout.finish("missing") is None
@@ -89,7 +89,7 @@ def test_a_result_without_pixels_is_refused(tmp_path: Path) -> None:
 
 
 def test_style_chips_write_a_look_and_not_only_a_negative(tmp_path: Path) -> None:
-    shell = open_layout(tmp_path, World().gate())
+    shell = open_layout(tmp_path, gate=World().gate())
     shell.layout.choose("style", "sketch")
     assert shell.layout.get("canvas.style") == "sketch"
     assert shell.layout.get("shell.negative") == "full color"

@@ -627,8 +627,17 @@ function Invoke-Machine {
             Install-SuiteGpuPackages $Py ""
             if (-not (Test-SuiteGpuPackages $Py)) { throw "Setup stopped." }
         }
+        $CommonUrl = "https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.2.4/voxprint_common-0.2.4-py3-none-any.whl"
+        $CommonSha = "3051bc64700964705bf5cee5182829d1311560a38a9f7436195f26481e4fa239"
+        $CommonWheel = Join-Path $Fetch "voxprint_common-0.2.4-py3-none-any.whl"
+        Assert-NoReparse $CommonWheel
+        Invoke-WebRequest -Uri $CommonUrl -OutFile $CommonWheel
+        $got = (Get-FileHash -Algorithm SHA256 -Path $CommonWheel).Hash.ToLowerInvariant()
+        if ($got -ne $CommonSha) { throw "voxprint-common 0.2.4 failed the SHA-256 check." }
         Assert-AdminPath $script:Uv
         Assert-AdminPath $Py
+        & $script:Uv pip install --no-config --python $Py $CommonWheel
+        if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
         & $script:Uv pip install --no-config --python $Py --index-url https://pypi.org/simple "torchao==0.18.0"
         if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
         & $script:Uv pip install --no-config --python $Py --index $TorchIndex --index-url https://pypi.org/simple --index-strategy unsafe-best-match -c $Constraints -c $CudaConstraints "${App}[gen]"
@@ -679,8 +688,10 @@ function Invoke-User {
         }
         $dataRoot = Join-Path $env:LOCALAPPDATA "Voxprint"
         Assert-NoReparse $dataRoot
+        $Mdl = Join-Path $App "mdl.json"
+        if (-not (Test-Path -LiteralPath $Mdl)) { throw "mdl.json is missing from the setup. The install cannot continue." }
         Write-Host "Installing the default image pack..."
-        Invoke-Py @("-m", "canvas.app.provision")
+        Invoke-Py @("-m", "voxprint_common.mdl", "download", "--app", "canvas", "--manifest", $Mdl)
         $tierDir = Join-Path $dataRoot "Canvas"
         Assert-NoReparse $tierDir
         New-Item -ItemType Directory -Force $tierDir | Out-Null

@@ -39,7 +39,10 @@ def test_unchanged_file_is_not_hashed_again(monkeypatch, tmp_path: Path):
 def test_verified_records_keep_the_component_map(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path / "home"))
     shared = tmp_path / "home" / "shared"
-    register_component(shared, "python-3.14", kind="runtime", version="3.14.8", path="runtime", sha256="ab" * 32)
+    register_component(
+        shared, "python-3.14", kind="runtime", version="3.14.8",
+        path="runtime/py314-torch2.11-cu130", sha256="ab" * 32,
+    )
     path = tmp_path / "weight.bin"
     path.write_bytes(b"xyz")
     digest = hashlib.sha256(b"xyz").hexdigest()

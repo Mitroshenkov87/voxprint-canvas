@@ -20,24 +20,12 @@ from canvas.infra.manifest import (
 )
 from canvas.infra.paths import models_dir, shared_dir
 from canvas.infra.runtime import (
-    ORT_ID,
-    ORT_VERSION,
-    PYTHON_ID,
-    PYTHON_VERSION,
-    RUNTIME_REL,
-    TORCH_ID,
-    TORCH_VERSION,
     TRT_ID,
     TRT_PATH,
-    TRT_VERSION,
-    file_sha256,
-    hash_tree,
-    interpreter_marker,
     python_supports_tensorrt,
     refill_wheels,
     restore_runtime,
     restore_tensorrt,
-    wheel_dir,
 )
 from canvas.models.features import withheld_from_setup
 from canvas.models.loader import plan_specs
@@ -45,10 +33,8 @@ from canvas.models.plan import CallPlan
 from canvas.models.registry import Catalog, ModelSpec, RegistryError
 from canvas.models.snapshots import (
     SnapshotError,
-    download_snapshot,
     snapshot_ready,
     snapshot_repo,
-    snapshot_status,
     weight_dir,
 )
 from canvas.models.verified import VerifiedCache
@@ -133,18 +119,19 @@ def format_duration(seconds: int) -> str:
 
 
 def install_supporting(catalog: Catalog, progress: Callable[[str], None]) -> None:
-    """Download the models that ship with the default pack, other than the generator."""
+    """Record supporting packs that are already on disk. VOXPrint MDL fetches weights."""
+    del progress
     for spec in default_specs(catalog):
         if spec.role == "generator":
             continue
-        install_spec(spec, progress, confirm=None)
+        install_spec(spec, lambda _message: None, confirm=None)
 
 
 def install_defaults(catalog: Catalog, progress: Callable[[str], None]) -> None:
-    """Download the default packs during setup."""
+    """Record default packs that are already on disk. VOXPrint MDL fetches weights."""
+    del progress
     for spec in default_specs(catalog):
-        progress(text("splash.installing", name=pack_title(spec)))
-        install_spec(spec, progress, confirm=None)
+        install_spec(spec, lambda _message: None, confirm=None)
 
 
 def install_spec(
@@ -152,17 +139,13 @@ def install_spec(
     progress: Callable[[str], None],
     confirm: Callable[[str], bool] | None,
 ) -> None:
-    """Download one pack when it is missing, then record it."""
+    """Record one pack when it is already on disk. Canvas does not download it."""
+    del progress, confirm
     if withheld_from_setup(spec, catalog=None):
         return
     root = models_dir()
     if snapshot_ready(spec, root) is None:
-        if is_optional(spec):
-            notice = pack_notice(spec)
-            progress(notice)
-            if confirm is not None and not confirm(notice):
-                raise DownloadDeclined()
-        download_snapshot(spec, root, progress=progress)
+        return
     remember(spec)
 
 
@@ -172,7 +155,7 @@ def ensure_plan(
     progress: Callable[[str], None],
     confirm: Callable[[str], bool] | None,
 ) -> None:
-    """Download the packs one plan needs. Optional packs ask first."""
+    """Record packs that are already on disk. VOXPrint MDL fetches anything missing."""
     for spec in plan_specs(catalog, plan):
         install_spec(spec, progress, confirm)
 
@@ -223,66 +206,18 @@ def remember(spec: ModelSpec, app: str = APP_ID) -> None:
 
 
 def record_runtime(app: str = APP_ID) -> None:
-    """Record the suite interpreter when the setup installed one."""
-    marker = interpreter_marker()
-    if marker is None:
-        return
-    register_component(
-        shared_dir(),
-        PYTHON_ID,
-        kind="runtime",
-        version=PYTHON_VERSION,
-        path=RUNTIME_REL,
-        sha256=file_sha256(marker),
-        app=app,
-    )
+    """The shared runtime root is not registered. Refs are per model only."""
+    del app
 
 
 def record_wheels(app: str = APP_ID) -> None:
-    """Record torch, the GPU runtime, and TensorRT when those files are present."""
-    files = hash_tree(wheel_dir())
-    torch_files = {
-        name: digest for name, digest in files.items() if _wheel_name(name).startswith(("torch-", "torchvision-"))
-    }
-    if torch_files:
-        register_component(
-            shared_dir(),
-            TORCH_ID,
-            kind="wheels",
-            version=TORCH_VERSION,
-            path=RUNTIME_REL if interpreter_marker() is not None else "wheels",
-            sha256=lock_sha256(torch_files),
-            app=app,
-        )
-    ort_files = {name: digest for name, digest in files.items() if "onnxruntime_gpu" in _wheel_name(name)}
-    if ort_files:
-        register_component(
-            shared_dir(),
-            ORT_ID,
-            kind="wheels",
-            version=ORT_VERSION,
-            path=RUNTIME_REL if interpreter_marker() is not None else "wheels",
-            sha256=lock_sha256(ort_files),
-            app=app,
-        )
-    record_tensorrt(app)
+    """Wheel and runtime roots are not registered. Refs are per model only."""
+    del app
 
 
 def record_tensorrt(app: str = APP_ID) -> None:
-    """Record TensorRT 10 when its component directory has files."""
-    folder = shared_dir() / TRT_PATH
-    files = hash_tree(folder)
-    if not files:
-        return
-    register_component(
-        shared_dir(),
-        TRT_ID,
-        kind="runtime",
-        version=TRT_VERSION,
-        path=TRT_PATH,
-        sha256=lock_sha256(files),
-        app=app,
-    )
+    """The TensorRT directory is not registered. Refs are per model only."""
+    del app
 
 
 def _repair_one(
@@ -290,12 +225,7 @@ def _repair_one(
 ) -> None:
     kind = component.kind
     if kind == "model":
-        spec = _spec_for(catalog, component_id, component)
-        if spec is None:
-            progress(text("splash.leaving", name=component_id))
-            return
-        download_snapshot(spec, models_dir(), progress=progress)
-        remember(spec)
+        progress(text("splash.leaving", name=component_id))
         return
     if kind == "wheels":
         refill_wheels(progress)
@@ -326,10 +256,7 @@ def _needs_repair(
         if not python_supports_tensorrt():
             return False
     if component.kind == "model":
-        spec = _spec_for(catalog, component_id, component)
-        if spec is None or withheld_from_setup(spec, catalog):
-            return False
-        return snapshot_status(spec, models_dir(), cache) != "ready"
+        return False
     if component.kind in ("wheels", "runtime"):
         return not (shared / component.path).exists()
     return False
@@ -348,10 +275,6 @@ def _spec_for(catalog: Catalog, component_id: str, component: Component) -> Mode
         except SnapshotError:
             continue
     return None
-
-
-def _wheel_name(name: str) -> str:
-    return Path(name).name
 
 
 def _relative_pack(folder: Path) -> str:

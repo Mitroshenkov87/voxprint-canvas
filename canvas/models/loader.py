@@ -13,7 +13,7 @@ from canvas.models.pin import PinError, require_pin, verify_file
 from canvas.models.plan import CallPlan, build_plan
 from canvas.models.registry import Catalog, ModelSpec, RegistryError, load_catalog
 from canvas.models.runtime import render
-from canvas.models.snapshots import download_snapshot, snapshot_ready, weight_dir
+from canvas.models.snapshots import snapshot_ready, weight_dir
 from canvas.pipeline.bf16_schedule import (
     EmbeddingCache,
     GpuLedger,
@@ -155,21 +155,6 @@ class ZImageGenerator:
                 )
             return
         assert_never(choice.placement)
-
-
-def download_safety(catalog: Catalog, root: Path) -> None:
-    """Download every content-check snapshot. A bad hash raises ``SnapshotError``."""
-    for role in _SAFETY_ROLES:
-        found = catalog.by_role(role)
-        if len(found) != 1:
-            raise SafetyUnavailable("missing_model")
-        download_snapshot(found[0], root)
-
-
-def download_generator(catalog: Catalog, plan: CallPlan, root: Path) -> None:
-    """Download the generator snapshot for one plan, including a control file when the plan needs one."""
-    for spec in plan_specs(catalog, plan):
-        download_snapshot(spec, root)
 
 
 def plan_specs(catalog: Catalog, plan: CallPlan) -> tuple[ModelSpec, ...]:

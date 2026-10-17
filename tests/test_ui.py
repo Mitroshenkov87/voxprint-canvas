@@ -8,7 +8,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QLabel, QMessageBox, QPlainTextEdit, QTabWidget
+from PySide6.QtWidgets import QApplication, QLabel, QPlainTextEdit, QTabWidget
 
 from canvas.app.identity import splash_line, version_label
 from canvas.app.info import (
@@ -294,17 +294,12 @@ def test_enhance_keeps_the_prompt_and_shows_a_note_when_the_rewrite_is_refused(a
     window.close()
 
 
-def test_confirm_download_uses_the_notice(app, monkeypatch):
+def test_manage_models_opens_voxprint_mdl(app, monkeypatch):
     del app
-    seen: list[str] = []
-
-    def question(parent, title, notice, buttons):
-        del parent, buttons
-        seen.append(f"{title}:{notice}")
-        return QMessageBox.StandardButton.No
-
-    monkeypatch.setattr("canvas.ui.main_window.QMessageBox.question", question)
+    seen: list[list[str]] = []
+    monkeypatch.setattr("canvas.ui.main_window.subprocess.Popen", lambda argv: seen.append(list(argv)))
     window = MainWindow(lambda prompt, mode, fmt: "ok", Tier.GB16)
-    assert window.confirm_download("ControlNet lite is 1.0 GB. Estimated time 1 minute.") is False
-    assert seen == ["Download:ControlNet lite is 1.0 GB. Estimated time 1 minute."]
+    assert window.models_button.text() == "Manage models"
+    window.models_button.click()
+    assert seen == [["voxprint-mdl", "--gui", "--app", "canvas"]]
     window.close()

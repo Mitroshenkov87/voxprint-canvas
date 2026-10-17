@@ -363,6 +363,12 @@ if [ "$app_ready" -eq 0 ]; then
     exit 1
   fi
 fi
+COMMON_URL="https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.2.4/voxprint_common-0.2.4-py3-none-any.whl"
+COMMON_SHA="3051bc64700964705bf5cee5182829d1311560a38a9f7436195f26481e4fa239"
+common_wheel="$WHEELS/voxprint_common-0.2.4-py3-none-any.whl"
+curl -fsSL -o "$common_wheel" "$COMMON_URL"
+echo "$COMMON_SHA  $common_wheel" | sha256sum -c -
+"$UV" pip install --no-config --python "$VENV/bin/python" "$common_wheel"
 "$UV" pip install --no-config --python "$VENV/bin/python" --index-url https://pypi.org/simple "torchao==0.18.0"
 "$UV" pip install --no-config --python "$VENV/bin/python" \
   --index "$TORCH_INDEX" --index-url https://pypi.org/simple --index-strategy unsafe-best-match \
@@ -384,11 +390,16 @@ handoff_tree "$BIN_DIR"
 handoff_tree "$APP_DIR"
 handoff_tree "$DIR_DIR"
 as_user "$VENV/bin/python" -m canvas.infra.layout migrate --install-dir "$APP"
+if [ ! -f "$SRC/mdl.json" ]; then
+  echo "mdl.json is missing from the setup. The install cannot continue." >&2
+  exit 1
+fi
+cp "$SRC/mdl.json" "$APP/mdl.json"
 echo "Installing the default image pack..."
 refuse_symlink "$DATA"
 refuse_symlink "$DATA/canvas/tier.txt"
 handoff_parents "$DATA"
-as_user "$VENV/bin/python" -m canvas.app.provision
+as_user "$VENV/bin/python" -m voxprint_common.mdl download --app canvas --manifest "$SRC/mdl.json"
 as_user mkdir -p "$DATA/canvas"
 as_user sh -c '"$1" -m canvas.models.tiers > "$2"' sh "$VENV/bin/python" "$DATA/canvas/tier.txt"
 as_user "$VENV/bin/python" -m canvas.app.main --register-models

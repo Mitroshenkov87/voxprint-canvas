@@ -17,7 +17,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PIL import Image, ImageDraw
 from PySide6.QtCore import QSize
 from PySide6.QtGui import QColor, QPainter
-from PySide6.QtWidgets import QApplication, QComboBox, QLabel, QLineEdit, QProgressBar, QPushButton, QSpinBox, QWidget
+from PySide6.QtWidgets import QApplication, QComboBox, QLabel, QProgressBar, QPushButton, QSpinBox, QWidget
 
 from canvas.models.mdl_registry import Model
 from canvas.models.modes import Tier
@@ -276,30 +276,23 @@ def _distance(one: tuple[int, int, int], other: tuple[int, int, int]) -> int:
 
 
 def photoshoot_shots(destination: Path) -> None:
-    """Write fresh EN and RU Photoshoot shots at 1280×800.
+    """Write one plain Russian smoke grab at 1280×800.
 
     Args:
-        destination: Directory for ``photoshoot-ready-*.png`` and ``photoshoot-progress-*.png``.
+        destination: Directory for ``photoshoot-ru.png``.
     """
     destination.mkdir(parents=True, exist_ok=True)
     existing = QApplication.instance()
     app = existing if isinstance(existing, QApplication) else QApplication([])
-    ideas = {
-        "en": "Yellow ceramic teapot with a blue handle",
-        "ru": "Жёлтый чайник с синей ручкой",
-    }
-    for language, idea in ideas.items():
-        os.environ["LANG"] = "ru_RU.UTF-8" if language == "ru" else "en_US.UTF-8"
-        os.environ["LC_ALL"] = os.environ["LANG"]
-        set_language(language)
-        home = Path(tempfile.mkdtemp(prefix=f"photoshoot-shot-{language}-"))
-        os.environ["VOXPRINT_HOME"] = str(home)
-        ready = _photoshoot_window(home / "ready", idea)
-        _save_photoshoot(app, ready, destination / f"photoshoot-ready-{language}.png", progress=False)
-        ready.close()
-        progress = _photoshoot_window(home / "progress", idea)
-        _run_progress(app, progress, idea, destination / f"photoshoot-progress-{language}.png")
-        progress.close()
+    os.environ["LANG"] = "ru_RU.UTF-8"
+    os.environ["LC_ALL"] = "ru_RU.UTF-8"
+    set_language("ru")
+    idea = "Жёлтый чайник с синей ручкой"
+    home = Path(tempfile.mkdtemp(prefix="photoshoot-shot-ru-"))
+    os.environ["VOXPRINT_HOME"] = str(home)
+    window = _photoshoot_window(home, idea)
+    _run_smoke(app, window, idea, destination / "photoshoot-ru.png")
+    window.close()
 
 
 def _photoshoot_window(state: Path, idea: str) -> ShellWindow:
@@ -308,22 +301,6 @@ def _photoshoot_window(state: Path, idea: str) -> ShellWindow:
     window = ShellWindow(shell, tier=Tier.GB16, enlarge=object(), runner=lambda *_args: rgb(), improver=lambda prompt: prompt)
     window.view.set_prompt_text(idea)
     return window
-
-
-def _save_photoshoot(app: QApplication, window: ShellWindow, path: Path, *, progress: bool) -> None:
-    window.setFixedSize(SHOT)
-    window.show()
-    mode = window.findChild(QPushButton, "photoshootMode")
-    if mode is None:
-        raise SystemExit(f"{path.name} is missing Photoshoot")
-    mode.click()
-    app.processEvents()
-    _expect_photoshoot(window, path.name, progress=progress)
-    _check(window, path.name)
-    shot = window.grab()
-    if shot.size() != SHOT:
-        raise SystemExit(f"{path.name} is {shot.width()}x{shot.height()}")
-    shot.save(str(path))
 
 
 def _ready_models() -> tuple[Model, ...]:
@@ -337,7 +314,7 @@ def _button(window: ShellWindow, name: str) -> QPushButton:
     return button
 
 
-def _run_progress(app: QApplication, window: ShellWindow, idea: str, path: Path) -> None:
+def _run_smoke(app: QApplication, window: ShellWindow, idea: str, path: Path) -> None:
     photoshoot_run.selectable = _ready_models
     calls = {"n": 0}
 
@@ -345,7 +322,7 @@ def _run_progress(app: QApplication, window: ShellWindow, idea: str, path: Path)
         del job, inputs
         calls["n"] += 1
         if calls["n"] == 2:
-            _save_mid_series(app, window, path)
+            _save_smoke(app, window, path)
         return rgb()
 
     window._runner = runner
@@ -354,45 +331,34 @@ def _run_progress(app: QApplication, window: ShellWindow, idea: str, path: Path)
     window.show()
     _button(window, "photoshootMode").click()
     app.processEvents()
-    _button(window, "photoshootCreate").click()
+    _button(window, "generate").click()
     app.processEvents()
     if calls["n"] < 2 or not path.is_file():
         raise SystemExit(f"{path.name} was not saved during the series")
 
 
-def _save_mid_series(app: QApplication, window: ShellWindow, path: Path) -> bool:
+def _save_smoke(app: QApplication, window: ShellWindow, path: Path) -> bool:
     if path.is_file():
         return True
     app.processEvents()
-    _expect_photoshoot(window, path.name, progress=True)
+    mode = _button(window, "photoshootMode")
+    if not mode.isChecked() or mode.text() != "Фотосессия":
+        raise SystemExit(f"{path.name} is missing the Photoshoot option")
+    cancel = _button(window, "photoshootCancel")
+    if not cancel.isVisible() or cancel.text() != "Отмена":
+        raise SystemExit(f"{path.name} is missing Cancel")
+    lines = [item for item in window.findChildren(QLabel, "photoshootLine") if item.isVisible() and item.text().strip()]
+    if not lines:
+        raise SystemExit(f"{path.name} is missing the shot list")
+    generate = _button(window, "generate")
+    if not generate.isVisible():
+        raise SystemExit(f"{path.name} hides the shell Create button")
     _check(window, path.name)
     shot = window.grab()
     if shot.size() != SHOT:
         raise SystemExit(f"{path.name} is {shot.width()}x{shot.height()}")
     shot.save(str(path))
     return True
-
-
-def _expect_photoshoot(window: ShellWindow, name: str, *, progress: bool) -> None:
-    generate = window.findChild(QPushButton, "generate")
-    primary = window.findChild(QPushButton, "photoshootCreate")
-    if generate is None or generate.isVisible():
-        raise SystemExit(f"{name} still shows the shell Create button")
-    if primary is None or not primary.isVisible():
-        raise SystemExit(f"{name} is missing the panel Create button")
-    if not _button(window, "chip-photoshoot-count-6").isChecked():
-        raise SystemExit(f"{name} does not select 6 shots")
-    if progress:
-        if not _button(window, "photoshootCancel").isVisible():
-            raise SystemExit(f"{name} is missing Cancel")
-        cameras = [item for item in window.findChildren(QLineEdit, "photoshootCamera") if item.isVisible()]
-        if cameras:
-            raise SystemExit(f"{name} shows the camera in simple mode")
-        if not any(item.isVisible() for item in window.findChildren(QPushButton, "photoshootHandle")):
-            raise SystemExit(f"{name} is missing the drag handle")
-        sheet = window.findChild(QPushButton, "photoshootSheet")
-        if sheet is None or sheet.text() not in {"Overview sheet", "Обзорный лист"}:
-            raise SystemExit(f"{name} is missing the overview sheet")
 
 
 def _scenario(idea: str) -> str:

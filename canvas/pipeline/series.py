@@ -59,7 +59,7 @@ def run_series(
     include_camera: Callable[[], bool],
     rewrite: Callable[[str], str],
     age_gate: AgeGate,
-    generate: Callable[[str, int, SeriesFrame | None, float], SeriesFrame | None],
+    draw_frame: Callable[[str, int, SeriesFrame | None, float], SeriesFrame | None],
     cancelled: Callable[[], bool],
     folder: Path,
     on_scenario: Callable[[Scenario], None] | None = None,
@@ -81,7 +81,7 @@ def run_series(
         include_camera: True when Expert keeps the camera clause on the line.
         rewrite: One language-model call. The argument is the user message.
         age_gate: The minors gate. ``review_prompt`` and ``review_image`` are called by name.
-        generate: Returns pixels, or None when that frame is blocked.
+        draw_frame: Returns pixels, or None when that frame is blocked.
         cancelled: True when the user has cancelled.
         folder: Series directory. Created only after the scenario is accepted.
         on_scenario: Shows the accepted shots before the first frame.
@@ -137,7 +137,7 @@ def run_series(
         if cancelled():
             _write_meta(folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept)
             return SeriesResult("cancelled", "", tuple(kept), folder)
-        image = generate(line, seed + index, hero, strength)
+        image = draw_frame(line, seed + index, hero, strength)
         width = 0 if image is None else image.width
         height = 0 if image is None else image.height
         pixels = None if image is None else _released_frame(age_gate, image, line)

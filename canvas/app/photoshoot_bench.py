@@ -62,7 +62,7 @@ def measure_series(
         include_camera=lambda: False,
         rewrite=rewrite,
         age_gate=age_gate,
-        generate=generate,
+        draw_frame=generate,
         cancelled=lambda: False,
         folder=folder,
     )

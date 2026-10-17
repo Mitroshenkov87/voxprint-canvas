@@ -40,8 +40,28 @@ class InferenceUnavailable(Exception):
         return text("gate.unavailable")
 
 
+def applied_strength(requested: float | None) -> float:
+    """Img2img strength. None keeps the restyle default of 0.6.
+
+    Args:
+        requested: A Photoshoot strength, or None for the existing restyle path.
+
+    Raises:
+        ValueError: The value is not between 0 and 1.
+    """
+    if requested is None:
+        return 0.6
+    if isinstance(requested, bool) or not isinstance(requested, (int, float)):
+        raise ValueError("strength must be a number")
+    value = float(requested)
+    if not 0.0 < value <= 1.0:
+        raise ValueError("strength must be between 0 and 1")
+    return value
+
+
 def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, height: int, tier: Tier, *,
-           seed: int = 0, control_file: Path | None = None) -> RawImage:
+           seed: int = 0, control_file: Path | None = None,
+           strength: float | None = None) -> RawImage:
     """Run one pinned snapshot. ``folder`` is a local diffusers tree."""
     reset_peak_allocated()
     torch = _import_torch()
@@ -71,7 +91,7 @@ def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, he
         elif pipeline_name == PIPELINE_IMG2IMG:
             pipe = diffusers.ZImageImg2ImgPipeline.from_pretrained(folder, torch_dtype=dtype, local_files_only=True)
             _place(pipe, tier)
-            result = _timed(pipe, image=_pil(_frame(screened, "init")), strength=0.6, **common)
+            result = _timed(pipe, image=_pil(_frame(screened, "init")), strength=applied_strength(strength), **common)
         elif pipeline_name == PIPELINE_INPAINT:
             pipe = diffusers.ZImageInpaintPipeline.from_pretrained(folder, torch_dtype=dtype, local_files_only=True)
             _place(pipe, tier)

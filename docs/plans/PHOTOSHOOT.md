@@ -10,6 +10,24 @@
 
 Aleksandr, via Suite Lead: «Фотосессия создается автоматически через расширенный режим автоулучшения». Aleksandr, via Suite Lead: «Фотосессию включаем в первый релиз». The feature is its own pull request, based on `ui/shell-migration`, and it must not block that shell pull request. Rebase it onto `main` after the shell pull request merges.
 
+## Current build
+
+Aleksandr, via Suite Lead, 15:15: UI work is paused. The first Photoshoot pull request ships the logic and the model plumbing. The sections below stay the target screen. They are not what that pull request draws.
+
+In that pull request:
+
+- The scenario writer is the local Qwen3-4B enhancer. A stated age and the subject wording are copied verbatim into every shot. A shot that changes or drops them is discarded and regenerated.
+- The minors gate is unchanged and called by name on the idea, the scenario, every shot line, and every output frame. It fails closed. A blocked idea or scenario stops the series. A blocked frame is dropped and the row says `photoshoot.frame.blocked`. Nothing rewords a blocked text.
+- Batch generation goes through the existing Z-Image-Turbo pipeline. Cancel stops before the next frame and keeps finished frames.
+- The series folder writer saves the frames, `series.json`, the overview sheet, and the ZIP.
+- Each kept history item is recorded in `pictures/series-map.json` with the series folder, so Show folder opens that folder.
+- The first kept frame is the hero. Later shots use the existing restyle path at strength 0.45.
+- `photoshoot-bench` times a 6-frame series. It does not invent a 16 GB duration.
+
+The shared shell wiring is one «Фотосессия» option beside Improve prompt, a read-only shot list, and Cancel (`simple.cancel`, «Отмена»). The shell Create button stays visible and is the primary action. While the option is selected, that button runs the series. Count stays 6, place stays the same place, and the camera clause stays off the line. Preset rows, the drag handle, the menu, the camera field, the panel Create button, and the sheet and ZIP buttons wait.
+
+The only shipping grab is `docs/ui/screens/photoshoot-ru.png` on the feature branch: one plain Russian smoke shot at 1280×800 from a fresh window, taken while the list and Cancel are on screen. The pictures in `docs/plans/photoshoot/` are the earlier static mock. They are not being refined.
+
 ## Global Constraints
 
 - Licence-clean components only. Apache-2.0 or MIT. No InsightFace. No training of any kind, and no LoRA training.
@@ -381,4 +399,4 @@ Static Qt mock, 1280×800, offscreen, shared dark tokens from `voxprint-common` 
 - `docs/plans/photoshoot/photoshoot-progress-ru.png`
 - `docs/plans/photoshoot/photoshoot-progress-en.png`
 
-The pictures in this folder are the earlier static mock. The shipping screens, grabbed at 1280×800 from a fresh window, are `docs/ui/screens/photoshoot-ready-en.png`, `photoshoot-ready-ru.png`, `photoshoot-progress-en.png`, and `photoshoot-progress-ru.png` on the feature branch. On those screens the shell Create button is hidden, the panel Create button is the only primary, simple rows show the shot text, a drag handle, and one menu, and the camera field stays in Expert.
+The pictures in this folder are the earlier static mock. They are not being refined. The feature branch carries one plain Russian smoke grab, `docs/ui/screens/photoshoot-ru.png`, from the current build described above.

@@ -183,10 +183,9 @@ try {
         throw "uv reported Python at '$Base', but that file does not exist. Install Python 3.14 from $WindowsPythonUrl and run this setup again."
     }
 
-    # The shared runtime is user-writable. Execute its python.exe only when this
-    # setup just created the venv. An existing tree is not run and not upgraded.
+    # The shared runtime is user-writable. Never execute its python.exe.
+    # Packages are installed with the uv interpreter via --target.
     # A standalone interpreter (python.exe at the runtime root, no pyvenv.cfg) is left alone.
-    $createdRuntime = $false
     $runtimeVenv = (Test-Path -LiteralPath $RuntimePy) -and (Test-Path -LiteralPath $RuntimeCfg)
     if (-not $runtimeVenv) {
         $occupied = Get-ChildItem -Force $Runtime -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -196,7 +195,6 @@ try {
         New-Item -ItemType Directory -Force $Shared | Out-Null
         & $Base -m venv $Runtime
         if ($LASTEXITCODE -ne 0) { throw "Python could not create the suite runtime." }
-        $createdRuntime = $true
     }
 
     if (-not (Test-Path $Py)) {
@@ -224,11 +222,7 @@ try {
     }
     $Fetch = Join-Path $env:TEMP ("voxprint-wheels-" + [guid]::NewGuid().ToString("n"))
     New-Item -ItemType Directory -Force $Fetch | Out-Null
-    if ($createdRuntime) {
-        $runtimeReady = Test-SuiteGpuPackages $RuntimePy
-    } else {
-        $runtimeReady = Test-SuiteGpuFiles $RuntimeSite
-    }
+    $runtimeReady = Test-SuiteGpuFiles $RuntimeSite
     $appReady = Test-SuiteGpuPackages $Py
     if ($runtimeReady -and $appReady) {
         Write-Host "PyTorch is already installed."
@@ -247,12 +241,13 @@ try {
     }
     if (-not $runtimeReady) {
         Write-Host "Repairing the suite runtime..."
-        if ($createdRuntime) {
-            Install-SuiteGpuPackages $RuntimePy ""
-            if (-not (Test-SuiteGpuPackages $RuntimePy)) { throw "CUDA 13.0 PyTorch is still missing." }
-        } else {
-            Install-SuiteGpuPackages $Base $RuntimeSite
-            if (-not (Test-SuiteGpuFiles $RuntimeSite)) { throw "CUDA 13.0 PyTorch is still missing." }
+        Install-SuiteGpuPackages $Base $RuntimeSite
+        if (-not (Test-SuiteGpuFiles $RuntimeSite)) {
+            Write-Host "CUDA 13.0 PyTorch is still missing from $RuntimeSite"
+            Get-ChildItem -LiteralPath $RuntimeSite -Directory -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -like "*.dist-info" } |
+                ForEach-Object { Write-Host $_.Name }
+            throw "CUDA 13.0 PyTorch is still missing."
         }
     }
     if (-not $appReady) {

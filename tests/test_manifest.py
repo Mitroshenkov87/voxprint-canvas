@@ -413,6 +413,8 @@ def test_installers_resolve_numpy_from_pypi_and_pin_cuda_torch():
     assert "Test-SuiteGpuFiles" in windows
     assert "Remove-Item -LiteralPath $Fetch" in windows
     assert "& $RuntimePy" not in windows
+    assert "Test-SuiteGpuPackages $RuntimePy" not in windows
+    assert "Install-SuiteGpuPackages $RuntimePy" not in windows
     assert "$RuntimePy = $RootPy" not in windows
     assert "venv --upgrade $Runtime" not in windows
     assert "venv --upgrade $Venv" in windows

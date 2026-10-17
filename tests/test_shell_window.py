@@ -28,7 +28,9 @@ from canvas.models.modes import Tier
 from canvas.ui.shell_layout import open_layout
 from canvas.ui.shell_screen import ShellWindow
 from tests.fakes import World
+from tools.grab_shell_screens import prepare
 from voxprint_common.i18n import set_language, tr
+from voxprint_common.suite_settings import set_expert_mode
 from voxprint_common.ui.simple_image import Phase
 
 
@@ -109,10 +111,8 @@ def test_simple_mode_hides_expert_words_and_keeps_picture_tools(app, home: Path)
     stage_at = stage.mapTo(window, stage.rect().topLeft())
     panel_at = panel.mapTo(window, panel.rect().topLeft())
     assert panel_at.x() >= stage_at.x() + stage.width() - 8
-    badge = window.findChild(QLabel, "expertChip")
-    reset = window.findChild(QPushButton, "expertResetAll")
-    assert badge is not None and badge.isVisible() and badge.text()
-    assert reset is not None and reset.isVisible()
+    assert window.findChild(QLabel, "expertChip") is None
+    assert window.findChild(QPushButton, "expertResetAll") is None
     spins = [item for item in window.findChildren(QSpinBox, "shell.steps") if item.isVisible()]
     assert len(spins) == 1
     spin = spins[0]
@@ -207,22 +207,53 @@ def test_a_finished_picture_keeps_the_result_actions(app, home: Path) -> None:
     assert result is not None and result.pixmap() is not None and not result.pixmap().isNull()
 
 
-def test_the_badge_names_the_active_preset_until_a_hand_edit(app, home: Path) -> None:
+def test_a_hand_edit_uses_the_shared_reset(app, home: Path) -> None:
     window = _window(home)
     window.resize(1280, 800)
     window.show()
     window.set_expert(True)
     app.processEvents()
-    badge = window.findChild(QLabel, "expertChip")
-    reset = window.findChild(QPushButton, "expertResetAll")
-    assert badge.text() == tr("simple.quality.balanced")
-    assert reset.text() == text("canvas.expert.reset")
-    assert reset.isEnabled() is False
+    assert window.findChild(QLabel, "expertChip") is None
+    assert window.findChild(QPushButton, "expertResetAll") is None
     window.shell.layout.set_value("shell.steps", 33)
     window.view.refresh()
     app.processEvents()
-    assert badge.text() == text("canvas.expert.custom")
-    assert reset.isEnabled() is True
+    spins = [item for item in window.findChildren(QSpinBox, "shell.steps") if item.isVisible()]
+    assert len(spins) == 1 and spins[0].value() == 33
+    chip = window.findChild(QPushButton, "chip-quality-balanced")
+    assert chip.text() == tr("simple.preset.changed", name=tr("simple.quality.balanced"))
+    row = window.findChild(QPushButton, "reset-quality")
+    assert row is not None and not row.isVisible()
+    resets = [item for item in window.findChildren(QPushButton, "expertReset") if item.isVisible()]
+    assert len(resets) == 1
+    assert resets[0].text() == tr("simple.preset.reset", name=tr("simple.quality.balanced"))
+
+
+def test_simple_shots_keep_the_expert_panel_closed(app, home: Path, monkeypatch) -> None:
+    state = home / "state"
+    state.mkdir(parents=True, exist_ok=True)
+    payload = {"schema": 1, "items": [{"id": "pic-01", "prompt": "a red boat", "presets": [], "seed": 3}]}
+    (state / "image-history.json").write_text(json.dumps(payload) + "\n", encoding="utf-8")
+    set_expert_mode(True)
+    for language, locale in (("en", "en_US.UTF-8"), ("ru", "ru_RU.UTF-8")):
+        monkeypatch.setenv("LANG", locale)
+        monkeypatch.setenv("LC_ALL", locale)
+        set_language(language)
+        for name in ("simple", "simple-result"):
+            set_expert_mode(True)
+            window = _window(home)
+            prepare(window, name)
+            window.resize(1280, 800)
+            window.show()
+            app.processEvents()
+            panel = window.findChild(QWidget, "expertPanel")
+            toggle = window.findChild(QPushButton, "expertToggle")
+            assert panel is not None and not panel.isVisible()
+            assert toggle is not None and not toggle.isChecked()
+            if name == "simple-result":
+                result = window.findChild(QLabel, "result")
+                assert result is not None and result.pixmap() is not None and not result.pixmap().isNull()
+            window.close()
 
 
 def test_russian_buttons_keep_their_full_labels(app, home: Path, monkeypatch) -> None:
@@ -245,10 +276,23 @@ def test_russian_buttons_keep_their_full_labels(app, home: Path, monkeypatch) ->
         font.setWeight(QFont.Weight.DemiBold)
         advance = QFontMetrics(font).horizontalAdvance(words)
         assert button.width() >= advance + 28
+    illustration = window.findChild(QPushButton, "chip-style-illustration")
+    anime = window.findChild(QPushButton, "chip-style-anime")
+    assert illustration is not None and anime is not None
+    assert illustration.isVisible() and anime.isVisible()
+    assert not illustration.geometry().intersects(anime.geometry())
+    combo = window.findChild(QComboBox, "canvas.output_size")
+    assert combo is not None and combo.isVisible()
+    assert combo.property("fittedText") == combo.currentText()
+    assert "…" not in str(combo.property("fittedText"))
     setup = window.setup_wizard()
     assert setup.findChild(QPushButton, "setup-source-words").text() == "описания"
     assert setup.findChild(QPushButton, "setup-source-picture").text() == "картинки"
     assert setup.findChild(QPushButton, "setup-variation-varied").text() == "Творчески"
+    restyle = setup.findChild(QLabel, "setup-hint-restyle")
+    depth = setup.findChild(QLabel, "setup-hint-depth")
+    assert restyle is not None and depth is not None
+    assert restyle.width() == depth.width() >= 200
     mask = window.mask_wizard()
     assert mask.findChild(QLabel, "maskNeed").text() == text("canvas.mask.need")
 

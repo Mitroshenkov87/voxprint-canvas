@@ -113,18 +113,20 @@ class ShellWindow(QMainWindow):
     def set_expert(self, enabled: bool) -> None:
         """Store Expert mode and show or hide the side panel.
 
-        The shared screen is told once. ``set_enabled`` already notifies it
-        when the stored value changes, and telling it again leaves the
-        previous fields on top of the new ones.
+        The shared screen hears about a stored change once. Filling the
+        panel again piles the previous fields on the new ones, so a repeat
+        of the same value fills it only when the panel is still in the
+        other state.
 
         Args:
             enabled: True shows the expert values beside the picture.
         """
         previous = self._expert.enabled()
+        shown = self.view._expert_panel.isVisible()
         self._expert.set_enabled(enabled)
-        if previous == enabled:
+        if previous == enabled and shown != enabled:
             self.view.set_expert(enabled)
-        fit_panel(self, self._expert.enabled())
+        fit_panel(self, enabled)
 
     def _on_refresh(self) -> None:
         if self._chrome_ready:

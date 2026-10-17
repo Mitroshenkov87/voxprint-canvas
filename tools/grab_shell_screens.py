@@ -16,7 +16,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PIL import Image, ImageDraw
 from PySide6.QtCore import QSize
 from PySide6.QtGui import QColor, QPainter
-from PySide6.QtWidgets import QApplication, QPushButton
+from PySide6.QtWidgets import QApplication, QComboBox, QLabel, QPushButton, QSpinBox, QWidget
 
 from canvas.models.modes import Tier
 from canvas.ui.shell_layout import open_layout
@@ -33,7 +33,6 @@ def main() -> int:
     destination = Path(sys.argv[1] if len(sys.argv) > 1 else "/opt/cursor/artifacts/shell-screens")
     destination.mkdir(parents=True, exist_ok=True)
     home = Path(tempfile.mkdtemp(prefix="canvas-shell-shots-"))
-    os.environ["VOXPRINT_HOME"] = str(home)
     existing = QApplication.instance()
     app = existing if isinstance(existing, QApplication) else QApplication([])
     picture = destination / "sample.png"
@@ -42,34 +41,45 @@ def main() -> int:
         os.environ["LANG"] = "ru_RU.UTF-8" if language == "ru" else "en_US.UTF-8"
         os.environ["LC_ALL"] = os.environ["LANG"]
         set_language(language)
-        for expert, name in ((False, "simple"), (True, "expert")):
-            window = _window(home / language / name, Tier.GB16)
-            window.set_expert(expert)
-            _check(window, f"{name}-{language}")
-            _save(app, window, destination / f"{name}-{language}.png")
+        for name in ("simple", "expert", "simple-result", "expert-custom"):
+            window = _shot(home / language / name, name, Tier.GB16)
+            _save(app, window, destination / f"{name}-{language}.png", name)
             window.close()
-        window = _window(home / language / "result", Tier.GB16)
-        window.view._select("pic-01")
-        _check(window, f"simple-result-{language}")
-        _save(app, window, destination / f"simple-result-{language}.png")
-        window.close()
-        window = _window(home / language / "custom", Tier.GB16)
-        window.set_expert(True)
-        window.shell.layout.set_value("shell.steps", 33)
-        window.view.refresh()
-        _check(window, f"expert-custom-{language}")
-        _save(app, window, destination / f"expert-custom-{language}.png")
-        window.close()
-        window = _window(home / language / "tools", Tier.GB16)
-        _save_dialog(app, window, window.setup_wizard(), destination / f"setup-{language}.png")
-        _save_dialog(app, window, window.picture_wizard(), destination / f"picture-{language}.png", load=picture)
-        _save_dialog(app, window, window.mask_wizard(), destination / f"mask-need-{language}.png")
+        window = _shot(home / language / "tools", "simple", Tier.GB16)
+        _save_dialog(app, window, window.setup_wizard(), destination / f"setup-{language}.png", "setup")
+        _save_dialog(app, window, window.picture_wizard(), destination / f"picture-{language}.png", "picture", load=picture)
+        _save_dialog(app, window, window.mask_wizard(), destination / f"mask-need-{language}.png", "mask-need")
         window.use_picture(picture)
-        _save_dialog(app, window, window.mask_wizard(), destination / f"mask-{language}.png")
-        _save_dialog(app, window, window.addons_wizard(), destination / f"addons-{language}.png")
-        _save_dialog(app, window, window.diagnostics_wizard(), destination / f"check-{language}.png")
+        _save_dialog(app, window, window.mask_wizard(), destination / f"mask-{language}.png", "mask")
+        _save_dialog(app, window, window.addons_wizard(), destination / f"addons-{language}.png", "addons")
+        _save_dialog(app, window, window.diagnostics_wizard(), destination / f"check-{language}.png", "check")
         window.close()
     return 0
+
+
+def prepare(window: ShellWindow, name: str) -> None:
+    """Apply the mode and values the named shot has to show.
+
+    Args:
+        window: A shell window. Each shot keeps its own home.
+        name: Shot name without the language suffix.
+    """
+    if name == "expert-custom":
+        window.shell.layout.set_value("shell.steps", 33)
+    window.set_expert(name.startswith("expert"))
+    if name in {"simple-result", "expert-custom"}:
+        window.view._select("pic-01")
+
+
+def _shot(root: Path, name: str, tier: Tier) -> ShellWindow:
+    os.environ["VOXPRINT_HOME"] = str(root)
+    return _open(root / "state", tier, name)
+
+
+def _open(state: Path, tier: Tier, name: str) -> ShellWindow:
+    window = _window(state, tier)
+    prepare(window, name)
+    return window
 
 
 def _window(state: Path, tier: Tier) -> ShellWindow:
@@ -96,20 +106,29 @@ def _sample(path: Path) -> None:
     image.save(path)
 
 
-def _save(app: QApplication, window: ShellWindow, path: Path) -> None:
+def _save(app: QApplication, window: ShellWindow, path: Path, name: str) -> None:
     window.setFixedSize(SHOT)
     window.show()
     app.processEvents()
     if window.shell.layout.phase is not Phase.EMPTY:
         window.view._rescale()
         app.processEvents()
+    _expect(window, name)
+    _check(window, path.name)
     shot = window.grab()
     if shot.size() != SHOT:
         raise SystemExit(f"{path.name} is {shot.width()}x{shot.height()}")
     shot.save(str(path))
 
 
-def _save_dialog(app: QApplication, window: ShellWindow, dialog, path: Path, load: Path | None = None) -> None:
+def _save_dialog(
+    app: QApplication,
+    window: ShellWindow,
+    dialog,
+    path: Path,
+    name: str,
+    load: Path | None = None,
+) -> None:
     if load is not None and hasattr(dialog, "load_path"):
         dialog.load_path(load)
     window.setFixedSize(SHOT)
@@ -117,6 +136,7 @@ def _save_dialog(app: QApplication, window: ShellWindow, dialog, path: Path, loa
     dialog.adjustSize()
     dialog.show()
     app.processEvents()
+    _expect(window, name)
     _check(dialog, path.name)
     base = window.grab().toImage()
     popup = dialog.grab()
@@ -133,6 +153,71 @@ def _save_dialog(app: QApplication, window: ShellWindow, dialog, path: Path, loa
     painter.end()
     base.save(str(path))
     dialog.close()
+
+
+def _expect(window: ShellWindow, name: str) -> None:
+    """Fail the shot when the mode, the edit, or a wrapped row is wrong."""
+    panel = window.findChild(QWidget, "expertPanel")
+    toggle = window.findChild(QPushButton, "expertToggle")
+    if panel is None or toggle is None:
+        raise SystemExit(f"{name} is missing the expert controls")
+    expert = name.startswith("expert")
+    if panel.isVisible() != expert or toggle.isChecked() != expert:
+        raise SystemExit(f"{name} expert visible={panel.isVisible()} checked={toggle.isChecked()}")
+    _expect_chips(window, name)
+    if name in {"simple-result", "expert-custom"}:
+        result = window.findChild(QLabel, "result")
+        pixmap = None if result is None else result.pixmap()
+        if pixmap is None or pixmap.isNull():
+            raise SystemExit(f"{name} result is empty")
+    if not expert:
+        return
+    _expect_combo(window, name)
+    if name != "expert-custom":
+        return
+    spins = [item for item in window.findChildren(QSpinBox, "shell.steps") if item.isVisible()]
+    if len(spins) != 1 or spins[0].value() != 33:
+        seen = [(item.value(), item.isVisible()) for item in window.findChildren(QSpinBox, "shell.steps")]
+        raise SystemExit(f"{name} steps {seen}")
+    chip = window.findChild(QPushButton, "chip-quality-balanced")
+    words = "" if chip is None else chip.text()
+    if "изменения" not in words and "changes" not in words:
+        raise SystemExit(f"{name} chip {words!r}")
+    if window.findChild(QPushButton, "expertResetAll") is not None:
+        raise SystemExit(f"{name} still has the canvas reset")
+    if window.findChild(QLabel, "expertChip") is not None:
+        raise SystemExit(f"{name} still has the canvas badge")
+    row_reset = window.findChild(QPushButton, "reset-quality")
+    if row_reset is not None and row_reset.isVisible():
+        raise SystemExit(f"{name} shows the row reset")
+    resets = [item for item in window.findChildren(QPushButton, "expertReset") if item.isVisible()]
+    if len(resets) != 1:
+        raise SystemExit(f"{name} shared resets {len(resets)}")
+
+
+def _expect_chips(window: ShellWindow, name: str) -> None:
+    groups: dict[int, list[QPushButton]] = {}
+    for button in window.findChildren(QPushButton):
+        if not button.isVisible() or not button.property("chip"):
+            continue
+        groups.setdefault(id(button.parentWidget()), []).append(button)
+    for buttons in groups.values():
+        for index, left in enumerate(buttons):
+            box = left.geometry()
+            for right in buttons[index + 1 :]:
+                if box.intersects(right.geometry()):
+                    raise SystemExit(f"{name} overlap {left.objectName()} {right.objectName()}")
+
+
+def _expect_combo(window: ShellWindow, name: str) -> None:
+    combo = window.findChild(QComboBox, "canvas.output_size")
+    if combo is None or not combo.isVisible():
+        raise SystemExit(f"{name} is missing the size combo")
+    fitted = combo.property("fittedText")
+    if fitted != combo.currentText() or "…" in str(fitted):
+        raise SystemExit(
+            f"{name} combo {combo.currentText()!r} fitted {fitted!r} width {combo.width()}"
+        )
 
 
 def _check(root, name: str) -> None:

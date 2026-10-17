@@ -35,6 +35,9 @@ _SETUP_ROWS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("canvas.change", ("restyle", "inpaint", "outpaint", "pose", "depth", "edge")),
     ("canvas.format", ("avif", "jxl", "webp")),
 )
+_HINT_WIDTH = 336
+_HINT_GAP = 12
+_GROUP_HINT_WIDTH = 488
 
 
 class SetupWizard(QDialog):
@@ -89,19 +92,21 @@ class SetupWizard(QDialog):
         self._groups.append(group)
         if key == "canvas.change":
             grid = QGridLayout()
-            grid.setHorizontalSpacing(16)
-            grid.setVerticalSpacing(2)
+            grid.setHorizontalSpacing(_HINT_GAP)
+            grid.setVerticalSpacing(8)
+            grid.setColumnMinimumWidth(1, _HINT_WIDTH)
             for index, option in enumerate(options):
                 grid.addWidget(
                     self._option(group, key, suffix, option, current),
-                    index // 2 * 2,
-                    index % 2,
-                    Qt.AlignmentFlag.AlignLeft,
+                    index,
+                    0,
+                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
                 )
                 grid.addWidget(
-                    self._hint(f"{key}.{option}.hint", f"setup-hint-{option}"),
-                    index // 2 * 2 + 1,
-                    index % 2,
+                    self._hint(f"{key}.{option}.hint", f"setup-hint-{option}", _HINT_WIDTH),
+                    index,
+                    1,
+                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
                 )
             column.addLayout(grid)
             return host
@@ -111,7 +116,7 @@ class SetupWizard(QDialog):
             row.addWidget(self._option(group, key, suffix, option, current))
         row.addStretch(1)
         column.addLayout(row)
-        column.addWidget(self._hint(f"{key}.help", f"setup-hint-{suffix}"))
+        column.addWidget(self._hint(f"{key}.help", f"setup-hint-{suffix}", _GROUP_HINT_WIDTH))
         return host
 
     def _option(
@@ -131,11 +136,13 @@ class SetupWizard(QDialog):
         _fit_button(button)
         return button
 
-    def _hint(self, key: str, name: str) -> QLabel:
+    def _hint(self, key: str, name: str, width: int) -> QLabel:
         hint = QLabel(text(key))
         hint.setObjectName(name)
         hint.setProperty("setupHint", True)
         hint.setWordWrap(True)
+        hint.setFixedWidth(width)
+        hint.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         return hint
 
     def _pick(self, key: str, option: str) -> None:

@@ -4,12 +4,23 @@ Colours come from the shared tokens. This module does not invent a palette.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, QSize, Qt
+from typing import assert_never
+
+from PySide6.QtCore import QPoint, QRect, QSize, Qt
 from PySide6.QtGui import QAction, QColor, QFont, QFontMetrics, QIcon, QImage, QPainter, QPixmap
-from PySide6.QtWidgets import QComboBox, QLabel, QPushButton, QSizePolicy, QSplitter, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QComboBox,
+    QLabel,
+    QLayout,
+    QPushButton,
+    QSizePolicy,
+    QSplitter,
+    QVBoxLayout,
+    QWidget,
+)
 
 from voxprint_common.i18n import tr
-from voxprint_common.ui.presets import PresetMatch
+from voxprint_common.ui.settings import SettingType
 from voxprint_common.ui.simple_image import Phase
 from voxprint_common.ui.theme import (
     CARD_PLAIN,
@@ -20,7 +31,6 @@ from voxprint_common.ui.theme import (
     ROOT_PLAIN,
     TEXT,
     TEXT_MUTED,
-    TEXT_ON_PRIMARY,
     build_shell_style,
 )
 
@@ -73,13 +83,6 @@ QSpinBox, QDoubleSpinBox, QComboBox, QLineEdit, QPlainTextEdit {{
 QPushButton[chip="true"]:disabled {{
     color: {TEXT}; background: {CONTROL_BG}; border-color: {CONTROL_BORDER};
 }}
-QPushButton#expertResetAll:disabled {{
-    color: {TEXT}; background: {CONTROL_BG};
-}}
-QLabel#expertChip {{
-    color: {TEXT_ON_PRIMARY}; background: {PRIMARY};
-    border: 1px solid {PRIMARY_BORDER}; border-radius: 8px; padding: 2px 8px;
-}}
 """
 
 
@@ -115,7 +118,6 @@ def mount(window):
     split.setStretchFactor(0, 1)
     split.setStretchFactor(1, 0)
     _menu(window, view._overflow.menu())
-    _status(window)
     _tighten(window)
     scroll = view.root.findChild(QWidget, "expertScroll")
     if scroll is not None:
@@ -132,13 +134,21 @@ def fit_panel(window, enabled):
     """
     panel = window.view._expert_panel
     panel.setMinimumWidth(PANEL_WIDTH if enabled else 0)
-    panel.setMaximumWidth(PANEL_WIDTH)
+    panel.setMaximumWidth(PANEL_WIDTH if enabled else 0)
+    split = getattr(window, "_split", None)
+    if split is None:
+        return
     if not enabled:
+        split.setSizes([max(1, window.width()), 0])
+        _flow_heights(window, False)
         return
     _reap(window)
-    _status(window)
+    _paint_panel(window)
+    _widen_combos(window)
+    _hide_row_resets(window)
     width = max(1, window.width() - PANEL_WIDTH)
-    window._split.setSizes([width, PANEL_WIDTH])
+    split.setSizes([width, PANEL_WIDTH])
+    _flow_heights(window, True)
 
 
 def polish(window):
@@ -155,9 +165,12 @@ def polish(window):
     _thumbs(window)
     if window.view._expert_panel.isVisible():
         _reap(window)
-        _status(window)
+        _paint_panel(window)
+        _widen_combos(window)
+    _hide_row_resets(window)
     _labels(window)
     _fit_controls(window)
+    _wrap_rows(window)
 
 
 def _toolbar(window, row):
@@ -187,59 +200,6 @@ def _menu(window, menu):
         action.setObjectName(name)
         action.triggered.connect(slot)
         menu.insertAction(before, action)
-
-
-def _status(window):
-    panel_layout = window.view._panel_layout
-    badge = getattr(window, "_expert_badge", None)
-    if badge is None:
-        row = QWidget()
-        row.setObjectName("expertStatus")
-        layout = QVBoxLayout(row)
-        layout.setContentsMargins(0, 0, 0, 8)
-        layout.setSpacing(6)
-        badge = QLabel()
-        badge.setObjectName("expertChip")
-        badge.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
-        reset = QPushButton(text("canvas.expert.reset"))
-        reset.setObjectName("expertResetAll")
-        reset.clicked.connect(lambda: _reset(window))
-        layout.addWidget(badge, 0, Qt.AlignmentFlag.AlignLeft)
-        layout.addWidget(reset, 0, Qt.AlignmentFlag.AlignLeft)
-        window._expert_badge = badge
-        window._expert_reset = reset
-        panel_layout.insertWidget(0, row)
-    window._expert_reset.setText(text("canvas.expert.reset"))
-    window._expert_badge.setText(_preset_name(window))
-    window._expert_reset.setEnabled(_custom(window))
-
-
-def _reset(window):
-    for row in window.shell.layout.rows:
-        window.shell.layout.reset_group(row.row_id)
-    window.view.refresh()
-
-
-def _custom(window):
-    for row in window.shell.layout.rows:
-        status = window.shell.layout.preset_status(row.row_id)
-        if status is not None and status.kind is not PresetMatch.EXACT:
-            return True
-    return False
-
-
-def _preset_name(window):
-    """The quality preset's own name, or Custom after a hand edit."""
-    if _custom(window):
-        return text("canvas.expert.custom")
-    for row in window.shell.layout.rows:
-        if row.row_id != "quality":
-            continue
-        selected = str(window.shell.layout.presets.get("quality", row.default))
-        current = next((choice for choice in row.choices if choice.value == selected), None)
-        if current is not None:
-            return tr(current.label_key)
-    return text("canvas.expert.preset")
 
 
 def _size_menu(window):
@@ -516,9 +476,262 @@ def _fit_controls(window):
         if not button.text() or button.objectName().startswith("thumb-"):
             continue
         _fit_text(button)
-    badge = getattr(window, "_expert_badge", None)
-    if badge is not None and badge.text():
-        _reserve(badge, 20)
+
+
+def _paint_panel(window):
+    """Copy live values into the expert fields.
+
+    The shared screen looks for those fields under the picture column. This
+    window keeps the panel on the splitter, so the copy happens here.
+    """
+    form = window.findChild(QWidget, "expertForm")
+    if form is None:
+        return
+    layout = window.shell.layout
+    specs = tuple(spec for spec in window.shell.settings.visible(expert=True) if spec.expert)
+    for spec in specs:
+        control = form.findChild(QWidget, spec.setting_id)
+        if control is None:
+            continue
+        control.blockSignals(True)
+        _write_expert(control, spec, layout.get(spec.setting_id))
+        control.blockSignals(False)
+
+
+def _write_expert(control, spec, value):
+    kind = spec.type
+    if kind is SettingType.BOOL:
+        control.setChecked(value is True)
+        return
+    if kind is SettingType.ENUM:
+        index = control.findData(value)
+        if index >= 0:
+            control.setCurrentIndex(index)
+        return
+    if kind is SettingType.INT:
+        if isinstance(value, int) and not isinstance(value, bool):
+            control.setValue(value)
+        return
+    if kind is SettingType.FLOAT:
+        if isinstance(value, int | float) and not isinstance(value, bool):
+            control.setValue(float(value))
+        return
+    if kind is SettingType.PATH:
+        control.setText(value if isinstance(value, str) else "")
+        return
+    if kind is SettingType.TEXT:
+        control.setPlainText(value if isinstance(value, str) else "")
+        return
+    assert_never(kind)
+
+
+def _hide_row_resets(window):
+    """Leave preset changes on the chip and the shared panel reset."""
+    for button in window.findChildren(QPushButton):
+        if button.objectName().startswith("reset-"):
+            button.hide()
+
+
+def _widen_combos(window):
+    """Give each expert combo the width of its longest value."""
+    form = window.findChild(QWidget, "expertForm")
+    if form is None:
+        return
+    for combo in form.findChildren(QComboBox):
+        metrics = QFontMetrics(combo.font())
+        longest = 0
+        for index in range(combo.count()):
+            longest = max(longest, metrics.horizontalAdvance(combo.itemText(index)))
+        combo.setMinimumWidth(longest + 48)
+        label = _row_label(form.layout(), combo)
+        if label is not None:
+            label.setMaximumWidth(88)
+        combo.resize(max(combo.minimumWidth(), combo.width()), max(combo.height(), 28))
+        combo.updateGeometry()
+
+
+def _row_label(layout, widget):
+    if layout is None:
+        return None
+    found = None
+    label = None
+    for index in range(layout.count()):
+        item = layout.itemAt(index)
+        child = item.widget()
+        if child is widget:
+            found = layout
+            break
+        if isinstance(child, QLabel):
+            label = child
+        nested = _row_label(item.layout(), widget)
+        if nested is not None:
+            return nested
+    if found is None:
+        return None
+    for index in range(found.count()):
+        child = found.itemAt(index).widget()
+        if isinstance(child, QLabel):
+            return child
+    return label
+
+
+def _wrap_rows(window):
+    """Let a chip row use a second line when the expert panel narrows it."""
+    if not getattr(window, "_rows_wrapped", False):
+        rows = window.view._preset_rows
+        pending = []
+        hosts = []
+        while rows.count():
+            item = rows.takeAt(0)
+            line = item.layout()
+            if line is None:
+                widget = item.widget()
+                if widget is not None:
+                    pending.append(widget)
+                continue
+            widgets = []
+            while line.count():
+                taken = line.takeAt(0)
+                widget = taken.widget()
+                if widget is not None:
+                    widgets.append(widget)
+            host = QWidget()
+            host.setObjectName("chipFlow")
+            flow = _Flow()
+            flow.setSpacing(8)
+            host.setLayout(flow)
+            for widget in widgets:
+                flow.addWidget(widget)
+            policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            policy.setHeightForWidth(True)
+            host.setSizePolicy(policy)
+            pending.append(host)
+            hosts.append(host)
+        for widget in pending:
+            rows.addWidget(widget)
+        window._flow_hosts = hosts
+        window._rows_wrapped = True
+        preset = window.view._preset_host
+        policy = preset.sizePolicy()
+        policy.setVerticalPolicy(QSizePolicy.Policy.Preferred)
+        policy.setHeightForWidth(True)
+        preset.setSizePolicy(policy)
+    shown = window.view._expert_panel.isVisible()
+    _flow_heights(window, shown)
+
+
+def _flow_heights(window, enabled):
+    hosts = getattr(window, "_flow_hosts", None)
+    if not hosts:
+        return
+    width = _preset_width(window, enabled)
+    for host in hosts:
+        flow = host.layout()
+        if flow is None:
+            continue
+        host.setMinimumHeight(flow.heightForWidth(width))
+        host.updateGeometry()
+    window.view._preset_host.updateGeometry()
+
+
+def _preset_width(window, enabled):
+    panel = PANEL_WIDTH + 6 if enabled else 0
+    return max(160, window.width() - panel - 24 - 32 - 24)
+
+
+class _Flow(QLayout):
+    """A row of chips that wraps onto a second line."""
+
+    def __init__(self):
+        super().__init__()
+        self._items = []
+        self.setContentsMargins(0, 0, 0, 0)
+
+    def addItem(self, item):  # noqa: N802
+        self._items.append(item)
+
+    def count(self):
+        return len(self._items)
+
+    def itemAt(self, index):  # noqa: N802
+        if 0 <= index < len(self._items):
+            return self._items[index]
+        return None
+
+    def takeAt(self, index):  # noqa: N802
+        if 0 <= index < len(self._items):
+            return self._items.pop(index)
+        return None
+
+    def expandingDirections(self):  # noqa: N802
+        return Qt.Orientation(0)
+
+    def hasHeightForWidth(self):  # noqa: N802
+        return True
+
+    def heightForWidth(self, width):  # noqa: N802
+        return self._arrange(width, None)
+
+    def setGeometry(self, rect):  # noqa: N802
+        super().setGeometry(rect)
+        self._arrange(rect.width(), rect)
+
+    def sizeHint(self):  # noqa: N802
+        return self.minimumSize()
+
+    def minimumSize(self):  # noqa: N802
+        width = 0
+        height = 0
+        for item in self._items:
+            if _flow_hidden(item):
+                continue
+            item_width, item_height = _flow_size(item)
+            width = max(width, item_width)
+            height = max(height, item_height)
+        margins = self.contentsMargins()
+        return QSize(
+            width + margins.left() + margins.right(),
+            height + margins.top() + margins.bottom(),
+        )
+
+    def _arrange(self, width, rect):
+        spacing = max(self.spacing(), 0)
+        margins = self.contentsMargins()
+        inner = max(0, width - margins.left() - margins.right())
+        origin_x = margins.left() if rect is None else rect.x() + margins.left()
+        origin_y = margins.top() if rect is None else rect.y() + margins.top()
+        x = 0
+        y = 0
+        line_height = 0
+        for item in self._items:
+            if _flow_hidden(item):
+                continue
+            item_width, item_height = _flow_size(item)
+            if x and x + item_width > inner:
+                x = 0
+                y += line_height + spacing
+                line_height = 0
+            if rect is not None:
+                item.setGeometry(QRect(origin_x + x, origin_y + y, item_width, item_height))
+            x += item_width + spacing
+            line_height = max(line_height, item_height)
+        return margins.top() + y + line_height + margins.bottom()
+
+
+def _flow_hidden(item):
+    widget = item.widget()
+    return widget is not None and not widget.isVisible()
+
+
+def _flow_size(item):
+    widget = item.widget()
+    hint = item.sizeHint()
+    width = hint.width()
+    height = hint.height()
+    if widget is not None:
+        width = max(width, widget.minimumWidth())
+        height = max(height, widget.minimumHeight(), widget.sizeHint().height())
+    return max(width, 1), max(height, 1)
 
 
 def _fit_text(button):

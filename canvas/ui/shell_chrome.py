@@ -4,10 +4,12 @@ Colours come from the shared tokens. This module does not invent a palette.
 """
 from __future__ import annotations
 
+import logging
+
 from typing import assert_never
 
 from PySide6.QtCore import QPoint, QRect, QSize, Qt
-from PySide6.QtGui import QAction, QColor, QFont, QFontMetrics, QIcon, QImage, QPainter, QPixmap
+from PySide6.QtGui import QAction, QColor, QFont, QFontInfo, QFontMetrics, QIcon, QImage, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
     QLabel,
@@ -718,6 +720,7 @@ class _Flow(QLayout):
         inner = max(0, width - margins.left() - margins.right())
         origin_x = margins.left() if rect is None else rect.x() + margins.left()
         origin_y = margins.top() if rect is None else rect.y() + margins.top()
+        one_row = _fit_style_font(self._items, inner, spacing)
         squeeze = _squeeze(self._items, inner, spacing)
         lines = []
         current = []
@@ -728,7 +731,7 @@ class _Flow(QLayout):
                 continue
             item_width, item_height = _flow_size(item)
             item_width -= squeeze.get(id(item), 0)
-            if x and x + item_width > inner:
+            if x and x + item_width > inner and not one_row:
                 lines.append((current, line_height))
                 current = []
                 x = 0
@@ -752,6 +755,55 @@ class _Flow(QLayout):
         return margins.top() + y + margins.bottom()
 
 
+def _row_fits(items, inner, spacing):
+    shown = [item for item in items if not _flow_hidden(item)]
+    total = 0
+    for item in shown:
+        widget = item.widget()
+        tight = widget.property("tightWidth") if widget is not None else None
+        total += int(tight) if tight else _flow_size(item)[0]
+    return total + spacing * max(0, len(shown) - 1) <= inner
+
+
+def _fit_style_font(items, inner, spacing):
+    """Shrink the style chip font, in steps down to 80%, so the row stays on one line.
+
+    Returns True when the row holds style chips; such a row never wraps. When it
+    still does not fit at the 80% floor, a warning is logged and it stays one row.
+    """
+    chips = [
+        item.widget() for item in items
+        if item.widget() is not None and item.widget().property("tightWidth")
+    ]
+    if not chips:
+        return False
+    for step in (100, 95, 90, 85, 80):
+        for chip in chips:
+            _scale_chip_font(chip, step)
+        if _row_fits(items, inner, spacing):
+            return True
+    logging.getLogger(__name__).warning("style chip row does not fit in %d px at the 80%% font floor", inner)
+    return True
+
+
+def _scale_chip_font(chip, step):
+    if chip.property("fontStep") == step:
+        return
+    base = chip.property("basePx")
+    if base is None:
+        base = QFontInfo(chip.font()).pixelSize() or 14
+        chip.setProperty("basePx", base)
+    chip.setProperty("fontStep", step)
+    chip.setStyleSheet("" if step == 100 else f"font-size: {max(1, round(int(base) * step / 100))}px;")
+    font = QFont(chip.font())
+    font.setPixelSize(max(1, round(int(base) * step / 100)))
+    font.setWeight(QFont.Weight.DemiBold)
+    advance = QFontMetrics(font).horizontalAdvance(chip.text())
+    chip.setProperty("tightWidth", advance + 12)
+    chip.setProperty("naturalWidth", advance + 28)
+    chip.setMinimumWidth(advance + 12)
+
+
 def _squeeze(items, inner, spacing):
     """Trim style chip padding so the style row stays on one line.
 
@@ -766,7 +818,7 @@ def _squeeze(items, inner, spacing):
         return {}
     room = {id(item): max(0, _flow_size(item)[0] - int(item.widget().property("tightWidth"))) for item in tight}
     if sum(room.values()) < over:
-        return {}
+        return room
     share = {}
     left = over
     for index, item in enumerate(tight):

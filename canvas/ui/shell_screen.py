@@ -54,6 +54,8 @@ from canvas.ui.shell_chrome import (
     polish,
     shell_style,
 )
+from canvas.ui.photoshoot_bar import PhotoshootBar
+from canvas.ui.photoshoot_run import run_photoshoot
 from canvas.ui.shell_layout import CanvasShell, PictureJob, job_from
 from canvas.ui.wizards import AddonsWizard, DiagnosticsWizard, MaskWizard, PictureWizard, SetupWizard
 
@@ -111,6 +113,8 @@ class ShellWindow(QMainWindow):
         self._picture: Path | None = None
         self._mask: RawImage | None = None
         self._pictures: dict[str, str] = {}
+        self._series_folders: dict[str, str] = {}
+        self._photoshoot_frame: RawImage | None = None
         self._chrome_ready = False
         self.setObjectName("shell")
         self.setWindowTitle(tr("splash.app.canvas"))
@@ -133,6 +137,7 @@ class ShellWindow(QMainWindow):
             self.view.set_expert(True)
         self._split = mount(self)
         self.setCentralWidget(self._split)
+        self.photoshoot = PhotoshootBar(self)
         self._chrome_ready = True
         polish(self)
 
@@ -153,10 +158,14 @@ class ShellWindow(QMainWindow):
         if previous == enabled and shown != enabled:
             self.view.set_expert(enabled)
         fit_panel(self, enabled)
+        if getattr(self, "photoshoot", None) is not None:
+            self.photoshoot.sync_expert(enabled)
 
     def _on_refresh(self) -> None:
         if self._chrome_ready:
             polish(self)
+        if getattr(self, "photoshoot", None) is not None:
+            self.photoshoot.sync()
 
     def use_picture(self, path: Path) -> None:
         """Use ``path`` as the source picture and match its shape.
@@ -264,6 +273,9 @@ class ShellWindow(QMainWindow):
             return current
 
     def _on_generate(self) -> None:
+        if self.photoshoot.enabled:
+            run_photoshoot(self)
+            return
         layout = self.shell.layout
         if not selectable():
             layout.unavailable(text("canvas.models.missing"))
@@ -443,7 +455,8 @@ class ShellWindow(QMainWindow):
             QDesktopServices.openUrl(QUrl.fromLocalFile(path))
             return
         if action == "show_folder":
-            folder = str(Path(path).parent) if path else str(self.shell.state_dir / "pictures")
+            series = self._series_folders.get(item_id)
+            folder = series if series else str(Path(path).parent) if path else str(self.shell.state_dir / "pictures")
             QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
 
     def _save_as(self) -> None:

@@ -49,6 +49,7 @@ class ShellRunner:
         self.gate = gate
         self.tier = tier
         self.enlarge = enlarge
+        self.img2img_strength: float | None = None
 
     def __call__(self, job: PictureJob, inputs: tuple[PendingInput, ...]) -> RawImage:
         """Generate one picture and return unreviewed pixels.
@@ -63,6 +64,8 @@ class ShellRunner:
         catalog = load_catalog()
         generator = ZImageGenerator(catalog, self.tier)
         generator.seed = job.seed
+        if self.img2img_strength is not None:
+            generator.img2img_strength = self.img2img_strength
         generator.models = models_dir()
         _offer(generator, "steps", job.steps)
         _offer(generator, "guidance", job.guidance)

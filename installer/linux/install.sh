@@ -32,12 +32,23 @@ scrub_environment() {
 
 refuse_symlink() {
   cursor=$1
+  case "$cursor" in
+    /*) ;;
+    *)
+      echo "Setup stopped because this path is not absolute: $cursor" >&2
+      exit 1
+      ;;
+  esac
   while [ -n "$cursor" ] && [ "$cursor" != "/" ]; do
     if [ -L "$cursor" ]; then
       echo "Setup stopped because this path contains a link: $cursor" >&2
       exit 1
     fi
-    cursor=$(dirname "$cursor")
+    next=$(dirname "$cursor")
+    if [ "$next" = "$cursor" ]; then
+      return 0
+    fi
+    cursor=$next
   done
 }
 
@@ -81,7 +92,13 @@ profile_xdg() {
 
 data_root() {
   if [ -n "${VOXPRINT_HOME:-}" ]; then
-    printf '%s\n' "$VOXPRINT_HOME"
+    case "$VOXPRINT_HOME" in
+      /*) printf '%s\n' "$VOXPRINT_HOME" ;;
+      *)
+        echo "Setup stopped because VOXPRINT_HOME must be an absolute path." >&2
+        exit 1
+        ;;
+    esac
     return
   fi
   printf '%s\n' "$PROFILE_XDG/voxprint"
@@ -127,9 +144,17 @@ handoff_dir() {
 
 handoff_parents() {
   cursor=$1
+  case "$cursor" in
+    /*) ;;
+    *) return 0 ;;
+  esac
   while [ -n "$cursor" ] && [ "$cursor" != "/" ] && [ "$cursor" != "$USER_HOME" ]; do
     handoff_dir "$cursor"
-    cursor=$(dirname "$cursor")
+    next=$(dirname "$cursor")
+    if [ "$next" = "$cursor" ]; then
+      return 0
+    fi
+    cursor=$next
   done
 }
 
@@ -352,7 +377,13 @@ elif [ -z "$(find "$SHARED/tensorrt-10" -mindepth 1 -print -quit 2>/dev/null)" ]
   as_user "$VENV/bin/python" -m pip --isolated install -c "$SRC/constraints.txt" --target "$SHARED/tensorrt-10" \
     --upgrade-strategy only-if-needed "tensorrt-cu13==10.16.1.11"
 fi
-"$VENV/bin/python" -m canvas.infra.layout migrate --install-dir "$APP"
+handoff_parents "$BIN_DIR"
+handoff_parents "$APP_DIR"
+handoff_parents "$DIR_DIR"
+handoff_tree "$BIN_DIR"
+handoff_tree "$APP_DIR"
+handoff_tree "$DIR_DIR"
+as_user "$VENV/bin/python" -m canvas.infra.layout migrate --install-dir "$APP"
 echo "Installing the default image pack..."
 refuse_symlink "$DATA"
 refuse_symlink "$DATA/canvas/tier.txt"

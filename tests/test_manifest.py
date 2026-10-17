@@ -429,6 +429,8 @@ def test_installers_resolve_numpy_from_pypi_and_pin_cuda_torch():
     assert "handoff_tree" in linux
     assert 'chown -R "$SUDO_USER" "$1"' in linux
     assert '"$1" -s -c' in linux
+    assert 'as_user "$VENV/bin/python" -m canvas.infra.layout migrate --install-dir "$APP"' in linux
+    assert "VOXPRINT_HOME must be an absolute path." in linux
     assert 'getent passwd "$SUDO_USER"' in linux
     assert 'HOME="$USER_HOME"' in linux
     assert 'APP_DIR="$USER_HOME/.local/share/applications"' in linux
@@ -623,6 +625,34 @@ printf '%s\\n' "$user" "$data" "$PROFILE_XDG"
     assert user == str(home)
     assert data == str(inside / "voxprint")
     assert xdg == str(inside)
+
+    env["VOXPRINT_HOME"] = "relative/voxprint"
+    script_relative = """
+. ./installer/linux/install.sh
+USER_HOME=$HOME
+PROFILE_XDG=$HOME/.local/share
+data_root
+"""
+    rejected = subprocess.run(
+        ["sh", "-c", script_relative],
+        cwd=root,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert rejected.returncode != 0
+    assert "absolute path" in rejected.stderr
+    env.pop("VOXPRINT_HOME", None)
+    finished = subprocess.run(
+        ["sh", "-c", ". ./installer/linux/install.sh\nUSER_HOME=$HOME\nhandoff_parents relative\nprintf '%s\\n' done\n"],
+        cwd=root,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert finished.stdout.strip() == "done"
 
 
 def test_linux_setup_moves_a_standalone_runtime_aside(tmp_path):

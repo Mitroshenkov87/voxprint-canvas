@@ -1,6 +1,7 @@
 """Generate a Photoshoot series from the prompt field."""
 from __future__ import annotations
 
+import json
 import random
 import uuid
 from pathlib import Path
@@ -132,10 +133,10 @@ def run_photoshoot(window: ShellWindow) -> None:
             place_mode=bar.place,
             seed=base_seed,
             strength=_strength(bar.strength),
-            include_camera=window._expert.enabled,
+            include_camera=lambda: False,
             rewrite=rewrite,
             age_gate=window.shell.gate.age_gate,
-            generate=generate,
+            draw_frame=generate,
             cancelled=lambda: bar._stop or layout.phase is not Phase.BUSY,
             folder=folder,
             on_scenario=on_scenario,
@@ -188,7 +189,56 @@ def _remember(window: ShellWindow, line: str, picture: Path) -> None:
     if kept is not None:
         window._pictures[item_id] = str(picture)
         window._series_folders[item_id] = str(picture.parent)
+        record_series_frame(window.shell.state_dir, item_id, picture)
     layout.set_prompt(idea)
+
+
+def load_series_folders(state_dir: Path) -> dict[str, str]:
+    """History item ids mapped to the series folder that holds their frame.
+
+    Args:
+        state_dir: The Canvas state directory.
+    """
+    payload = _series_map(state_dir)
+    folders: dict[str, str] = {}
+    for key, value in payload.items():
+        if isinstance(key, str) and isinstance(value, dict):
+            folder = value.get("folder")
+            if isinstance(folder, str) and folder:
+                folders[key] = folder
+    return folders
+
+
+def record_series_frame(state_dir: Path, item_id: str, picture: Path) -> None:
+    """Remember that ``item_id`` belongs to the series folder of ``picture``.
+
+    Args:
+        state_dir: The Canvas state directory.
+        item_id: History item id.
+        picture: Kept frame inside the series folder.
+    """
+    path = _series_map_path(state_dir)
+    payload = _series_map(state_dir)
+    payload[item_id] = {"folder": str(picture.parent), "file": picture.name, "series": picture.parent.name}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _series_map_path(state_dir: Path) -> Path:
+    return state_dir / "pictures" / "series-map.json"
+
+
+def _series_map(state_dir: Path) -> dict[str, object]:
+    path = _series_map_path(state_dir)
+    if not path.is_file():
+        return {}
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(loaded, dict):
+        return {}
+    return loaded
 
 
 def _compose(layout: SimpleLayout, line: str, style: str) -> str:

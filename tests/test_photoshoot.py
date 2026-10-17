@@ -282,7 +282,7 @@ def _run(folder: Path, **overrides: object):
         include_camera=lambda: False,
         rewrite=rewrite if rewrite is not None else (lambda _prompt: _payload(idea)),
         age_gate=age_gate if isinstance(age_gate, AgeGate) else World().gate(),
-        generate=generate if generate is not None else (lambda line, seed, hero, strength: _frame()),
+        draw_frame=generate if generate is not None else (lambda line, seed, hero, strength: _frame()),
         cancelled=cancelled if cancelled is not None else (lambda: False),
         folder=folder,
         line_for=overrides.pop("line_for", None),

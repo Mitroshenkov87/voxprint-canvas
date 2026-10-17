@@ -1,6 +1,7 @@
-"""Photoshoot is a panel on the shared screen. Its Create button is the only primary."""
+"""Photoshoot is one option, a read-only shot list, and Cancel."""
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -39,27 +40,26 @@ def _window(home: Path, runner) -> ShellWindow:
     return ShellWindow(shell, tier=Tier.GB16, enlarge=object(), runner=runner, improver=lambda text: text)
 
 
-def test_photoshoot_chips_replace_the_single_picture_count(app, home: Path) -> None:
+def test_the_option_leaves_the_shell_create_button_in_place(app, home: Path) -> None:
     window = _window(home, lambda job, inputs: rgb())
     window.show()
     app.processEvents()
     mode = window.findChild(QPushButton, "photoshootMode")
     assert mode is not None and mode.text() == "Photoshoot"
-    assert window.findChild(QPushButton, "generate").isVisible()
+    generate = window.findChild(QPushButton, "generate")
+    assert generate is not None and generate.isVisible()
     mode.click()
     app.processEvents()
-    assert window.findChild(QPushButton, "chip-photoshoot-count-6").isChecked()
-    assert window.findChild(QPushButton, "chip-photoshoot-style-photo").isChecked()
-    assert window.findChild(QPushButton, "chip-photoshoot-place-same").isChecked()
-    assert not window.findChild(QPushButton, "chip-count-1").isVisible()
-    assert not window.findChild(QPushButton, "chip-style-illustration").isVisible()
+    assert mode.isChecked()
+    assert generate.isVisible()
+    assert window.findChild(QPushButton, "photoshootCreate") is None
     assert window.findChild(QPushButton, "photoshootWrite") is None
-    assert not window.findChild(QPushButton, "generate").isVisible()
-    primary = window.findChild(QPushButton, "photoshootCreate")
-    assert primary is not None and primary.isVisible() and primary.text() == "Generate"
+    assert window.findChild(QPushButton, "chip-photoshoot-count-6") is None
+    assert window.findChild(QPushButton, "photoshootHandle") is None
+    assert window.findChild(QPushButton, "photoshootMenu") is None
 
 
-def test_generate_writes_the_series_without_a_lens_in_simple_mode(app, home: Path, monkeypatch) -> None:
+def test_generate_writes_a_read_only_series(app, home: Path, monkeypatch) -> None:
     prompts: list[str] = []
 
     def runner(job, inputs):
@@ -73,24 +73,26 @@ def test_generate_writes_the_series_without_a_lens_in_simple_mode(app, home: Pat
     window.view.set_prompt_text(IDEA)
     window.show()
     window.findChild(QPushButton, "photoshootMode").click()
-    window.findChild(QPushButton, "photoshootCreate").click()
+    window.findChild(QPushButton, "generate").click()
     app.processEvents()
     assert len(prompts) == 6
     assert all("50 mm" not in prompt for prompt in prompts)
     assert all(IDEA in prompt for prompt in prompts)
-    menus = window.findChildren(QPushButton, "photoshootMenu")
-    handles = window.findChildren(QPushButton, "photoshootHandle")
-    assert menus and all(menu.isVisible() for menu in menus)
-    assert handles and all(handle.isVisible() for handle in handles)
-    assert all(not camera.isVisible() for camera in window.findChildren(QLineEdit, "photoshootCamera"))
-    assert not window.findChild(QPushButton, "generate").isVisible()
-    assert window.findChild(QPushButton, "photoshootSheet").isEnabled()
+    lines = window.findChildren(QLabel, "photoshootLine")
+    assert len(lines) == 6
+    assert all(label.isVisible() for label in lines)
+    assert window.findChild(QLineEdit, "photoshootCamera") is None
+    assert window.findChild(QPushButton, "generate").isVisible()
     assert (home / "state" / "pictures" / "series").exists()
     assert window._series_folders
     assert all(path.endswith(".png") for path in window._pictures.values())
+    recorded = json.loads((home / "state" / "pictures" / "series-map.json").read_text(encoding="utf-8"))
+    assert set(recorded) == set(window._series_folders)
+    again = _window(home, runner)
+    assert again._series_folders == window._series_folders
 
 
-def test_expert_keeps_the_camera_on_the_line(app, home: Path, monkeypatch) -> None:
+def test_expert_does_not_add_a_camera_control(app, home: Path, monkeypatch) -> None:
     prompts: list[str] = []
 
     def runner(job, inputs):
@@ -105,13 +107,11 @@ def test_expert_keeps_the_camera_on_the_line(app, home: Path, monkeypatch) -> No
     window.set_expert(True)
     window.show()
     window.findChild(QPushButton, "photoshootMode").click()
-    window.findChild(QPushButton, "photoshootCreate").click()
+    window.findChild(QPushButton, "generate").click()
     app.processEvents()
-    assert prompts and all("50 mm" in prompt for prompt in prompts)
-    cameras = window.findChildren(QLineEdit, "photoshootCamera")
-    assert cameras and all(camera.isVisible() for camera in cameras)
-    assert all(button.isVisible() for button in window.findChildren(QPushButton, "photoshootMenu"))
-    assert not window.findChild(QPushButton, "generate").isVisible()
+    assert prompts and all("50 mm" not in prompt for prompt in prompts)
+    assert window.findChild(QLineEdit, "photoshootCamera") is None
+    assert window.findChild(QPushButton, "photoshootMenu") is None
 
 
 def test_a_blocked_frame_is_labelled_and_is_not_the_hero(app, home: Path, monkeypatch) -> None:
@@ -137,13 +137,13 @@ def test_a_blocked_frame_is_labelled_and_is_not_the_hero(app, home: Path, monkey
     window.view.set_prompt_text(IDEA)
     window.show()
     window.findChild(QPushButton, "photoshootMode").click()
-    window.findChild(QPushButton, "photoshootCreate").click()
+    window.findChild(QPushButton, "generate").click()
     app.processEvents()
-    cells = [cell.text() for cell in window.findChildren(QLabel, "photoshootCell")]
-    assert "Shot blocked" in cells
+    labels = [label.text() for label in window.findChildren(QLabel, "photoshootLine")]
+    assert any("Shot blocked" in text for text in labels)
     assert modes[0] is Mode.TEXT
     assert modes[1] is Mode.RESTYLE
-    folder = next(path for path in (home / "state" / "pictures" / "series").iterdir())
+    folder = next(path for path in (home / "state" / "pictures" / "series").iterdir() if path.is_dir())
     assert not (folder / "02.png").exists()
     assert (folder / "01.png").is_file()
 
@@ -164,9 +164,11 @@ def test_cancel_keeps_the_frames_already_finished(app, home: Path, monkeypatch) 
     window.view.set_prompt_text(IDEA)
     window.show()
     window.findChild(QPushButton, "photoshootMode").click()
-    window.findChild(QPushButton, "photoshootCreate").click()
+    window.findChild(QPushButton, "generate").click()
     app.processEvents()
     assert len(prompts) == 1
-    folder = next(path for path in (home / "state" / "pictures" / "series").iterdir())
+    folder = next(path for path in (home / "state" / "pictures" / "series").iterdir() if path.is_dir())
     assert (folder / "01.png").is_file()
     assert not (folder / "02.png").exists()
+    cancel = window.findChild(QPushButton, "photoshootCancel")
+    assert cancel is not None and cancel.text() == "Cancel"

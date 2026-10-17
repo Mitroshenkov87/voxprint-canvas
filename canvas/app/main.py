@@ -352,7 +352,7 @@ def _photoshoot_bench(args: argparse.Namespace) -> int:
     except (
         SafetyError, SnapshotError, DownloadDeclined, InferenceUnavailable, ModelNotReady,
         ModeUnavailable, BaseNotSelected, JobError, CoolingDown, EnlargeMissing, EnlargeError, VramRefused,
-        SystemMemoryRefused, NunchakuUnavailable, OSError,
+        OSError,
     ) as exc:
         return _emit({"ok": False, "error": str(exc)}, as_json, 1)
     return _emit(report, as_json, 0 if report.get("ok") else 1)

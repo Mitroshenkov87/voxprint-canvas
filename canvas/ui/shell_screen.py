@@ -10,23 +10,12 @@ from typing import assert_never
 
 from PySide6.QtCore import QUrl
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import (
-    QApplication,
-    QFileDialog,
-    QHBoxLayout,
-    QLabel,
-    QMainWindow,
-    QPushButton,
-    QVBoxLayout,
-    QWidget,
-)
+from PySide6.QtWidgets import QApplication, QFileDialog, QMainWindow
 
 from voxprint_common.i18n import add_catalogs, tr
 from voxprint_common.mdl.names import CLI_NAME
 from voxprint_common.ui.expert import ExpertMode
 from voxprint_common.ui.simple_image import Phase, SimpleImageWidget as SimpleWidget
-from voxprint_common.ui.variants import WINDOW_HEIGHT, WINDOW_WIDTH
-
 from canvas.app.i18n import text
 from canvas.app.info import APP_VERSION, ENLARGE_NAME, ENLARGE_RELEASES
 from canvas.app.selftest import selftest_report
@@ -41,8 +30,8 @@ from canvas.models.sizes import closest_aspect
 from canvas.safety.image import RawImage
 from canvas.safety.inputs import ImageRole, PendingInput
 from canvas.ui.about import AboutDialog
+from canvas.ui.shell_chrome import SHOT_HEIGHT, SHOT_WIDTH, fit_panel, mount, polish, shell_style
 from canvas.ui.shell_layout import CanvasShell, PictureJob, job_from
-from canvas.ui.theme import build_style
 from canvas.ui.wizards import AddonsWizard, DiagnosticsWizard, MaskWizard, PictureWizard, SetupWizard
 
 Runner = Callable[[PictureJob, tuple[PendingInput, ...]], RawImage]
@@ -92,11 +81,12 @@ class ShellWindow(QMainWindow):
         self._picture: Path | None = None
         self._mask: RawImage | None = None
         self._pictures: dict[str, str] = {}
+        self._chrome_ready = False
         self.setObjectName("shell")
         self.setWindowTitle(tr("splash.app.canvas"))
-        self.setStyleSheet(build_style(False))
+        self.setStyleSheet(shell_style())
         self.setMinimumSize(shell.surface.min_width, shell.surface.min_height)
-        self.resize(WINDOW_WIDTH, WINDOW_HEIGHT)
+        self.resize(SHOT_WIDTH, SHOT_HEIGHT)
         self.view = SimpleWidget(
             shell.layout,
             shell.settings,
@@ -104,31 +94,37 @@ class ShellWindow(QMainWindow):
             on_command=self._on_command,
             on_improve=self._on_improve,
             on_history=self._on_history,
+            on_refresh=self._on_refresh,
             surface=shell.surface,
         )
         self._expert = ExpertMode()
         self._expert.subscribe(self.view.set_expert)
         if self._expert.enabled():
             self.view.set_expert(True)
-        holder = QWidget()
-        column = QVBoxLayout(holder)
-        column.setContentsMargins(12, 8, 12, 8)
-        column.addLayout(self._actions())
-        column.addWidget(self.view.root, 1)
-        footer = QLabel(text("notice.responsibility"))
-        footer.setObjectName("footer")
-        footer.setWordWrap(True)
-        column.addWidget(footer)
-        self.setCentralWidget(holder)
+        self._split = mount(self)
+        self.setCentralWidget(self._split)
+        self._chrome_ready = True
+        polish(self)
 
     def set_expert(self, enabled: bool) -> None:
         """Store Expert mode and show or hide the side panel.
 
+        The shared screen is told once. ``set_enabled`` already notifies it
+        when the stored value changes, and telling it again leaves the
+        previous fields on top of the new ones.
+
         Args:
             enabled: True shows the expert values beside the picture.
         """
+        previous = self._expert.enabled()
         self._expert.set_enabled(enabled)
-        self.view.set_expert(self._expert.enabled())
+        if previous == enabled:
+            self.view.set_expert(enabled)
+        fit_panel(self, self._expert.enabled())
+
+    def _on_refresh(self) -> None:
+        if self._chrome_ready:
+            polish(self)
 
     def use_picture(self, path: Path) -> None:
         """Use ``path`` as the source picture and match its shape.
@@ -183,23 +179,6 @@ class ShellWindow(QMainWindow):
     def diagnostics_wizard(self) -> DiagnosticsWizard:
         """The PC check. It does not run until a button is pressed."""
         return DiagnosticsWizard(self, self._run_check, self._run_update)
-
-    def _actions(self) -> QHBoxLayout:
-        row = QHBoxLayout()
-        specs = (
-            ("actionSetup", "canvas.action.setup", self._open_setup),
-            ("actionPicture", "canvas.action.picture", self._open_picture),
-            ("actionMask", "canvas.action.mask", self._open_mask),
-            ("actionAddons", "canvas.action.addons", self._open_addons),
-            ("actionCheck", "canvas.action.check", self._open_check),
-        )
-        for name, key, slot in specs:
-            button = QPushButton(text(key))
-            button.setObjectName(name)
-            button.clicked.connect(slot)
-            row.addWidget(button)
-        row.addStretch(1)
-        return row
 
     def _open_setup(self) -> None:
         self.setup_wizard().exec()

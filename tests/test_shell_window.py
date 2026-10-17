@@ -10,7 +10,17 @@ import pytest
 pytest.importorskip("PySide6")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QLabel, QPlainTextEdit, QPushButton, QSpinBox, QWidget
+from PySide6.QtGui import QAction
+from PySide6.QtWidgets import (
+    QApplication,
+    QComboBox,
+    QLabel,
+    QPlainTextEdit,
+    QPushButton,
+    QScrollArea,
+    QSpinBox,
+    QWidget,
+)
 
 from canvas.app.i18n import text
 from canvas.models.modes import Tier
@@ -56,17 +66,58 @@ def test_simple_mode_hides_expert_words_and_keeps_picture_tools(app, home: Path)
     setup.findChild(QPushButton, "setup-change-inpaint").click()
     assert window.shell.layout.get("canvas.change") == "inpaint"
     assert window.findChild(QPushButton, "chip-instruction-on") is None
+    picture = window.findChild(QPushButton, "actionPicture")
+    mask = window.findChild(QPushButton, "actionMask")
+    assert picture is not None and picture.isVisible()
+    assert mask is not None and not mask.isVisible()
+    assert window.findChild(QPushButton, "actionAddons") is None
+    assert window.findChild(QAction, "actionAddons") is not None
+    assert window.findChild(QAction, "actionCheck") is not None
+    assert window.findChild(QAction, "actionSetup") is not None
+    ratio = window.findChild(QComboBox, "sizeRatio")
+    assert ratio is not None and ratio.isVisible()
+    square = window.findChild(QPushButton, "chip-size-1-1")
+    assert square is not None and not square.isVisible()
+    detail = window.findChild(QPushButton, "chip-detail-light")
+    assert detail is not None and not detail.isVisible()
     fourk = window.findChild(QPushButton, "chip-output-4k")
     assert fourk is not None and not fourk.isEnabled()
+    assert "Enlarge" in fourk.text()
     reason = window.findChild(QLabel, "reason-output-4k")
-    assert reason is not None and reason.text()
+    assert reason is not None and not reason.isVisible()
+    install = window.findChild(QPushButton, "unavailable-output-4k")
+    assert install is not None and install.isVisible()
     footer = window.findChild(QLabel, "footer")
     assert footer is not None and footer.text() == text("notice.responsibility")
+    window.resize(1280, 800)
+    app.processEvents()
+    stage = window.findChild(QWidget, "stage")
+    history = window.findChild(QWidget, "historyStrip")
+    assert stage is not None and stage.height() >= 300
+    assert history is not None and history.isVisible() and history.height() >= 88
+    assert history.mapTo(window, history.rect().bottomLeft()).y() <= window.height()
     window.set_expert(True)
     app.processEvents()
-    spin = window.findChild(QSpinBox, "shell.steps")
-    assert spin is not None and spin.isVisible()
+    panel = window.findChild(QWidget, "expertPanel")
+    assert panel is not None and panel.isVisible() and panel.width() >= 300
+    assert panel.height() >= window.height() - 4
+    stage_at = stage.mapTo(window, stage.rect().topLeft())
+    panel_at = panel.mapTo(window, panel.rect().topLeft())
+    assert panel_at.x() >= stage_at.x() + stage.width() - 8
+    badge = window.findChild(QLabel, "expertChip")
+    reset = window.findChild(QPushButton, "expertResetAll")
+    assert badge is not None and badge.isVisible() and badge.text()
+    assert reset is not None and reset.isVisible()
+    spins = [item for item in window.findChildren(QSpinBox, "shell.steps") if item.isVisible()]
+    assert len(spins) == 1
+    spin = spins[0]
+    assert spin.width() < 400
     spin.setValue(33)
+    scroll = window.findChild(QScrollArea, "expertScroll")
+    form = window.findChild(QWidget, "expertForm")
+    assert scroll is not None and form is not None
+    if form.height() > scroll.viewport().height():
+        assert scroll.verticalScrollBar().maximum() > 0
     window.set_expert(False)
     app.processEvents()
     panel = window.findChild(QWidget, "expertPanel")

@@ -456,6 +456,22 @@
       "en": "Picture setup",
       "ru": "Настройка картинки"
     },
+    "canvas.output.4k.needs": {
+      "en": "4K (needs Enlarge)",
+      "ru": "4K (нужен Enlarge)"
+    },
+    "canvas.expert.preset": {
+      "en": "Preset",
+      "ru": "Набор"
+    },
+    "canvas.expert.custom": {
+      "en": "Custom",
+      "ru": "Свой"
+    },
+    "canvas.expert.reset": {
+      "en": "Reset to preset",
+      "ru": "Вернуть набор"
+    },
     "canvas.setup.title": {
       "en": "Picture setup",
       "ru": "Настройка картинки"

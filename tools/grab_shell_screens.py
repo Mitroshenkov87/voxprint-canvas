@@ -5,6 +5,7 @@ stand-in classifiers. Nothing is generated.
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -53,11 +54,22 @@ def main() -> int:
 
 
 def _window(state: Path, tier: Tier) -> ShellWindow:
+    state.mkdir(parents=True, exist_ok=True)
+    _history(state / "image-history.json")
     shell = open_layout(state, World().gate(), enlarge_installed=False)
     return ShellWindow(shell, tier=tier, enlarge=object(), runner=lambda *_args: rgb(), improver=lambda prompt: prompt)
 
 
+def _history(path: Path) -> None:
+    items = [
+        {"id": f"pic-{index:02d}", "prompt": f"picture {index}", "presets": [], "seed": index}
+        for index in range(1, 51)
+    ]
+    path.write_text(json.dumps({"schema": 1, "items": items}) + "\n", encoding="utf-8")
+
+
 def _save(app: QApplication, window: ShellWindow, path: Path) -> None:
+    window.resize(1280, 800)
     window.show()
     app.processEvents()
     window.grab().save(str(path))
@@ -66,7 +78,7 @@ def _save(app: QApplication, window: ShellWindow, path: Path) -> None:
 def _save_dialog(app: QApplication, dialog, path: Path, load: Path | None = None) -> None:
     if load is not None and hasattr(dialog, "load_path"):
         dialog.load_path(load)
-    dialog.resize(720, 520)
+    dialog.resize(1280, 800)
     dialog.show()
     app.processEvents()
     dialog.grab().save(str(path))

@@ -402,6 +402,8 @@ def test_installers_resolve_numpy_from_pypi_and_pin_cuda_torch():
         assert "Repairing the suite runtime..." in script
         assert "PyTorch is already installed." in script
         assert "TensorRT is skipped on Python 3.14." in script
+    assert "voxprint-gpu-probe-" in windows
+    assert "-c $code" not in windows
     assert '--index-url "$TORCH_INDEX"' in linux
     assert "--extra-index-url https://pypi.org/simple" in linux
     assert "onnxruntime-gpu==1.31.0" in linux

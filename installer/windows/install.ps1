@@ -57,8 +57,14 @@ if gpu not in found or name in found:
     sys.exit(1)
 sys.exit(0)
 "@
-    & $Python -c $code | Out-Null
-    return $LASTEXITCODE -eq 0
+    $probe = Join-Path $env:TEMP ("voxprint-gpu-probe-" + [guid]::NewGuid().ToString("n") + ".py")
+    Set-Content -LiteralPath $probe -Value $code -Encoding ascii
+    try {
+        & $Python $probe | Out-Null
+        return $LASTEXITCODE -eq 0
+    } finally {
+        Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
+    }
 }
 
 function Install-SuiteGpuPackages([string]$Python) {

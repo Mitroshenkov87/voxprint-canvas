@@ -1,5 +1,8 @@
 {
-  "locales": ["en", "ru"],
+  "locales": [
+    "en",
+    "ru"
+  ],
   "strings": {
     "app.name": {
       "en": "VOXPrint AI Canvas",
@@ -384,6 +387,338 @@
     "unit.second.many": {
       "en": "seconds",
       "ru": "секунд"
+    },
+    "edit.removed": {
+      "en": "Instruction editing has been removed.",
+      "ru": "Правка по инструкции удалена."
+    },
+    "canvas.models.missing": {
+      "en": "Models are not ready yet. Use Manage models.",
+      "ru": "Модели ещё не готовы. Откройте «Управление моделями»."
+    },
+    "canvas.stage.prepare": {
+      "en": "Preparing",
+      "ru": "Подготовка"
+    },
+    "canvas.stage.draw": {
+      "en": "Drawing",
+      "ru": "Рисуем"
+    },
+    "canvas.action.picture": {
+      "en": "Use a picture",
+      "ru": "Использовать картинку"
+    },
+    "canvas.action.mask": {
+      "en": "Edit the mask",
+      "ru": "Править маску"
+    },
+    "canvas.action.addons": {
+      "en": "Add-ons",
+      "ru": "Дополнения"
+    },
+    "canvas.action.check": {
+      "en": "Check this PC",
+      "ru": "Проверить компьютер"
+    },
+    "canvas.action.setup": {
+      "en": "Picture setup",
+      "ru": "Настройка картинки"
+    },
+    "canvas.output.4k.needs": {
+      "en": "4K (needs Enlarge)",
+      "ru": "4K (нужен Enlarge)"
+    },
+    "canvas.enlarge.title": {
+      "en": "VOXPrint Enlarge",
+      "ru": "VOXPrint Enlarge"
+    },
+    "canvas.enlarge.confirm": {
+      "en": "4K needs VOXPrint Enlarge. Install it?",
+      "ru": "Для 4K нужен VOXPrint Enlarge. Установить?"
+    },
+    "canvas.enlarge.confirm.size": {
+      "en": "4K needs VOXPrint Enlarge (≈ {size}). Install it?",
+      "ru": "Для 4K нужен VOXPrint Enlarge (≈ {size}). Установить?"
+    },
+    "canvas.enlarge.progress": {
+      "en": "Installing VOXPrint Enlarge…",
+      "ru": "Устанавливается VOXPrint Enlarge…"
+    },
+    "canvas.enlarge.progress.bytes": {
+      "en": "Installing VOXPrint Enlarge… {done} of {total}",
+      "ru": "Устанавливается VOXPrint Enlarge… {done} из {total}"
+    },
+    "canvas.enlarge.failed": {
+      "en": "VOXPrint Enlarge could not be installed.",
+      "ru": "Не удалось установить VOXPrint Enlarge."
+    },
+    "canvas.expert.preset": {
+      "en": "Preset",
+      "ru": "Набор"
+    },
+    "canvas.expert.custom": {
+      "en": "Custom",
+      "ru": "Свои настройки"
+    },
+    "canvas.expert.reset": {
+      "en": "Reset to preset",
+      "ru": "Сбросить к пресету"
+    },
+    "canvas.setup.title": {
+      "en": "Picture setup",
+      "ru": "Настройка картинки"
+    },
+    "canvas.setup.done": {
+      "en": "Done",
+      "ru": "Готово"
+    },
+    "canvas.picture.title": {
+      "en": "Use a picture",
+      "ru": "Использовать картинку"
+    },
+    "canvas.picture.open": {
+      "en": "Open",
+      "ru": "Открыть"
+    },
+    "canvas.picture.use": {
+      "en": "Use this picture",
+      "ru": "Использовать эту картинку"
+    },
+    "canvas.picture.empty": {
+      "en": "No picture yet.",
+      "ru": "Картинки пока нет."
+    },
+    "canvas.mask.title": {
+      "en": "Edit the mask",
+      "ru": "Править маску"
+    },
+    "canvas.mask.brush": {
+      "en": "Brush",
+      "ru": "Кисть"
+    },
+    "canvas.mask.eraser": {
+      "en": "Eraser",
+      "ru": "Ластик"
+    },
+    "canvas.mask.clear": {
+      "en": "Clear",
+      "ru": "Очистить"
+    },
+    "canvas.mask.use": {
+      "en": "Use this mask",
+      "ru": "Использовать эту маску"
+    },
+    "canvas.mask.need": {
+      "en": "Open a picture first.",
+      "ru": "Сначала откройте картинку."
+    },
+    "canvas.mask.hint": {
+      "en": "Paint the area that should change.",
+      "ru": "Закрасьте область, которую нужно изменить"
+    },
+    "canvas.mask.size": {
+      "en": "Brush size",
+      "ru": "Размер кисти"
+    },
+    "canvas.addons.title": {
+      "en": "Add-ons",
+      "ru": "Дополнения"
+    },
+    "canvas.addons.path": {
+      "en": "Folder",
+      "ru": "Папка"
+    },
+    "canvas.addons.strength": {
+      "en": "Strength",
+      "ru": "Сила"
+    },
+    "canvas.addons.save": {
+      "en": "Save",
+      "ru": "Сохранить"
+    },
+    "canvas.check.title": {
+      "en": "Check this PC",
+      "ru": "Проверить компьютер"
+    },
+    "canvas.check.run": {
+      "en": "Run check",
+      "ru": "Запустить проверку"
+    },
+    "canvas.check.deep": {
+      "en": "Check every file",
+      "ru": "Проверить каждый файл"
+    },
+    "canvas.check.update": {
+      "en": "Check for an update",
+      "ru": "Проверить обновление"
+    },
+    "canvas.check.ready": {
+      "en": "This PC is ready.",
+      "ru": "Компьютер готов."
+    },
+    "canvas.check.failed": {
+      "en": "This PC is not ready.",
+      "ru": "Компьютер не готов."
+    },
+    "canvas.check.current": {
+      "en": "This is the current release.",
+      "ru": "Это текущий выпуск."
+    },
+    "canvas.check.newer": {
+      "en": "A newer release is {tag}.",
+      "ru": "Есть более новый выпуск: {tag}."
+    },
+    "canvas.check.os": {
+      "en": "System",
+      "ru": "Система"
+    },
+    "canvas.check.gpu": {
+      "en": "Graphics",
+      "ru": "Графика"
+    },
+    "canvas.check.encoders": {
+      "en": "File types",
+      "ru": "Типы файлов"
+    },
+    "canvas.source": {
+      "en": "Start from",
+      "ru": "Начать с"
+    },
+    "canvas.source.words": {
+      "en": "From text",
+      "ru": "С текста"
+    },
+    "canvas.source.picture": {
+      "en": "From a picture",
+      "ru": "С картинки"
+    },
+    "canvas.source.help": {
+      "en": "From text — the picture is created from the description. From a picture — the chosen image is the base.",
+      "ru": "С текста — картинка создаётся по описанию. С картинки — за основу берётся выбранное изображение."
+    },
+    "canvas.variation": {
+      "en": "Variation",
+      "ru": "Разнообразие"
+    },
+    "canvas.variation.quick": {
+      "en": "Usual",
+      "ru": "Обычно"
+    },
+    "canvas.variation.varied": {
+      "en": "Bolder",
+      "ru": "Смелее"
+    },
+    "canvas.variation.help": {
+      "en": "Usual — the familiar result. Bolder — more unusual ideas.",
+      "ru": "Обычно — привычный результат. Смелее — больше необычных идей."
+    },
+    "canvas.change": {
+      "en": "Change",
+      "ru": "Изменение"
+    },
+    "canvas.change.restyle": {
+      "en": "Restyle",
+      "ru": "Перерисовать"
+    },
+    "canvas.change.inpaint": {
+      "en": "Paint over",
+      "ru": "Закрасить"
+    },
+    "canvas.change.outpaint": {
+      "en": "Extend",
+      "ru": "Расширить"
+    },
+    "canvas.change.pose": {
+      "en": "Copy the pose",
+      "ru": "Повторить позу"
+    },
+    "canvas.change.depth": {
+      "en": "Depth map",
+      "ru": "Карта глубины"
+    },
+    "canvas.change.edge": {
+      "en": "Outlines",
+      "ru": "Контуры"
+    },
+    "canvas.change.help": {
+      "en": "What to change in the picture.",
+      "ru": "Что изменить в картинке."
+    },
+    "canvas.change.restyle.hint": {
+      "en": "Redraws the picture in a new look.",
+      "ru": "Перерисовывает картинку в новом виде."
+    },
+    "canvas.change.inpaint.hint": {
+      "en": "Paints over one area and replaces it.",
+      "ru": "Закрашивает область и заменяет её."
+    },
+    "canvas.change.outpaint.hint": {
+      "en": "Grows the picture past its edges.",
+      "ru": "Продолжает картинку за её края."
+    },
+    "canvas.change.pose.hint": {
+      "en": "Keeps the pose from the picture.",
+      "ru": "Повторяет позу с картинки."
+    },
+    "canvas.change.depth.hint": {
+      "en": "Follows what is near and what is far.",
+      "ru": "Повторяет ближнее и дальнее."
+    },
+    "canvas.change.edge.hint": {
+      "en": "Follows the outlines in the picture.",
+      "ru": "Повторяет контуры картинки."
+    },
+    "canvas.format": {
+      "en": "File type",
+      "ru": "Тип файла"
+    },
+    "canvas.format.avif": {
+      "en": "AVIF",
+      "ru": "AVIF"
+    },
+    "canvas.format.jxl": {
+      "en": "JPEG XL",
+      "ru": "JPEG XL"
+    },
+    "canvas.format.webp": {
+      "en": "WebP",
+      "ru": "WebP"
+    },
+    "canvas.format.help": {
+      "en": "The file type of a saved picture.",
+      "ru": "Тип файла сохранённой картинки."
+    },
+    "canvas.style": {
+      "en": "Look",
+      "ru": "Вид"
+    },
+    "canvas.style.help": {
+      "en": "The look added to the prompt.",
+      "ru": "Вид, который добавляется к описанию."
+    },
+    "canvas.output_size": {
+      "en": "Exact size",
+      "ru": "Точный размер"
+    },
+    "canvas.output_size.help": {
+      "en": "Standard, 2K, or 4K.",
+      "ru": "Стандарт, 2K или 4K."
+    },
+    "canvas.output_size.follow": {
+      "en": "Match the choice",
+      "ru": "Как в выборе"
+    },
+    "canvas.output_size.native": {
+      "en": "Standard",
+      "ru": "Стандарт"
+    },
+    "canvas.output_size.2k": {
+      "en": "2K",
+      "ru": "2K"
+    },
+    "canvas.output_size.4k": {
+      "en": "4K",
+      "ru": "4K"
     }
   }
 }

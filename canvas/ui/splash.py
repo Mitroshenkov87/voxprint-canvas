@@ -1,10 +1,9 @@
 """Startup splash.
 
-The shared widget will be published by ``voxprint-common`` (Suite Lead) as
-``voxprint_common.ui.splash``. That package is not installed, so this module
-keeps the same public names and implements the local splash for SHARED-RUNTIME
-schema 1. ``canvas.app.main`` imports ``Splash`` and ``show_splash`` from here;
-that import is the one-line swap when the shared widget arrives.
+The shared widget is published by ``voxprint-common`` as
+``voxprint_common.ui.splash``. This module keeps the approved local card
+until a later swap. ``canvas.app.main`` imports ``Splash`` and ``show_splash``
+from here; that import is the one-line swap.
 
 The 2× asset is a Lanczos upscale of ``assets/splash.jpg``. The Enlarge CLI
 was not available to render it.
@@ -33,7 +32,7 @@ FADE_MS = 200
 SHOW_BUDGET_MS = 150
 # Placeholder. Replace the file with an Enlarge upscale and set this to "enlarge".
 HIDPI_UPSCALER = "lanczos"
-# One-line swap once package voxprint-common publishes the shared widget.
+# One-line swap onto the shared widget. The local card stays until that swap.
 FUTURE_IMPORT = "voxprint_common.ui.splash"
 SHARED_RUNTIME_SCHEMA = 1
 

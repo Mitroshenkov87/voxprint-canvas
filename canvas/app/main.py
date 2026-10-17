@@ -32,6 +32,7 @@ from canvas.models.modes import Mode, Tier
 from canvas.models.plan import BaseNotSelected, ModeUnavailable, build_plan
 from canvas.models.registry import load_catalog
 from canvas.models.snapshots import SnapshotError
+from canvas.app.photoshoot_bench import live_generate, live_rewrite, run_bench
 from canvas.pipeline.bf16_schedule import VramRefused
 from canvas.pipeline.enhance import EnhanceResult, fallback_message, open_rewriter, resolve_prompt, rewrite_text
 from canvas.pipeline.schedule import SystemMemoryRefused, last_image_seconds, reset_image_seconds
@@ -73,7 +74,8 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--json", action="store_true", help="print a JSON document")
     parser.add_argument("--version", action="store_true", help="print the release identity and exit")
-    generate = parser.add_subparsers(dest="command", required=False).add_parser(
+    commands = parser.add_subparsers(dest="command", required=False)
+    generate = commands.add_parser(
         "generate",
         help="generate one image and exit",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -99,6 +101,16 @@ def _parser() -> argparse.ArgumentParser:
         help="plan as if the GPU had this many GB (CANVAS_VRAM_CAP_GB)",
     )
     generate.add_argument("--json", action="store_true")
+    bench = commands.add_parser(
+        "photoshoot-bench",
+        help="time a 6-frame Photoshoot series and exit",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=_EXIT_CODES,
+    )
+    bench.add_argument("--prompt", required=True, help="idea for the 6-frame series")
+    bench.add_argument("--out", required=True, help="folder for the series")
+    bench.add_argument("--seed", type=int, default=1)
+    bench.add_argument("--json", action="store_true")
     return parser
 
 
@@ -314,6 +326,38 @@ def _generate(args: argparse.Namespace) -> int:
     )
 
 
+def _photoshoot_bench(args: argparse.Namespace) -> int:
+    """Time a 6-frame series on this machine. A missing GPU writes no duration."""
+    as_json = bool(args.json)
+    os_result = current_os_check()
+    if not os_result.ok:
+        return _emit({"ok": False, "error": os_result.message}, as_json, 2)
+    gpu = check_gpu(probe_gpu())
+    if not gpu.ok or gpu.tier is None:
+        return _emit({"ok": False, "error": gpu.message}, as_json, 2)
+    folder = Path(args.out)
+    try:
+        install_supporting(load_catalog(), lambda message: print(message, file=sys.stderr))
+        stack = load_catalog_stack(models_dir(), load_catalog())
+        gate = AgeGate(stack)
+        report = run_bench(
+            prompt=str(args.prompt),
+            folder=folder,
+            seed=int(args.seed),
+            tier=gpu.tier,
+            age_gate=gate,
+            rewrite=live_rewrite(gpu.tier),
+            generate=live_generate(gate, gpu.tier),
+        )
+    except (
+        SafetyError, SnapshotError, DownloadDeclined, InferenceUnavailable, ModelNotReady,
+        ModeUnavailable, BaseNotSelected, JobError, CoolingDown, EnlargeMissing, EnlargeError, VramRefused,
+        SystemMemoryRefused, NunchakuUnavailable, OSError,
+    ) as exc:
+        return _emit({"ok": False, "error": str(exc)}, as_json, 1)
+    return _emit(report, as_json, 0 if report.get("ok") else 1)
+
+
 def main(argv: list[str] | None = None) -> int:
     """Register the shared model folder, check for a release, or open the window."""
     args = _parser().parse_args(argv)
@@ -325,6 +369,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if getattr(args, "command", None) == "generate":
         return _generate(args)
+    if getattr(args, "command", None) == "photoshoot-bench":
+        return _photoshoot_bench(args)
     if args.selftest:
         report = selftest_report(deep=bool(args.deep))
         if args.json:

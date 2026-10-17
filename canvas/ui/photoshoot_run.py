@@ -66,6 +66,7 @@ def run_photoshoot(window: object) -> None:
         return
     folder = window.shell.state_dir / "pictures" / "series" / uuid.uuid4().hex
     bar.folder = folder
+    bar._stop = False
     base_seed = int(layout.seed)
 
     def rewrite(prompt: str) -> str:
@@ -76,6 +77,7 @@ def run_photoshoot(window: object) -> None:
     def generate(line: str, seed: int, hero: object | None, strength: float) -> RawImage | None:
         used = _seed(bar.seed_mode, base_seed, seed)
         prompt = _compose(layout, line, style)
+        # The first kept frame is the init image. Simple mode uses strength 0.45.
         picture = job._replace(
             prompt=prompt,
             seed=used,
@@ -113,7 +115,7 @@ def run_photoshoot(window: object) -> None:
         bar.mark(index, status)
         if status == "kept":
             _remember(window, bar.line_for(index), folder / f"{index + 1:02}.png")
-            if index + 1 < len(bar.rows) and layout.phase is not Phase.BUSY:
+            if not bar._stop and index + 1 < len(bar.rows) and layout.phase is not Phase.BUSY:
                 layout.set_prompt(idea)
                 layout.generate()
         window.view.refresh()
@@ -129,10 +131,9 @@ def run_photoshoot(window: object) -> None:
             strength=_strength(bar.strength),
             include_camera=window._expert.enabled,
             rewrite=rewrite,
-            review_prompt=window.shell.gate.review_prompt,
+            age_gate=window.shell.gate.age_gate,
             generate=generate,
-            review_image=lambda _image, _line: None,
-            cancelled=lambda: layout.phase is not Phase.BUSY,
+            cancelled=lambda: bar._stop or layout.phase is not Phase.BUSY,
             folder=folder,
             on_scenario=on_scenario,
             line_for=bar.line_for,

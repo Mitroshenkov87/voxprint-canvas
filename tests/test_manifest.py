@@ -300,8 +300,7 @@ def test_optional_pack_notice_includes_size_and_estimate():
     catalog = load_catalog()
     creative = catalog.by_id("z-image-creative-bf16")
     lite = catalog.by_id("z-image-turbo-fun-controlnet-union-bf16-lite")
-    edit = catalog.by_id("qwen-image-edit-2511-fp8")
-    assert is_optional(creative) and is_optional(lite) and is_optional(edit)
+    assert is_optional(creative) and is_optional(lite)
     turbo = catalog.by_id("z-image-turbo-bf16-16gb")
     assert is_optional(turbo) is False
     assert turbo.nbytes > 1_000_000_000
@@ -309,7 +308,6 @@ def test_optional_pack_notice_includes_size_and_estimate():
     assert notice.startswith("ControlNet lite is ")
     assert "Estimated time" in notice
     assert "Creative Z-Image" in pack_notice(creative)
-    assert "Qwen-Image-Edit-2511" in pack_notice(edit)
     specs = default_specs(catalog)
     ids = {spec.id for spec in specs}
     assert "z-image-turbo-bf16-16gb" in ids

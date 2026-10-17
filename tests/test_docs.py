@@ -14,8 +14,8 @@ def test_cli_page_is_captured_from_help(tmp_path: Path):
     assert "Generated from `voxprint-canvas --help`" in page
     assert "--version" in page
     assert "--selftest" in page
-    assert "4  feature unavailable" in captured
-    assert "feature unavailable" in page
+    assert "0  the picture was written" in captured
+    assert "feature unavailable" not in page
     assert "--register-models" in page
     folded = page.casefold()
     for word in BANNED:

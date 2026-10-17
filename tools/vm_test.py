@@ -16,8 +16,6 @@ from pathlib import Path
 
 from PIL import Image
 
-from canvas.models.features import instruction_edit_available
-
 BLOCKED = "This request cannot be completed."
 ADULT = "a 25-year-old woman reading a book in a sunlit cafe"
 KITE = "a child flying a kite in a park"
@@ -259,55 +257,18 @@ def _cap_prefix(cap: float | None) -> list[str]:
     return ["--vram-cap-gb", _cap_text(cap)]
 
 
-def _child_env(cap: float | None, edit_route: str | None = None) -> dict[str, str] | None:
+def _child_env(cap: float | None) -> dict[str, str] | None:
     if cap is None:
         return None
     env = os.environ.copy()
     env["CANVAS_VRAM_CAP_GB"] = _cap_text(cap)
-    if edit_route:
-        env["CANVAS_EDIT_ROUTE"] = edit_route
-    else:
-        env.pop("CANVAS_EDIT_ROUTE", None)
     return env
 
 
-def edit_comparisons(int4_on_disk: bool) -> tuple[tuple[str, str | None], ...]:
-    """Edit jobs for a 16 GB cap.
-
-    When the INT4 route is on disk, the first job follows the automatic route
-    and the second forces the FP8 offload path. Otherwise the only edit job
-    is the FP8 path, so a missing INT4 pack is not reported as an INT4 run.
-    """
-    if int4_on_disk:
-        return (("qwen-edit", None), ("qwen-edit-fp8", "fp8"))
-    return (("qwen-edit", "fp8"),)
-
-
-def _route_16(report: dict[str, object]) -> dict[str, object]:
-    edit = report.get("edit_route")
-    if not isinstance(edit, dict):
-        return {}
-    row = edit.get("16gb")
-    if not isinstance(row, dict):
-        return {}
-    return row
-
-
-def _int4_on_disk(route: dict[str, object]) -> bool:
-    return route.get("quant") == "int4" and route.get("on_disk") is True
-
-
-def _replace_out(args: list[str], dest: Path) -> list[str]:
-    out = list(args)
-    if "--out" in out:
-        out[out.index("--out") + 1] = str(dest)
-    return out
-
-
 def vram_cap_jobs(pictures: Path, cap: float) -> tuple[tuple[str, Path, list[str]], ...]:
-    """Text-to-image at 2K, an inpaint, and one Qwen-Image-Edit, under the cap.
+    """Text-to-image at 2K and an inpaint, under the cap.
 
-    Later jobs read the text-to-image file. The mask is a solid picture written
+    The inpaint reads the text-to-image file. The mask is a solid picture written
     before the inpaint command runs.
     """
     prefix = _cap_prefix(cap)
@@ -330,15 +291,6 @@ def vram_cap_jobs(pictures: Path, cap: float) -> tuple[tuple[str, Path, list[str
                 "--output-size", "2k", "--out", str(pictures / "inpaint-2k.avif"), "--json",
             ],
         ),
-        (
-            "qwen-edit",
-            pictures / "edit.avif",
-            [
-                *prefix, "generate", "--edit-instruction", "make the coat red",
-                "--input", str(source), "--aspect", "16:9", "--output-size", "2k",
-                "--out", str(pictures / "edit.avif"), "--json",
-            ],
-        ),
     )
 
 
@@ -351,27 +303,15 @@ def _run_cap(
     seconds: dict[str, float],
     report: dict[str, object] | None = None,
 ) -> int:
+    del report
     pictures = folder / "pictures"
     pictures.mkdir(exist_ok=True)
     _write_mask(pictures / "mask.png")
     env = _child_env(cap)
-    int4 = _int4_on_disk(_route_16(report or {}))
     failed = False
     for name, dest, args in vram_cap_jobs(pictures, cap):
-        if name == "qwen-edit" and not instruction_edit_available():
-            checks.append({"name": name, "ok": True, "detail": "unavailable"})
-            continue
-        if name != "qwen-edit":
-            if not _record_cap_job(canvas, checks, name, dest, args, env, allocated, seconds):
-                failed = True
-            continue
-        for job_name, route_env in edit_comparisons(int4):
-            job_dest = dest if job_name == "qwen-edit" else dest.with_name("edit-fp8.avif")
-            job_env = _child_env(cap, route_env)
-            if not _record_cap_job(
-                canvas, checks, job_name, job_dest, _replace_out(args, job_dest), job_env, allocated, seconds,
-            ):
-                failed = True
+        if not _record_cap_job(canvas, checks, name, dest, args, env, allocated, seconds):
+            failed = True
     return 1 if failed else 0
 
 
@@ -399,8 +339,6 @@ def _record_cap_job(
         "seconds_per_image": seconds.get(name),
         "peak_allocated_bytes": body.get("peak_allocated_bytes"),
     }
-    if name.startswith("qwen-edit"):
-        row["edit_route"] = body.get("edit_route", "")
     checks.append(row)
     return ok
 

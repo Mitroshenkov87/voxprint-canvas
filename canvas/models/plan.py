@@ -5,13 +5,11 @@ from dataclasses import dataclass
 from typing import assert_never
 
 from canvas.app.i18n import text
-from canvas.models.edit_route import select_edit_route
 from canvas.models.modes import Mode, Tier
 from canvas.models.pins import (
     DIFFUSERS_PIN,
     PIPELINE_CONTROL,
     PIPELINE_CONTROL_INPAINT,
-    PIPELINE_EDIT,
     PIPELINE_IMG2IMG,
     PIPELINE_INPAINT,
     PIPELINE_TEXT,
@@ -102,17 +100,6 @@ def build_plan(catalog: Catalog, screened: ScreenedInput, tier: Tier) -> CallPla
         pipeline = PIPELINE_CONTROL_INPAINT if has_mask else PIPELINE_CONTROL
         return _plan(
             mode, tier, pipeline, (turbo, control), turbo.steps, turbo.guidance_scale, turbo.text_encoder_offload,
-        )
-    if mode is Mode.INSTRUCTION:
-        edit = select_edit_route(catalog, tier)
-        if edit.quant == "int4":
-            offload = "encode-then-unload"
-        elif tier is Tier.GB16:
-            offload = "group-offload"
-        else:
-            offload = edit.text_encoder_offload
-        return _plan(
-            mode, tier, PIPELINE_EDIT, (edit,), edit.steps, edit.guidance_scale, offload,
         )
     assert_never(mode)
 

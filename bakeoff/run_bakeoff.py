@@ -68,14 +68,14 @@ Q_NEG_TUNED = Q_NEG_OFFICIAL + (
 )
 
 Z_ARMS = ["z_bf16", "z_fp8"]
-ALL_ARMS = ["z_bf16", "z_fp8", "q_bf16", "q_tuned", "q_fp8", "q_int4"]
+ALL_ARMS = ["z_bf16", "z_fp8", "q_bf16", "q_tuned", "q_fp8"]
 
 
 @dataclass
 class Arm:
     name: str
     family: str  # "z" or "q"
-    quant: str  # "bf16", "fp8-forge", "int4"
+    quant: str  # "bf16", "fp8-forge"
     subset: bool
     width: int
     height: int
@@ -97,8 +97,6 @@ def default_arms() -> dict[str, Arm]:
                        notes=["true CFG 4.5 + official negative + English anatomy terms"]),
         "q_fp8": Arm("q_fp8", "q", "fp8-forge", False, 1328, 1328, 50, 4.0, Q_NEG_OFFICIAL, max_min=80,
                      notes=["Forge FP8 dequantized to BF16 on A100. Quality gate is still pending, so this arm is not a confirmed 24 GB quant."]),
-        "q_int4": Arm("q_int4", "q", "int4", False, 1328, 1328, 50, 4.0, Q_NEG_OFFICIAL, max_min=60,
-                      notes=["SVDQuant INT4 via Nunchaku: 16 GB tier"]),
     }
 
 
@@ -285,25 +283,6 @@ class Runner:
         import torch
 
         a = self.args
-        if arm.quant == "int4":
-            int4 = Path(os.path.expanduser(a.q_int4_dir))
-            if not int4.exists() or not safetensor_list(int4):
-                return f"deferred: no INT4 build at {int4}"
-            try:
-                from nunchaku import NunchakuQwenImageTransformer2DModel  # type: ignore
-            except Exception as exc:  # noqa: BLE001
-                return f"deferred: nunchaku not importable ({type(exc).__name__})"
-            from diffusers import QwenImagePipeline
-
-            self.unload()
-            files = safetensor_list(int4)
-            transformer = NunchakuQwenImageTransformer2DModel.from_pretrained(str(files[0]))
-            self.pipe = QwenImagePipeline.from_pretrained(
-                a.q_repo, revision=a.q_rev, transformer=transformer, torch_dtype=torch.bfloat16
-            ).to("cuda")
-            self.family, self.loaded_quant = "q", "int4"
-            return None
-
         if self.family != arm.family or self.loaded_quant not in ("bf16", None) and arm.quant == "bf16":
             self.unload()
             if arm.family == "z":
@@ -737,7 +716,7 @@ def summarise(out: Path, prompts: list[dict[str, Any]], notes: list[str], args: 
         delta = {k: round(mb[k] - ma[k], 4) for k in ma if isinstance(ma[k], (int, float)) and isinstance(mb.get(k), (int, float)) and k != "images"}
         return {"a": a, "b": b, "common_images": len(common), "a_metrics": ma, "b_metrics": mb, "delta_b_minus_a": delta}
 
-    pairs = [p for p in (paired("z_bf16", "q_bf16"), paired("z_bf16", "q_fp8"), paired("z_fp8", "q_int4"),
+    pairs = [p for p in (paired("z_bf16", "q_bf16"), paired("z_bf16", "q_fp8"),
                          paired("q_bf16", "q_tuned"), paired("z_bf16", "z_fp8"), paired("q_bf16", "q_fp8")) if p]
 
     def status(name: str) -> str:
@@ -753,8 +732,8 @@ def summarise(out: Path, prompts: list[dict[str, Any]], notes: list[str], args: 
         "16gb": {
             "z": "z_bf16",
             "z_note": "Forge rejected Z-Image FP8 (LPIPS 0.14-0.22 vs BF16). The 16 GB tier is BF16.",
-            "q": "q_int4" if status("q_int4") in ("done", "partial") else None,
-            "q_note": None if status("q_int4") in ("done", "partial") else "Qwen 16 GB tier deferred (no INT4 build)",
+            "q": None,
+            "q_note": "Qwen-Image-2512 is measured on the 24 GB arms.",
         },
     }
     summary = {
@@ -899,7 +878,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--z-encoder-fp8", default="", help="Forge qwen3-4b-text-encoder-fp8.safetensors (default: search ~/forge-out)")
     p.add_argument("--q-fp8-dir", default="~/forge-out/canvas/qwen-image-2512/fp8")
     p.add_argument("--q-encoder-fp8", default="", help="shared Qwen2.5-VL FP8 encoder file (optional)")
-    p.add_argument("--q-int4-dir", default="~/forge-out/canvas/qwen-image-2512/int4")
     p.add_argument("--force", action="store_true", help="regenerate images that already exist for the chosen arms")
     p.add_argument("--score-only", action="store_true")
     p.add_argument("--no-score", action="store_true")

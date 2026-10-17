@@ -301,5 +301,6 @@ def test_manage_models_opens_voxprint_mdl(app, monkeypatch):
     window = MainWindow(lambda prompt, mode, fmt: "ok", Tier.GB16)
     assert window.models_button.text() == "Manage models"
     window.models_button.click()
-    assert seen == [["voxprint-mdl", "--gui", "--app", "canvas"]]
+    assert seen[0][1:] == ["--gui", "--app", "canvas"]
+    assert seen[0][0].replace("\\", "/").endswith(("voxprint-mdl", "voxprint-mdl.exe"))
     window.close()

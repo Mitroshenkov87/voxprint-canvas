@@ -404,6 +404,16 @@ def test_installers_resolve_numpy_from_pypi_and_pin_cuda_torch():
         assert "TensorRT is skipped on Python 3.14." in script
     assert "PyTorch wheels are already downloaded." in linux
     assert "voxprint-wheels-" in windows
+    assert 'Join-Path $Work ("voxprint-wheels-' in windows
+    assert 'Join-Path $env:TEMP ("voxprint-wheels-' not in windows
+    assert 'Join-Path $Work ("voxprint-gpu-probe-' in windows
+    assert 'Join-Path $env:TEMP ("voxprint-gpu-probe-' not in windows
+    assert "UV_PYTHON_INSTALL_DIR" in windows
+    assert "UV_PYTHON_BIN_DIR" in windows
+    assert "UV_CACHE_DIR" in windows
+    assert "PYTHONNOUSERSITE" in windows
+    assert "--without-pip" in windows
+    assert "Assert-AdminPath" in windows
     assert "python install 3.14 --reinstall" in windows
     assert "Get-Command py" not in windows
     assert "voxprint-gpu-probe-" in windows

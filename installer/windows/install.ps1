@@ -16,6 +16,19 @@ $RuntimePy = Join-Path $Runtime "Scripts\python.exe"
 $RuntimeCfg = Join-Path $Runtime "pyvenv.cfg"
 $RuntimeSite = Join-Path $Runtime "Lib\site-packages"
 $Fetch = $null
+$PythonDir = Join-Path $App "python"
+$PythonBin = Join-Path $PythonDir "bin"
+$UvCache = Join-Path $App "uv-cache"
+$PipCache = Join-Path $App "pip-cache"
+$Work = Join-Path $App "setup-work"
+$AdminTemp = Join-Path $App "setup-temp"
+$UserRoots = @()
+foreach ($envName in @("LOCALAPPDATA", "APPDATA", "TEMP", "TMP")) {
+    $raw = [Environment]::GetEnvironmentVariable($envName)
+    if (-not [string]::IsNullOrWhiteSpace($raw)) {
+        $UserRoots += [System.IO.Path]::GetFullPath($raw)
+    }
+}
 $Trt = Join-Path $Shared "tensorrt-10"
 $WindowsPythonUrl = "https://www.python.org/ftp/python/3.14.8/python-3.14.8-amd64.exe"
 $TorchIndex = "https://download.pytorch.org/whl/cu130"
@@ -59,13 +72,37 @@ if gpu not in found or name in found:
     sys.exit(1)
 sys.exit(0)
 "@
-    $probe = Join-Path $env:TEMP ("voxprint-gpu-probe-" + [guid]::NewGuid().ToString("n") + ".py")
+    New-Item -ItemType Directory -Force $Work | Out-Null
+    $probe = Join-Path $Work ("voxprint-gpu-probe-" + [guid]::NewGuid().ToString("n") + ".py")
     Set-Content -LiteralPath $probe -Value $code -Encoding ascii
     try {
+        Assert-AdminPath $Python
+        Assert-AdminPath $probe
         & $Python $probe | Out-Null
         return $LASTEXITCODE -eq 0
     } finally {
         Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Assert-AdminPath([string]$Path) {
+    # Elevated setup only runs files under the install folder. Program Files
+    # needs admin rights to write. Profile, roaming, and temp folders do not.
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        throw "Setup will not run an empty program path."
+    }
+    $full = [System.IO.Path]::GetFullPath($Path)
+    $root = [System.IO.Path]::GetFullPath($App)
+    if (-not $root.EndsWith('\')) { $root = $root + '\' }
+    if (-not $full.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Setup will not run a program outside the install folder."
+    }
+    foreach ($userRoot in $UserRoots) {
+        $prefix = $userRoot
+        if (-not $prefix.EndsWith('\')) { $prefix = $prefix + '\' }
+        if ($full.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "Setup will not run a program from a user-writable folder."
+        }
     }
 }
 
@@ -120,6 +157,8 @@ function Test-SuiteGpuFiles([string]$SitePackages) {
 }
 
 function Install-SuiteGpuPackages([string]$Python, [string]$Target) {
+    Assert-AdminPath $Python
+    Assert-AdminPath $Uv
     New-Item -ItemType Directory -Force $Fetch | Out-Null
     $into = @("--python", $Python, "--find-links", $Fetch, "-c", $Constraints)
     if (-not [string]::IsNullOrWhiteSpace($Target)) {
@@ -146,9 +185,15 @@ function Clear-WheelFetch {
     if ($Fetch -and (Test-Path -LiteralPath $Fetch)) {
         Remove-Item -LiteralPath $Fetch -Recurse -Force -ErrorAction SilentlyContinue
     }
+    foreach ($dir in @($AdminTemp, $UvCache, $PipCache)) {
+        if ($dir -and (Test-Path -LiteralPath $dir)) {
+            Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 function Invoke-Py([string[]]$ArgList) {
+    Assert-AdminPath $Py
     & $Py @ArgList
     if ($LASTEXITCODE -ne 0) {
         throw "Setup stopped."
@@ -169,12 +214,28 @@ try {
     if (-not (Test-Path $uv)) {
         throw "uv.exe is not bundled next to install.ps1. Install Python 3.14 from $WindowsPythonUrl and run this setup again."
     }
+    New-Item -ItemType Directory -Force $PythonDir, $PythonBin, $UvCache, $PipCache, $Work, $AdminTemp | Out-Null
+    # Keep uv, pip, and child temp files inside the install folder. A user
+    # uv.toml or the default profile install dir must not redirect them.
+    $env:UV_PYTHON_INSTALL_DIR = $PythonDir
+    $env:UV_PYTHON_BIN_DIR = $PythonBin
+    $env:UV_CACHE_DIR = $UvCache
+    $env:UV_NO_CONFIG = "1"
+    $env:UV_MANAGED_PYTHON = "1"
+    $env:PYTHONNOUSERSITE = "1"
+    $env:PIP_CACHE_DIR = $PipCache
+    $env:TEMP = $AdminTemp
+    $env:TMP = $AdminTemp
+    foreach ($name in @("PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP", "PYTHONUSERBASE")) {
+        if (Test-Path "Env:$name") { Remove-Item "Env:$name" }
+    }
     Write-Host "Installing Python with uv..."
-    & $uv python install 3.14 --reinstall
+    Assert-AdminPath $uv
+    & $uv python install 3.14 --reinstall --no-registry --install-dir $PythonDir
     if ($LASTEXITCODE -ne 0) {
         throw "uv could not install Python 3.14. Install Python 3.14 from $WindowsPythonUrl and run this setup again."
     }
-    $found = (& $uv python find 3.14 | Out-String).Trim()
+    $found = (& $uv python find 3.14 --managed-python | Out-String).Trim()
     if ($LASTEXITCODE -ne 0 -or -not $found) {
         throw "uv installed Python 3.14 but the interpreter could not be found. Install Python 3.14 from $WindowsPythonUrl and run this setup again."
     }
@@ -182,6 +243,7 @@ try {
     if (-not (Test-Path $Base)) {
         throw "uv reported Python at '$Base', but that file does not exist. Install Python 3.14 from $WindowsPythonUrl and run this setup again."
     }
+    Assert-AdminPath $Base
 
     # The shared runtime is user-writable. Never execute its python.exe.
     # Packages are installed with the uv interpreter via --target.
@@ -193,10 +255,13 @@ try {
             throw "The suite runtime is already installed. Canvas will not replace it."
         }
         New-Item -ItemType Directory -Force $Shared | Out-Null
-        & $Base -m venv $Runtime
+        # --without-pip keeps venv from launching the new interpreter. That
+        # interpreter lives in the user-writable shared tree.
+        & $Base -m venv --without-pip $Runtime
         if ($LASTEXITCODE -ne 0) { throw "Python could not create the suite runtime." }
     }
 
+    Assert-AdminPath $Base
     if (-not (Test-Path $Py)) {
         & $Base -m venv $Venv
         if ($LASTEXITCODE -ne 0) { throw "Python could not create the environment." }
@@ -220,7 +285,7 @@ try {
     if (-not (Test-Path $Uv)) {
         throw "uv 0.13.0 is required to install PyTorch."
     }
-    $Fetch = Join-Path $env:TEMP ("voxprint-wheels-" + [guid]::NewGuid().ToString("n"))
+    $Fetch = Join-Path $Work ("voxprint-wheels-" + [guid]::NewGuid().ToString("n"))
     New-Item -ItemType Directory -Force $Fetch | Out-Null
     $runtimeReady = Test-SuiteGpuFiles $RuntimeSite
     $appReady = Test-SuiteGpuPackages $Py
@@ -254,6 +319,8 @@ try {
         Install-SuiteGpuPackages $Py ""
         if (-not (Test-SuiteGpuPackages $Py)) { throw "Setup stopped." }
     }
+    Assert-AdminPath $Uv
+    Assert-AdminPath $Py
     & $Uv pip install --python $Py --index-url https://pypi.org/simple "torchao==0.18.0"
     if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
     & $Uv pip install --python $Py --index-url https://pypi.org/simple -c $Constraints "${App}[gen]"

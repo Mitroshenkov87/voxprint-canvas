@@ -267,6 +267,36 @@ jobs:
           & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script
           if ($LASTEXITCODE -ne 0) { throw "install.ps1 exited $LASTEXITCODE" }
           Write-Host "install.ps1 exited 0"
+          $cfgPath = Join-Path "installer\windows\staging\venv" "pyvenv.cfg"
+          if (-not (Test-Path -LiteralPath $cfgPath)) { throw "venv pyvenv.cfg is missing" }
+          $home = $null
+          $executable = $null
+          foreach ($line in Get-Content -LiteralPath $cfgPath) {
+            if ($line.StartsWith("home = ")) { $home = $line.Substring(7).Trim() }
+            if ($line.StartsWith("executable = ")) { $executable = $line.Substring(13).Trim() }
+          }
+          if ($executable) {
+            $base = $executable
+          } elseif ($home) {
+            $base = Join-Path $home "python.exe"
+          } else {
+            throw "pyvenv.cfg has no base interpreter"
+          }
+          $install = (Resolve-Path "installer\windows\staging").Path
+          $baseFull = [System.IO.Path]::GetFullPath($base)
+          $prefix = $install.TrimEnd('\') + '\'
+          if (-not $baseFull.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "venv base interpreter is outside the install dir: $baseFull"
+          }
+          foreach ($rootName in @("LOCALAPPDATA", "APPDATA", "TEMP", "TMP")) {
+            $root = [Environment]::GetEnvironmentVariable($rootName)
+            if ([string]::IsNullOrWhiteSpace($root)) { continue }
+            $user = [System.IO.Path]::GetFullPath($root).TrimEnd('\') + '\'
+            if ($baseFull.StartsWith($user, [System.StringComparison]::OrdinalIgnoreCase)) {
+              throw "venv base interpreter is in a user-writable folder: $baseFull"
+            }
+          }
+          Write-Host "venv base interpreter is under the install dir: $baseFull"
       - name: A failing install.ps1 makes Setup exit non-zero
         shell: pwsh
         run: |

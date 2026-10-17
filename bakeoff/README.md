@@ -4,7 +4,7 @@ Measures stock **Z-Image-Turbo** on the rented A100 80GB, inside a hard time bud
 (`--deadline-min 150`). The default `--arms` list is `z_bf16,z_fp8`. The
 Qwen-Image-2512 arms stay in the harness and run only when named on `--arms`.
 Canvas does not ship Qwen-Image-2512 as a generator. Runs after Model Forge
-parts A+B and before part D, so Forge Qwen FP8/INT4 builds are normally absent: those
+parts A+B and before part D, so Forge Qwen FP8 builds are normally absent: those
 arms are skipped cleanly and can be re-run alone later; their results merge into the
 same summary.
 
@@ -17,7 +17,6 @@ same summary.
 | `q_bf16` | Qwen-Image-2512 `25468b9` | native BF16, fully on GPU (main Qwen arm) | all 105 | 1328x1328, 50 steps, true CFG 4.0, official negative | 80 |
 | `q_tuned` | Qwen-Image-2512 | native BF16 | first 40 (`--subset-n`) | true CFG 4.5, official negative + English anatomy terms | 28 |
 | `q_fp8` | Qwen-Image-2512 | Forge part D FP8 (`--q-fp8-dir`, default `~/forge-out/canvas/qwen-image-2512/fp8`). Quality gate is still pending | all 105 | as `q_bf16` | 80 |
-| `q_int4` | Qwen-Image-2512 | official SVDQuant INT4 via Nunchaku (`--q-int4-dir`) | all 105 | as `q_bf16` | 60 |
 
 FP8 files use the Forge `voxprint-fp8-v1` format (float8_e4m3fn + `<name>.scale_weight`)
 and are dequantized to BF16 on the A100 (no FP8 tensor cores), so FP8 arms measure
@@ -102,7 +101,7 @@ Four rules for every bake-off question (`showcase`, `metrics` for v1 and v2,
    slice that fit. Arms that do not fit are stored as `skipped` with reason
    `outside the budget`. Planning estimates, used only to size the run: Z-Image
    3 s at 1024×1024, Qwen 50 s at 1328×1328, then scaled by pixels; a family load
-   is 180 s for Z and 240 s for Qwen; FP8 adds 60 s and INT4 adds 180 s. The same
+   is 180 s for Z and 240 s for Qwen; FP8 adds 60 s. The same
    family and quant does not reload. Showcase scoring reserve is 0. A 25-minute
    showcase budget fits both default Z-Image arms. The same budget with
    `--arms z_bf16,q_bf16` fits both full arms (estimate 19.44 min). A 12-minute
@@ -159,7 +158,7 @@ python bakeoff/run_bakeoff.py --deadline-min 150 \
   --z-fp8 ~/forge-out/<part-A>/zimage-turbo-transformer-fp8.safetensors \
   --z-encoder-fp8 ~/forge-out/<part-A>/qwen3-4b-text-encoder-fp8.safetensors
 # after part D: tier arms only, merged into the same results/
-python bakeoff/run_bakeoff.py --arms q_fp8,q_int4 --deadline-min 120 --review ''
+python bakeoff/run_bakeoff.py --arms q_fp8 --deadline-min 120 --review ''
 python bakeoff/run_bakeoff.py --score-only        # finish scoring if the deadline cut it
 ```
 
@@ -209,6 +208,5 @@ into the blind review pack.
 ## Decision
 
 Qwen-Image-2512 is not a Canvas generator. Z-Image-Turbo BF16 is the text-to-image
-generator on every tier. Z-Image base stays the 24 GB Creative mode. Qwen-Image-Edit-2511
-is the instruction editor on 16 GB and on 24 GB. The `q_*` arms remain so an operator can still
+generator on every tier. Z-Image base stays the 24 GB Creative mode. The `q_*` arms remain so an operator can still
 measure Qwen-Image-2512; they are not a product plan.

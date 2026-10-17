@@ -17,7 +17,6 @@ MIN_COMPUTE_CAPABILITY = (8, 9)
 
 RESPONSIBILITY = text("notice.responsibility", "en")
 THIRD_PARTY_NOTICE = text("notice.third_party", "en")
-INSTRUCTION_EDIT_UNAVAILABLE = text("edit.unavailable", "en")
 
 ENLARGE_NAME = "VOXPrint AI Enlarge"
 ENLARGE_HINT = text("enlarge.hint", "en", name=ENLARGE_NAME)

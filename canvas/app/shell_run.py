@@ -10,7 +10,6 @@ from canvas.infra.paths import models_dir
 from canvas.models.loader import ModelNotReady, ZImageGenerator
 from canvas.models.mdl_registry import selectable
 from canvas.models.modes import Tier
-from canvas.models.nunchaku import NunchakuUnavailable
 from canvas.models.plan import BaseNotSelected, ModeUnavailable
 from canvas.models.provision import DownloadDeclined
 from canvas.models.registry import load_catalog
@@ -19,7 +18,6 @@ from canvas.models.snapshots import SnapshotError
 from canvas.pipeline.bf16_schedule import VramRefused
 from canvas.pipeline.enhance import open_rewriter, resolve_prompt, rewrite_text
 from canvas.pipeline.pipeline import CoolingDown, EnlargeMissing, JobError, Pipeline
-from canvas.pipeline.schedule import SystemMemoryRefused
 from canvas.safety.gate import AgeGate, SafetyError, SafetyUnavailable
 from canvas.safety.image import RawImage
 from canvas.safety.inputs import PendingInput
@@ -91,8 +89,6 @@ class ShellRunner:
             SnapshotError,
             DownloadDeclined,
             VramRefused,
-            SystemMemoryRefused,
-            NunchakuUnavailable,
             EnlargeError,
             OSError,
         ) as exc:

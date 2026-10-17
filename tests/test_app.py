@@ -26,13 +26,7 @@ def test_selftest_register_and_update(monkeypatch, tmp_path, capsys):
     assert report["ok"] is False
     assert report["encoders"] == {"avif": True, "jxl": True, "webp": True}
     assert isinstance(report["models"], list) and report["models"]
-    assert report["instruction_edit"] == "unavailable"
-    others = [row for row in report["models"] if row["id"] != "qwen-image-edit-2511-fp8"]
-    assert all(row["detail"] == "not_downloaded" and row["ok"] for row in others)
-    edit = next(row for row in report["models"] if row["id"] == "qwen-image-edit-2511-fp8")
-    assert edit["ok"] is True
-    assert edit["detail"] == "unavailable"
-    assert edit["mirror_status"] == "published"
+    assert all(row["detail"] == "not_downloaded" and row["ok"] for row in report["models"])
     assert all(row["detail"] == "not_downloaded" and row["ok"] for row in report["classifiers"])
     assert report["deep"] is False
     assert isinstance(report["notes"], list)

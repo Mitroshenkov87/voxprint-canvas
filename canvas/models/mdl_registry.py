@@ -44,3 +44,48 @@ def load_models() -> tuple[Model, ...]:
 def selectable() -> tuple[Model, ...]:
     """Return models a person can pick. Unavailable placeholders are left out."""
     return tuple(model for model in load_models() if not model.unavailable)
+
+
+def enlarge_manifest_path() -> Path | None:
+    """Return Enlarge's ``mdl.json`` when the MDL registry lists it."""
+    try:
+        installed = discover()
+    except CatalogError:
+        return None
+    for app in installed:
+        if app.id != "enlarge":
+            continue
+        candidate = app.path / "mdl.json"
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def enlarge_download_bytes() -> int | None:
+    """Return the Enlarge download size in bytes.
+
+    The figure is the sum of file sizes in the registered Enlarge manifest.
+    The same digest is counted once. ``None`` means the registry has no size.
+    """
+    path = enlarge_manifest_path()
+    if path is None:
+        return None
+    try:
+        manifest = load_manifest(path)
+    except CatalogError:
+        return None
+    if manifest.app != "enlarge":
+        return None
+    seen: set[str] = set()
+    total = 0
+    for model in manifest.models:
+        if model.unavailable:
+            continue
+        for item in model.files:
+            if item.size <= 0 or item.sha256 in seen:
+                continue
+            seen.add(item.sha256)
+            total += item.size
+    if total <= 0:
+        return None
+    return total

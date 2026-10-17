@@ -48,7 +48,8 @@ QMainWindow#shell, QWidget#shellColumn, QWidget#simpleRoot, QDialog {{
     background: {ROOT_PLAIN}; color: {TEXT};
 }}
 QDialog#setupWizard, QDialog#pictureWizard, QDialog#maskWizard,
-QDialog#addonsWizard, QDialog#diagnosticsWizard {{
+QDialog#addonsWizard, QDialog#diagnosticsWizard,
+QDialog#enlargeConfirm, QDialog#enlargeProgress, QDialog#enlargeError {{
     background: {CARD_PLAIN}; border: 1px solid {CONTROL_BORDER};
 }}
 QLabel {{
@@ -270,14 +271,31 @@ def _choose_ratio(window, combo):
 
 
 def _output(window):
-    button = window.view.root.findChild(QPushButton, "chip-output-4k")
+    chip = window.view.root.findChild(QPushButton, "chip-output-4k")
     reason = window.view.root.findChild(QLabel, "reason-output-4k")
+    install = window.view.root.findChild(QPushButton, "unavailable-output-4k")
     if reason is not None:
         reason.hide()
-    if button is None or button.isEnabled():
+    if install is not None:
+        install.hide()
+    if chip is None or _fourk_available(window):
         return
-    button.setText(text("canvas.output.4k.needs"))
-    _reserve(button, 36)
+    chip.setText(text("canvas.output.4k.needs"))
+    chip.setEnabled(True)
+    _reserve(chip, 36)
+    if getattr(window, "_fourk_wired", False):
+        return
+    chip.clicked.connect(lambda _checked=False: window._offer_enlarge())
+    window._fourk_wired = True
+
+
+def _fourk_available(window):
+    state = window.shell.layout.state
+    if state is None:
+        return False
+    group = state._presets.group("output")
+    option = None if group is None else group.option("4k")
+    return option is not None and option.available
 
 
 def _detail(window):

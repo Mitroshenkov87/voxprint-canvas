@@ -16,7 +16,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PIL import Image, ImageDraw
 from PySide6.QtCore import QSize
 from PySide6.QtGui import QColor, QPainter
-from PySide6.QtWidgets import QApplication, QComboBox, QLabel, QPushButton, QSpinBox, QWidget
+from PySide6.QtWidgets import QApplication, QComboBox, QLabel, QProgressBar, QPushButton, QSpinBox, QWidget
 
 from canvas.models.modes import Tier
 from canvas.ui.shell_layout import open_layout
@@ -53,6 +53,16 @@ def main() -> int:
         _save_dialog(app, window, window.mask_wizard(), destination / f"mask-{language}.png", "mask")
         _save_dialog(app, window, window.addons_wizard(), destination / f"addons-{language}.png", "addons")
         _save_dialog(app, window, window.diagnostics_wizard(), destination / f"check-{language}.png", "check")
+        _save_dialog(
+            app, window, window.enlarge_confirm(), destination / f"enlarge-confirm-{language}.png", "enlarge-confirm"
+        )
+        if language == "ru":
+            progress = window.enlarge_progress()
+            bar = progress.findChild(QProgressBar, "enlargeProgressBar")
+            if bar is not None:
+                bar.setRange(0, 100)
+                bar.setValue(40)
+            _save_dialog(app, window, progress, destination / "enlarge-progress-ru.png", "enlarge-progress")
         window.close()
     return 0
 

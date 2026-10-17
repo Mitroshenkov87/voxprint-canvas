@@ -22,8 +22,8 @@ Status is `done`, `TODO`, `NEEDS OWNER DECISION`, `pending Yitro`, or `removed (
 | Revert | Revert | Simple Revert to my prompt | done |
 | Aspect ratios | Aspect picker | Size: Landscape, Square, or Portrait, then the ratio menu | done |
 | Match a picture's shape | Input size | Use a picture | done |
-| 4K via Enlarge | 4K checkbox | Output: 4K (needs Enlarge) until Enlarge is installed | done |
-| Install Enlarge | Install Enlarge | Install, beside that 4K label | done |
+| 4K via Enlarge | 4K checkbox | Output: 4K. Until Enlarge is installed the chip reads 4K (needs Enlarge). Choosing it confirms, the shared MDL installer runs, and a successful install selects 4K | done |
+| Install Enlarge | Install Enlarge | Confirm on the 4K chip, then the shared MDL installer, with progress and Cancel | done |
 | File type | AVIF, JPEG XL, WebP list | More, then Picture setup: File type | done |
 | Generate | Generate | Simple Generate | done |
 | Status line | Status label | Result sentence | done |

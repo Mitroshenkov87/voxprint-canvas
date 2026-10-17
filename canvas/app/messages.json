@@ -460,6 +460,30 @@
       "en": "4K (needs Enlarge)",
       "ru": "4K (нужен Enlarge)"
     },
+    "canvas.enlarge.title": {
+      "en": "VOXPrint Enlarge",
+      "ru": "VOXPrint Enlarge"
+    },
+    "canvas.enlarge.confirm": {
+      "en": "4K needs VOXPrint Enlarge. Install it?",
+      "ru": "Для 4K нужен VOXPrint Enlarge. Установить?"
+    },
+    "canvas.enlarge.confirm.size": {
+      "en": "4K needs VOXPrint Enlarge (≈ {size}). Install it?",
+      "ru": "Для 4K нужен VOXPrint Enlarge (≈ {size}). Установить?"
+    },
+    "canvas.enlarge.progress": {
+      "en": "Installing VOXPrint Enlarge…",
+      "ru": "Устанавливается VOXPrint Enlarge…"
+    },
+    "canvas.enlarge.progress.bytes": {
+      "en": "Installing VOXPrint Enlarge… {done} of {total}",
+      "ru": "Устанавливается VOXPrint Enlarge… {done} из {total}"
+    },
+    "canvas.enlarge.failed": {
+      "en": "VOXPrint Enlarge could not be installed.",
+      "ru": "Не удалось установить VOXPrint Enlarge."
+    },
     "canvas.expert.preset": {
       "en": "Preset",
       "ru": "Набор"

@@ -10,14 +10,21 @@ from typing import assert_never
 
 from PySide6.QtCore import QUrl
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QApplication, QFileDialog, QMainWindow
+from PySide6.QtWidgets import (
+    QApplication,
+    QButtonGroup,
+    QDialog,
+    QFileDialog,
+    QMainWindow,
+    QPushButton,
+)
 
 from voxprint_common.i18n import add_catalogs, tr
 from voxprint_common.mdl.names import CLI_NAME
 from voxprint_common.ui.expert import ExpertMode
 from voxprint_common.ui.simple_image import Phase, SimpleImageWidget as SimpleWidget
 from canvas.app.i18n import text
-from canvas.app.info import APP_VERSION, ENLARGE_NAME, ENLARGE_RELEASES
+from canvas.app.info import APP_VERSION, ENLARGE_NAME
 from canvas.app.selftest import selftest_report
 from canvas.app.shell_run import RunStopped, ShellRunner, improve_prompt, load_rgb
 from canvas.app.updates import check_for_update
@@ -30,7 +37,23 @@ from canvas.models.sizes import closest_aspect
 from canvas.safety.image import RawImage
 from canvas.safety.inputs import ImageRole, PendingInput
 from canvas.ui.about import AboutDialog
-from canvas.ui.shell_chrome import SHOT_HEIGHT, SHOT_WIDTH, fit_panel, mount, polish, shell_style
+from canvas.ui.enlarge_flow import (
+    EnlargeConfirm,
+    EnlargeError,
+    EnlargeProgress,
+    Installer,
+    enlarge_question,
+    run_shared_enlarge,
+)
+from canvas.ui.shell_chrome import (
+    SHOT_HEIGHT,
+    SHOT_WIDTH,
+    _fourk_available,
+    fit_panel,
+    mount,
+    polish,
+    shell_style,
+)
 from canvas.ui.shell_layout import CanvasShell, PictureJob, job_from
 from canvas.ui.wizards import AddonsWizard, DiagnosticsWizard, MaskWizard, PictureWizard, SetupWizard
 
@@ -57,6 +80,7 @@ class ShellWindow(QMainWindow):
         enlarge: object | None = None,
         runner: Runner | None = None,
         improver: Improver | None = None,
+        installer: Installer | None = None,
     ) -> None:
         """Place the shared screen in the Canvas window.
 
@@ -66,6 +90,7 @@ class ShellWindow(QMainWindow):
             enlarge: Enlarge client. A missing client is opened here.
             runner: Generates one picture. The default uses the pipeline.
             improver: Rewrites the prompt in place. The default uses the same gate.
+            installer: Installs Enlarge. The default uses the shared model queue.
         """
         super().__init__()
         add_catalogs(Path(__file__).resolve().parent / "locales")
@@ -82,6 +107,7 @@ class ShellWindow(QMainWindow):
             def improver(prompt: str) -> str:
                 return improve_prompt(gate=shell.gate.age_gate, prompt=prompt, tier=tier)
         self._improver = improver
+        self._installer = installer if installer is not None else run_shared_enlarge
         self._picture: Path | None = None
         self._mask: RawImage | None = None
         self._pictures: dict[str, str] = {}
@@ -185,6 +211,14 @@ class ShellWindow(QMainWindow):
     def diagnostics_wizard(self) -> DiagnosticsWizard:
         """The PC check. It does not run until a button is pressed."""
         return DiagnosticsWizard(self, self._run_check, self._run_update)
+
+    def enlarge_confirm(self) -> EnlargeConfirm:
+        """The question shown when 4K is chosen before Enlarge is installed."""
+        return EnlargeConfirm(self, enlarge_question())
+
+    def enlarge_progress(self) -> EnlargeProgress:
+        """The install progress, with Cancel."""
+        return EnlargeProgress(self)
 
     def _open_setup(self) -> None:
         self.setup_wizard().exec()
@@ -355,7 +389,50 @@ class ShellWindow(QMainWindow):
             self.set_expert(not self._expert.enabled())
             return
         if command_id == "install.enlarge":
-            QDesktopServices.openUrl(QUrl(ENLARGE_RELEASES))
+            self._offer_enlarge()
+
+    def _offer_enlarge(self) -> None:
+        if _fourk_available(self):
+            self._select_4k()
+            return
+        dialog = self.enlarge_confirm()
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        self._install_enlarge()
+
+    def _install_enlarge(self) -> None:
+        progress = self.enlarge_progress()
+        progress.show()
+        app = QApplication.instance()
+        if isinstance(app, QApplication):
+            app.processEvents()
+        outcome = self._installer(progress)
+        progress.close()
+        if outcome == "ready":
+            self._select_4k()
+            return
+        if outcome == "failed":
+            EnlargeError(self).exec()
+            return
+        if outcome == "cancelled":
+            return
+        assert_never(outcome)
+
+    def _select_4k(self) -> None:
+        state = self.shell.layout.state
+        if state is None:
+            return
+        state._presets = state._presets.with_available("output", "4k", available=True)
+        chip = self.view.root.findChild(QPushButton, "chip-output-4k")
+        if chip is not None:
+            chip.setEnabled(True)
+            if not chip.isCheckable():
+                chip.setCheckable(True)
+            group = self.view._chip_groups.get("output")
+            if isinstance(group, QButtonGroup) and chip not in group.buttons():
+                group.addButton(chip)
+        self.shell.layout.choose("output", "4k")
+        self.view.refresh()
 
     def _on_history(self, action: str, item_id: str) -> None:
         path = self._pictures.get(item_id)

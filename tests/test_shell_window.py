@@ -10,10 +10,12 @@ import pytest
 pytest.importorskip("PySide6")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import QTimer
 from PySide6.QtGui import QAction, QFont, QFontMetrics
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
+    QDialog,
     QLabel,
     QPlainTextEdit,
     QPushButton,
@@ -24,12 +26,15 @@ from PySide6.QtWidgets import (
 )
 
 from canvas.app.i18n import text
+from canvas.models.mdl_registry import enlarge_download_bytes
+from canvas.ui.enlarge_flow import enlarge_question
 from canvas.models.modes import Tier
 from canvas.ui.shell_layout import open_layout
 from canvas.ui.shell_screen import ShellWindow
 from tests.fakes import World
 from tools.grab_shell_screens import prepare
 from voxprint_common.i18n import set_language, tr
+from voxprint_common.mdl.present import format_size
 from voxprint_common.suite_settings import set_expert_mode
 from voxprint_common.ui.simple_image import Phase
 
@@ -48,9 +53,16 @@ def home(monkeypatch, tmp_path: Path):
     set_language("en")
 
 
-def _window(home: Path, *, runner=None, improver=None) -> ShellWindow:
-    shell = open_layout(home / "state", gate=World().gate(), enlarge_installed=False)
-    return ShellWindow(shell, tier=Tier.GB16, enlarge=object(), runner=runner, improver=improver)
+def _window(home: Path, *, runner=None, improver=None, installer=None, enlarge_installed: bool = False) -> ShellWindow:
+    shell = open_layout(home / "state", gate=World().gate(), enlarge_installed=enlarge_installed)
+    return ShellWindow(
+        shell,
+        tier=Tier.GB16,
+        enlarge=object(),
+        runner=runner,
+        improver=improver,
+        installer=installer,
+    )
 
 
 def test_simple_mode_hides_expert_words_and_keeps_picture_tools(app, home: Path) -> None:
@@ -88,12 +100,12 @@ def test_simple_mode_hides_expert_words_and_keeps_picture_tools(app, home: Path)
     detail = window.findChild(QPushButton, "chip-detail-light")
     assert detail is not None and not detail.isVisible()
     fourk = window.findChild(QPushButton, "chip-output-4k")
-    assert fourk is not None and not fourk.isEnabled()
-    assert "Enlarge" in fourk.text()
+    assert fourk is not None and fourk.isEnabled()
+    assert fourk.text() == "4K (needs Enlarge)"
     reason = window.findChild(QLabel, "reason-output-4k")
     assert reason is not None and not reason.isVisible()
     install = window.findChild(QPushButton, "unavailable-output-4k")
-    assert install is not None and install.isVisible()
+    assert install is not None and not install.isVisible()
     footer = window.findChild(QLabel, "footer")
     assert footer is not None and footer.text() == text("notice.responsibility")
     window.resize(1280, 800)
@@ -297,6 +309,21 @@ def test_russian_buttons_keep_their_full_labels(app, home: Path, monkeypatch) ->
     assert setup.findChild(QPushButton, "setup-variation-varied").text() == "Смелее"
     revert = window.findChild(QPushButton, "revertPrompt")
     assert revert is not None and revert.text() == "Вернуть мой запрос"
+    fourk = window.findChild(QPushButton, "chip-output-4k")
+    assert fourk is not None and fourk.isEnabled() and fourk.text() == "4K (нужен Enlarge)"
+    install = window.findChild(QPushButton, "unavailable-output-4k")
+    assert install is not None and not install.isVisible()
+    question = window.enlarge_confirm()
+    amount = enlarge_download_bytes()
+    expected = (
+        text("canvas.enlarge.confirm")
+        if amount is None
+        else text("canvas.enlarge.confirm.size", size=format_size(amount))
+    )
+    assert question.findChild(QLabel, "enlargePrompt").text() == expected
+    assert question.findChild(QPushButton, "enlargeInstall").text() == "Установить"
+    assert question.findChild(QPushButton, "enlargeCancel").text() == "Отмена"
+    question.close()
     restyle = setup.findChild(QLabel, "setup-hint-restyle")
     depth = setup.findChild(QLabel, "setup-hint-depth")
     assert restyle is not None and depth is not None
@@ -322,3 +349,138 @@ def test_ui_sources_do_not_name_the_placeholder_models() -> None:
     catalog = json.loads(Path("canvas/mdl.json").read_text(encoding="utf-8"))
     for row in catalog["models"]:
         assert row["id"].casefold() not in blob
+
+
+def _dismiss(window: ShellWindow, button_name: str) -> None:
+    def press() -> None:
+        dialog = window.findChild(QDialog, "enlargeConfirm")
+        assert dialog is not None
+        dialog.findChild(QPushButton, button_name).click()
+
+    QTimer.singleShot(0, press)
+    window.findChild(QPushButton, "chip-output-4k").click()
+
+
+def test_cancelling_enlarge_stays_on_standard(app, home: Path) -> None:
+    called: list[str] = []
+    window = _window(home, installer=lambda _progress: called.append("ran") or "ready")
+    window.show()
+    app.processEvents()
+    seen: dict[str, str] = {}
+
+    def cancel() -> None:
+        dialog = window.findChild(QDialog, "enlargeConfirm")
+        assert dialog is not None
+        seen["prompt"] = dialog.findChild(QLabel, "enlargePrompt").text()
+        assert dialog.findChild(QPushButton, "enlargeInstall").text() == "Install"
+        assert dialog.findChild(QPushButton, "enlargeCancel").text() == "Cancel"
+        dialog.findChild(QPushButton, "enlargeCancel").click()
+
+    QTimer.singleShot(0, cancel)
+    window.findChild(QPushButton, "chip-output-4k").click()
+    assert called == []
+    assert seen["prompt"] == text("canvas.enlarge.confirm")
+    assert window.shell.layout.presets["output"] == "standard"
+    standard = window.findChild(QPushButton, "chip-output-standard")
+    fourk = window.findChild(QPushButton, "chip-output-4k")
+    assert standard is not None and standard.isChecked()
+    assert fourk is not None and not fourk.isChecked()
+
+
+def test_confirming_enlarge_selects_4k_after_install(app, home: Path) -> None:
+    seen: dict[str, str] = {}
+
+    def installer(progress) -> str:
+        cancel = progress.findChild(QPushButton, "enlargeProgressCancel")
+        label = progress.findChild(QLabel, "enlargeProgressLabel")
+        seen["cancel"] = "" if cancel is None else cancel.text()
+        seen["label"] = "" if label is None else label.text()
+        return "ready"
+
+    window = _window(home, installer=installer)
+    window.show()
+    _dismiss(window, "enlargeInstall")
+    app.processEvents()
+    assert seen["cancel"] == "Cancel"
+    assert seen["label"] == text("canvas.enlarge.progress")
+    fourk = window.findChild(QPushButton, "chip-output-4k")
+    assert fourk is not None and fourk.text() == "4K" and fourk.isEnabled() and fourk.isChecked()
+    assert window.shell.layout.presets["output"] == "4k"
+    install = window.findChild(QPushButton, "unavailable-output-4k")
+    assert install is not None and not install.isVisible()
+
+
+def test_a_failed_enlarge_install_stays_on_standard(app, home: Path) -> None:
+    found: dict[str, str] = {}
+
+    def installer(_progress) -> str:
+        def close() -> None:
+            error = window.findChild(QDialog, "enlargeError")
+            label = None if error is None else error.findChild(QLabel, "enlargeErrorText")
+            found["text"] = "" if label is None else label.text()
+            if error is not None:
+                error.findChild(QPushButton, "enlargeErrorClose").click()
+
+        QTimer.singleShot(0, close)
+        return "failed"
+
+    window = _window(home, installer=installer)
+    window.show()
+    _dismiss(window, "enlargeInstall")
+    assert found["text"] == text("canvas.enlarge.failed")
+    assert window.shell.layout.presets["output"] == "standard"
+    fourk = window.findChild(QPushButton, "chip-output-4k")
+    standard = window.findChild(QPushButton, "chip-output-standard")
+    assert fourk is not None and fourk.text() == "4K (needs Enlarge)" and not fourk.isChecked()
+    assert standard is not None and standard.isChecked()
+    del app
+
+
+def test_an_installed_enlarge_chip_reads_4k(app, home: Path) -> None:
+    window = _window(home, enlarge_installed=True)
+    window.show()
+    app.processEvents()
+    fourk = window.findChild(QPushButton, "chip-output-4k")
+    assert fourk is not None and fourk.text() == "4K" and fourk.isEnabled()
+    assert window.findChild(QPushButton, "unavailable-output-4k") is None
+    fourk.click()
+    app.processEvents()
+    dialog = window.findChild(QDialog, "enlargeConfirm")
+    assert dialog is None or not dialog.isVisible()
+    assert window.shell.layout.presets["output"] == "4k"
+    assert fourk.isChecked()
+
+
+def test_the_enlarge_question_uses_the_registry_size(home: Path) -> None:
+    assert text("canvas.enlarge.confirm", "en") == "4K needs VOXPrint Enlarge. Install it?"
+    assert text("canvas.enlarge.confirm", "ru") == "Для 4K нужен VOXPrint Enlarge. Установить?"
+    assert text("canvas.enlarge.confirm.size", "en") == "4K needs VOXPrint Enlarge (≈ {size}). Install it?"
+    assert enlarge_download_bytes() is None
+    folder = home / "enlarge-app"
+    folder.mkdir()
+    payload = {
+        "schema": 1,
+        "app": "enlarge",
+        "models": [
+            {
+                "id": "weights",
+                "version": "1",
+                "vram_tier": "8gb",
+                "files": [
+                    {
+                        "path": "model.bin",
+                        "size": 1572864,
+                        "sha256": "ab" * 32,
+                        "mirrors": ["https://example.com/model.bin"],
+                    }
+                ],
+            }
+        ],
+    }
+    (folder / "mdl.json").write_text(json.dumps(payload), encoding="utf-8")
+    state = home / "state"
+    state.mkdir(parents=True, exist_ok=True)
+    registry = {"apps": [{"id": "enlarge", "path": str(folder)}]}
+    (state / "installed-apps.json").write_text(json.dumps(registry) + "\n", encoding="utf-8")
+    assert enlarge_download_bytes() == 1572864
+    assert enlarge_question() == text("canvas.enlarge.confirm.size", size=format_size(1572864))

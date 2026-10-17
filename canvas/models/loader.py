@@ -108,6 +108,7 @@ class ZImageGenerator:
         self.embeddings = EmbeddingCache()
         self.probe: PeakVramProbe | None = None
         self.seed = 0
+        self.img2img_strength: float | None = None
         self.models: Path | None = None
         self.ram_gb = ram_gb
 
@@ -141,6 +142,7 @@ class ZImageGenerator:
             return render(
                 plan, folder, screened, width, height, self.tier,
                 seed=self.seed, control_file=control_file, weight_name=weight_name,
+                strength=self.img2img_strength,
             )
         except ImportError as exc:
             raise ModelNotReady(plan) from exc

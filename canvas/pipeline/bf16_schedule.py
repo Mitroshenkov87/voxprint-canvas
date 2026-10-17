@@ -157,7 +157,7 @@ class ScheduleTrace:
 
 def needs_control(mode: Mode) -> bool:
     """Inpaint and the guided modes denoise with ControlNet lite. Text and restyle do not."""
-    if mode is Mode.TEXT or mode is Mode.TEXT_CREATIVE or mode is Mode.RESTYLE or mode is Mode.INSTRUCTION:
+    if mode is Mode.TEXT or mode is Mode.TEXT_CREATIVE or mode is Mode.RESTYLE:
         return False
     if mode is Mode.INPAINT or mode is Mode.OUTPAINT or mode is Mode.POSE or mode is Mode.DEPTH or mode is Mode.EDGE:
         return True

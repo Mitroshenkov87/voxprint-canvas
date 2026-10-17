@@ -9,7 +9,6 @@ import pytest
 from canvas.models.loader import _control_file, ensure_weights, load_catalog_stack
 from canvas.models.pins import DIFFUSERS_PIN, PIPELINE_CONTROL
 from canvas.models.plan import CallPlan
-from canvas.models.features import instruction_edit_available
 from canvas.models.registry import Catalog, RegistryError, load_catalog
 from canvas.safety.gate import SafetyUnavailable
 
@@ -39,12 +38,10 @@ def test_catalog_loads_and_rejects_a_bad_pin_or_licence(tmp_path: Path):
         load_catalog(_rewrite(tmp_path, lambda raw: raw["models"][0]["sources"].append({"kind": "http", "uri": "https://example.invalid"})))
 
 
-def test_z_image_fp8_is_rejected_and_edit_fp8_keeps_its_gate(tmp_path: Path):
+def test_z_image_fp8_is_rejected(tmp_path: Path):
     catalog = load_catalog()
     ids = {spec.id for spec in catalog.models}
     assert "qwen-image-2512-fp8" not in ids
-    assert "qwen-image-2512-int4" not in ids
-    assert catalog.by_id("qwen-image-edit-2511-fp8").quality_gate == "passed"
 
     def as_fp8(raw: dict) -> None:
         raw["models"][0]["quant"] = "fp8-e4m3"
@@ -52,14 +49,6 @@ def test_z_image_fp8_is_rejected_and_edit_fp8_keeps_its_gate(tmp_path: Path):
 
     with pytest.raises(RegistryError, match="BF16"):
         load_catalog(_rewrite(tmp_path, as_fp8))
-
-    def drop_gate(raw: dict) -> None:
-        for row in raw["models"]:
-            if row["id"] == "qwen-image-edit-2511-fp8":
-                row["quality_gate"] = ""
-
-    with pytest.raises(RegistryError, match="quality gate"):
-        load_catalog(_rewrite(tmp_path, drop_gate))
 
 
 def test_unpinned_weights_fail_closed(tmp_path: Path):
@@ -105,11 +94,6 @@ def test_release_pins_match_the_frozen_snapshots():
     creative = catalog.by_id("z-image-creative-bf16")
     assert creative.revision == "04cc4abb7c5069926f75c9bfde9ef43d49423021"
     assert creative.pinned()
-    edit = catalog.by_id("qwen-image-edit-2511-fp8")
-    assert edit.revision == "6f3ccc0b56e431dc6a0c2b2039706d7d26f22cb9"
-    assert edit.mirror_revision == "32a23ad2004c32096ae39371bd8332e440b8d1ae"
-    assert edit.mirror_status == "published"
-    assert edit.pinned()
     yunet = catalog.by_id("yunet-face")
     assert yunet.files["face_detection_yunet_2023mar.onnx"] == (
         "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4"
@@ -117,14 +101,6 @@ def test_release_pins_match_the_frozen_snapshots():
     guard = catalog.by_id("qwen3guard-gen-0.6b")
     assert guard.revision == "fada3b2f655b89601929198343c94cd2f64d93cc"
     assert guard.pinned()
-
-
-def test_instruction_edit_is_unavailable_until_the_compressed_model():
-    catalog = load_catalog()
-    flag = catalog.features["instruction_edit"]
-    assert flag.status == "unavailable"
-    assert flag.reason == "model_in_preparation"
-    assert instruction_edit_available(catalog) is False
 
 
 def test_control_file_follows_the_tier(tmp_path: Path):

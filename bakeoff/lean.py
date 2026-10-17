@@ -26,8 +26,8 @@ SHOWCASE_COUNTS = {
 }
 QUESTION_ARMS = {
     "showcase": ("z_bf16", "q_bf16"),
-    "metrics": ("z_bf16", "q_bf16", "q_tuned", "z_fp8", "q_fp8", "q_int4"),
-    "gate-measurement": ("z_bf16", "q_bf16", "z_fp8", "q_fp8", "q_int4", "q_tuned"),
+    "metrics": ("z_bf16", "q_bf16", "q_tuned", "z_fp8", "q_fp8"),
+    "gate-measurement": ("z_bf16", "q_bf16", "z_fp8", "q_fp8", "q_tuned"),
 }
 ARM_FAMILY = {
     "z_bf16": ("z", "bf16"),
@@ -35,7 +35,6 @@ ARM_FAMILY = {
     "q_bf16": ("q", "bf16"),
     "q_tuned": ("q", "bf16"),
     "q_fp8": ("q", "fp8-forge"),
-    "q_int4": ("q", "int4"),
 }
 # Planning estimates only. Z-Image at 1024 square, Qwen at 1328 square, then scaled by pixels.
 Z_BASE_S = 3.0
@@ -43,7 +42,7 @@ Z_BASE_PX = 1024 * 1024
 Q_BASE_S = 50.0
 Q_BASE_PX = 1328 * 1328
 FAMILY_LOAD_S = {"z": 180.0, "q": 240.0}
-QUANT_EXTRA_S = {"bf16": 0.0, "fp8-forge": 60.0, "int4": 180.0}
+QUANT_EXTRA_S = {"bf16": 0.0, "fp8-forge": 60.0}
 _EXPLICIT = {"nude", "naked", "topless", "lingerie", "erotic", "erotica", "boudoir", "nudity", "nsfw", "porn"}
 _SUMMARY_KEYS = (
     "schema", "generated_utc", "models", "scorers", "gate_rule", "prompt_set", "question",

@@ -271,11 +271,11 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $marker = Join-Path $env:TEMP "voxprint-setup-broke.txt"
+          $marker = "C:\voxprint-setup-broke.txt"
           if (Test-Path $marker) { Remove-Item -Force $marker }
           @(
-            'Set-Content -LiteralPath (Join-Path $env:TEMP "voxprint-setup-broke.txt") -Value "broke"'
-            'exit 7'
+            'Set-Content -LiteralPath "C:\voxprint-setup-broke.txt" -Value "broke"'
+            'exit 9'
           ) | Set-Content -LiteralPath "installer\windows\staging\install.ps1" -Encoding ascii
           if (Test-Path "installer\windows\staging\venv") {
             Remove-Item -Recurse -Force "installer\windows\staging\venv"
@@ -287,9 +287,13 @@ jobs:
           if (-not $iscc) { throw "Inno Setup was not installed" }
           & $iscc "/Odist" "installer\windows\voxprint-canvas.iss"
           if ($LASTEXITCODE -ne 0) { throw "the setup compiler failed" }
-          & "dist\VoxprintCanvasSetup.exe" /VERYSILENT /SUPPRESSMSGBOXES
-          $code = $LASTEXITCODE
+          $log = "C:\voxprint-setup.log"
+          if (Test-Path $log) { Remove-Item -Force $log }
+          $setup = Start-Process -FilePath (Resolve-Path "dist\VoxprintCanvasSetup.exe") -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/SP-","/NORESTART","/LOG=$log" -Wait -PassThru
+          $code = $setup.ExitCode
+          Write-Host "Setup exited $code"
+          if (Test-Path $log) { Get-Content $log -Tail 40 }
           if (-not (Test-Path $marker)) { throw "Setup did not run install.ps1 (exit $code)" }
           if ($code -eq 0) { throw "a broken install.ps1 left Setup at exit 0" }
-          if ($code -ne 7) { throw "Setup exited $code instead of install.ps1's exit 7" }
+          if ($code -ne 9) { throw "Setup exited $code instead of install.ps1's exit 9" }
           Write-Host "Broken install.ps1 made Setup exit $code"

@@ -84,9 +84,6 @@ QSpinBox, QDoubleSpinBox, QComboBox, QLineEdit, QPlainTextEdit {{
 QPushButton[chip="true"]:disabled {{
     color: {TEXT}; background: {CONTROL_BG}; border-color: {CONTROL_BORDER};
 }}
-QPushButton[styleChip="true"] {{
-    padding: 6px 10px;
-}}
 """
 
 
@@ -657,8 +654,7 @@ def _flow_heights(window, enabled):
 
 def _preset_width(window, enabled):
     panel = PANEL_WIDTH + 6 if enabled else 0
-    # 54 is the column margin and the split handle measured at 1280px.
-    return max(160, window.width() - panel - 54)
+    return max(160, window.width() - panel - 24 - 32 - 24)
 
 
 class _Flow(QLayout):
@@ -767,12 +763,6 @@ def _flow_size(item):
     if widget is not None:
         width = max(width, widget.minimumWidth())
         height = max(height, widget.minimumHeight(), widget.sizeHint().height())
-        cap_w = widget.maximumWidth()
-        cap_h = widget.maximumHeight()
-        if cap_w < 16777215:
-            width = min(width, cap_w)
-        if cap_h < 16777215:
-            height = min(height, cap_h)
     return max(width, 1), max(height, 1)
 
 
@@ -784,10 +774,6 @@ def _fit_text(button):
     if button.objectName() == "generate":
         font.setPixelSize(16)
         pad = 22
-    elif str(button.objectName()).startswith("chip-style-") and not str(button.objectName()).endswith("-custom"):
-        pad = 10
-        button.setProperty("styleChip", True)
-        button.setFixedHeight(36)
     elif button.property("chip"):
         pad = 14
     elif button.objectName() in {"expertToggle", "useInput", "deletePicture"}:

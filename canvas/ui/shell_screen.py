@@ -48,7 +48,6 @@ from canvas.ui.enlarge_flow import (
 from canvas.ui.shell_chrome import (
     SHOT_HEIGHT,
     SHOT_WIDTH,
-    _flow_heights,
     _fourk_available,
     fit_panel,
     mount,
@@ -136,15 +135,6 @@ class ShellWindow(QMainWindow):
         self.setCentralWidget(self._split)
         self._chrome_ready = True
         polish(self)
-
-    def resizeEvent(self, event) -> None:  # noqa: N802
-        """Keep each chip row as tall as the current window, and no taller."""
-        super().resizeEvent(event)
-        if self._chrome_ready:
-            for button in self.findChildren(QPushButton):
-                if button.property("styleChip"):
-                    button.setFixedHeight(36)
-            _flow_heights(self, self.view._expert_panel.isVisible())
 
     def set_expert(self, enabled: bool) -> None:
         """Store Expert mode and show or hide the side panel.

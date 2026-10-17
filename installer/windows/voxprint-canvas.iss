@@ -115,7 +115,7 @@ begin
     Exit;
   Exec(
     ExpandConstant('{app}\venv\Scripts\python.exe'),
-    '-m canvas.app.main --unregister-models',
+    '-I -m canvas.app.main --unregister-models',
     ExpandConstant('{app}'),
     SW_HIDE,
     ewWaitUntilTerminated,

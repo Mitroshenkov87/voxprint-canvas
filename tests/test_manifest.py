@@ -532,6 +532,7 @@ def test_installers_resolve_numpy_from_pypi_and_pin_cuda_torch():
     assert "ExpandConstant('{app}\\setup-work\\canvas-install.log')" in post
     assert "ExpandConstant('{localappdata}\\Voxprint\\logs\\canvas-install.log')" in post
     assert "ExecAsOriginalUser" not in uninstall
+    assert "-I -m canvas.app.main --unregister-models" in uninstall
     assert "icacls.exe" not in iss
     assert "CurUninstallStepChanged" in iss
     assert "usUninstall" in iss

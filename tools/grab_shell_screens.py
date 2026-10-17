@@ -10,6 +10,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
+from typing import cast
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -18,7 +19,9 @@ from PySide6.QtCore import QSize
 from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import QApplication, QComboBox, QLabel, QLineEdit, QProgressBar, QPushButton, QSpinBox, QWidget
 
+from canvas.models.mdl_registry import Model
 from canvas.models.modes import Tier
+from canvas.ui import photoshoot_run
 from canvas.ui.shell_layout import open_layout
 from canvas.ui.shell_screen import ShellWindow
 from tests.fakes import World, rgb
@@ -323,10 +326,19 @@ def _save_photoshoot(app: QApplication, window: ShellWindow, path: Path, *, prog
     shot.save(str(path))
 
 
-def _run_progress(app: QApplication, window: ShellWindow, idea: str, path: Path) -> None:
-    import canvas.ui.photoshoot_run as photoshoot_run
+def _ready_models() -> tuple[Model, ...]:
+    return cast(tuple[Model, ...], (object(),))
 
-    photoshoot_run.selectable = lambda: (object(),)
+
+def _button(window: ShellWindow, name: str) -> QPushButton:
+    button = window.findChild(QPushButton, name)
+    if not isinstance(button, QPushButton):
+        raise SystemExit(f"missing {name}")
+    return button
+
+
+def _run_progress(app: QApplication, window: ShellWindow, idea: str, path: Path) -> None:
+    photoshoot_run.selectable = _ready_models
     calls = {"n": 0}
 
     def runner(job, inputs):
@@ -340,9 +352,9 @@ def _run_progress(app: QApplication, window: ShellWindow, idea: str, path: Path)
     window.photoshoot.writer = lambda _prompt: _scenario(idea)
     window.setFixedSize(SHOT)
     window.show()
-    window.findChild(QPushButton, "photoshootMode").click()
+    _button(window, "photoshootMode").click()
     app.processEvents()
-    window.findChild(QPushButton, "photoshootCreate").click()
+    _button(window, "photoshootCreate").click()
     app.processEvents()
     if calls["n"] < 2 or not path.is_file():
         raise SystemExit(f"{path.name} was not saved during the series")
@@ -368,10 +380,10 @@ def _expect_photoshoot(window: ShellWindow, name: str, *, progress: bool) -> Non
         raise SystemExit(f"{name} still shows the shell Create button")
     if primary is None or not primary.isVisible():
         raise SystemExit(f"{name} is missing the panel Create button")
-    if not window.findChild(QPushButton, "chip-photoshoot-count-6").isChecked():
+    if not _button(window, "chip-photoshoot-count-6").isChecked():
         raise SystemExit(f"{name} does not select 6 shots")
     if progress:
-        if not window.findChild(QPushButton, "photoshootCancel").isVisible():
+        if not _button(window, "photoshootCancel").isVisible():
             raise SystemExit(f"{name} is missing Cancel")
         cameras = [item for item in window.findChildren(QLineEdit, "photoshootCamera") if item.isVisible()]
         if cameras:

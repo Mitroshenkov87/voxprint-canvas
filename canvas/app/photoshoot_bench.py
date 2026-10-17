@@ -10,14 +10,14 @@ from collections.abc import Callable
 from pathlib import Path
 
 from canvas.app.shell_run import RunStopped, ShellRunner
-from canvas.core.formats import OutputFormat
+from canvas.core.formats import DEFAULT_FORMAT
 from canvas.infra.enlarge import EnlargeClient
 from canvas.infra.paths import models_dir
 from canvas.models.modes import Mode, Tier
 from canvas.models.registry import load_catalog
 from canvas.pipeline.enhance import open_rewriter
 from canvas.pipeline.photoshoot import SYSTEM_PROMPT
-from canvas.pipeline.series import SeriesResult, run_series
+from canvas.pipeline.series import SeriesFrame, SeriesResult, run_series
 from canvas.safety.gate import AgeGate
 from canvas.safety.image import RawImage
 from canvas.safety.inputs import ImageRole, PendingInput
@@ -35,7 +35,7 @@ def measure_series(
     seed: int,
     rewrite: Callable[[str], str],
     age_gate: AgeGate,
-    generate: Callable[[str, int, object | None, float], object | None],
+    generate: Callable[[str, int, SeriesFrame | None, float], SeriesFrame | None],
     style: str = "photo",
     place_mode: str = "same",
 ) -> dict[str, object]:
@@ -87,7 +87,7 @@ def live_rewrite(tier: Tier) -> Callable[[str], str]:
     return rewrite
 
 
-def live_generate(age_gate: AgeGate, tier: Tier) -> Callable[[str, int, object | None, float], object | None]:
+def live_generate(age_gate: AgeGate, tier: Tier) -> Callable[[str, int, SeriesFrame | None, float], SeriesFrame | None]:
     """One frame. Later shots use the first kept frame at the given strength.
 
     Args:
@@ -97,10 +97,10 @@ def live_generate(age_gate: AgeGate, tier: Tier) -> Callable[[str, int, object |
     runner = ShellRunner(gate=age_gate, tier=tier, enlarge=EnlargeClient())
     look = look_for("photo")
 
-    def generate(line: str, seed: int, hero: object | None, strength: float) -> RawImage | None:
+    def generate(line: str, seed: int, hero: SeriesFrame | None, strength: float) -> RawImage | None:
         prompt = " ".join(part for part in (line.strip(), look.suffix) if part)
         mode = Mode.TEXT if hero is None else Mode.RESTYLE
-        job = PictureJob(prompt, look.negative, mode, "1:1", "native", OutputFormat.PNG, seed, 8, 0.0, "euler", 1)
+        job = PictureJob(prompt, look.negative, mode, "1:1", "native", DEFAULT_FORMAT, seed, 8, 0.0, "euler", 1)
         runner.img2img_strength = None if hero is None else strength
         fresh: tuple[PendingInput, ...] = ()
         if hero is not None:
@@ -122,7 +122,7 @@ def run_bench(
     tier: Tier,
     age_gate: AgeGate,
     rewrite: Callable[[str], str],
-    generate: Callable[[str, int, object | None, float], object | None],
+    generate: Callable[[str, int, SeriesFrame | None, float], SeriesFrame | None],
 ) -> dict[str, object]:
     """Measure a 6-frame series with the callbacks the caller built.
 

@@ -8,7 +8,7 @@ import zlib
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, assert_never
+from typing import Literal, Protocol, assert_never
 
 from canvas.app.i18n import text
 from canvas.pipeline.enhance import stated_ages
@@ -26,6 +26,16 @@ from canvas.safety.gate import AgeGate, SafetyError
 from canvas.safety.image import RawImage, SafeImage
 
 StopCode = Literal["", "idea", "scenario", "cancelled"]
+
+
+class SeriesFrame(Protocol):
+    """Pixels a frame callback can return. The gate reviews a copy."""
+
+    width: int
+    height: int
+
+    def to_bytes(self) -> bytes:
+        """RGB bytes, three per pixel."""
 
 
 @dataclass(frozen=True)
@@ -49,7 +59,7 @@ def run_series(
     include_camera: Callable[[], bool],
     rewrite: Callable[[str], str],
     age_gate: AgeGate,
-    generate: Callable[[str, int, object | None, float], object | None],
+    generate: Callable[[str, int, SeriesFrame | None, float], SeriesFrame | None],
     cancelled: Callable[[], bool],
     folder: Path,
     on_scenario: Callable[[Scenario], None] | None = None,
@@ -78,9 +88,12 @@ def run_series(
         line_for: The line to send for that index, after an Expert edit.
         on_status: ``drawing``, ``kept``, or ``blocked`` for one row.
     """
-    if place_mode not in ("same", "different"):
+    if place_mode == "same":
+        mode: PlaceMode = "same"
+    elif place_mode == "different":
+        mode = "different"
+    else:
         return SeriesResult("scenario", "", (), None)
-    mode: PlaceMode = place_mode
     request = scenario_request(idea, count, style, mode)
     if request is None:
         return SeriesResult("scenario", "", (), None)
@@ -97,7 +110,7 @@ def run_series(
     if on_scenario is not None:
         on_scenario(scenario)
     folder.mkdir(parents=True, exist_ok=True)
-    hero: object | None = None
+    hero: SeriesFrame | None = None
     kept: list[Path] = []
     blocked: list[int] = []
     saved_lines: list[str] = []
@@ -159,7 +172,7 @@ def _refuse_prompt(age_gate: AgeGate, prompt: str) -> str | None:
     return None
 
 
-def _released_frame(age_gate: AgeGate, image: object, line: str) -> bytes | None:
+def _released_frame(age_gate: AgeGate, image: SeriesFrame, line: str) -> bytes | None:
     """Pixels ``review_image`` released, or None when the frame is dropped."""
     raw = RawImage(image.width, image.height, image.to_bytes())
     try:

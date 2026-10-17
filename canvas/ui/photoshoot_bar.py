@@ -6,11 +6,15 @@ detail stays in Expert. The drag handle and the one menu stay on every row.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QUrl, Qt
 from PySide6.QtGui import QCursor, QDesktopServices
 from PySide6.QtWidgets import (
+    QBoxLayout,
     QButtonGroup,
     QGridLayout,
     QHBoxLayout,
@@ -39,6 +43,9 @@ from voxprint_common.ui.theme import (
 
 from canvas.pipeline.photoshoot import Shot, assemble_line
 
+if TYPE_CHECKING:
+    from canvas.ui.shell_screen import ShellWindow
+
 
 @dataclass
 class ShotRow:
@@ -60,23 +67,23 @@ class ShotRow:
 class PhotoshootBar:
     """The mode chip, the everyday rows, and the series board."""
 
-    def __init__(self, window: object) -> None:
+    def __init__(self, window: ShellWindow) -> None:
         """Add the option and the rows to an open shell window.
 
         Args:
             window: A :class:`canvas.ui.shell_screen.ShellWindow`.
         """
         self.window = window
+        self.writer: Callable[[str], str] | None = None
         self.enabled = False
         self.count = 6
         self.place = "same"
         self.seed_mode = "series"
         self.strength = "medium"
-        self.writer = None
         self._stop = False
         self.rows: list[ShotRow] = []
         self.subject = ""
-        self.folder = None
+        self.folder: Path | None = None
         self._showing = False
         self._mount_mode()
         self._host = self._mount_rows()
@@ -390,14 +397,15 @@ class PhotoshootBar:
         footer.addWidget(self.frame)
         footer.addWidget(self.cancel)
         outer.addLayout(footer)
-        stage = self.window.view._stage
-        stage.layout().insertWidget(0, board)
+        _column(self.window.view._stage).insertWidget(0, board)
         board.hide()
         return board
 
     def _fill_grid(self, count: int) -> None:
         while self._grid_layout.count():
             item = self._grid_layout.takeAt(0)
+            if item is None:
+                continue
             widget = item.widget()
             if widget is not None:
                 widget.setParent(None)
@@ -448,7 +456,7 @@ class PhotoshootBar:
         line.addWidget(label, 1)
         line.addWidget(editor, 1)
         line.addWidget(camera)
-        layout = self._list_host.layout()
+        layout = _column(self._list_host)
         layout.insertWidget(max(0, layout.count() - 1), widget)
         self.rows.append(ShotRow(shot, plain, False, "waiting", False, widget, label, editor, camera, handle, menu))
         self.sync_expert(self._expert())
@@ -503,7 +511,7 @@ class PhotoshootBar:
         self.rows.clear()
 
     def _repack(self) -> None:
-        layout = self._list_host.layout()
+        layout = _column(self._list_host)
         while layout.count():
             layout.takeAt(0)
         for row in self.rows:
@@ -532,6 +540,13 @@ class PhotoshootBar:
     def _open_zip(self) -> None:
         if self.folder is not None:
             _open_path(self.folder / "series.zip")
+
+
+def _column(widget: QWidget) -> QBoxLayout:
+    layout = widget.layout()
+    if not isinstance(layout, QBoxLayout):
+        raise RuntimeError("the photoshoot row has no column")
+    return layout
 
 
 def _cell_text(status: str) -> str:

@@ -23,10 +23,7 @@ DIR_DIR="$HOME/.local/share/desktop-directories"
 BIN_DIR="$HOME/.local/bin"
 LINUX_PYTHON_URL="https://github.com/astral-sh/python-build-standalone/releases/download/20261009/cpython-3.14.8%2B20261009-x86_64-unknown-linux-gnu-install_only.tar.gz"
 TORCH_INDEX="https://download.pytorch.org/whl/cu130"
-UV_CONFIG="$SRC/canvas/infra/uv.cu130.toml"
-
 echo "Checking Python..."
-FRESH=0
 if [ -x "$RUNTIME/bin/python3" ]; then
   PY="$RUNTIME/bin/python3"
 elif [ -d "$RUNTIME" ] && [ -n "$(find "$RUNTIME" -mindepth 1 -print -quit 2>/dev/null)" ]; then
@@ -40,7 +37,6 @@ else
   tar -xzf "$archive" -C "$RUNTIME" --strip-components=1
   rm -f "$archive"
   PY="$RUNTIME/bin/python3"
-  FRESH=1
 fi
 
 if ! mkdir -p "$APP"; then
@@ -54,28 +50,84 @@ if [ ! -f "$SRC/constraints.txt" ]; then
   exit 1
 fi
 "$VENV/bin/python" -m pip install --upgrade pip
-# PyPI is the main index. uv pins torch and torchvision to the CUDA 13.0 index.
+# PyPI is the main index. torch and torchvision come from the CUDA 13.0 index.
 # torchao is installed from PyPI with an exact pin.
 "$VENV/bin/python" -m pip install --index-url https://pypi.org/simple "uv==0.13.0"
 UV="$VENV/bin/uv"
-if [ ! -f "$UV_CONFIG" ]; then
-  echo "The CUDA index configuration is missing from the setup. The install cannot continue." >&2
-  exit 1
+
+gpu_ready() {
+  ort=$(printf '%s%s' onnx runtime)
+  "$1" -c "
+import importlib
+import importlib.metadata as meta
+import sys
+try:
+    import torch
+except Exception:
+    sys.exit(1)
+cuda = getattr(getattr(torch, 'version', None), 'cuda', None) or ''
+if not str(cuda).startswith('13.0'):
+    sys.exit(1)
+name = '${ort}'
+gpu = name + '-gpu'
+try:
+    importlib.import_module(name)
+except Exception:
+    sys.exit(1)
+found = {dist.metadata['Name'].lower() for dist in meta.distributions()}
+if gpu not in found or name in found:
+    sys.exit(1)
+sys.exit(0)
+"
+}
+
+install_gpu() {
+  "$UV" pip install --python "$1" --index "$TORCH_INDEX" --index-strategy unsafe-best-match \
+    --find-links "$SHARED/wheels" -c "$SRC/constraints.txt" \
+    "torch==2.11.0+cu130" "torchvision==0.26.0+cu130"
+  "$UV" pip install --python "$1" --index-url https://pypi.org/simple -c "$SRC/constraints.txt" \
+    "onnxruntime-gpu==1.31.0"
+}
+
+runtime_ready=0
+app_ready=0
+if gpu_ready "$PY"; then
+  runtime_ready=1
 fi
-if [ "$FRESH" -eq 1 ]; then
-  "$PY" -m pip install --upgrade pip
-  "$UV" pip install --python "$PY" --config-file "$UV_CONFIG" -c "$SRC/constraints.txt" \
-    torch torchvision onnxruntime-gpu
+if gpu_ready "$VENV/bin/python"; then
+  app_ready=1
 fi
-echo "Installing PyTorch..."
-"$VENV/bin/python" -m pip download -c "$SRC/constraints.txt" \
-  "torch==2.11.0+cu130" "torchvision==0.26.0+cu130" \
-  --index-url "$TORCH_INDEX" --extra-index-url https://pypi.org/simple -d "$SHARED/wheels"
+if [ "$runtime_ready" -eq 1 ] && [ "$app_ready" -eq 1 ]; then
+  echo "PyTorch is already installed."
+elif find "$SHARED/wheels" -name 'torch-2.11.0*.whl' -print -quit 2>/dev/null | grep -q .; then
+  echo "PyTorch wheels are already downloaded."
+else
+  echo "Installing PyTorch..."
+  "$VENV/bin/python" -m pip download -c "$SRC/constraints.txt" \
+    "torch==2.11.0+cu130" "torchvision==0.26.0+cu130" \
+    --index-url "$TORCH_INDEX" --extra-index-url https://pypi.org/simple -d "$SHARED/wheels"
+fi
 "$VENV/bin/python" -m pip download -c "$SRC/constraints.txt" \
   "onnxruntime-gpu==1.31.0" "torchao==0.18.0" \
   --index-url https://pypi.org/simple -d "$SHARED/wheels"
+if [ "$runtime_ready" -eq 0 ]; then
+  echo "Repairing the suite runtime..."
+  "$PY" -m pip install --upgrade pip
+  install_gpu "$PY"
+  if ! gpu_ready "$PY"; then
+    echo "CUDA 13.0 PyTorch is still missing." >&2
+    exit 1
+  fi
+fi
+if [ "$app_ready" -eq 0 ]; then
+  install_gpu "$VENV/bin/python"
+  if ! gpu_ready "$VENV/bin/python"; then
+    echo "CUDA 13.0 PyTorch is still missing." >&2
+    exit 1
+  fi
+fi
 "$UV" pip install --python "$VENV/bin/python" --index-url https://pypi.org/simple "torchao==0.18.0"
-"$UV" pip install --python "$VENV/bin/python" --config-file "$UV_CONFIG" -c "$SRC/constraints.txt" \
+"$UV" pip install --python "$VENV/bin/python" --index-url https://pypi.org/simple -c "$SRC/constraints.txt" \
   "$SRC[gen]"
 if "$VENV/bin/python" -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 14) else 1)"; then
   echo "TensorRT is skipped on Python 3.14." >&2

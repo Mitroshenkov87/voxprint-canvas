@@ -6,6 +6,7 @@
 ; Windows 11 24H2 or newer, 64-bit.
 ; The setup copies the app. It does not embed GPU libraries or model files.
 ; install.ps1 installs missing dependencies, including the default image pack, and runs: python -m canvas.models.tiers
+; CurStepChanged runs that script and Setup exits non-zero when it fails.
 ; An upgrade keeps the AppId, ignores the previous directory, and the setup script removes the old folder and shortcuts.
 
 #define MyAppName "VOXPrint AI Canvas"
@@ -42,8 +43,39 @@ Source: "staging\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs creat
 Name: "{group}\{#MyAppName}"; Filename: "{app}\venv\Scripts\voxprint-canvas.exe"; WorkingDir: "{app}"
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 
-[Run]
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\install.ps1"""; Flags: runasoriginaluser waituntilterminated; StatusMsg: "Setting up {#MyAppName}"
-
 [UninstallRun]
 Filename: "{app}\venv\Scripts\python.exe"; Parameters: "-m canvas.app.main --unregister-models"; Flags: runhidden waituntilterminated
+
+[Code]
+procedure ExitProcess(uExitCode: Cardinal);
+  external 'ExitProcess@kernel32.dll stdcall';
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ResultCode: Integer;
+  Started: Boolean;
+begin
+  if CurStep <> ssPostInstall then
+    Exit;
+  Started := Exec(
+    ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    ExpandConstant('-NoProfile -ExecutionPolicy Bypass -File "{app}\install.ps1"'),
+    '',
+    SW_SHOW,
+    ewWaitUntilTerminated,
+    ResultCode
+  );
+  if not Started then
+  begin
+    SuppressibleMsgBox('VOXPrint AI Canvas could not start its setup script.', mbError, MB_OK, IDOK);
+    ExitProcess(1);
+  end;
+  if ResultCode <> 0 then
+  begin
+    SuppressibleMsgBox('VOXPrint AI Canvas setup failed. The log is %LOCALAPPDATA%\Voxprint\logs\canvas-install.log.', mbError, MB_OK, IDOK);
+    if (ResultCode > 0) and (ResultCode <= 255) then
+      ExitProcess(ResultCode)
+    else
+      ExitProcess(1);
+  end;
+end;

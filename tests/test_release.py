@@ -40,6 +40,15 @@ def test_installers_fetch_gpu_libraries_and_the_default_pack():
     assert "staging\\*" in iss
 
 
+def test_windows_ci_builds_the_installer_and_runs_install_ps1():
+    text = Path(".github/workflows/tests.yml").read_text(encoding="utf-8")
+    assert "windows-install:" in text
+    assert "runs-on: windows-latest" in text
+    assert "voxprint-canvas.iss" in text
+    assert "install.ps1" in text
+    assert "ISCC.exe" in text
+
+
 def test_release_ships_tools_and_vm_scripts():
     text = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
     assert "tools" in text

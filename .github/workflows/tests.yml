@@ -196,3 +196,73 @@ jobs:
           MKL_NUM_THREADS: "1"
           TOKENIZERS_PARALLELISM: "false"
         run: .venv/bin/python -m pytest tests/test_enhance_weights.py
+  windows-install:
+    runs-on: windows-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - name: Free disk space
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "SilentlyContinue"
+          @(
+            "C:\Program Files (x86)\Android",
+            "C:\Program Files\Android",
+            "C:\Program Files (x86)\Microsoft Visual Studio",
+            "C:\Program Files\Microsoft Visual Studio",
+            "C:\Program Files (x86)\Microsoft SQL Server",
+            "C:\Program Files\Microsoft SQL Server",
+            "C:\Program Files (x86)\Google",
+            "C:\Program Files\Google",
+            "C:\hostedtoolcache\windows\go",
+            "C:\hostedtoolcache\windows\Ruby",
+            "C:\hostedtoolcache\windows\PyPy",
+            "C:\hostedtoolcache\windows\node"
+          ) | ForEach-Object {
+            if (Test-Path $_) { Remove-Item $_ -Recurse -Force }
+          }
+          Get-PSDrive -Name C | Format-List
+      - name: Inno Setup 6
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $stage = "installer\windows\staging"
+          New-Item -ItemType Directory -Force $stage | Out-Null
+          Copy-Item -Path canvas -Destination $stage -Recurse
+          Copy-Item -Path tools -Destination $stage -Recurse
+          New-Item -ItemType Directory -Force (Join-Path $stage "scripts") | Out-Null
+          Copy-Item "scripts/vm_test.sh" (Join-Path $stage "scripts/vm_test.sh")
+          Copy-Item "scripts/vm_test.ps1" (Join-Path $stage "scripts/vm_test.ps1")
+          foreach ($name in @("pyproject.toml", "README.md", "LICENSE", "NOTICE", "BUILD.json", "constraints.txt")) {
+            Copy-Item $name (Join-Path $stage $name)
+          }
+          $uvZip = Join-Path $env:TEMP "uv-windows.zip"
+          $uvDir = Join-Path $env:TEMP "uv-windows"
+          Invoke-WebRequest -Uri "https://github.com/astral-sh/uv/releases/download/0.13.0/uv-x86_64-pc-windows-msvc.zip" -OutFile $uvZip
+          if (Test-Path $uvDir) { Remove-Item -Recurse -Force $uvDir }
+          Expand-Archive -Path $uvZip -DestinationPath $uvDir -Force
+          $uvExe = Get-ChildItem -Path $uvDir -Recurse -Filter uv.exe | Select-Object -First 1
+          if (-not $uvExe) { throw "uv.exe was not in the download" }
+          Copy-Item $uvExe.FullName (Join-Path $stage "uv.exe")
+          Copy-Item installer\windows\install.ps1 (Join-Path $stage "install.ps1")
+          Copy-Item installer\windows\voxprint-canvas.cmd (Join-Path $stage "voxprint-canvas.cmd")
+          Get-ChildItem $stage -Recurse -Directory -Filter __pycache__ | Remove-Item -Recurse -Force
+          $iscc = @(
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+            "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $iscc) { throw "Inno Setup was not installed" }
+          New-Item -ItemType Directory -Force dist | Out-Null
+          & $iscc "/Odist" "installer\windows\voxprint-canvas.iss"
+          if ($LASTEXITCODE -ne 0) { throw "the setup compiler failed" }
+          if (-not (Test-Path "dist\VoxprintCanvasSetup.exe")) { throw "the setup executable is missing" }
+      - name: Run install.ps1
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $script = "installer\windows\staging\install.ps1"
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script
+          if ($LASTEXITCODE -ne 0) { throw "install.ps1 exited $LASTEXITCODE" }

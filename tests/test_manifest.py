@@ -387,16 +387,20 @@ def test_installers_resolve_numpy_from_pypi_and_pin_cuda_torch():
     assert "torch-backend" not in config
     assert 'name = "pytorch-cu130"' in config
     assert "explicit = true" in config
-    assert 'torch = { index = "pytorch-cu130" }' in config
-    assert 'torchvision = { index = "pytorch-cu130" }' in config
-    sources = config.split("[sources]", 1)[1]
-    assert "torchao" not in sources
+    assert "[sources]" not in config
+    assert "override-dependencies" not in config
+    assert "torchao" not in config
     for script in (linux, windows):
-        assert "uv.cu130.toml" in script
-        assert "--config-file" in script
+        assert "--index-strategy" in script
+        assert "unsafe-best-match" in script
+        assert "--find-links" in script
+        assert "--config-file" not in script
         assert "torch==2.11.0+cu130" in script
         assert "torchvision==0.26.0+cu130" in script
         assert "torchao==0.18.0" in script
+        assert "[gen]" in script
+        assert "Repairing the suite runtime..." in script
+        assert "PyTorch is already installed." in script
         assert "TensorRT is skipped on Python 3.14." in script
     assert '--index-url "$TORCH_INDEX"' in linux
     assert "--extra-index-url https://pypi.org/simple" in linux
@@ -405,6 +409,15 @@ def test_installers_resolve_numpy_from_pypi_and_pin_cuda_torch():
     assert '"--index-url", "https://pypi.org/simple"' in windows
     assert "uv==0.13.0" in linux
     assert "uv==0.13.0" in windows
+    assert "Start-Transcript" in windows
+    assert "canvas-install.log" in windows
+    assert "WindowsApps" in windows
+    iss = Path("installer/windows/voxprint-canvas.iss").read_text(encoding="utf-8")
+    assert "CurStepChanged" in iss
+    assert "ssPostInstall" in iss
+    assert "SuppressibleMsgBox" in iss
+    assert "ExitProcess" in iss
+    assert "[Run]" not in iss
 
 
 def test_wheel_repair_pins_torch_to_cuda_and_torchao_to_pypi(monkeypatch, tmp_path):

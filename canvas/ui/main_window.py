@@ -73,7 +73,8 @@ def _mode_label(mode: Mode) -> str:
 def _mdl_argv() -> list[str]:
     """``voxprint-mdl --gui --app canvas``, preferring the interpreter's folder."""
     name = "voxprint-mdl.exe" if sys.platform == "win32" else "voxprint-mdl"
-    bundled = Path(sys.executable).resolve().parent / name
+    # absolute() keeps a venv symlink in place. resolve() would follow it into the base interpreter.
+    bundled = Path(sys.executable).absolute().parent / name
     program = str(bundled) if bundled.is_file() else name
     return [program, "--gui", "--app", "canvas"]
 

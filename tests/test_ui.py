@@ -1,5 +1,7 @@
 """The two tabs, the format list, and the neutral status line."""
 import os
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -24,7 +26,7 @@ from canvas.models.sizes import ASPECT_GROUPS
 from canvas.infra.enlarge import EnlargeError
 from canvas.safety.gate import GenerationBlocked
 from canvas.ui.about import AboutDialog
-from canvas.ui.main_window import EnhanceReply, MainWindow
+from canvas.ui.main_window import EnhanceReply, MainWindow, _mdl_argv
 from canvas.ui.splash import Splash
 
 
@@ -304,3 +306,18 @@ def test_manage_models_opens_voxprint_mdl(app, monkeypatch):
     assert seen[0][1:] == ["--gui", "--app", "canvas"]
     assert seen[0][0].replace("\\", "/").endswith(("voxprint-mdl", "voxprint-mdl.exe"))
     window.close()
+
+
+def test_mdl_launcher_stays_beside_a_symlinked_interpreter(tmp_path, monkeypatch):
+    real = tmp_path / "runtime" / "bin"
+    real.mkdir(parents=True)
+    (real / "python").write_text("#!/bin/sh\n", encoding="utf-8")
+    venv_bin = tmp_path / "venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    link = venv_bin / "python"
+    link.symlink_to(real / "python")
+    launcher = venv_bin / ("voxprint-mdl.exe" if sys.platform == "win32" else "voxprint-mdl")
+    launcher.write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setattr("canvas.ui.main_window.sys.executable", str(link))
+    argv = _mdl_argv()
+    assert Path(argv[0]) == launcher

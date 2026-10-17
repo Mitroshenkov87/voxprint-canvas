@@ -6,6 +6,7 @@ import multiprocessing
 import os
 import re
 import subprocess
+import sys
 from multiprocessing.synchronize import Event as ProcessEvent
 from importlib import metadata
 from pathlib import Path
@@ -583,6 +584,7 @@ def _source_install_functions(env, script, cwd):
     )
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="The Linux installer script runs on Linux.")
 def test_sudo_install_uses_the_passwd_home_not_root(tmp_path):
     home = tmp_path / "alice"
     home.mkdir()
@@ -655,6 +657,7 @@ data_root
     assert finished.stdout.strip() == "done"
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="The Linux installer script runs on Linux.")
 def test_linux_setup_moves_a_standalone_runtime_aside(tmp_path):
     home = tmp_path / "alice"
     runtime = home / ".local" / "share" / "voxprint" / "shared" / "runtime" / "py314-torch2.11-cu130"

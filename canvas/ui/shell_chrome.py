@@ -738,6 +738,8 @@ class _Flow(QLayout):
             line_height = max(line_height, item_height)
         if current:
             lines.append((current, line_height))
+        if rect is not None and len(lines) > 1:  # DEBUG-ROW
+            print("ROWDBG", inner, spacing, squeeze, [(i.widget().objectName(), w, i.sizeHint().width(), i.widget().property("tightWidth")) for i, w, _ in [x for l in lines for x in l[0]]])  # DEBUG-ROW
         y = 0
         for index, (row, row_height) in enumerate(lines):
             x = 0

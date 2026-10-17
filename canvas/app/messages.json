@@ -593,32 +593,32 @@
       "ru": "Начать с"
     },
     "canvas.source.words": {
-      "en": "A description",
-      "ru": "описания"
+      "en": "From text",
+      "ru": "С текста"
     },
     "canvas.source.picture": {
-      "en": "A picture",
-      "ru": "картинки"
+      "en": "From a picture",
+      "ru": "С картинки"
     },
     "canvas.source.help": {
-      "en": "A description starts from words. A picture starts from an image you choose.",
-      "ru": "Описания начинают с текста. Картинки — с выбранного изображения."
+      "en": "From text — the picture is created from the description. From a picture — the chosen image is the base.",
+      "ru": "С текста — картинка создаётся по описанию. С картинки — за основу берётся выбранное изображение."
     },
     "canvas.variation": {
       "en": "Variation",
       "ru": "Разнообразие"
     },
     "canvas.variation.quick": {
-      "en": "Quick",
-      "ru": "Быстро"
+      "en": "Usual",
+      "ru": "Обычно"
     },
     "canvas.variation.varied": {
-      "en": "Creative",
-      "ru": "Творчески"
+      "en": "Bolder",
+      "ru": "Смелее"
     },
     "canvas.variation.help": {
-      "en": "Quick is faster. Creative tries more ideas.",
-      "ru": "Быстро заканчивает раньше. Творчески пробует больше идей."
+      "en": "Usual — the familiar result. Bolder — more unusual ideas.",
+      "ru": "Обычно — привычный результат. Смелее — больше необычных идей."
     },
     "canvas.change": {
       "en": "Change",

@@ -113,6 +113,10 @@ def test_simple_mode_hides_expert_words_and_keeps_picture_tools(app, home: Path)
     assert panel_at.x() >= stage_at.x() + stage.width() - 8
     assert window.findChild(QLabel, "expertChip") is None
     assert window.findChild(QPushButton, "expertResetAll") is None
+    style_names = ("photo", "cinematic", "portrait", "illustration", "anime", "3d", "painting", "sketch")
+    style_chips = [window.findChild(QPushButton, f"chip-style-{name}") for name in style_names]
+    assert all(chip is not None and chip.isVisible() for chip in style_chips)
+    assert len({chip.y() for chip in style_chips}) == 1
     spins = [item for item in window.findChildren(QSpinBox, "shell.steps") if item.isVisible()]
     assert len(spins) == 1
     spin = spins[0]
@@ -139,6 +143,7 @@ def test_improve_and_revert_stay_in_the_same_field(app, home: Path) -> None:
     improve = window.findChild(QPushButton, "improvePrompt")
     revert = window.findChild(QPushButton, "revertPrompt")
     assert improve is not None and revert is not None
+    assert revert.text() == "Revert to my prompt"
     improve.click()
     box = window.findChild(QPlainTextEdit, "promptBox")
     assert "warm light" in box.toPlainText()
@@ -276,19 +281,22 @@ def test_russian_buttons_keep_their_full_labels(app, home: Path, monkeypatch) ->
         font.setWeight(QFont.Weight.DemiBold)
         advance = QFontMetrics(font).horizontalAdvance(words)
         assert button.width() >= advance + 28
-    illustration = window.findChild(QPushButton, "chip-style-illustration")
-    anime = window.findChild(QPushButton, "chip-style-anime")
-    assert illustration is not None and anime is not None
-    assert illustration.isVisible() and anime.isVisible()
-    assert not illustration.geometry().intersects(anime.geometry())
+    style_names = ("photo", "cinematic", "portrait", "illustration", "anime", "3d", "painting", "sketch")
+    style_chips = [window.findChild(QPushButton, f"chip-style-{name}") for name in style_names]
+    assert all(chip is not None and chip.isVisible() for chip in style_chips)
+    assert len({chip.y() for chip in style_chips}) == 1
+    assert not style_chips[3].geometry().intersects(style_chips[4].geometry())
     combo = window.findChild(QComboBox, "canvas.output_size")
     assert combo is not None and combo.isVisible()
     assert combo.property("fittedText") == combo.currentText()
     assert "…" not in str(combo.property("fittedText"))
     setup = window.setup_wizard()
-    assert setup.findChild(QPushButton, "setup-source-words").text() == "описания"
-    assert setup.findChild(QPushButton, "setup-source-picture").text() == "картинки"
-    assert setup.findChild(QPushButton, "setup-variation-varied").text() == "Творчески"
+    assert setup.findChild(QPushButton, "setup-source-words").text() == "С текста"
+    assert setup.findChild(QPushButton, "setup-source-picture").text() == "С картинки"
+    assert setup.findChild(QPushButton, "setup-variation-quick").text() == "Обычно"
+    assert setup.findChild(QPushButton, "setup-variation-varied").text() == "Смелее"
+    revert = window.findChild(QPushButton, "revertPrompt")
+    assert revert is not None and revert.text() == "Вернуть мой запрос"
     restyle = setup.findChild(QLabel, "setup-hint-restyle")
     depth = setup.findChild(QLabel, "setup-hint-depth")
     assert restyle is not None and depth is not None

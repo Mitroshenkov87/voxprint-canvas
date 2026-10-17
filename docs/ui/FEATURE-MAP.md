@@ -9,7 +9,7 @@ Status is `done`, `TODO`, `NEEDS OWNER DECISION`, `pending Yitro`, or `removed (
 | --- | --- | --- | --- |
 | App name | Window title | Simple title | done |
 | About | About button | Overflow Settings opens About | done |
-| Start from words | Text tab | More, then Picture setup: A description | done |
+| Start from words | Text tab | More, then Picture setup: From text | done |
 | img2img (restyle) | Image tab, Restyle | More, then Picture setup: Restyle, plus Use a picture | done |
 | inpaint | Image tab, Inpaint; `generate --mask` | More, then Picture setup: Paint over. Edit the mask appears after a picture is chosen | done |
 | Extend | Image tab, Outpaint | More, then Picture setup: Extend, plus the mask editor | done |
@@ -19,7 +19,7 @@ Status is `done`, `TODO`, `NEEDS OWNER DECISION`, `pending Yitro`, or `removed (
 | Instruction editing | Image tab; `generate --edit-instruction` | removed (owner decision 2026-10-17) | removed (owner decision 2026-10-17) |
 | Prompt | Prompt box | Simple prompt | done |
 | Improve prompt | Enhance | Simple Improve prompt, same field | done |
-| Revert | Revert | Simple Revert | done |
+| Revert | Revert | Simple Revert to my prompt | done |
 | Aspect ratios | Aspect picker | Size: Landscape, Square, or Portrait, then the ratio menu | done |
 | Match a picture's shape | Input size | Use a picture | done |
 | 4K via Enlarge | 4K checkbox | Output: 4K (needs Enlarge) until Enlarge is installed | done |
@@ -31,8 +31,8 @@ Status is `done`, `TODO`, `NEEDS OWNER DECISION`, `pending Yitro`, or `removed (
 | Responsibility line | Footer | Footer | done |
 | In-app model download | Download question | More, then Manage models (MDL) | done |
 | Splash | Startup splash | Startup splash | done |
-| Quick picture | Text mode | More, then Picture setup: Quick | done |
-| More varied picture | Creative mode on 24 GB | More, then Picture setup: Creative | done |
+| Quick picture | Text mode | More, then Picture setup: Usual | done |
+| More varied picture | Creative mode on 24 GB | More, then Picture setup: Bolder | done |
 | Look | (styles were not a separate control) | Simple Look chips | done |
 | How many pictures | (not on the old window) | Simple count chips, 1 / 2 / 4 | done |
 | Light, medium, strong | (not a separate old control) | Shown on the Output row only when 4K is chosen | done |

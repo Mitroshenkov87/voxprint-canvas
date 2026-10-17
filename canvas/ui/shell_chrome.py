@@ -742,7 +742,9 @@ def _fit_text(button):
     if button.objectName() == "generate":
         font.setPixelSize(16)
         pad = 22
-    elif button.property("chip") or button.objectName() in {"expertToggle", "useInput", "deletePicture"}:
+    elif button.property("chip"):
+        pad = 14
+    elif button.objectName() in {"expertToggle", "useInput", "deletePicture"}:
         pad = 18
     elif _in_action_bar(button):
         pad = 18

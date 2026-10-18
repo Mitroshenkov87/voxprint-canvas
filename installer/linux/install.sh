@@ -300,8 +300,9 @@ sys.exit(0)
 }
 
 install_gpu() {
-  "$UV" pip install --no-config --python "$1" --index "$TORCH_INDEX" --index-strategy unsafe-best-match \
-    --find-links "$WHEELS" -c "$SRC/constraints.txt" -c "$SRC/constraints-cuda.txt" \
+  # Exact CUDA pins from the CUDA 13.0 index only. constraints.txt is applied with the app.
+  "$UV" pip install --no-config --python "$1" --index-url "$TORCH_INDEX" \
+    --find-links "$WHEELS" -c "$SRC/constraints-cuda.txt" \
     "torch==2.11.0+cu130" "torchvision==0.26.0+cu130"
   "$UV" pip install --no-config --python "$1" --index-url https://pypi.org/simple \
     -c "$SRC/constraints.txt" -c "$SRC/constraints-cuda.txt" \
@@ -341,8 +342,8 @@ install_runtime() {
   refuse_symlink "$RUNTIME"
   refuse_symlink "$RUNTIME_SITE"
   as_user "$UV" pip install --no-config --python "$BASE" --target "$RUNTIME_SITE" \
-    --index "$TORCH_INDEX" --index-strategy unsafe-best-match \
-    --find-links "$WHEELS" -c "$SRC/constraints.txt" -c "$SRC/constraints-cuda.txt" \
+    --index-url "$TORCH_INDEX" \
+    --find-links "$WHEELS" -c "$SRC/constraints-cuda.txt" \
     "torch==2.11.0+cu130" "torchvision==0.26.0+cu130"
   as_user "$UV" pip install --no-config --python "$BASE" --target "$RUNTIME_SITE" \
     --index-url https://pypi.org/simple -c "$SRC/constraints.txt" -c "$SRC/constraints-cuda.txt" \
@@ -407,7 +408,8 @@ echo "$COMMON_SHA  $common_wheel" | sha256sum -c -
 "$UV" pip install --no-config --python "$VENV/bin/python" "$common_wheel"
 "$UV" pip install --no-config --python "$VENV/bin/python" --index-url https://pypi.org/simple "torchao==0.18.0"
 "$UV" pip install --no-config --python "$VENV/bin/python" \
-  --index "$TORCH_INDEX" --index-url https://pypi.org/simple --index-strategy unsafe-best-match \
+  --index-url https://pypi.org/simple \
+  --find-links "$WHEELS" \
   -c "$SRC/constraints.txt" -c "$SRC/constraints-cuda.txt" \
   "$SRC[gen]"
 if "$VENV/bin/python" -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 14) else 1)"; then

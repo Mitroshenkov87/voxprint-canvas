@@ -55,9 +55,13 @@ jobs:
       - name: App environment and audit tools
         run: |
           python -m pip install -q uv
+          mkdir -p wheels
+          curl -fsSL -o wheels/voxprint_common-0.3.1-py3-none-any.whl \
+            https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.3.1/voxprint_common-0.3.1-py3-none-any.whl
+          python -c "import hashlib, pathlib; p=pathlib.Path('wheels/voxprint_common-0.3.1-py3-none-any.whl'); d=hashlib.sha256(p.read_bytes()).hexdigest(); e='f14036fc70db07e40e5e5376427cea28c3173a94f1d031997a3259ed0afc91fd'; raise SystemExit(None if d==e else 'voxprint-common 0.3.1 failed the SHA-256 check: '+d)"
           uv venv .app
           uv venv .tools
-          uv pip install --python .app/bin/python -e ".[dev]"
+          uv pip install --python .app/bin/python --find-links wheels -e ".[dev]"
           uv pip install --python .tools/bin/python -r tools/requirements-audit.txt
       - name: Audit
         run: |

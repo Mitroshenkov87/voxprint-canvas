@@ -14,8 +14,10 @@ def test_release_workflow_publishes_a_prerelease_from_the_build_file():
     assert "github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')" in text
     assert 'name: SHA256SUMS' in text
     assert "--prerelease" in text
-    assert "version_label" in text
-    assert "VOXPrint AI Canvas ${label}" in text
+    assert "spec_from_file_location" in text
+    assert "release_title()" in text
+    assert "RC release title must not include a codename" in text
+    assert "unexpected RC release title" in text
     assert "SHA256SUMS" in text
     assert "gh release delete" in text
     assert "--cleanup-tag" not in text
@@ -60,6 +62,45 @@ def test_windows_ci_builds_the_installer_and_runs_install_ps1():
     assert "torch.version.cuda is not 13.0" in text
     assert "pyvenv.cfg" in text
     assert "constraints-cuda.txt" in text
+    assert "git is still on PATH" in text
+    iss = Path("installer/windows/voxprint-canvas.iss").read_text(encoding="utf-8")
+    windows = Path("installer/windows/install.ps1").read_text(encoding="utf-8")
+    assert "if ResultCode <> 0 then" in iss
+    assert "ExitProcess(Code)" in iss
+    assert "if Code <> 0 then" in iss
+    assert "exit 1" in windows
+
+
+def test_install_sources_do_not_use_git_or_an_unsafe_index_strategy():
+    root = Path(__file__).resolve().parents[1]
+    paths = [root / "pyproject.toml"]
+    paths.extend(sorted(root.glob("constraints*.txt")))
+    paths.extend(sorted(path for path in (root / "installer").rglob("*") if path.is_file()))
+    paths.extend(sorted(path for path in (root / ".github" / "workflows").rglob("*") if path.is_file()))
+    for path in paths:
+        text = path.read_text(encoding="utf-8")
+        assert "unsafe-best-match" not in text, path
+        assert "git+" not in text, path
+    pyproject = (root / "pyproject.toml").read_text(encoding="utf-8")
+    assert 'voxprint-common[ui]==0.3.1' in pyproject
+    sha = "f14036fc70db07e40e5e5376427cea28c3173a94f1d031997a3259ed0afc91fd"
+    for name in ("tests.yml", "audit.yml", "docs.yml"):
+        workflow = (root / ".github" / "workflows" / name).read_text(encoding="utf-8")
+        assert sha in workflow
+        assert "voxprint_common-0.3.1-py3-none-any.whl" in workflow
+    linux = (root / "installer" / "linux" / "install.sh").read_text(encoding="utf-8")
+    windows = (root / "installer" / "windows" / "install.ps1").read_text(encoding="utf-8")
+    for script in (linux, windows):
+        assert sha in script
+        assert '--index-url' in script or '"--index-url"' in script
+        assert "torch==2.11.0+cu130" in script
+        assert "torchvision==0.26.0+cu130" in script
+    assert '--index-url "$TORCH_INDEX"' in linux
+    assert '--index-url https://pypi.org/simple' in linux
+    assert '--find-links "$WHEELS"' in linux
+    assert '"--index-url", $IndexUrl' in windows or "--index-url $TorchIndex" in windows
+    assert "--index-url https://pypi.org/simple" in windows
+    assert "--find-links $Fetch" in windows
 
 
 def test_release_ships_tools_and_vm_scripts():

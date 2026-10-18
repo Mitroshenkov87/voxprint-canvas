@@ -3,9 +3,14 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
+
+# Written here so the release workflow can load this file without Qt.
+_PRODUCT_NAME = "VOXPrint AI Canvas"
+_RC_TAG = re.compile(r"^v\d+\.\d+\.\d+-rc\.\d+$")
 
 
 def build_file() -> Path:
@@ -71,7 +76,15 @@ def splash_line(env: Mapping[str, str] | None = None) -> str:
 
 
 def release_title(env: Mapping[str, str] | None = None) -> str:
-    """GitHub release title. The app name is the product name; the rest is ``BUILD.json``."""
-    from canvas.app.info import APP_NAME
+    """GitHub release title.
 
-    return f"{APP_NAME} {version_label(env)}"
+    A release-candidate tag is ``VOXPrint AI Canvas v<version> build <N>``.
+    The codename in ``BUILD.json`` is reserved for the final release.
+    ``GITHUB_REF_NAME`` supplies the tag. This function does not import the UI stack.
+    """
+    source: Mapping[str, str] = os.environ if env is None else env
+    ref = str(source.get("GITHUB_REF_NAME", "")).strip()
+    number = build_number(env)
+    if _RC_TAG.fullmatch(ref):
+        return f"{_PRODUCT_NAME} {ref} build {number}"
+    return f"{_PRODUCT_NAME} {version_label(env)}"

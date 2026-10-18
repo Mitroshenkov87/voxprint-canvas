@@ -5,6 +5,15 @@ from pathlib import Path
 from tools.vm_test import main, results_dir
 
 
+def test_default_tag_is_the_current_release_candidate(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr("tools.vm_test._gpu_present", lambda: False)
+    monkeypatch.setenv("VOXPRINT_VM_RESULTS", str(tmp_path))
+    monkeypatch.delenv("VOXPRINT_TAG", raising=False)
+    assert main(["--smoke", "--json"]) == 3
+    body = json.loads(capsys.readouterr().out)
+    assert body["tag"] == "v0.1.0-rc.9"
+
+
 def test_no_gpu_is_exit_3(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr("tools.vm_test._gpu_present", lambda: False)
     monkeypatch.setenv("VOXPRINT_VM_RESULTS", str(tmp_path))

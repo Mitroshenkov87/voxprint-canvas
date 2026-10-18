@@ -49,11 +49,15 @@ jobs:
         shell: bash
         run: |
           python -m pip install -q uv
+          mkdir -p wheels
+          curl -fsSL -o wheels/voxprint_common-0.3.1-py3-none-any.whl \
+            https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.3.1/voxprint_common-0.3.1-py3-none-any.whl
+          python -c "import hashlib, pathlib; p=pathlib.Path('wheels/voxprint_common-0.3.1-py3-none-any.whl'); d=hashlib.sha256(p.read_bytes()).hexdigest(); e='f14036fc70db07e40e5e5376427cea28c3173a94f1d031997a3259ed0afc91fd'; raise SystemExit(None if d==e else 'voxprint-common 0.3.1 failed the SHA-256 check: '+d)"
           uv venv .venv
           if [ "${{ runner.os }}" = "Windows" ]; then
-            uv pip install --python .venv/Scripts/python.exe -e ".[dev]"
+            uv pip install --python .venv/Scripts/python.exe --find-links wheels -e ".[dev]"
           else
-            uv pip install --python .venv/bin/python -e ".[dev]"
+            uv pip install --python .venv/bin/python --find-links wheels -e ".[dev]"
           fi
       - name: Test
         shell: bash
@@ -118,8 +122,12 @@ jobs:
       - name: Install
         run: |
           python -m pip install -q uv
+          mkdir -p wheels
+          curl -fsSL -o wheels/voxprint_common-0.3.1-py3-none-any.whl \
+            https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.3.1/voxprint_common-0.3.1-py3-none-any.whl
+          python -c "import hashlib, pathlib; p=pathlib.Path('wheels/voxprint_common-0.3.1-py3-none-any.whl'); d=hashlib.sha256(p.read_bytes()).hexdigest(); e='f14036fc70db07e40e5e5376427cea28c3173a94f1d031997a3259ed0afc91fd'; raise SystemExit(None if d==e else 'voxprint-common 0.3.1 failed the SHA-256 check: '+d)"
           uv venv .venv
-          uv pip install --python .venv/bin/python -e ".[dev]"
+          uv pip install --python .venv/bin/python --find-links wheels -e ".[dev]"
       - name: Check the pinned Enlarge release
         env:
           QT_QPA_PLATFORM: offscreen
@@ -135,10 +143,15 @@ jobs:
       - name: Install CPU torch and the generation stack
         run: |
           python -m pip install -q uv
+          mkdir -p wheels
+          curl -fsSL -o wheels/voxprint_common-0.3.1-py3-none-any.whl \
+            https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.3.1/voxprint_common-0.3.1-py3-none-any.whl
+          python -c "import hashlib, pathlib; p=pathlib.Path('wheels/voxprint_common-0.3.1-py3-none-any.whl'); d=hashlib.sha256(p.read_bytes()).hexdigest(); e='f14036fc70db07e40e5e5376427cea28c3173a94f1d031997a3259ed0afc91fd'; raise SystemExit(None if d==e else 'voxprint-common 0.3.1 failed the SHA-256 check: '+d)"
           uv venv .venv
           uv pip install --python .venv/bin/python \
             --index-url https://download.pytorch.org/whl/cpu \
             --extra-index-url https://pypi.org/simple \
+            --find-links wheels \
             -c constraints.txt \
             -e ".[dev,gen]"
       - name: Encoder compatibility
@@ -162,10 +175,15 @@ jobs:
       - name: Install the pinned CPU stack
         run: |
           python -m pip install -q uv
+          mkdir -p wheels
+          curl -fsSL -o wheels/voxprint_common-0.3.1-py3-none-any.whl \
+            https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.3.1/voxprint_common-0.3.1-py3-none-any.whl
+          python -c "import hashlib, pathlib; p=pathlib.Path('wheels/voxprint_common-0.3.1-py3-none-any.whl'); d=hashlib.sha256(p.read_bytes()).hexdigest(); e='f14036fc70db07e40e5e5376427cea28c3173a94f1d031997a3259ed0afc91fd'; raise SystemExit(None if d==e else 'voxprint-common 0.3.1 failed the SHA-256 check: '+d)"
           uv venv .venv
           uv pip install --python .venv/bin/python \
             --index-url https://download.pytorch.org/whl/cpu \
             --extra-index-url https://pypi.org/simple \
+            --find-links wheels \
             -c constraints.txt \
             -e ".[dev,gen]"
       - name: Download the small content-check models
@@ -195,10 +213,15 @@ jobs:
       - name: Install the pinned CPU stack
         run: |
           python -m pip install -q uv
+          mkdir -p wheels
+          curl -fsSL -o wheels/voxprint_common-0.3.1-py3-none-any.whl \
+            https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.3.1/voxprint_common-0.3.1-py3-none-any.whl
+          python -c "import hashlib, pathlib; p=pathlib.Path('wheels/voxprint_common-0.3.1-py3-none-any.whl'); d=hashlib.sha256(p.read_bytes()).hexdigest(); e='f14036fc70db07e40e5e5376427cea28c3173a94f1d031997a3259ed0afc91fd'; raise SystemExit(None if d==e else 'voxprint-common 0.3.1 failed the SHA-256 check: '+d)"
           uv venv .venv
           uv pip install --python .venv/bin/python \
             --index-url https://download.pytorch.org/whl/cpu \
             --extra-index-url https://pypi.org/simple \
+            --find-links wheels \
             -c constraints.txt \
             -e ".[dev,gen]"
       - name: Download the text encoder
@@ -288,6 +311,11 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
+          $env:Path = ($env:Path -split ';' | Where-Object {
+            $_ -and ($_ -notmatch '(?i)(^|[\\/])Git([\\/]|$)')
+          }) -join ';'
+          $gitCmd = Get-Command git -ErrorAction SilentlyContinue
+          if ($gitCmd) { throw "git is still on PATH: $($gitCmd.Source)" }
           $source = (Resolve-Path "installer\windows\staging").Path
           $install = Join-Path $env:ProgramFiles "VOXPrint AI Suite\Canvas"
           if (Test-Path -LiteralPath $install) { Remove-Item -LiteralPath $install -Recurse -Force }

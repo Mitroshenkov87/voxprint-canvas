@@ -125,8 +125,25 @@ jobs:
           tag="${GITHUB_REF_NAME#v}"
           notes="docs/release-notes/${tag}.md"
           test -f "$notes"
-          label=$(python -c "import importlib.util as u; s=u.spec_from_file_location('identity', 'canvas/app/identity.py'); m=u.module_from_spec(s); s.loader.exec_module(m); print(m.version_label())")
-          title="VOXPrint AI Canvas ${label}"
+          title=$(python -c "import importlib.util as u; s=u.spec_from_file_location('identity', 'canvas/app/identity.py'); m=u.module_from_spec(s); s.loader.exec_module(m); print(m.release_title())")
+          case "$GITHUB_REF_NAME" in
+            v*-rc.*)
+              case "$title" in
+                "VOXPrint AI Canvas ${GITHUB_REF_NAME} build "[0-9]*) ;;
+                *)
+                  echo "unexpected RC release title: $title" >&2
+                  exit 1
+                  ;;
+              esac
+              case "$title" in
+                *\"*)
+                  echo "RC release title must not include a codename: $title" >&2
+                  exit 1
+                  ;;
+              esac
+              ;;
+          esac
+          echo "$title"
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release delete "$GITHUB_REF_NAME" --yes
           fi

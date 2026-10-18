@@ -2,9 +2,9 @@
 
 Release title:
 
-`VOXPrint AI Canvas X.Y.Z RC · build N "Tavnit"`
+`VOXPrint AI Canvas vX.Y.Z-rc.N build B`
 
-X.Y.Z, the channel, N and the codename are read from `BUILD.json`. N is the `build` field. Publish the string from `release_title()`. Do not type a second copy of the version.
+A release-candidate tag uses that title. `release_title()` reads the tag and the build number from `BUILD.json`. The codename in `BUILD.json` is reserved for the final release. Do not type a second copy of the version.
 
 New:
 

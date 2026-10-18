@@ -10,7 +10,7 @@ import pytest
 pytest.importorskip("PySide6")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QPushButton
+from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QPushButton, QSpinBox
 
 from canvas.models.modes import Mode, Tier
 from canvas.safety.gate import GenerationBlocked
@@ -38,6 +38,53 @@ def home(monkeypatch, tmp_path: Path):
 def _window(home: Path, runner) -> ShellWindow:
     shell = open_layout(home / "state", gate=World().gate(), enlarge_installed=False)
     return ShellWindow(shell, tier=Tier.GB16, enlarge=object(), runner=runner, improver=lambda text: text)
+
+
+def test_the_frame_count_starts_at_six(app, home: Path) -> None:
+    window = _window(home, lambda job, inputs: rgb())
+    window.show()
+    app.processEvents()
+    frames = window.findChild(QSpinBox, "photoshootFrames")
+    label = window.findChild(QLabel, "photoshootFramesLabel")
+    assert frames is not None and label is not None
+    assert frames.value() == 6
+    assert frames.minimum() == 1
+    assert frames.maximum() == 50
+    assert label.text() == "Frames"
+    assert window.photoshoot.count == 6
+    window.findChild(QPushButton, "photoshootMode").click()
+    app.processEvents()
+    assert frames.isVisible()
+    assert label.isVisible()
+    set_language("ru")
+    russian = _window(home, lambda job, inputs: rgb())
+    russian.show()
+    app.processEvents()
+    assert russian.findChild(QLabel, "photoshootFramesLabel").text() == "Кадров"
+    set_language("en")
+
+
+def test_progress_uses_the_chosen_frame_count(app, home: Path, monkeypatch) -> None:
+    def runner(job, inputs):
+        del job, inputs
+        return rgb()
+
+    def writer(prompt: str) -> str:
+        body = json.loads(prompt)
+        return _payload(IDEA, int(body["count"]))
+
+    monkeypatch.setattr("canvas.ui.photoshoot_run.selectable", lambda: (object(),))
+    window = _window(home, runner)
+    window.photoshoot.writer = writer
+    window.view.set_prompt_text(IDEA)
+    window.show()
+    window.findChild(QPushButton, "photoshootMode").click()
+    window.findChild(QSpinBox, "photoshootFrames").setValue(4)
+    window.findChild(QPushButton, "generate").click()
+    app.processEvents()
+    lines = window.findChildren(QLabel, "photoshootLine")
+    assert len(lines) == 4
+    assert window.findChild(QLabel, "photoshootFrame").text() == "Shot 4 of 4"
 
 
 def test_the_option_leaves_the_shell_create_button_in_place(app, home: Path) -> None:

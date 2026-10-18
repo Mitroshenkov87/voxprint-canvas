@@ -137,24 +137,18 @@ You need a Linux distribution released in 2025 or later, and `curl`, `tar` and `
 
 1. Download `voxprint-canvas-<version>-linux-x86_64.tar.gz` and `SHA256SUMS` from the releases page and check the archive:
 
-   ```bash
-   sha256sum -c --ignore-missing SHA256SUMS
-   ```
+        sha256sum -c --ignore-missing SHA256SUMS
 
 2. Unpack the archive and open its folder:
 
-   ```bash
-   tar -xzf voxprint-canvas-0.1.0-rc.13-linux-x86_64.tar.gz
-   cd voxprint-canvas-0.1.0-rc.13-linux-x86_64
-   ```
+        tar -xzf voxprint-canvas-0.1.0-rc.13-linux-x86_64.tar.gz
+        cd voxprint-canvas-0.1.0-rc.13-linux-x86_64
 
 3. Run the installer. It installs the program into `/opt/voxprint-ai-suite/canvas/`, so it needs permission to write there:
 
-   ```bash
-   sudo ./install.sh
-   ```
+        sudo ./install.sh
 
-   When you use `sudo`, the program goes into `/opt`, and your own data and menu entry are still created in your home folder, as your user.
+    When you use `sudo`, the program goes into `/opt`, and your own data and menu entry are still created in your home folder, as your user.
 
 4. The script installs Python if needed, PyTorch for CUDA 13.0, the suite libraries and the default model pack. It prints **Installed.** at the end.
 
@@ -204,7 +198,7 @@ Every finished picture is added to the strip under the picture area. Click a pre
 
 1. Click the description field (**Describe the picture**) and describe what you want to see. Write it as you would brief a photographer or an illustrator: the subject, the place, the light. For example:
 
-   > A red bicycle leaning against a brick wall on a quiet street, morning sun, soft shadows
+    > A red bicycle leaning against a brick wall on a quiet street, morning sun, soft shadows
 
 2. Leave **Quality** on **Balanced** and **Style** on **Photo** for now.
 3. Choose the shape under **Size**: **Landscape**, **Square** or **Portrait**.
@@ -465,11 +459,11 @@ Choose **4K** in the **Output size** row (or **Exact size: 4K** in Expert mode) 
 
 1. Describe the subject in the description field, for example:
 
-   > A yellow kettle with a blue handle
+    > A yellow kettle with a blue handle
 
-   or
+    or
 
-   > A man in his forties in a navy suit, business portrait
+    > A man in his forties in a navy suit, business portrait
 
 2. Choose **Photo**, **Cinematic** or **Portrait** under **Style**. Other styles are treated as **Photo** for a series.
 3. Click **Photoshoot** (next to **Improve prompt**) so that it is highlighted.
@@ -477,11 +471,11 @@ Choose **4K** in the **Output size** row (or **Exact size: 4K** in Expert mode) 
 
 ![Photoshoot is switched on.](screens/photoshoot-on.png)
 
-Canvas first writes a short scenario: one line per shot, with the subject and the framing. The list appears in the picture area and cannot be edited. Then the shots are drawn one by one; the list shows which shot is being drawn, and the line under it reads, for example, *Shot 2 of 6*. The first finished shot becomes the reference for the others, so the subject stays the same across the series.
+Canvas first writes a short scenario: one line per shot, with the subject and the framing. The list appears in the picture area and cannot be edited. Then the shots are drawn one by one; the list shows which shot is being drawn, and the line under it reads the shot number and the total, for example *Shot 2 of 6* when **Frames** is 6. The first finished shot becomes the reference for the others, so the subject stays the same across the series.
 
 ![A series in progress.](screens/photoshoot-running.png)
 
-A series is always 6 shots, in one place (**Same place**), with **Seed** set to **In order** and **How close** set to **Usual**. The catalog also names **How many shots** (6 / 12 / 20), **Place** (**Different places**), **Same seed**, **Random**, **Looser** and **Closer**. Those controls are not on the screen. The shot list cannot be edited.
+Set **Frames** next to **Photoshoot** before you click **Generate**. A series can have from 1 to 50 shots and starts at 6. The shots stay in one place (**Same place**), with **Seed** set to **In order** and **How close** set to **Usual**. The catalog also names **Place** (**Different places**), **Same seed**, **Random**, **Looser** and **Closer**. Those controls are not on the screen. The shot list cannot be edited.
 
 ## Stop a series
 
@@ -494,6 +488,16 @@ When the series is ready, it appears in the history strip as one entry. **Open f
 ![A finished series in the history strip.](screens/photoshoot-done.png)
 
 If a shot cannot be made, it is marked in the list and skipped; the rest of the series continues. If the scenario cannot be used, Canvas says *The scenario cannot be used. The series has stopped.* Rewrite the description and try again.
+
+## From the command line
+
+The `photoshoot` command writes the same series into a folder you name:
+
+```text
+voxprint-canvas-cli photoshoot --prompt "A yellow kettle with a blue handle" --frames 6 --out ./kettle
+```
+
+`--frames` sets the number of shots, from 1 to 50. The default is 6. `--style` takes the same style ids as the **Style** row (`photo` by default). `--places` is `same` or `different` (`same` by default). `--seed` starts at 1. Each frame is an AVIF file. The folder also contains `scenario.txt`, with one scenario line per shot. Add `--json` for the frame paths, the path of `scenario.txt`, and how many frames were made of those requested. `--adult` follows the Expert **Adult content (18+)** switch.
 
 # LoRAs from Model Forge
 

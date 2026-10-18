@@ -11,10 +11,13 @@ import unicodedata
 from dataclasses import dataclass
 from typing import Literal, assert_never
 
+from canvas.pipeline.adult_direction import shot_plan
 from canvas.pipeline.enhance import quoted_spans, stated_ages
 
 PlaceMode = Literal["same", "different"]
-COUNTS = (6, 12, 20)
+MAX_FRAMES = 50
+DEFAULT_FRAMES = 6
+SCENARIO_CHUNK = 10
 
 SYSTEM_PROMPT = """You write a photo-shoot scenario as JSON for a text-to-image model.
 The user message is JSON with idea, count, style, and place_mode.
@@ -31,6 +34,7 @@ Rules:
 - subject_block is copied character for character from idea. Do not translate it. Do not shorten it by dropping a stated age or a subject descriptor.
 - descriptors are short phrases copied character for character from subject_block. One phrase is not enough if the idea names more than one identifying fact. Include every stated age phrase.
 - shots has exactly count objects.
+- When previous is present, those lines are shots already accepted. Return count new shots that continue the series. Do not repeat a scene from previous. When place_mode is "different", do not repeat a place from previous. Keep subject_block the same text.
 - scene, pose, and camera are natural English.
 - Do not add people who are not in the idea. Do not add youthful descriptors.
 - Do not invent, drop, round, or change a stated age. Do not soften or rewrite adult content.
@@ -63,25 +67,42 @@ class Scenario:
     shots: tuple[Shot, ...]
 
 
-def scenario_request(idea: str, count: int, style: str, place_mode: str, *, adult: bool = False) -> str | None:
+def scenario_request(
+    idea: str,
+    count: int,
+    style: str,
+    place_mode: str,
+    *,
+    adult: bool = False,
+    previous: tuple[str, ...] = (),
+) -> str | None:
     """JSON user message for one scenario call. None when the chips are not a series.
 
     Args:
         idea: The prompt-field text.
-        count: 6, 12, or 20.
+        count: How many shots this call should return, from 1 to ``MAX_FRAMES``.
         style: ``photo``, ``cinematic``, or ``portrait``.
         place_mode: ``same`` or ``different``.
         adult: Expert adult content is on. Adds a per-shot pose and light plan.
+        previous: Lines already accepted, so this call continues the series.
     """
-    if count not in COUNTS or style not in ("photo", "cinematic", "portrait") or place_mode not in ("same", "different"):
+    if (
+        isinstance(count, bool)
+        or not isinstance(count, int)
+        or count < 1
+        or count > MAX_FRAMES
+        or style not in ("photo", "cinematic", "portrait")
+        or place_mode not in ("same", "different")
+    ):
         return None
     if not idea.strip():
         return None
     payload: dict[str, object] = {"idea": idea, "count": count, "style": style, "place_mode": place_mode}
+    if previous:
+        payload["previous"] = list(previous)
     if adult:
-        from canvas.pipeline.adult_direction import shot_plan
-
-        payload["direction"] = shot_plan(count)
+        start = len(previous)
+        payload["direction"] = shot_plan(start + count)[start:]
     return json.dumps(payload, ensure_ascii=False)
 
 
@@ -108,11 +129,11 @@ def validate_scenario(idea: str, raw: str, *, count: int, place_mode: PlaceMode)
     Args:
         idea: The prompt-field text.
         raw: The model reply.
-        count: How many shots were requested.
+        count: How many shots were requested, from 1 to ``MAX_FRAMES``.
         place_mode: ``same`` or ``different``.
     """
     payload = _object(raw)
-    if payload is None or count not in COUNTS:
+    if payload is None or isinstance(count, bool) or not isinstance(count, int) or count < 1 or count > MAX_FRAMES:
         return None
     subject = payload.get("subject_block")
     descriptors = payload.get("descriptors")

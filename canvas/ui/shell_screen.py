@@ -60,6 +60,7 @@ from canvas.ui.shell_chrome import (
 )
 from canvas.ui.photoshoot_bar import PhotoshootBar
 from canvas.ui.photoshoot_run import adult_content, load_series_folders, run_photoshoot
+from canvas.ui.ui_call import run_off_ui
 from canvas.ui.shell_layout import CanvasShell, PictureJob, job_from
 from canvas.ui.wizards import AddonsWizard, DiagnosticsWizard, MaskWizard, PictureWizard, SetupWizard
 
@@ -121,6 +122,7 @@ class ShellWindow(QMainWindow):
         self._mask_file: Path | None = None
         self._pictures: dict[str, str] = {}
         self._series_folders: dict[str, str] = load_series_folders(shell.state_dir)
+        self._busy = False
         self._chrome_ready = False
         self.setObjectName("shell")
         self.setWindowTitle(tr("splash.app.canvas"))
@@ -295,13 +297,18 @@ class ShellWindow(QMainWindow):
         return text("canvas.check.newer", tag=tag)
 
     def _on_improve(self, current: str) -> str:
+        if self._busy:
+            return current
+        self._busy = True
         try:
-            return self._improver(current)
+            return run_off_ui(lambda: self._improver(current))
         except Exception as exc:
             message = getattr(exc, "user_message", None)
             self.shell.layout.block(message if isinstance(message, str) and message else text("gate.unavailable"))
             self.view.refresh()
             return current
+        finally:
+            self._busy = False
 
     def _write_mask(self, image: RawImage) -> Path | None:
         """Save the mask beside the state and store it in the Yitro mask slot."""
@@ -327,6 +334,15 @@ class ShellWindow(QMainWindow):
                 self._mask_file = Path(mask)
 
     def _on_generate(self, settings: object = None) -> None:
+        if self._busy:
+            return
+        self._busy = True
+        try:
+            self._generate(settings)
+        finally:
+            self._busy = False
+
+    def _generate(self, settings: object = None) -> None:
         if self.photoshoot.enabled:
             run_photoshoot(self)
             return
@@ -365,7 +381,11 @@ class ShellWindow(QMainWindow):
                 return
             try:
                 fresh = self._fresh_inputs(job.mode)
-                raw = self._runner(job, fresh)
+
+                def draw() -> RawImage:
+                    return self._runner(job, fresh)
+
+                raw = run_off_ui(draw)
             except _NeedImage as exc:
                 layout.block(exc.message)
                 self.view.refresh()

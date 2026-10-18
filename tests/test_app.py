@@ -158,6 +158,9 @@ def test_generate_screens_the_prompt_before_the_generator(monkeypatch, tmp_path)
         def __init__(self, stack: object) -> None:
             order.append("gate")
 
+        def warm(self) -> None:
+            order.append("warm")
+
         def release_request(self, *args: object, **kwargs: object) -> FakeScreened:
             order.append("review")
             return FakeScreened()
@@ -182,6 +185,7 @@ def test_generate_screens_the_prompt_before_the_generator(monkeypatch, tmp_path)
     monkeypatch.setattr("canvas.app.main.EnlargeClient", lambda *args, **kwargs: object())
     code = main(["generate", "--prompt", "a red boat", "--aspect", "1:1", "--out", str(tmp_path / "out.avif"), "--json"])
     assert code == 0
+    assert order.index("warm") < order.index("review")
     assert order.index("review") < order.index("ensure")
     assert order.index("supporting") < order.index("review")
 
@@ -203,6 +207,9 @@ def test_generate_json_reports_the_enlarge_error(monkeypatch, capsys, tmp_path):
 
     class FakeGate:
         def __init__(self, stack: object) -> None:
+            return None
+
+        def warm(self) -> None:
             return None
 
         def release_request(self, *args: object, **kwargs: object) -> FakeScreened:

@@ -288,6 +288,10 @@
       "en": "Checking the GPU",
       "ru": "Проверка видеокарты"
     },
+    "startup.lock": {
+      "en": "Another Canvas window is still open. Close it, then try again.",
+      "ru": "Другое окно Canvas ещё открыто. Закройте его и попробуйте снова."
+    },
     "splash.installing": {
       "en": "Installing {name}",
       "ru": "Установка {name}"

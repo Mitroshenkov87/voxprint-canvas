@@ -28,12 +28,12 @@ def help_text() -> str:
     return text
 
 
-def generate_help() -> str:
-    """Stdout of ``python -m canvas.app.main generate --help``."""
+def _help(command: str, marker: str) -> str:
+    """Stdout of ``python -m canvas.app.main <command> --help``."""
     env = dict(os.environ)
     env.setdefault("QT_QPA_PLATFORM", "offscreen")
     proc = subprocess.run(
-        [sys.executable, "-m", "canvas.app.main", "generate", "--help"],
+        [sys.executable, "-m", "canvas.app.main", command, "--help"],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -41,22 +41,36 @@ def generate_help() -> str:
         check=False,
     )
     text = proc.stdout.strip()
-    if proc.returncode != 0 or "--enhance" not in text:
-        raise RuntimeError(proc.stderr.strip() or text or "generate help did not come from the app")
+    if proc.returncode != 0 or marker not in text:
+        raise RuntimeError(proc.stderr.strip() or text or f"{command} help did not come from the app")
     return text
 
 
-def render(text: str, generate: str = "") -> str:
+def generate_help() -> str:
+    """Stdout of ``python -m canvas.app.main generate --help``."""
+    return _help("generate", "--enhance")
+
+
+def photoshoot_help() -> str:
+    """Stdout of ``python -m canvas.app.main photoshoot --help``."""
+    return _help("photoshoot", "--frames")
+
+
+def _section(name: str, body: str) -> str:
+    if not body.strip():
+        return ""
+    return (
+        f"\n## {name}\n\n"
+        f"Generated from `voxprint-canvas {name} --help` when the docs are built.\n\n"
+        "```text\n"
+        f"{body.strip()}\n"
+        "```\n"
+    )
+
+
+def render(text: str, generate: str = "", photoshoot: str = "") -> str:
     """The command-line page. The fenced block is the captured help."""
-    extra = ""
-    if generate.strip():
-        extra = (
-            "\n## generate\n\n"
-            "Generated from `voxprint-canvas generate --help` when the docs are built.\n\n"
-            "```text\n"
-            f"{generate.strip()}\n"
-            "```\n"
-        )
+    extra = _section("generate", generate) + _section("photoshoot", photoshoot)
     return (
         "# Command line\n\n"
         "Generated from `voxprint-canvas --help` when the docs are built.\n\n"
@@ -69,7 +83,7 @@ def render(text: str, generate: str = "") -> str:
 
 def main() -> int:
     """Capture help and write ``docs/cli.md``."""
-    DEST.write_text(render(help_text(), generate_help()), encoding="utf-8")
+    DEST.write_text(render(help_text(), generate_help(), photoshoot_help()), encoding="utf-8")
     return 0
 
 

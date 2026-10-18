@@ -1,7 +1,6 @@
 """Gate."""
 import math
-from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import TimeoutError as FuturesTimeout
+import threading
 from dataclasses import dataclass
 from typing import Literal, Sequence, assert_never
 
@@ -24,6 +23,7 @@ from canvas.safety.constants import (
     IMAGE_CLASSROOM,
     IMAGE_SCHOOL_UNIFORM,
     IMAGE_TIMEOUT_S,
+    MODEL_LOAD_TIMEOUT_S,
     SEXUAL_SCORE_BLOCK_AT,
     ZERO_SHOT_BLOCK_AT,
 )
@@ -97,19 +97,28 @@ def issue_input(prompt: str, mode: str, frames: tuple[tuple[str, int, int, bytes
 
 
 def _wait(fn, timeout: float):
-    pool = ThreadPoolExecutor(max_workers=1)
-    try:
-        future = pool.submit(fn)
+    """Run ``fn`` on a daemon thread and stop waiting when ``timeout`` elapses."""
+    outcome: dict[str, object] = {}
+
+    def run() -> None:
         try:
-            return future.result(timeout=timeout)
-        except FuturesTimeout as exc:
-            raise SafetyUnavailable("timeout") from exc
-        except SafetyError:
-            raise
+            outcome["value"] = fn()
+        except SafetyError as exc:
+            outcome["error"] = exc
         except Exception as exc:
-            raise SafetyUnavailable("classifier_error") from exc
-    finally:
-        pool.shutdown(wait=False, cancel_futures=True)
+            outcome["error"] = exc
+
+    thread = threading.Thread(target=run, name="canvas-check", daemon=True)
+    thread.start()
+    thread.join(timeout)
+    if thread.is_alive():
+        raise SafetyUnavailable("timeout")
+    error = outcome.get("error")
+    if isinstance(error, SafetyError):
+        raise error
+    if isinstance(error, Exception):
+        raise SafetyUnavailable("classifier_error") from error
+    return outcome.get("value")
 
 
 def _score(scores: dict[str, float], label: str) -> float:
@@ -278,11 +287,61 @@ def refusal_stage(text: str, safety: str, categories: Sequence[str]) -> str:
     return "allow"
 
 
+_LOAD_ORDER = ("guard", "nsfw", "zeroshot", "faces", "ages", "fine")
+
+
 class AgeGate:
     """Decides whether a request may continue. There is no off switch."""
 
     def __init__(self, stack: SafetyStack) -> None:
         self._stack = stack
+        self._load_cv = threading.Condition()
+        self._load_state = "idle"
+        self._load_code = "classifier_error"
+
+    def warm(self) -> None:
+        """Load each component once."""
+        self._ensure_loaded()
+
+    def _ensure_loaded(self) -> None:
+        """One load for this gate. Later callers wait for it."""
+        with self._load_cv:
+            if self._load_state == "ready":
+                return
+            if self._load_state == "failed":
+                raise SafetyUnavailable(self._load_code)
+            if self._load_state == "loading":
+                while self._load_state == "loading":
+                    self._load_cv.wait()
+                if self._load_state == "ready":
+                    return
+                raise SafetyUnavailable(self._load_code)
+            self._load_state = "loading"
+        failed = True
+        code = "classifier_error"
+        try:
+            self._load_components()
+            failed = False
+        except SafetyUnavailable as exc:
+            code = exc.code
+            raise
+        finally:
+            with self._load_cv:
+                if failed:
+                    self._load_state = "failed"
+                    self._load_code = code
+                else:
+                    self._load_state = "ready"
+                self._load_cv.notify_all()
+
+    def _load_components(self) -> None:
+        """Load each component under its own bound."""
+        for name in _LOAD_ORDER:
+            component = getattr(self._stack, name)
+            load = getattr(component, "load", None)
+            if not callable(load):
+                continue
+            _wait(load, timeout=MODEL_LOAD_TIMEOUT_S)
 
     def review_prompt(self, text: str) -> None:
         """Decide whether a prompt may continue."""
@@ -290,6 +349,7 @@ class AgeGate:
 
     def _screen_prompt(self, text: str) -> bool:
         """Screen a prompt."""
+        self._ensure_loaded()
         verdict = _wait(lambda: self._stack.guard.assess(text), timeout=CLASSIFIER_TIMEOUT_S)
         if verdict.safety not in ("safe", "controversial", "unsafe"):
             raise SafetyUnavailable("classifier_error")
@@ -339,6 +399,7 @@ class AgeGate:
 
     def _check_image(self, raw: RawImage, code: str, prompt: str = "", *, full: bool = False) -> None:
         """Screen an image."""
+        self._ensure_loaded()
         try:
             score = _wait(lambda: self._stack.nsfw.sexual_score(raw), timeout=IMAGE_TIMEOUT_S)
             if isinstance(score, bool) or not isinstance(score, (int, float)):

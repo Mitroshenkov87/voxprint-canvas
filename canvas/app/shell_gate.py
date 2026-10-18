@@ -11,6 +11,7 @@ from voxprint_common.ui.safety import ReviewedOutput
 from canvas.app.i18n import text
 from canvas.safety.gate import AgeGate, SafetyError
 from canvas.safety.image import RawImage, SafeImage
+from canvas.ui.ui_call import run_off_ui
 
 
 class ContentCheck:
@@ -46,13 +47,16 @@ class ContentCheck:
         Args:
             prompt: The words that would be used.
         """
-        try:
-            self.age_gate.review_prompt(prompt)
-        except SafetyError as exc:
-            return exc.user_message
-        except Exception:
-            return text("gate.unavailable")
-        return None
+        def work() -> str | None:
+            try:
+                self.age_gate.review_prompt(prompt)
+            except SafetyError as exc:
+                return exc.user_message
+            except Exception:
+                return text("gate.unavailable")
+            return None
+
+        return run_off_ui(work)
 
     def review_result(self, prompt: str, item_id: str, output: object = None) -> str | None:
         """Review the staged picture. A missing picture is refused.
@@ -66,14 +70,18 @@ class ContentCheck:
         raw = self._staged.pop(item_id, None)
         if raw is None:
             return text("gate.unavailable")
-        try:
-            safe = self.age_gate.review_image(raw, prompt)
-        except SafetyError as exc:
-            return exc.user_message
-        except Exception:
-            return text("gate.unavailable")
-        self.kept[item_id] = safe
-        return None
+
+        def work() -> str | None:
+            try:
+                safe = self.age_gate.review_image(raw, prompt)
+            except SafetyError as exc:
+                return exc.user_message
+            except Exception:
+                return text("gate.unavailable")
+            self.kept[item_id] = safe
+            return None
+
+        return run_off_ui(work)
 
 
 def reviewed_output(image: RawImage) -> ReviewedOutput:

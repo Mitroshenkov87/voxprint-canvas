@@ -59,7 +59,11 @@ def test_photoshoot_bench_command_asks_for_six_frames(monkeypatch, capsys, tmp_p
         return {"ok": True, "frames": 6, "kept": 6, "stopped": "", "seconds": 1.25, "folder": str(kwargs["folder"])}
 
     monkeypatch.setattr("canvas.app.main.run_bench", run_bench)
-    monkeypatch.setattr("canvas.app.main.AgeGate", lambda _stack: object())
+    class _Gate:
+        def warm(self) -> None:
+            return None
+
+    monkeypatch.setattr("canvas.app.main.AgeGate", lambda _stack: _Gate())
     code = main(["photoshoot-bench", "--prompt", IDEA, "--out", str(tmp_path), "--json", "--seed", "7"])
     body = json.loads(capsys.readouterr().out)
     assert code == 0

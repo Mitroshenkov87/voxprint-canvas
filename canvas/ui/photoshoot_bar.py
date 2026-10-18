@@ -13,13 +13,23 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPalette
-from PySide6.QtWidgets import QBoxLayout, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QBoxLayout,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QScrollArea,
+    QSpinBox,
+    QVBoxLayout,
+    QWidget,
+)
 
 from voxprint_common.i18n import tr
 from voxprint_common.ui.simple_image import Phase
 from voxprint_common.ui.theme import CARD_PLAIN, TEXT
 
-from canvas.pipeline.photoshoot import Shot, assemble_line
+from canvas.pipeline.photoshoot import DEFAULT_FRAMES, MAX_FRAMES, Shot, assemble_line
 
 if TYPE_CHECKING:
     from canvas.ui.shell_screen import ShellWindow
@@ -46,7 +56,6 @@ class PhotoshootBar:
         self.window = window
         self.writer: Callable[[str], str] | None = None
         self.enabled = False
-        self.count = 6
         self.place = "same"
         self.seed_mode = "series"
         self.strength = "medium"
@@ -58,6 +67,11 @@ class PhotoshootBar:
         self._mount_mode()
         self.board = self._mount_board()
         self.sync()
+
+    @property
+    def count(self) -> int:
+        """How many frames this series should contain."""
+        return int(self.frames.value())
 
     def line_for(self, index: int) -> str:
         """The read-only line for shot ``index``.
@@ -102,6 +116,9 @@ class PhotoshootBar:
         """Show the shot list only after a scenario has been accepted."""
         busy = self.window.shell.layout.phase is Phase.BUSY
         self.mode.setEnabled(not busy)
+        self.frames_label.setVisible(self.enabled)
+        self.frames.setVisible(self.enabled)
+        self.frames.setEnabled(self.enabled and not busy)
         self.board.setVisible(self._showing)
         self.cancel.setVisible(busy and self._showing)
 
@@ -119,10 +136,21 @@ class PhotoshootBar:
         self.mode.setProperty("chip", True)
         self.mode.setToolTip(tr("photoshoot.tooltip"))
         self.mode.clicked.connect(self._toggle)
+        self.frames_label = QLabel(tr("photoshoot.frames"))
+        self.frames_label.setObjectName("photoshootFramesLabel")
+        self.frames = QSpinBox()
+        self.frames.setObjectName("photoshootFrames")
+        self.frames.setRange(1, MAX_FRAMES)
+        self.frames.setValue(DEFAULT_FRAMES)
+        self.frames.setAccelerated(True)
+        self.frames_label.setBuddy(self.frames)
         if improve is not None:
             layout = _layout_containing(improve)
             if layout is not None:
-                layout.insertWidget(layout.indexOf(improve) + 1, self.mode)
+                index = layout.indexOf(improve) + 1
+                layout.insertWidget(index, self.mode)
+                layout.insertWidget(index + 1, self.frames_label)
+                layout.insertWidget(index + 2, self.frames)
 
     def _toggle(self) -> None:
         self.enabled = self.mode.isChecked()

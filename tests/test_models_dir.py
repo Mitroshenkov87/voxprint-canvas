@@ -67,6 +67,28 @@ def test_a_model_folder_outside_shared_is_refcounted_and_released(monkeypatch, t
     assert blob.is_file()
 
 
+def test_release_deletes_a_view_and_keeps_a_nested_blob(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
+    monkeypatch.delenv("VOXPRINT_MODELS_DIR", raising=False)
+    view = models_dir() / "views" / "canvas" / "demo-0123456789ab"
+    view.mkdir(parents=True)
+    (view / "model_index.json").write_text("{}", encoding="utf-8")
+    nested = models_dir() / "blobs" / "ab" / ("cd" * 32)
+    nested.parent.mkdir(parents=True)
+    nested.write_bytes(b"blob")
+    sha = "2" * 64
+    manifest.register_component(
+        shared_dir(), "model-view", kind="model", version="1", path=view.resolve().as_posix(), sha256=sha, app="canvas",
+    )
+    manifest.register_component(
+        shared_dir(), "model-blob", kind="model", version="1", path=nested.resolve().as_posix(), sha256=sha,
+        app="canvas",
+    )
+    manifest.unregister_app(shared_dir(), "canvas")
+    assert not view.exists()
+    assert nested.read_bytes() == b"blob"
+
+
 def test_a_moved_model_follows_its_folder(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
     monkeypatch.delenv("VOXPRINT_MODELS_DIR", raising=False)

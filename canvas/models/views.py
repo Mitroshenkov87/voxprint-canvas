@@ -23,6 +23,8 @@ import shutil
 import sys
 from pathlib import Path
 
+from canvas.app.i18n import text
+
 
 VIEWS_DIR = "views"
 APP_DIR = "canvas"
@@ -35,6 +37,10 @@ _COPY_SUFFIXES = frozenset({".json", ".txt", ".model", ".tiktoken", ".jinja", ".
 
 class ViewError(Exception):
     """A view could not be built without copying a weight file."""
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail)
+        self.detail = detail
 
 
 def blob_path(root: Path, digest: str) -> Path:
@@ -51,8 +57,7 @@ def view_dir(root: Path, key: str, files: dict[str, str]) -> Path:
     """The view folder for one file set. The digest changes when any pin changes."""
     listing = "\n".join(f"{name}\t{digest.lower()}" for name, digest in sorted(files.items()))
     digest = hashlib.sha256(listing.encode("utf-8")).hexdigest()[:12]
-    safe = key.replace("/", "--").replace("\\", "--")
-    return views_root(root) / f"{safe}-{digest}"
+    return views_root(root) / f"{_safe_key(key)}-{digest}"
 
 
 def is_view(root: Path, folder: Path) -> bool:
@@ -77,9 +82,10 @@ def ensure_view(root: Path, key: str, files: dict[str, str]) -> Path | None:
     """
     folder = view_dir(root, key, files)
     if not blobs_present(root, files):
-        _remove_view(root, folder)
+        drop_model_views(root, key)
         return None
     if _view_valid(root, folder, files):
+        drop_model_views(root, key, keep=folder)
         return folder
     staging = folder.with_name(f"{folder.name}.staging-{os.getpid()}")
     _remove_view(root, staging)
@@ -96,6 +102,7 @@ def ensure_view(root: Path, key: str, files: dict[str, str]) -> Path | None:
     except BaseException:
         _remove_view(root, staging)
         raise
+    drop_model_views(root, key, keep=folder)
     return folder
 
 
@@ -108,10 +115,44 @@ def remove_views(root: Path) -> None:
         _remove_view(root, child)
 
 
+def drop_model_views(root: Path, key: str, keep: Path | None = None) -> None:
+    """Remove Canvas views for ``key``. ``keep`` stays. Nothing under ``blobs/`` is removed."""
+    base = views_root(root)
+    if not base.is_dir():
+        return
+    owner = _safe_key(key)
+    for child in list(base.iterdir()):
+        if _owner_of(child.name) != owner:
+            continue
+        if keep is not None and child.name == keep.name:
+            continue
+        _remove_view(root, child)
+
+
+def _safe_key(key: str) -> str:
+    return key.replace("/", "--").replace("\\", "--")
+
+
+def _owner_of(name: str) -> str | None:
+    """The model key encoded in a view or staging folder name, or None."""
+    stem = name
+    marker = ".staging-"
+    if marker in name:
+        head, tail = name.rsplit(marker, 1)
+        if tail.isdigit():
+            stem = head
+    if len(stem) < 14 or stem[-13] != "-":
+        return None
+    digest = stem[-12:]
+    if any(ch not in "0123456789abcdef" for ch in digest):
+        return None
+    return stem[:-13]
+
+
 def _safe_name(name: str) -> Path:
     parts = Path(name.replace("\\", "/")).parts
     if not parts or Path(name).is_absolute() or any(part in ("", ".", "..") for part in parts):
-        raise ViewError("a pinned file name must stay inside its model folder")
+        raise ViewError(text("view.bad_path"))
     return Path(*parts)
 
 
@@ -130,7 +171,7 @@ def _place(blob: Path, target: Path) -> None:
     if _copy_allowed(target, blob):
         shutil.copyfile(blob, target)
         return
-    raise ViewError(f"{target.name} could not be linked to the model store; weights are not copied")
+    raise ViewError(text("view.link_failed", name=target.name))
 
 
 def _view_valid(root: Path, folder: Path, files: dict[str, str]) -> bool:

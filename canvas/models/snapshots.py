@@ -14,10 +14,11 @@ from pathlib import Path
 
 from canvas.app.i18n import text
 from canvas.models.features import withheld_from_setup
+from canvas.models.mdl_layout import files_for, has_files
 from canvas.models.pin import PinError, require_pin, verify_file
 from canvas.models.registry import ModelSpec
 from canvas.models.verified import VerifiedCache
-from canvas.models.views import ViewError, blob_path, blobs_present, ensure_view
+from canvas.models.views import ViewError, blob_path, blobs_present, drop_model_views, ensure_view
 
 _PACKAGE = Path(__file__).parent
 _CHUNK = 1024 * 1024
@@ -26,16 +27,24 @@ _CHUNK = 1024 * 1024
 class SnapshotError(Exception):
     """A weight file could not be fetched or did not match its pin."""
 
-    def __init__(self, detail: str) -> None:
+    def __init__(self, detail: str, *, user_message: str | None = None) -> None:
         super().__init__(detail)
         self.detail = detail
+        self.user_message = user_message
 
     def __str__(self) -> str:
+        if self.user_message:
+            return self.user_message
         return text("error.download")
 
 
 def weight_dir(root: Path, repo: str, *, fallback: bool = False) -> Path:
-    """Directory for one repo snapshot. The fallback tree is a sibling folder."""
+    """Legacy ``<org>--<repo>`` folder. ``fallback`` selects the ``--upstream`` sibling.
+
+    Loading goes through :func:`snapshot_ready` and :func:`fallback_ready`, which
+    return a view over the MDL blobs first and this folder only while an older
+    tree is still on disk.
+    """
     name = repo.replace("/", "--")
     if fallback:
         name += "--upstream"
@@ -50,15 +59,18 @@ def snapshot_repo(spec: ModelSpec) -> str:
 def snapshot_status(spec: ModelSpec, root: Path, cache: VerifiedCache | None = None) -> str:
     """``ready``, ``not_downloaded``, ``incomplete``, or ``hash_mismatch``.
 
-    Files in the VOXPrint MDL blob store count first; a legacy repo folder still counts.
+    Files in the VOXPrint MDL blob store count first. A missing blob, or a blob of
+    the wrong size, is not downloaded. A legacy repo folder still counts.
     """
-    primary = _best(_blob_status(root, spec.files, cache),
-                    _folder_status(weight_dir(root, snapshot_repo(spec)), spec.files, cache))
+    primary = _source_status(spec.id, spec.files, weight_dir(root, snapshot_repo(spec)), root, cache)
     fallback = "not_downloaded"
     if spec.fallback_files:
-        fallback = _best(
-            _blob_status(root, spec.fallback_files, cache),
-            _folder_status(weight_dir(root, snapshot_repo(spec), fallback=True), spec.fallback_files, cache),
+        fallback = _source_status(
+            f"{spec.id}-upstream",
+            spec.fallback_files,
+            weight_dir(root, snapshot_repo(spec), fallback=True),
+            root,
+            cache,
         )
     if primary == "ready" or fallback == "ready":
         return "ready"
@@ -74,6 +86,30 @@ def snapshot_status(spec: ModelSpec, root: Path, cache: VerifiedCache | None = N
 def _best(first: str, second: str) -> str:
     order = ("ready", "hash_mismatch", "incomplete", "not_downloaded")
     return min(first, second, key=order.index)
+
+
+def _source_status(
+    model_id: str, catalog_files: dict[str, str], legacy: Path, root: Path, cache: VerifiedCache | None,
+) -> str:
+    """Blob status for one id, or the legacy folder when the manifest has no file list."""
+    if has_files(model_id):
+        mapped = files_for(model_id, root)
+        if mapped is None:
+            blob_state = "not_downloaded"
+        else:
+            blob_state = _verified({path: blob.name for path, blob in mapped.items()}, root, cache)
+    else:
+        blob_state = _blob_status(root, catalog_files, cache)
+    return _best(blob_state, _folder_status(legacy, catalog_files, cache))
+
+
+def _verified(files: dict[str, str], root: Path, cache: VerifiedCache | None) -> str:
+    if not files:
+        return "not_downloaded"
+    for digest in files.values():
+        if not _matches(blob_path(root, digest), digest, cache):
+            return "hash_mismatch"
+    return "ready"
 
 
 def _blob_status(root: Path, files: dict[str, str], cache: VerifiedCache | None = None) -> str:
@@ -110,9 +146,9 @@ def snapshot_ready(spec: ModelSpec, root: Path, cache: VerifiedCache | None = No
     """The local folder whose files match the pin, or None when none does.
 
     A view over the MDL blob store comes first, then the legacy ``<org>--<repo>``
-    folder, then the same two for the FP32 fallback set.
+    folder, then the FP32 ``<id>-upstream`` view and its legacy folder.
     """
-    found = _view_or_none(spec.id, root, spec.files, cache)
+    found = _open_layout(spec.id, root, spec.files, cache)
     if found is not None:
         return found
     primary = weight_dir(root, snapshot_repo(spec))
@@ -129,11 +165,32 @@ def fallback_ready(spec: ModelSpec, root: Path, cache: VerifiedCache | None = No
     """
     if not spec.fallback_files:
         return None
-    found = _view_or_none(f"{spec.id}-upstream", root, spec.fallback_files, cache)
+    found = _open_layout(f"{spec.id}-upstream", root, spec.fallback_files, cache)
     if found is not None:
         return found
     other = weight_dir(root, snapshot_repo(spec), fallback=True)
     return other if _complete(other, spec.fallback_files, cache) else None
+
+
+def _open_layout(
+    model_id: str, root: Path, catalog_files: dict[str, str], cache: VerifiedCache | None,
+) -> Path | None:
+    """The view for ``model_id``.
+
+    An installed file list wins. A missing blob or a wrong size drops a stale
+    view and is not downloaded. With no file list, the catalog pins are used.
+    """
+    if has_files(model_id):
+        mapped = files_for(model_id, root)
+        if mapped is None:
+            drop_model_views(root, model_id)
+            return None
+        files = {path: blob.name for path, blob in mapped.items()}
+        if not all(_matches(blob_path(root, digest), digest, cache) for digest in files.values()):
+            drop_model_views(root, model_id)
+            return None
+        return _view_or_none(model_id, root, files, cache)
+    return _view_or_none(model_id, root, catalog_files, cache)
 
 
 def _view_or_none(key: str, root: Path, files: dict[str, str], cache: VerifiedCache | None) -> Path | None:
@@ -146,7 +203,7 @@ def _view_or_none(key: str, root: Path, files: dict[str, str], cache: VerifiedCa
     try:
         return ensure_view(root, key, files)
     except ViewError as exc:
-        raise SnapshotError(str(exc)) from exc
+        raise SnapshotError(exc.detail, user_message=str(exc)) from exc
 
 
 def download_snapshot(

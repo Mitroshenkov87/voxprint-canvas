@@ -108,6 +108,7 @@ def request_fp32(spec: ModelSpec) -> bool:
     """Queue the FP32 ``<id>-upstream`` entry with VOXPrint MDL. False when it cannot be queued."""
     if not spec.fallback_files:
         return False
+    # Resolved at call time: a missing MDL client returns False, and tests patch enqueue.
     try:
         from voxprint_common.mdl import enqueue
         from voxprint_common.mdl.catalog import CatalogError

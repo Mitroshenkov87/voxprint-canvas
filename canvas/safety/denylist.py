@@ -59,8 +59,9 @@ _MINOR_SEXUAL: tuple[tuple[str, str, tuple[str, ...]], ...] = (
 # with explicit or nude content they block (product rule 2026-10-18).
 _YOUTH_CONTEXT: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("exact", "en", ("school", "schools", "schoolkid", "schoolkids", "highschool", "student", "students",
-                     "pupil", "pupils", "classroom", "classrooms", "schoolyard")),
-    ("prefix", "en", ("schooluniform",)),
+                     "pupil", "pupils", "classroom", "classrooms", "schoolyard",
+                     "juvenile", "juveniles", "adolescent", "adolescents")),
+    ("prefix", "en", ("schooluniform", "barelylegal")),
     ("stem", "ru", ("школ", "школьн", "студент", "ученик", "учениц", "гимназист", "старшеклас",
                     "первоклас", "одноклассниц", "одноклассник")),
     ("stem", "ru-lat", ("shkol", "student", "uchenik", "uchenits", "starsheklas")),
@@ -195,6 +196,14 @@ def _drop_exempt(raw: list[str]) -> list[str]:
     return kept
 
 
+# Two-word phrases matched as one token ("barely legal" -> "barelylegal").
+_PHRASES = frozenset({("barely", "legal")})
+
+
+def _phrases(tokens: list[str]) -> list[str]:
+    return [a + b for a, b in zip(tokens, tokens[1:]) if (a, b) in _PHRASES]
+
+
 def tokenise(text: str) -> list[str]:
     """Normalised tokens plus glued spellings and Russian transliterations."""
     folded = _base(text).translate(_LEET)
@@ -207,7 +216,7 @@ def tokenise(text: str) -> list[str]:
             extra.append(_translit(token))
         else:
             primary.append(token.translate(_CONFUSABLE))
-    return primary + _glue(primary) + extra
+    return primary + _glue(primary) + _phrases(primary) + extra
 
 
 # A stem is a prefix of an inflected form, not a substring. The remainder is empty,

@@ -74,3 +74,31 @@ def test_non_exempt_counterpart_blocks(prompt):
 @pytest.mark.parametrize("prompt", ["a kind woman", "baby oil bottle", "old school car", "minor key piano"])
 def test_clothed_prompts_still_pass(prompt):
     World().gate().review_prompt(prompt)
+
+
+YOUTH_CUES = ["juvenile", "juveniles", "adolescent", "adolescents", "barely legal", "barely-legal", "barelylegal"]
+
+
+@pytest.mark.parametrize("cue", YOUTH_CUES)
+@pytest.mark.parametrize("explicit", ["nude", "explicit", "porn"])
+def test_youth_cue_with_explicit_content_blocks(explicit, cue):
+    prompt = f"{explicit}, {cue}"
+    assert refusal_stage(prompt, "safe", ()) == "lexicon-youth-context"
+    with pytest.raises(GenerationBlocked):
+        World().gate().review_prompt(prompt)
+
+
+def test_maloletka_is_already_covered_by_the_minor_stem():
+    assert refusal_stage("голая малолетка", "safe", ()) != "allow"
+    World().gate().review_prompt("малолетка в парке")
+
+
+@pytest.mark.parametrize("prompt", ["a juvenile hawk on a branch", "juveniles of the species", "an adolescent drama poster",
+                                    "adolescents playing football", "a barely legal parking spot"])
+def test_youth_cue_in_a_clothed_prompt_passes(prompt):
+    World().gate().review_prompt(prompt)
+
+
+@pytest.mark.parametrize("prompt", ["nude girl", "petite nude woman", "nude, doll makeup"])
+def test_ordinary_adult_wording_is_not_a_cue(prompt):
+    World().gate().review_prompt(prompt)

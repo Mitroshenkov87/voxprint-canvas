@@ -11,7 +11,7 @@ def test_default_tag_is_the_current_release_candidate(monkeypatch, tmp_path, cap
     monkeypatch.delenv("VOXPRINT_TAG", raising=False)
     assert main(["--smoke", "--json"]) == 3
     body = json.loads(capsys.readouterr().out)
-    assert body["tag"] == "v0.1.0-rc.14"
+    assert body["tag"] == "v0.1.0-rc.15"
 
 
 def test_no_gpu_is_exit_3(monkeypatch, tmp_path, capsys):

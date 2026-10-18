@@ -1,44 +1,105 @@
-# 16 GB smoke run: install Canvas from this checkout, fetch the models through
-# VOXPrint MDL (mdl.json), then generate five 1024x1024 pictures with
-# Z-Image-Turbo BF16 on the 16 GB group-offload path. Every output goes through
-# the content gate. Writes <out>\result.json.
-# Exit 0 pass, 1 a picture failed, 2 setup, 3 no GPU, 4 gate unavailable,
-# 5 a manifest entry failed its download or hash check.
-# Usage: powershell -ExecutionPolicy Bypass -File tools\smoke_16gb.ps1 [out-folder]
-param([string]$Out = "smoke-16gb")
+# Canvas smoke run for Proving Ground on Windows (Windows PowerShell 5.1 or PowerShell 7).
+# No WSL and no bash. The Setup .exe installs this script as
+# C:\Program Files\VOXPrint AI Suite\Canvas\tools\smoke_16gb.ps1; a checkout works too.
+# Results go to .\smoke-results under the current folder unless -Out is given.
+#
+#   -VramCapGB 16  16 GB pass: torch.cuda.set_per_process_memory_fraction plus the
+#                  16 GB group-offload path, so an RTX 4090 runs as a 16 GB card.
+#   (no cap, or 0) 24 GB pass: uncapped, on the 24 GB tier path.
+#
+# Steps: find Python (the one the Canvas installer ships, or -Python), fetch and
+# verify the voxprint-common 0.2.5 wheel, download the models through VOXPrint MDL
+# (mdl.json), generate five neutral 1024x1024 pictures through the content gate,
+# then time the gate by stage. Writes <Out>\result-16gb.json or result-24gb.json.
+#
+# Exit 0 pass, 1 a picture failed, 2 setup (no Python, wheel hash, wrong tier),
+# 3 no GPU, 4 gate unavailable, 5 an MDL download or hash check failed.
+#
+#   powershell -NoProfile -ExecutionPolicy Bypass -File tools\smoke_16gb.ps1 -VramCapGB 16
+#   powershell -NoProfile -ExecutionPolicy Bypass -File tools\smoke_16gb.ps1
+param(
+    [double]$VramCapGB = 0,
+    [string]$Python = "",
+    [string]$Out = ""
+)
 $ErrorActionPreference = "Stop"
-$Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-Set-Location $Root
-$TorchIndex = "https://download.pytorch.org/whl/cu130"
-$CommonUrl = "https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.2.4/voxprint_common-0.2.4-py3-none-any.whl"
-$CommonSha = "3051bc64700964705bf5cee5182829d1311560a38a9f7436195f26481e4fa239"
-$Py = if ($env:PYTHON) { $env:PYTHON } else { "py" }
-$PyArgs = if ($env:PYTHON) { @() } else { @("-3.14") }
-if (-not (Get-Command $Py -ErrorAction SilentlyContinue)) {
-    Write-Host "Python 3.14 is not installed. Set PYTHON to a Python 3.14 interpreter."
+if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
+    $PSNativeCommandUseErrorActionPreference = $false
+}
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+$Root = Split-Path -Parent $PSScriptRoot
+$CommonVersion = "0.2.5"
+$CommonUrl = "https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.2.5/voxprint_common-0.2.5-py3-none-any.whl"
+$CommonSha = "4980c1ab5a75b22dec1a16b16474ccb350110c8d3d056f25b5ed74a623fe6a9b"
+$Installed = Join-Path $env:ProgramFiles "VOXPrint AI Suite\Canvas\venv\Scripts\python.exe"
+
+if ($Python -eq "") { $Python = $Installed }
+if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) {
+    Write-Host "Python was not found at $Python. Install Canvas from the Setup .exe, or pass -Python <python.exe>."
     exit 2
 }
-function Step([string]$Exe, [string[]]$Arguments, [int]$Code = 2) {
-    & $Exe @Arguments
-    if ($LASTEXITCODE -ne 0) { exit $Code }
+$Python = (Resolve-Path -LiteralPath $Python).Path
+if ($VramCapGB -gt 0) { $Pass = "16gb" } else { $Pass = "24gb" }
+if ($Out -eq "") { $Out = "smoke-results" }
+if (-not [System.IO.Path]::IsPathRooted($Out)) { $Out = Join-Path (Get-Location).Path $Out }
+New-Item -ItemType Directory -Force -Path $Out | Out-Null
+$Out = (Resolve-Path -LiteralPath $Out).Path
+Write-Host "Python: $Python"
+Write-Host "Pass: $Pass"
+
+# voxprint-common 0.2.5: fetch, verify, and use it when the interpreter has another version.
+$Work = Join-Path $Out ".smoke-work"
+$Lib = Join-Path $Work "lib"
+New-Item -ItemType Directory -Force -Path $Work | Out-Null
+$Wheel = Join-Path $Work "voxprint_common-0.2.5-py3-none-any.whl"
+try {
+    Invoke-WebRequest -Uri $CommonUrl -OutFile $Wheel -UseBasicParsing
+} catch {
+    Write-Host "The voxprint-common $CommonVersion wheel could not be downloaded: $_"
+    exit 2
 }
-$Venv = Join-Path $Root ".smoke-venv"
-$VPy = Join-Path $Venv "Scripts\python.exe"
-if (-not (Test-Path -LiteralPath $VPy)) { Step $Py ($PyArgs + @("-m", "venv", $Venv)) }
-$Wheels = Join-Path $Venv "wheels"
-New-Item -ItemType Directory -Force -Path $Wheels | Out-Null
-$Wheel = Join-Path $Wheels "voxprint_common-0.2.4-py3-none-any.whl"
-Invoke-WebRequest -Uri $CommonUrl -OutFile $Wheel -UseBasicParsing
 if ((Get-FileHash -Algorithm SHA256 -LiteralPath $Wheel).Hash.ToLower() -ne $CommonSha) {
-    Write-Host "voxprint-common wheel hash mismatch."
+    Write-Host "The voxprint-common $CommonVersion wheel failed the SHA-256 check."
     exit 2
 }
-Step $VPy @("-m", "pip", "install", "-q", "--upgrade", "pip")
-Step $VPy @("-m", "pip", "install", "-q", $Wheel)
-Step $VPy @("-m", "pip", "install", "-q", "--extra-index-url", $TorchIndex,
-    "-c", "constraints.txt", "-c", "constraints-cuda.txt", "-e", ".[gen]")
-# A failed download or a hash mismatch stops the run here with exit 5.
-Step $VPy @("-m", "voxprint_common.mdl", "download", "--app", "canvas", "--manifest", (Join-Path $Root "mdl.json")) 5
-& $VPy -m tools.smoke_16gb --python $VPy --out $Out
-if ($null -eq $LASTEXITCODE) { exit 2 }
-exit $LASTEXITCODE
+$ErrorActionPreference = "Continue"
+$have = & $Python -c "import importlib.metadata as m; print(m.version('voxprint-common'))" 2>$null
+$probe = $LASTEXITCODE
+$ErrorActionPreference = "Stop"
+if ($probe -ne 0) { $have = "" }
+if ("$have".Trim() -ne $CommonVersion) {
+    Write-Host "voxprint-common is '$have' in this Python. Using the verified $CommonVersion wheel for this run."
+    if (Test-Path -LiteralPath $Lib) { Remove-Item -Recurse -Force -LiteralPath $Lib }
+    & $Python -m pip install --disable-pip-version-check -q --no-deps --target $Lib $Wheel
+    if ($LASTEXITCODE -ne 0) { Write-Host "The voxprint-common wheel could not be unpacked."; exit 2 }
+    $env:PYTHONPATH = $Lib
+}
+
+# Use the mdl.json that belongs to the Canvas this Python runs (the install folder
+# above venv\Scripts), else the checkout's.
+$AppDir = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $Python))
+$Manifest = Join-Path $AppDir "mdl.json"
+if (-not (Test-Path -LiteralPath $Manifest)) { $Manifest = Join-Path $Root "mdl.json" }
+Push-Location $Out
+try {
+    $ErrorActionPreference = "Continue"
+    & $Python -c "import canvas" 2>$null
+    $probe = $LASTEXITCODE
+    $ErrorActionPreference = "Stop"
+    if ($probe -ne 0) { Write-Host "Canvas is not installed in this Python."; exit 2 }
+    Write-Host "Models: python -m voxprint_common.mdl download --app canvas --manifest $Manifest"
+    & $Python -m voxprint_common.mdl download --app canvas --manifest $Manifest
+    if ($LASTEXITCODE -ne 0) { Write-Host "MDL download or hash check failed."; exit 5 }
+
+    $toolArgs = @((Join-Path $Root "tools\smoke_16gb.py"), "--python", $Python, "--out", $Out, "--pass", $Pass, "--manifest", $Manifest)
+    if ($Pass -eq "16gb") {
+        $toolArgs += @("--vram-cap-gb", [string]::Format([Globalization.CultureInfo]::InvariantCulture, "{0}", $VramCapGB))
+    }
+    & $Python @toolArgs
+    $code = $LASTEXITCODE
+} finally {
+    Pop-Location
+}
+if ($null -eq $code) { exit 2 }
+Write-Host "Result: $(Join-Path $Out "result-$Pass.json") (exit $code)"
+exit $code

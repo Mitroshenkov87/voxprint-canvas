@@ -297,7 +297,7 @@ class AgeGate:
         self._screen_prompt(text)
 
     def _screen_prompt(self, text: str) -> bool:
-        """Stop a refused prompt. Return True when the prompt asks for explicit content."""
+        """Screen a prompt."""
         verdict = _wait(lambda: self._stack.guard.assess(text), timeout=CLASSIFIER_TIMEOUT_S)
         if verdict.safety not in ("safe", "controversial", "unsafe"):
             raise SafetyUnavailable("classifier_error")
@@ -322,13 +322,7 @@ class AgeGate:
     def release_request(
         self, prompt: str, mode: str, inputs: Sequence[PendingInput] = (), *, explicit: bool = False,
     ) -> ScreenedInput:
-        """Accept a prompt and its images, or stop the request.
-
-        Input images get the same two stages as outputs. An explicit prompt, or
-        ``explicit=True`` (the adult-content setting is on), runs the full
-        stage on every input whatever the NSFW pass says. ``explicit`` can only
-        add checks; it never skips one.
-        """
+        """Screen a request."""
         staged: list[bytearray] = []
         try:
             full = self._screen_prompt(prompt) or explicit
@@ -356,15 +350,7 @@ class AgeGate:
             raw.wipe()
 
     def _check_image(self, raw: RawImage, code: str, prompt: str = "", *, full: bool = False) -> None:
-        """Two stages. Stage 1 is the NSFW pass alone; stage 2 runs only on flagged frames.
-
-        A frame whose NSFW score is under ``SEXUAL_SCORE_BLOCK_AT`` passes after
-        stage 1, and no other classifier sees it, unless ``full`` is set. An NSFW
-        error, timeout or unusable score flags the frame as sexual (fail-closed)
-        and stage 2 runs. Stage 2 reads the SigLIP labels, finds faces, and reads
-        the two age bands only when a face is present. Any error in stage 2
-        raises ``SafetyUnavailable``. The caller wipes the picture either way.
-        """
+        """Screen an image."""
         try:
             score = _wait(lambda: self._stack.nsfw.sexual_score(raw), timeout=IMAGE_TIMEOUT_S)
             if isinstance(score, bool) or not isinstance(score, (int, float)):

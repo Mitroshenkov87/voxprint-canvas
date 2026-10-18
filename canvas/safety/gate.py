@@ -197,8 +197,12 @@ def image_block_reason(
             band = False
             adolescent = False
         case "adult":
-            band = any(value >= ADOLESCENT_16_17_AT_AGE_18 for _at_most_15, value in parsed)
-            adolescent = band
+            marks = tuple(value >= ADOLESCENT_16_17_AT_AGE_18 for _at_most_15, value in parsed)
+            band = any(marks)
+            if estimates is None:
+                adolescent = band
+            else:
+                adolescent = any(mark and age < ESTIMATE_CONFIRM_BELOW for mark, age in zip(marks, estimates))
         case "none":
             marks = tuple(value >= ADOLESCENT_16_17_AT for _at_most_15, value in parsed)
             band = any(marks)

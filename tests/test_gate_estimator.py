@@ -38,6 +38,7 @@ def _bands(**probs: float) -> tuple[float, float]:
 
 
 TEEN_READING = _bands(**{"10_19": 0.85, "20_29": 0.15})
+STATED_READING = _bands(**{"10_19": 0.95, "20_29": 0.05})
 SOFT_READING = _bands(**{"10_19": 0.60, "20_29": 0.40})
 
 
@@ -112,12 +113,27 @@ def test_child_probes_stay_blocked():
     assert blocked == len(probes)
 
 
-def test_stated_age_paths_are_unchanged():
+def test_stated_age_paths():
     scores = {label: 0.0 for label in IMAGE_LABELS}
     scores[IMAGE_ADULT_SEXUAL] = 0.9
     face = [(0.0, gate_module.ADOLESCENT_16_17_AT_AGE_18)]
-    assert image_block_reason(0.95, face, scores, support="adult", fine=[25.0]) == "adolescent"
+    assert image_block_reason(0.95, face, scores, support="adult", fine=[25.0]) == "allow"
+    assert image_block_reason(0.95, face, scores, support="adult", fine=[ESTIMATE_CONFIRM_BELOW]) == "allow"
+    assert image_block_reason(0.95, face, scores, support="adult", fine=[17.9]) == "adolescent"
+    assert image_block_reason(0.95, face, scores, support="adult") == "adolescent"
+    assert image_block_reason(0.95, face, scores, support="adult", fine=[12.0]) == "low-estimate"
+    assert image_block_reason(0.95, [(CLEAR_CHILD_AT, 0.0)], scores, support="adult", fine=[25.0]) == "clear-child"
     assert image_block_reason(0.95, face, scores, support="strong", fine=[25.0]) == "allow"
+
+
+@pytest.mark.parametrize("estimate", [18.5, 19.0, 19.5, 20.5])
+def test_stated_18_19_adults_pass(estimate):
+    assert _passes(_world([STATED_READING], [estimate]), "a woman, 18 years old")
+    assert _passes(_world([STATED_READING], [estimate]), "a woman, 19 years old")
+
+
+def test_stated_18_19_low_estimate_drops():
+    assert not _passes(_world([STATED_READING], [17.0]), "a woman, 18 years old")
 
 
 def test_without_estimates_the_line_is_unchanged():

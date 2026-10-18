@@ -53,12 +53,23 @@ _MINOR_SEXUAL: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("stem", "ru-lat", ("loli", "shota", "lolicon", "shotacon", "pedofil")),
     ("stem", "de", ("kindesmissbrauch", "kinderporn", "paedophil")),
 )
+# School and student context. Alone, or in a clothed scene, these pass. Together
+# with explicit or nude content they block (product rule 2026-10-18).
+_YOUTH_CONTEXT: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("exact", "en", ("school", "schools", "schoolkid", "schoolkids", "highschool", "student", "students",
+                     "pupil", "pupils", "classroom", "classrooms", "schoolyard")),
+    ("prefix", "en", ("schooluniform",)),
+    ("stem", "ru", ("школ", "школьн", "студент", "ученик", "учениц", "гимназист", "старшеклас",
+                    "первоклас", "одноклассниц", "одноклассник")),
+    ("stem", "ru-lat", ("shkol", "student", "uchenik", "uchenits", "starsheklas")),
+    ("exact", "de", ("schule", "schueler", "schuelerin", "schuluniform", "klassenzimmer", "student", "studentin")),
+)
 _SEXUAL: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("exact", "en", ("sex", "sexy", "nude", "naked", "porn", "porno", "nsfw", "erotic", "erotica",
                      "explicit", "lewd", "hentai", "topless", "bottomless", "lingerie", "xxx")),
     ("prefix", "en", ("sexual", "intercourse")),
-    ("stem", "ru", ("секс", "порно", "эротич", "обнаж", "голая", "голый", "голые", "интим")),
-    ("stem", "ru-lat", ("seks", "porno", "erotich")),
+    ("stem", "ru", ("секс", "порно", "эротич", "эротик", "обнаж", "голая", "голый", "голые", "интим")),
+    ("stem", "ru-lat", ("seks", "porno", "erotich", "erotik")),
     ("stem", "de", ("nackt", "porn", "erotisch", "explizit", "geschlechtsverkehr", "dessous")),
     ("exact", "de", ("sex",)),
 )
@@ -95,6 +106,7 @@ class TextSignals:
     minor: bool
     sexual: bool
     minor_sexual: bool = False
+    youth_context: bool = False
 
 
 @dataclass(frozen=True)
@@ -108,6 +120,7 @@ class ScanTrace:
     minor_terms: tuple[str, ...]
     sexual_terms: tuple[str, ...]
     minor_sexual_terms: tuple[str, ...]
+    youth_context_terms: tuple[str, ...] = ()
 
 
 def _cyrillic_count(token: str) -> int:
@@ -218,6 +231,7 @@ def explain(text: str) -> ScanTrace:
     minor_terms = _hits(tokens, _MINOR)
     sexual_terms = _hits(tokens, _SEXUAL)
     minor_sexual_terms = _hits(tokens, _MINOR_SEXUAL)
+    youth_context_terms = _hits(tokens, _YOUTH_CONTEXT)
     age = _age_hit(text)
     minor_sexual = bool(minor_sexual_terms)
     return ScanTrace(
@@ -228,10 +242,16 @@ def explain(text: str) -> ScanTrace:
         minor_terms=minor_terms,
         sexual_terms=sexual_terms,
         minor_sexual_terms=minor_sexual_terms,
+        youth_context_terms=youth_context_terms,
     )
 
 
 def scan(text: str) -> TextSignals:
     """Return minor and sexual signals. A minor signal alone does not block."""
     detail = explain(text)
-    return TextSignals(minor=detail.minor, sexual=detail.sexual, minor_sexual=detail.minor_sexual)
+    return TextSignals(
+        minor=detail.minor,
+        sexual=detail.sexual,
+        minor_sexual=detail.minor_sexual,
+        youth_context=bool(detail.youth_context_terms),
+    )

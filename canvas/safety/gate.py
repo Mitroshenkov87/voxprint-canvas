@@ -4,8 +4,18 @@ Input images are screened before a ``ScreenedInput`` is issued. Output images ar
 screened before a ``SafeImage`` is issued. A missing model, a bad hash, a load
 error, a timeout or any other classifier error refuses the request. Nothing in
 this module reads settings, environment variables or flags.
+
+Product rule (2026-10-18). The prompt check is the primary filter: it runs on the
+final prompt string a generator receives, on every route, because a generator
+accepts only a ``ScreenedInput``. Explicit or nude intent together with a child,
+teen or minor term, a stated age under 18, or a school or student cue blocks. A
+clothed school or student scene passes. The output check is a lighter net: in a
+sexual frame it drops a clear child or adolescent reading at the existing
+thresholds, a minor-sexual image score, or a visible school uniform or classroom.
+A youngest-adult or babyface reading with no other marker passes.
+
+Nothing here logs or stores a decision, a score, a prompt or any pixel data.
 """
-import logging
 import math
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeout
@@ -24,6 +34,8 @@ from canvas.safety.constants import (
     IMAGE_LABELS,
     IMAGE_MINOR,
     IMAGE_MINOR_SEXUAL,
+    IMAGE_CLASSROOM,
+    IMAGE_SCHOOL_UNIFORM,
     IMAGE_TIMEOUT_S,
     SEXUAL_SCORE_BLOCK_AT,
     ZERO_SHOT_BLOCK_AT,
@@ -31,9 +43,6 @@ from canvas.safety.constants import (
 from canvas.safety.denylist import scan
 from canvas.safety.image import RawImage, SafeImage, ScreenedFrame, ScreenedInput, _INPUT_TOKEN, _OUTPUT_TOKEN
 from canvas.safety.inputs import PendingInput, role_name
-
-log = logging.getLogger("voxprint.canvas.safety")
-
 
 class SafetyError(Exception):
     """The request stopped. The message is safe to show."""
@@ -57,6 +66,12 @@ class GenerationBlocked(SafetyError):
     """The request cannot be completed."""
 
     message_key = "gate.blocked"
+
+
+class YouthContextBlocked(GenerationBlocked):
+    """Explicit content was combined with a school, student or young-age cue."""
+
+    message_key = "gate.blocked_youth"
 
 
 class SafetyUnavailable(SafetyError):
@@ -158,10 +173,12 @@ def image_block_reason(
     scores: dict[str, float],
     *,
     support: Literal["none", "adult", "strong"] = "none",
-) -> Literal["allow", "minor-sexual", "clear-child", "adolescent"]:
+) -> Literal["allow", "minor-sexual", "clear-child", "adolescent", "school-context"]:
     """Why a picture would stop, or ``allow``.
 
     Adult sexual content passes. A minor-sexual image score blocks on its own.
+    A school-uniform or classroom score at the zero-shot line blocks in a sexual
+    frame and passes in a clothed one.
     P(age <= 15) at the child line blocks with sexual content, and a stated age
     cannot remove that. P(16 or 17) blocks only at its own higher line. A stated
     age of 18 or 19 raises that line, and a stated age of 20 or more removes it.
@@ -171,6 +188,7 @@ def image_block_reason(
     minor_sexual = _at_least(_score(scores, IMAGE_MINOR_SEXUAL))
     adult_sexual = _at_least(_score(scores, IMAGE_ADULT_SEXUAL))
     _score(scores, IMAGE_MINOR)
+    school = _at_least(_score(scores, IMAGE_SCHOOL_UNIFORM)) or _at_least(_score(scores, IMAGE_CLASSROOM))
     sexual = float(nsfw) >= SEXUAL_SCORE_BLOCK_AT or adult_sexual or minor_sexual
     clear = any(at_most_15 >= CLEAR_CHILD_AT for at_most_15, _band in parsed)
     match support:
@@ -188,6 +206,8 @@ def image_block_reason(
         return "clear-child"
     if sexual and adolescent:
         return "adolescent"
+    if sexual and school:
+        return "school-context"
     return "allow"
 
 
@@ -231,7 +251,9 @@ def refusal_stage(text: str, safety: str, categories: Sequence[str]) -> str:
 
     ``lexicon-minor-sexual`` and ``lexicon-minor`` come from the term list.
     ``guard-restricted`` is a Qwen3Guard category that names a minor or non-consent.
-    Unsafe or controversial plus the plain sexual category is not a block.
+    ``lexicon-youth-context`` is explicit intent (term list or the Qwen3Guard
+    sexual category) together with a school or student cue. Unsafe or
+    controversial plus the plain sexual category alone is not a block.
     """
     signals = scan(text)
     if signals.minor_sexual:
@@ -241,6 +263,8 @@ def refusal_stage(text: str, safety: str, categories: Sequence[str]) -> str:
     sexual = signals.sexual or _guard_sexual(safety, categories)
     if sexual and signals.minor:
         return "lexicon-minor"
+    if sexual and signals.youth_context:
+        return "lexicon-youth-context"
     return "allow"
 
 
@@ -256,9 +280,19 @@ class AgeGate:
         if verdict.safety not in ("safe", "controversial", "unsafe"):
             raise SafetyUnavailable("classifier_error")
         stage = refusal_stage(text, verdict.safety, verdict.categories)
+        if stage == "lexicon-youth-context":
+            raise YouthContextBlocked("prompt")
         if stage != "allow":
-            log.info("content check refused a prompt (%s)", stage)
             raise GenerationBlocked("prompt")
+
+    def review_prompts(self, texts: Sequence[str]) -> None:
+        """Screen every text of a multi-part request, such as an idea, a scenario and each shot line.
+
+        One blocked text stops the whole request. Each shot still goes through
+        ``release_request`` with its final prompt before it is generated.
+        """
+        for item in texts:
+            self.review_prompt(item)
 
     def release_request(self, prompt: str, mode: str, inputs: Sequence[PendingInput] = ()) -> ScreenedInput:
         """Accept a prompt and its images, or stop the request."""
@@ -309,8 +343,7 @@ class AgeGate:
         match reason:
             case "allow":
                 return
-            case "minor-sexual" | "clear-child" | "adolescent":
-                log.info("content check refused an image (%s)", reason)
+            case "minor-sexual" | "clear-child" | "adolescent" | "school-context":
                 raise GenerationBlocked(code)
             case _ as unexpected:
                 assert_never(unexpected)

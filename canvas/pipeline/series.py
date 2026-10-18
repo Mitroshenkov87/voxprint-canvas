@@ -12,6 +12,7 @@ from typing import Literal, Protocol, assert_never
 
 from canvas.app.i18n import text
 from canvas.pipeline.enhance import stated_ages
+from canvas.pipeline.adult_direction import ages_allowed, with_adult_anchor, youth_cues
 from canvas.pipeline.photoshoot import (
     PlaceMode,
     Scenario,
@@ -65,6 +66,7 @@ def run_series(
     on_scenario: Callable[[Scenario], None] | None = None,
     line_for: Callable[[int], str] | None = None,
     on_status: Callable[[int, str], None] | None = None,
+    adult: bool = False,
 ) -> SeriesResult:
     """Write the scenario, check it, and save the frames the gate allows.
 
@@ -87,6 +89,9 @@ def run_series(
         on_scenario: Shows the accepted shots before the first frame.
         line_for: The line to send for that index, after an Expert edit.
         on_status: ``drawing``, ``kept``, or ``blocked`` for one row.
+        adult: Expert adult content is on. Lines get the adult wording, a line with
+            a youth cue is refused (not rephrased), and a stated age under 18 stops
+            the series. The gate still reviews every text and frame.
     """
     if place_mode == "same":
         mode: PlaceMode = "same"
@@ -94,12 +99,14 @@ def run_series(
         mode = "different"
     else:
         return SeriesResult("scenario", "", (), None)
-    request = scenario_request(idea, count, style, mode)
+    request = scenario_request(idea, count, style, mode, adult=adult)
     if request is None:
         return SeriesResult("scenario", "", (), None)
     reason = _refuse_prompt(age_gate, idea)
     if reason:
         return SeriesResult("idea", reason, (), None)
+    if adult and not ages_allowed(idea):
+        return SeriesResult("idea", "", (), None)
     scenario = _scenario(idea, count, mode, request, rewrite)
     if scenario is None or len(scenario.shots) < 6:
         return SeriesResult("scenario", "", (), None)
@@ -107,6 +114,8 @@ def run_series(
     reason = _refuse_prompt(age_gate, "\n".join(lines))
     if reason:
         return SeriesResult("scenario", reason, (), None)
+    if adult and not ages_allowed("\n".join(lines)):
+        return SeriesResult("scenario", "", (), None)
     if on_scenario is not None:
         on_scenario(scenario)
     folder.mkdir(parents=True, exist_ok=True)
@@ -128,6 +137,12 @@ def run_series(
             blocked.append(index)
             _status(on_status, index, "blocked")
             continue
+        if adult:
+            if youth_cues(line):
+                blocked.append(index)
+                _status(on_status, index, "blocked")
+                continue
+            line = with_adult_anchor(line)
         shot_reason = _refuse_prompt(age_gate, line)
         if shot_reason:
             blocked.append(index)

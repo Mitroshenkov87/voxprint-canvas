@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable
-from typing import TypeVar
+from typing import TypeVar, cast
 
 from PySide6.QtCore import QEventLoop, QObject, Qt, QThread, QTimer, Signal
 from PySide6.QtWidgets import QApplication
@@ -21,7 +21,8 @@ class _Bridge(QObject):
         self.call.connect(self._run, Qt.ConnectionType.QueuedConnection)
 
     def _run(self, payload: object) -> None:
-        fn, box, done = payload  # type: ignore[misc]
+        fn, box, done = cast(
+            tuple[Callable[[], object], dict[str, object], threading.Event], payload)
         try:
             box["value"] = fn()
         except Exception as exc:

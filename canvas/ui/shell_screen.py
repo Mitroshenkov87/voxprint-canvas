@@ -381,7 +381,11 @@ class ShellWindow(QMainWindow):
                 return
             try:
                 fresh = self._fresh_inputs(job.mode)
-                raw = run_off_ui(lambda fresh=fresh: self._runner(job, fresh))
+
+                def draw() -> RawImage:
+                    return self._runner(job, fresh)
+
+                raw = run_off_ui(draw)
             except _NeedImage as exc:
                 layout.block(exc.message)
                 self.view.refresh()

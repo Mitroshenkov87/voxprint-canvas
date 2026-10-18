@@ -204,6 +204,7 @@ def test_missing_school_scores_fail_closed():
     with pytest.raises(SafetyUnavailable):
         image_block_reason(0.9, [], {IMAGE_MINOR_SEXUAL: 0.0, IMAGE_ADULT_SEXUAL: 0.0, "a child or minor": 0.0})
     world = World()
+    world.nsfw = 0.9  # two-stage gate: SigLIP runs on flagged frames
     world.error = "zero-image"
     with pytest.raises(SafetyUnavailable):
         world.gate().review_image(rgb())

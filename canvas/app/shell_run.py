@@ -81,7 +81,8 @@ class ShellRunner:
             enlarge=self.enlarge,
         )
         try:
-            safe = pipeline.generate(job.prompt, job.mode, inputs, aspect=job.aspect, output=job.output)
+            safe = pipeline.generate(job.prompt, job.mode, inputs, aspect=job.aspect, output=job.output,
+                                     explicit=job.adult_content)
         except SafetyUnavailable as exc:
             raise RunStopped(exc.user_message, unavailable=True) from exc
         except SafetyError as exc:

@@ -294,6 +294,10 @@ class AgeGate:
 
     def review_prompt(self, text: str) -> None:
         """Decide whether a prompt may continue."""
+        self._screen_prompt(text)
+
+    def _screen_prompt(self, text: str) -> bool:
+        """Screen a prompt."""
         verdict = _wait(lambda: self._stack.guard.assess(text), timeout=CLASSIFIER_TIMEOUT_S)
         if verdict.safety not in ("safe", "controversial", "unsafe"):
             raise SafetyUnavailable("classifier_error")
@@ -304,6 +308,7 @@ class AgeGate:
             raise StylisedBlocked("prompt")
         if stage != "allow":
             raise GenerationBlocked("prompt")
+        return scan(text).sexual or _guard_sexual(verdict.safety, verdict.categories)
 
     def review_prompts(self, texts: Sequence[str]) -> None:
         """Screen every text of a multi-part request, such as an idea, a scenario and each shot line.
@@ -314,15 +319,17 @@ class AgeGate:
         for item in texts:
             self.review_prompt(item)
 
-    def release_request(self, prompt: str, mode: str, inputs: Sequence[PendingInput] = ()) -> ScreenedInput:
-        """Accept a prompt and its images, or stop the request."""
+    def release_request(
+        self, prompt: str, mode: str, inputs: Sequence[PendingInput] = (), *, explicit: bool = False,
+    ) -> ScreenedInput:
+        """Screen a request."""
         staged: list[bytearray] = []
         try:
-            self.review_prompt(prompt)
+            full = self._screen_prompt(prompt) or explicit
             packed: list[tuple[str, int, int, bytes]] = []
             for item in inputs:
                 name = role_name(item.role)
-                self._check_image(item.image, "input", prompt)
+                self._check_image(item.image, "input", prompt, full=full)
                 staged.append(bytearray(item.image.to_bytes()))
                 packed.append((name, item.image.width, item.image.height, bytes(staged[-1])))
             return issue_input(prompt, mode, tuple(packed))
@@ -342,24 +349,27 @@ class AgeGate:
         finally:
             raw.wipe()
 
-    def _check_image(self, raw: RawImage, code: str, prompt: str = "") -> None:
-        """Run the image checks in a fixed order.
-
-        Faces and the two age bands are read together and must agree in count.
-        Sexual content blocks on a clear child band, or on the higher 16-17 band
-        unless a stated adult age supports that band. A missing, non-numeric,
-        out-of-range, or timed-out result raises ``SafetyUnavailable``. The
-        caller wipes the picture either way.
-        """
-        faces = _wait(lambda: self._stack.faces.detect(raw), timeout=IMAGE_TIMEOUT_S)
-        ages = _wait(lambda: self._stack.ages.estimate(raw, faces), timeout=IMAGE_TIMEOUT_S)
-        if len(tuple(ages)) != len(tuple(faces)):
-            raise SafetyUnavailable("classifier_error")
-        nsfw = _wait(lambda: self._stack.nsfw.sexual_score(raw), timeout=IMAGE_TIMEOUT_S)
-        if isinstance(nsfw, bool) or not isinstance(nsfw, (int, float)) or math.isnan(float(nsfw)) or math.isinf(float(nsfw)):
-            raise SafetyUnavailable("classifier_error")
+    def _check_image(self, raw: RawImage, code: str, prompt: str = "", *, full: bool = False) -> None:
+        """Screen an image."""
+        try:
+            score = _wait(lambda: self._stack.nsfw.sexual_score(raw), timeout=IMAGE_TIMEOUT_S)
+            if isinstance(score, bool) or not isinstance(score, (int, float)):
+                raise SafetyUnavailable("classifier_error")
+            nsfw = float(score)
+            if math.isnan(nsfw) or math.isinf(nsfw):
+                raise SafetyUnavailable("classifier_error")
+        except SafetyUnavailable:
+            nsfw = 1.0
+        if nsfw < SEXUAL_SCORE_BLOCK_AT and not full:
+            return
         scores = _wait(lambda: self._stack.zeroshot.score_image(raw, IMAGE_LABELS), timeout=IMAGE_TIMEOUT_S)
-        reason = image_block_reason(float(nsfw), ages, scores, support=adult_age_support(prompt))
+        faces = tuple(_wait(lambda: self._stack.faces.detect(raw), timeout=IMAGE_TIMEOUT_S))
+        ages: tuple[object, ...] = ()
+        if faces:
+            ages = tuple(_wait(lambda: self._stack.ages.estimate(raw, faces), timeout=IMAGE_TIMEOUT_S))
+            if len(ages) != len(faces):
+                raise SafetyUnavailable("classifier_error")
+        reason = image_block_reason(nsfw, ages, scores, support=adult_age_support(prompt))
         match reason:
             case "allow":
                 return

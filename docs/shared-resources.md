@@ -55,3 +55,7 @@ An older Canvas file that has `version` and `resources` is read once, converted 
 ## Model weights
 
 Weights live in the voxprint-common `models_dir()`: `VOXPRINT_MODELS_DIR`, then `models_dir` in `<data home>/state/suite.json`, then the legacy `state/models_dir.txt`, otherwise `<data home>/models`. VOXPrint MDL downloads there and Canvas loads from there. `shared/` holds only the runtime and `manifest.json`; a model component may be recorded with its absolute path inside `models_dir()`. Setup moves an older `shared/models` to `<data home>/models` once, before Python runs. When that move is not possible, it sets `models_dir` in `suite.json` to the old folder.
+
+### Model views
+
+VOXPrint MDL stores each downloaded file once as `models_dir()/blobs/<sha256>`. Canvas opens a model from a view, `models_dir()/views/canvas/<id>-<digest12>/`, which has the repo layout and hard links to the blobs. Each view is built in a staging folder, renamed into place, and described by a `.voxprint-view.json` marker. When a hard link fails, Linux uses a symbolic link. Small config files may be copied, but weights are never copied, so on Windows a failed link refuses the model. Every file is checked against its pin before it is loaded. Canvas deletes only views, never blobs. `--unregister-models` removes the views. A legacy `<org>--<repo>` folder still loads.

@@ -373,6 +373,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.unregister_models:
         unregister(shared_dir())
+        # Views are Canvas links over the MDL blobs; the blobs stay with MDL.
+        from canvas.infra.paths import models_dir
+        from canvas.models.views import remove_views
+
+        remove_views(models_dir())
         return 0
     if args.check_update:
         tag = check_for_update(APP_VERSION)

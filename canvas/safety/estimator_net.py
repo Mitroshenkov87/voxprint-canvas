@@ -141,7 +141,7 @@ class EstimatorNet(VOLO):
             num_heads=list(D1_NUM_HEADS),
             **kwargs,
         )
-        self.patch_embed = PairEmbed(img_size, 8, 64, D1_EMBED_DIMS[0])  # type: ignore[assignment]
+        self.add_module("patch_embed", PairEmbed(img_size, 8, 64, D1_EMBED_DIMS[0]))
         trunc_normal_(self.pos_embed, std=0.02)
 
     def forward_features(self, x: torch.Tensor) -> torch.Tensor:

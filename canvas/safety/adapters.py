@@ -406,14 +406,17 @@ class FaceAgeRegressor:
             return
         import json
 
-        import torch
-        from safetensors.torch import load_file
-
-        from canvas.safety.estimator_net import EstimatorNet
         weights = folder / _REGRESSOR_WEIGHTS
         config_path = folder / "config.json"
         if not weights.is_file() or not config_path.is_file():
             raise SafetyUnavailable("model_not_ready")
+        try:
+            import torch
+            from safetensors.torch import load_file
+
+            from canvas.safety.estimator_net import EstimatorNet
+        except ImportError as exc:
+            raise SafetyUnavailable("model_not_ready") from exc
         try:
             config = json.loads(config_path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:

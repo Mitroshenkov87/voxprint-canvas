@@ -5,6 +5,7 @@ import json
 import multiprocessing
 import os
 import re
+import shutil
 import subprocess
 import sys
 from multiprocessing.synchronize import Event as ProcessEvent
@@ -761,7 +762,11 @@ def _windows_junction(link: Path, target: Path) -> None:
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows reparse points are checked by the Windows installer.")
-def test_windows_follows_a_python_junction_only_inside_the_install(tmp_path):
+@pytest.mark.parametrize("host", ["pwsh.exe", "powershell.exe"])
+def test_windows_follows_a_python_junction_only_inside_the_install(tmp_path, host):
+    # PowerShell 7 first; Windows PowerShell 5.1 stays covered as the fallback host.
+    if shutil.which(host) is None:
+        pytest.skip(f"{host} is not installed")
     py_root = tmp_path / "python"
     real = py_root / "real"
     real.mkdir(parents=True)
@@ -809,7 +814,7 @@ try {
 }
 """
     result = subprocess.run(
-        ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+        [host, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
         cwd=root,
         env=env,
         check=False,

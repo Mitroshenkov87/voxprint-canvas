@@ -31,6 +31,7 @@ from canvas.models.features import withheld_from_setup
 from canvas.models.loader import plan_specs
 from canvas.models.plan import CallPlan
 from canvas.models.registry import Catalog, ModelSpec, RegistryError
+from canvas.models.views import is_view
 from canvas.models.snapshots import (
     SnapshotError,
     snapshot_ready,
@@ -144,7 +145,12 @@ def install_spec(
     if withheld_from_setup(spec, catalog=None):
         return
     root = models_dir()
-    if snapshot_ready(spec, root) is None:
+    try:
+        folder = snapshot_ready(spec, root)
+    except SnapshotError:
+        return
+    if folder is None or is_view(root, folder):
+        # A view's blobs are already refcounted by VOXPrint MDL.
         return
     remember(spec)
 
@@ -278,8 +284,14 @@ def _spec_for(catalog: Catalog, component_id: str, component: Component) -> Mode
 
 
 def _relative_pack(folder: Path) -> str:
+    """The manifest path: shared-relative, or absolute inside ``models_dir()``."""
     shared = shared_dir().resolve()
+    resolved = folder.resolve()
     try:
-        return folder.resolve().relative_to(shared).as_posix()
-    except ValueError as exc:
-        raise SnapshotError("the model folder is outside the shared directory") from exc
+        return resolved.relative_to(shared).as_posix()
+    except ValueError:
+        pass
+    models = models_dir().resolve()
+    if resolved != models and models in resolved.parents:
+        return resolved.as_posix()
+    raise SnapshotError("the model folder is outside the models directory")

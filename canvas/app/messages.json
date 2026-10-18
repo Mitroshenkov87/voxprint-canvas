@@ -192,6 +192,14 @@
       "en": "The model could not be downloaded.",
       "ru": "Не удалось скачать модель."
     },
+    "view.link_failed": {
+      "en": "{name} could not be linked to the model store. Weights are not copied.",
+      "ru": "Не удалось связать {name} с хранилищем моделей. Веса не копируются."
+    },
+    "view.bad_path": {
+      "en": "A model file must stay inside its folder.",
+      "ru": "Файл модели должен оставаться внутри своей папки."
+    },
     "error.verify": {
       "en": "The model file could not be verified.",
       "ru": "Не удалось проверить файл модели."

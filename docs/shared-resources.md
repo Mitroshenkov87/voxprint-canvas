@@ -51,3 +51,11 @@ A component is reused when the id, version, and sha256 all match. Otherwise Canv
 Writes are atomic. Canvas locks `manifest.lock` (30 seconds), writes `manifest.json.tmp`, flushes it, and renames it onto `manifest.json`.
 
 An older Canvas file that has `version` and `resources` is read once, converted to components, and written back as schema 1. A pack becomes a model. A suite entry becomes a tool.
+
+## Model weights
+
+Weights live in the voxprint-common `models_dir()`: `VOXPRINT_MODELS_DIR`, then `models_dir` in `<data home>/state/suite.json`, then the legacy `state/models_dir.txt`, otherwise `<data home>/models`. VOXPrint MDL downloads there and Canvas loads from there. `shared/` holds only the runtime and `manifest.json`; a model component may be recorded with its absolute path inside `models_dir()`. Setup moves an older `shared/models` to `<data home>/models` once, before Python runs. When that move is not possible, it sets `models_dir` in `suite.json` to the old folder.
+
+### Model views
+
+VOXPrint MDL stores each downloaded file once as `models_dir()/blobs/<sha256>`. Canvas reads the installed `mdl.json` and, when every blob is present at the declared size, opens a view at `models_dir()/views/canvas/<id>-<digest12>/` in the repo layout. An `<id>-upstream` FP32 entry gets its own view. Each file is a hard link to its blob. The view is built in a staging folder, renamed into place, and described by a `.voxprint-view.json` marker that lists each path and its sha256. A missing blob, or a blob of the wrong size, is reported as not downloaded, and a stale view is removed. When a hard link fails, Linux uses a symbolic link. Small config and JSON files may be copied. Weights are never copied, so on Windows a failed link refuses the model. `from_pretrained` opens the folder with `local_files_only=True`. Canvas may delete views. It never deletes anything under `blobs/`. `--unregister-models` removes the views and leaves the blobs. A legacy `<org>--<repo>` folder, and its `<repo>--upstream` sibling, still load while those trees remain.

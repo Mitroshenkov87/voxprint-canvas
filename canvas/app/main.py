@@ -24,6 +24,7 @@ from canvas.infra.models_users import register, unregister
 from canvas.infra.paths import models_dir, shared_dir
 from canvas.infra.vram import peak_allocated_bytes, set_vram_cap_gb
 from canvas.models.loader import ModelNotReady, ZImageGenerator, load_catalog_stack
+from canvas.models.views import remove_views
 from canvas.models.provision import DownloadDeclined, ensure_plan, install_defaults, install_supporting, repair
 from canvas.models.runtime import InferenceUnavailable
 from canvas.models.modes import Mode, Tier
@@ -373,6 +374,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.unregister_models:
         unregister(shared_dir())
+        # Views are Canvas links over the MDL blobs; the blobs stay with MDL.
+        remove_views(models_dir())
         return 0
     if args.check_update:
         tag = check_for_update(APP_VERSION)

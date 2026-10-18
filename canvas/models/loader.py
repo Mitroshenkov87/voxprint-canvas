@@ -13,7 +13,7 @@ from canvas.models.pin import PinError, require_pin, verify_file
 from canvas.models.plan import CallPlan, build_plan
 from canvas.models.registry import Catalog, ModelSpec, RegistryError, load_catalog
 from canvas.models.runtime import WeightsLoadError, render
-from canvas.models.snapshots import fallback_ready, snapshot_ready, weight_dir
+from canvas.models.snapshots import SnapshotError, fallback_ready, snapshot_ready, weight_dir
 from canvas.pipeline.bf16_schedule import (
     EmbeddingCache,
     GpuLedger,
@@ -45,8 +45,12 @@ def _weight_path(root: Path, spec: ModelSpec, name: str) -> Path:
     return root / spec.repo.replace("/", "--") / name
 
 
-def ensure_weights(spec: ModelSpec, root: Path) -> None:
-    """Refuse when any file is unpinned, missing or hashed wrong."""
+def ensure_weights(spec: ModelSpec, root: Path, folder: Path | None = None) -> None:
+    """Refuse when any file is unpinned, missing or hashed wrong.
+
+    ``folder`` is the model folder to check (a view over the MDL blobs or the
+    legacy repo folder); by default the legacy folder under ``root``.
+    """
     if not spec.files:
         raise SafetyUnavailable("missing_model")
     for name, digest in spec.files.items():
@@ -54,7 +58,7 @@ def ensure_weights(spec: ModelSpec, root: Path) -> None:
             require_pin(digest)
         except PinError as exc:
             raise SafetyUnavailable("missing_model") from exc
-        path = _weight_path(root, spec, name)
+        path = (folder / name) if folder is not None else _weight_path(root, spec, name)
         if not path.is_file():
             raise SafetyUnavailable("missing_model")
         try:
@@ -65,20 +69,34 @@ def ensure_weights(spec: ModelSpec, root: Path) -> None:
 
 def load_safety_stack(catalog: Catalog, root: Path) -> SafetyStack:
     """Open the check stack after every weight file is verified."""
-    bound: dict[str, ModelSpec] = {}
+    folders: dict[str, Path] = {}
     for role in _SAFETY_ROLES:
         found = catalog.by_role(role)
         if len(found) != 1:
             raise SafetyUnavailable("missing_model")
-        ensure_weights(found[0], root)
-        bound[role] = found[0]
+        folder = _safety_folder(found[0], root)
+        ensure_weights(found[0], root, folder)
+        folders[role] = folder
     return SafetyStack(
-        Qwen3GuardGen(weight_dir(root, bound["prompt-guard"].repo)),
-        SiglipZeroShot(weight_dir(root, bound["zero-shot"].repo)),
-        YuNetFaces(weight_dir(root, bound["face-detector"].repo)),
-        FairFaceAge(weight_dir(root, bound["age"].repo)),
-        NsfwViT(weight_dir(root, bound["nsfw"].repo)),
+        Qwen3GuardGen(folders["prompt-guard"]),
+        SiglipZeroShot(folders["zero-shot"]),
+        YuNetFaces(folders["face-detector"]),
+        FairFaceAge(folders["age"]),
+        NsfwViT(folders["nsfw"]),
     )
+
+
+def _safety_folder(spec: ModelSpec, root: Path) -> Path:
+    """The view over the MDL blobs when it is complete, else the legacy repo folder.
+
+    Either way ``ensure_weights`` checks every file against its pin before use, and
+    a view that cannot be built refuses the stack (fail closed).
+    """
+    try:
+        folder = snapshot_ready(spec, root)
+    except SnapshotError as exc:
+        raise SafetyUnavailable("missing_model") from exc
+    return folder if folder is not None else weight_dir(root, spec.repo)
 
 
 def load_catalog_stack(root: Path, catalog: Catalog | None = None) -> SafetyStack:
@@ -90,6 +108,7 @@ def request_fp32(spec: ModelSpec) -> bool:
     """Queue the FP32 ``<id>-upstream`` entry with VOXPrint MDL. False when it cannot be queued."""
     if not spec.fallback_files:
         return False
+    # Resolved at call time: a missing MDL client returns False, and tests patch enqueue.
     try:
         from voxprint_common.mdl import enqueue
         from voxprint_common.mdl.catalog import CatalogError

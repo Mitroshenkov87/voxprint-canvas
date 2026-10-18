@@ -14,7 +14,7 @@ from canvas.infra.gpu import probe_gpu
 from canvas.infra.paths import models_dir
 from canvas.infra.runtime import python_supports_tensorrt
 from canvas.models.registry import ModelSpec, load_catalog
-from canvas.models.snapshots import snapshot_ready, snapshot_status
+from canvas.models.snapshots import SnapshotError, snapshot_ready, snapshot_status
 from canvas.models.verified import VerifiedCache
 from canvas.safety.adapters import FairFaceAge, NsfwViT, Qwen3GuardGen, SiglipZeroShot, YuNetFaces
 from canvas.safety.gate import SafetyError, issue
@@ -112,7 +112,11 @@ def _classifiers(catalog, root: Path, cache: VerifiedCache) -> list[dict[str, ob
         if state != "ready":
             rows.append({"id": spec.id, "ok": False, "detail": state})
             continue
-        folder = snapshot_ready(spec, root, cache)
+        try:
+            folder = snapshot_ready(spec, root, cache)
+        except SnapshotError:
+            rows.append({"id": spec.id, "ok": False, "detail": "link_failed"})
+            continue
         if folder is None:
             rows.append({"id": spec.id, "ok": False, "detail": "hash_mismatch"})
             continue

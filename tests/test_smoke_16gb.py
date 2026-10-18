@@ -156,8 +156,13 @@ def test_gate_bench_times_every_stage_and_forces_the_age_stage(monkeypatch, tmp_
             calls.append("nsfw")
             return 0.01
 
+    class Fine:
+        def estimate(self, raw, faces):
+            calls.append(f"fine:{len(faces)}")
+            return tuple(30.0 for _ in faces)
+
     stub = Stub()
-    stack = loader.SafetyStack(stub, stub, stub, stub, stub)
+    stack = loader.SafetyStack(stub, stub, stub, stub, stub, Fine())
     monkeypatch.setattr(loader, "load_catalog_stack", lambda root, catalog=None: stack)
     image = tmp_path / "a.png"
     PILImage.new("RGB", (64, 64), "white").save(image)
@@ -172,6 +177,7 @@ def test_gate_bench_times_every_stage_and_forces_the_age_stage(monkeypatch, tmp_
     for key in ("prompt_check_s", "nsfw_pass_s", "age_stage_s"):
         assert isinstance(frame[key], float)
     assert frame["age_stage"]["synthetic_face"] is True and frame["age_stage"]["faces"] == 0
-    assert calls == ["guard", "nsfw", "siglip", "yunet", "fairface:1"]
+    assert calls == ["guard", "nsfw", "siglip", "yunet", "fairface:1", "fine:1"]
+    assert isinstance(frame["age_stage"]["fine_s"], float)
     text = json.dumps(body)
     assert PROMPTS[0] not in text and "0.01" not in text

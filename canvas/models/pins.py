@@ -22,6 +22,7 @@ REPO_GUARD = "Qwen/Qwen3Guard-Gen-0.6B"
 REPO_SIGLIP = "google/siglip2-so400m-patch14-384"
 REPO_YUNET = "opencv/face_detection_yunet"
 REPO_AGE = "dima806/fairface_age_image_detection"
+REPO_AGE_FINE = "iitolstykh/mivolo_v2"
 REPO_NSFW = "Falconsai/nsfw_image_detection"
 
 TEXT_ENCODER = "Qwen/Qwen3-4B"

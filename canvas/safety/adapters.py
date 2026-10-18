@@ -6,7 +6,7 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 from PIL import Image
 
-from canvas.models.pins import REPO_AGE, REPO_GUARD, REPO_NSFW, REPO_SIGLIP, REPO_YUNET
+from canvas.models.pins import REPO_AGE, REPO_AGE_FINE, REPO_GUARD, REPO_NSFW, REPO_SIGLIP, REPO_YUNET
 from canvas.safety.classifiers import Face, GuardVerdict
 from canvas.safety.gate import SafetyUnavailable
 from canvas.safety.image import RawImage
@@ -314,6 +314,158 @@ class FairFaceAge:
             values = [float(probs[index]) for index in range(int(probs.shape[-1]))]
             bands.append(fairface_age_bands(self._model.config.id2label, values))
         return bands
+
+
+_REGRESSOR_CONFIG = {
+    "model_name": "mivolo_d1_384",
+    "in_chans": 6,
+    "num_classes": 3,
+    "input_size": 384,
+    "with_persons_model": True,
+    "only_age": False,
+}
+_REGRESSOR_MEAN = (0.485, 0.456, 0.406)
+_REGRESSOR_STD = (0.229, 0.224, 0.225)
+_REGRESSOR_WEIGHTS = "model.safetensors"
+_REGRESSOR_PREFIX = "mivolo.model."
+
+
+def _finite(value: object) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise SafetyUnavailable("classifier_error")
+    number = float(value)
+    if math.isnan(number) or math.isinf(number):
+        raise SafetyUnavailable("classifier_error")
+    return number
+
+
+def regressor_scale(config: Mapping[str, Any]) -> tuple[float, float, float]:
+    """Regressor scale."""
+    for key, expected in _REGRESSOR_CONFIG.items():
+        if config.get(key) != expected:
+            raise SafetyUnavailable("model_not_ready")
+    low = _finite(config.get("min_age"))
+    high = _finite(config.get("max_age"))
+    mid = _finite(config.get("avg_age"))
+    if not low < mid < high:
+        raise SafetyUnavailable("model_not_ready")
+    return (low, high, mid)
+
+
+def letterbox(pixels: np.ndarray, size: int) -> np.ndarray:
+    """Letterbox."""
+    import cv2
+    height, width = pixels.shape[:2]
+    if height <= 0 or width <= 0:
+        raise SafetyUnavailable("classifier_error")
+    if height == size and width == size:
+        return pixels
+    ratio = min(size / height, size / width)
+    new_w, new_h = int(round(width * ratio)), int(round(height * ratio))
+    if (new_w, new_h) != (width, height):
+        pixels = cv2.resize(pixels, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+    pad_w, pad_h = (size - new_w) / 2, (size - new_h) / 2
+    top, bottom = int(round(pad_h - 0.1)), int(round(pad_h + 0.1))
+    left, right = int(round(pad_w - 0.1)), int(round(pad_w + 0.1))
+    return cv2.copyMakeBorder(pixels, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(0, 0, 0))
+
+
+def face_crop(pixels: np.ndarray, face: Face) -> np.ndarray:
+    """Face crop."""
+    height, width = pixels.shape[:2]
+    x1, y1 = max(face.x, 0), max(face.y, 0)
+    x2, y2 = min(face.x + face.width, width), min(face.y + face.height, height)
+    if x2 <= x1 or y2 <= y1:
+        raise SafetyUnavailable("classifier_error")
+    return pixels[y1:y2, x1:x2]
+
+
+def regressor_ages(raw: Sequence[object], scale: tuple[float, float, float], count: int) -> list[float]:
+    """Regressor ages."""
+    if len(raw) != count:
+        raise SafetyUnavailable("classifier_error")
+    low, high, mid = scale
+    return [_finite(value) * (high - low) + mid for value in raw]
+
+
+class FaceAgeRegressor:
+    """FaceAgeRegressor."""
+
+    model_id = REPO_AGE_FINE
+
+    def __init__(self, folder: Path | None = None, device: str = "cpu") -> None:
+        self.folder = folder
+        self.device = device
+        self._model: Any = None
+        self._scale: tuple[float, float, float] | None = None
+
+    def load(self) -> None:
+        """Load."""
+        folder = _need_folder(self.folder)
+        if self._model is not None:
+            return
+        import json
+
+        import torch
+        from safetensors.torch import load_file
+
+        from canvas.safety.estimator_net import EstimatorNet
+        weights = folder / _REGRESSOR_WEIGHTS
+        config_path = folder / "config.json"
+        if not weights.is_file() or not config_path.is_file():
+            raise SafetyUnavailable("model_not_ready")
+        try:
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise SafetyUnavailable("model_not_ready") from exc
+        if not isinstance(config, dict):
+            raise SafetyUnavailable("model_not_ready")
+        scale = regressor_scale(config)
+        state = load_file(str(weights))
+        if not state or not all(key.startswith(_REGRESSOR_PREFIX) for key in state):
+            raise SafetyUnavailable("model_not_ready")
+        model = EstimatorNet(img_size=int(config["input_size"]), num_classes=int(config["num_classes"]))
+        stripped = {key[len(_REGRESSOR_PREFIX):]: value.float() for key, value in state.items()}
+        try:
+            model.load_state_dict(stripped, strict=True)
+        except RuntimeError as exc:
+            raise SafetyUnavailable("model_not_ready") from exc
+        dtype = torch.float16 if self.device.startswith("cuda") else torch.float32
+        self._model = model.to(device=self.device, dtype=dtype).eval()
+        self._scale = scale
+
+    def _tensor(self, pixels: np.ndarray, size: int) -> Any:
+        import torch
+        mean = np.asarray(_REGRESSOR_MEAN, dtype=np.float32)
+        std = np.asarray(_REGRESSOR_STD, dtype=np.float32)
+        boxed = letterbox(pixels, size).astype(np.float32) / 255.0
+        normal = ((boxed - mean) / std).astype(np.float32).transpose((2, 0, 1))
+        return torch.from_numpy(np.ascontiguousarray(normal))
+
+    def estimate(self, image: RawImage, faces: Sequence[Face]) -> Sequence[float]:
+        """Estimate."""
+        self.load()
+        if not faces:
+            return []
+        import torch
+        model = self._model
+        scale = self._scale
+        if scale is None:
+            raise SafetyUnavailable("model_not_ready")
+        size = int(_REGRESSOR_CONFIG["input_size"])  # type: ignore[call-overload]
+        pixels = np.frombuffer(image.to_bytes(), dtype=np.uint8).reshape(image.height, image.width, 3)
+        face_batch = torch.stack([self._tensor(face_crop(pixels, face), size) for face in faces])
+        empty = torch.zeros((3, size, size), dtype=torch.float32)
+        mean = torch.tensor(_REGRESSOR_MEAN, dtype=torch.float32).view(3, 1, 1)
+        std = torch.tensor(_REGRESSOR_STD, dtype=torch.float32).view(3, 1, 1)
+        body = ((empty - mean) / std).unsqueeze(0).expand(len(faces), -1, -1, -1)
+        batch = torch.cat((face_batch, body), dim=1)
+        dtype = next(model.parameters()).dtype
+        with torch.no_grad():
+            output = model(batch.to(device=self.device, dtype=dtype)).float().cpu()
+        if output.ndim != 2 or int(output.shape[0]) != len(faces) or int(output.shape[1]) != 3:
+            raise SafetyUnavailable("classifier_error")
+        return regressor_ages([float(value) for value in output[:, 2]], scale, len(faces))
 
 
 class NsfwViT:

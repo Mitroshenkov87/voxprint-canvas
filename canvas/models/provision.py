@@ -41,7 +41,7 @@ from canvas.models.snapshots import (
 from canvas.models.verified import VerifiedCache
 
 _RATE = 8 * 1024 * 1024
-_SAFETY_ROLES = ("prompt-guard", "zero-shot", "face-detector", "age", "nsfw")
+_SAFETY_ROLES = ("prompt-guard", "zero-shot", "face-detector", "age", "nsfw", "age-fine")
 OPTIONAL_IDS = (
     "z-image-turbo-fun-controlnet-union-bf16-lite",
     "z-image-turbo-fun-controlnet-union-bf16",

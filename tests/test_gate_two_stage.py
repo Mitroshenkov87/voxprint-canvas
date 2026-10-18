@@ -15,7 +15,7 @@ from canvas.safety.image import SafeImage, ScreenedInput
 from canvas.safety.inputs import ImageRole, PendingInput
 from tests.fakes import World, rgb
 
-STAGE_TWO = {"image-score", "faces", "ages"}
+STAGE_TWO = {"image-score", "faces", "ages", "fine"}
 
 
 def _child(world: World) -> None:

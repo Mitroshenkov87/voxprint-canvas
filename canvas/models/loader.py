@@ -23,11 +23,11 @@ from canvas.pipeline.bf16_schedule import (
 )
 from canvas.pipeline.schedule import Placement, choose_schedule
 from canvas.pipeline.vram_probe import PeakVramProbe
-from canvas.safety.adapters import FairFaceAge, NsfwViT, Qwen3GuardGen, SiglipZeroShot, YuNetFaces
+from canvas.safety.adapters import FaceAgeRegressor, FairFaceAge, NsfwViT, Qwen3GuardGen, SiglipZeroShot, YuNetFaces
 from canvas.safety.gate import SafetyStack, SafetyUnavailable
 from canvas.safety.image import RawImage, ScreenedInput
 
-_SAFETY_ROLES = ("prompt-guard", "zero-shot", "face-detector", "age", "nsfw")
+_SAFETY_ROLES = ("prompt-guard", "zero-shot", "face-detector", "age", "nsfw", "age-fine")
 
 
 class ModelNotReady(Exception):
@@ -83,6 +83,7 @@ def load_safety_stack(catalog: Catalog, root: Path) -> SafetyStack:
         YuNetFaces(folders["face-detector"]),
         FairFaceAge(folders["age"]),
         NsfwViT(folders["nsfw"]),
+        FaceAgeRegressor(folders["age-fine"]),
     )
 
 

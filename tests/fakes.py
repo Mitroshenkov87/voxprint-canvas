@@ -27,12 +27,13 @@ class World:
         self.image_scores = {label: 0.0 for label in IMAGE_LABELS}
         self.faces: list[Face] = []
         self.ages: list[tuple[float, float]] = []  # (P(age <= 15), P(16 or 17)) per face
+        self.fine: list[float] | None = None  # per face; None gives 17.0 for each face
         self.nsfw = 0.0
         self.error = ""
         self.calls: list[str] = []
 
     def stack(self) -> SafetyStack:
-        return SafetyStack(_Guard(self), _Zero(self), _Faces(self), _Ages(self), _Nsfw(self))
+        return SafetyStack(_Guard(self), _Zero(self), _Faces(self), _Ages(self), _Nsfw(self), _Fine(self))
 
     def gate(self) -> AgeGate:
         return AgeGate(self.stack())
@@ -103,3 +104,17 @@ class _Nsfw:
         if self.world.error == "nsfw":
             raise RuntimeError("score failed")
         return self.world.nsfw
+
+
+class _Fine:
+    def __init__(self, world: World) -> None:
+        self.world = world
+
+    def estimate(self, image: RawImage, faces: object) -> list[float]:
+        del image
+        self.world.calls.append("fine")
+        if self.world.error == "fine":
+            raise RuntimeError("fine failed")
+        if self.world.fine is None:
+            return [17.0 for _face in faces]  # type: ignore[attr-defined]
+        return list(self.world.fine)

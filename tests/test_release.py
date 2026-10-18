@@ -14,7 +14,8 @@ def test_release_workflow_publishes_a_prerelease_from_the_build_file():
     assert "github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')" in text
     assert 'name: SHA256SUMS' in text
     assert "--prerelease" in text
-    assert "release_title" in text
+    assert "version_label" in text
+    assert "VOXPrint AI Canvas ${label}" in text
     assert "SHA256SUMS" in text
     assert "gh release delete" in text
     assert "--cleanup-tag" not in text

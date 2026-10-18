@@ -437,8 +437,9 @@ def test_installers_resolve_numpy_from_pypi_and_pin_cuda_torch():
     assert "override-dependencies" not in config
     assert "torchao" not in config
     for script in (linux, windows):
-        assert "--index-strategy" in script
-        assert "unsafe-best-match" in script
+        assert "--index-strategy" not in script
+        assert "unsafe-best-match" not in script
+        assert "--index-url" in script
         assert "--find-links" in script
         assert "--config-file" not in script
         assert "torch==2.11.0+cu130" in script

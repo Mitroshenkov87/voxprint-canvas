@@ -442,24 +442,27 @@ function Test-CpuOnnxDist([string]$SitePackages) {
     return $false
 }
 
-function Install-PinnedPackage([string]$Python, [string]$Target, [string]$IndexUrl, [string]$Strategy, [string]$Package) {
+function Install-PinnedPackage([string]$Python, [string]$Target, [string]$IndexUrl, [string]$Package) {
     Assert-AdminPath $Python
     Assert-AdminPath $script:Uv
     if (-not (Test-Path -LiteralPath $Fetch)) {
         Assert-NoReparse $Fetch
         New-Item -ItemType Directory -Force $Fetch | Out-Null
     }
-    $into = @("pip", "install", "--no-config", "--python", $Python, "--find-links", $Fetch, "-c", $Constraints, "-c", $CudaConstraints)
+    # torch and torchvision are resolved from the CUDA index alone. constraints.txt
+    # pins numpy to a PyPI release that index does not publish, so the app install applies it.
+    $into = @("pip", "install", "--no-config", "--python", $Python, "--find-links", $Fetch, "--index-url", $IndexUrl)
+    if ($IndexUrl -eq $TorchIndex) {
+        $into += @("-c", $CudaConstraints)
+    } else {
+        $into += @("-c", $Constraints, "-c", $CudaConstraints)
+    }
     if (-not [string]::IsNullOrWhiteSpace($Target)) {
         Assert-NoReparse $Target
         New-Item -ItemType Directory -Force $Target | Out-Null
         $into += @("--target", $Target)
     }
-    if ($Strategy) {
-        & $script:Uv @into --index $IndexUrl --index-strategy $Strategy $Package
-    } else {
-        & $script:Uv @into --index-url $IndexUrl $Package
-    }
+    & $script:Uv @into $Package
     if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
 }
 
@@ -472,15 +475,15 @@ function Repair-SharedRuntimePackages {
     $cpu = Test-CpuOnnxDist $RuntimeSite
     if (-not (Test-TorchCudaFiles $RuntimeSite)) {
         Write-Host "Repairing torch in the suite runtime..."
-        Install-PinnedPackage $script:Base $RuntimeSite $TorchIndex "unsafe-best-match" "torch==2.11.0+cu130"
+        Install-PinnedPackage $script:Base $RuntimeSite $TorchIndex "torch==2.11.0+cu130"
     }
     if (-not $visionOk) {
         Write-Host "Repairing torchvision in the suite runtime..."
-        Install-PinnedPackage $script:Base $RuntimeSite $TorchIndex "unsafe-best-match" "torchvision==0.26.0+cu130"
+        Install-PinnedPackage $script:Base $RuntimeSite $TorchIndex "torchvision==0.26.0+cu130"
     }
     if (-not $gpuOk) {
         Write-Host "Repairing ONNX Runtime in the suite runtime..."
-        Install-PinnedPackage $script:Base $RuntimeSite "https://pypi.org/simple" "" "onnxruntime-gpu==1.31.0"
+        Install-PinnedPackage $script:Base $RuntimeSite "https://pypi.org/simple" "onnxruntime-gpu==1.31.0"
     }
     if ($cpu) {
         $cpuPackage = "onnx" + "runtime"
@@ -498,15 +501,15 @@ function Install-SuiteGpuPackages([string]$Python, [string]$Target) {
         Assert-NoReparse $Fetch
         New-Item -ItemType Directory -Force $Fetch | Out-Null
     }
-    $into = @("pip", "install", "--no-config", "--python", $Python, "--find-links", $Fetch, "-c", $Constraints, "-c", $CudaConstraints)
+    $into = @("pip", "install", "--no-config", "--python", $Python, "--find-links", $Fetch)
     if (-not [string]::IsNullOrWhiteSpace($Target)) {
         Assert-NoReparse $Target
         New-Item -ItemType Directory -Force $Target | Out-Null
         $into += @("--target", $Target)
     }
-    & $script:Uv @into --index $TorchIndex --index-strategy unsafe-best-match "torch==2.11.0+cu130" "torchvision==0.26.0+cu130"
+    & $script:Uv @into --index-url $TorchIndex -c $CudaConstraints "torch==2.11.0+cu130" "torchvision==0.26.0+cu130"
     if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
-    & $script:Uv @into --index-url "https://pypi.org/simple" "onnxruntime-gpu==1.31.0"
+    & $script:Uv @into --index-url "https://pypi.org/simple" -c $Constraints -c $CudaConstraints "onnxruntime-gpu==1.31.0"
     if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
     $cpu = "onnx" + "runtime"
     if (-not [string]::IsNullOrWhiteSpace($Target)) {
@@ -717,7 +720,7 @@ function Invoke-Machine {
         if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
         & $script:Uv pip install --no-config --python $Py --index-url https://pypi.org/simple "torchao==0.18.0"
         if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
-        & $script:Uv pip install --no-config --python $Py --index $TorchIndex --index-url https://pypi.org/simple --index-strategy unsafe-best-match -c $Constraints -c $CudaConstraints "${App}[gen]"
+        & $script:Uv pip install --no-config --python $Py --index-url https://pypi.org/simple --find-links $Fetch -c $Constraints -c $CudaConstraints "${App}[gen]"
         if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
         & $Py -m canvas.infra.layout migrate --install-dir $App
         if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }

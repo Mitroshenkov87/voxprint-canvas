@@ -38,7 +38,7 @@ def test_display_name_and_install_paths():
     assert "%LOCALAPPDATA%\\VOXPrint AI Suite" in readme
     assert "~/.local/share/voxprint-ai-suite" in readme
     notes = Path("docs/RELEASE-NOTES-TEMPLATE.md").read_text(encoding="utf-8")
-    assert 'VOXPrint AI Canvas X.Y.Z RC · build N "Tavnit"' in notes
+    assert "VOXPrint AI Canvas vX.Y.Z-rc.N build B" in notes
 
 
 def test_suite_registry_beats_the_default_enlarge_path(tmp_path, monkeypatch):

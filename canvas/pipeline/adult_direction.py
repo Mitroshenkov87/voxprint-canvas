@@ -97,14 +97,17 @@ SCENARIO_ADDENDUM = f"""
 - If subject_block has no stated age, start every scene with "{ADULT_ANCHOR}" or the matching adult wording for the person in the idea.
 """
 
-# Lint list for this module's own text and for model output in adult mode.
+# Youth wording the gate's prompt filter does not cover yet. Every adult-mode line
+# also goes through ``AgeGate.review_prompt`` / ``review_prompts`` (canvas/safety/gate.py),
+# which already refuses minor terms (child, kid, teen, minor, underage, preteen,
+# schoolgirl, ...), loli/shota terms, stated ages under 18, and explicit content with
+# school/student or anime/stylised cues. Those are not repeated here.
+# "barely legal", "juvenile" and "adolescent" stay until a gate PR adds them. The
+# other four describe a youthful look, which an adult-mode prompt never emphasises.
+# Ordinary adult wording ("girl", "young woman", "petite", "doll", "cute") is not refused.
 # Kept out of the prompt text on purpose.
 YOUTH_CUES = (
-    "young", "younger", "youthful", "young-looking", "petite", "girlish", "boyish", "small", "tiny", "little",
-    "innocent", "school", "schoolgirl", "schoolboy", "student", "uniform", "teen", "teens", "teenage",
-    "teenager", "adolescent", "minor", "underage", "child", "children", "childlike", "kid", "kids", "girl",
-    "girls", "boy", "boys", "baby", "babydoll", "doll", "cute", "kawaii", "loli", "lolita", "shota", "anime",
-    "manga", "waifu", "chibi", "pigtails", "braces", "barely legal", "virgin", "juvenile", "preteen",
+    "barely legal", "juvenile", "adolescent", "youthful", "young-looking", "girlish", "boyish",
 )
 _CUE_RE = re.compile(r"(?<![\w-])(" + "|".join(re.escape(cue) for cue in sorted(YOUTH_CUES, key=len, reverse=True))
                      + r")(?![\w-])", re.IGNORECASE)
@@ -113,7 +116,10 @@ _ADULT_RE = re.compile(r"\badult\b|\bwoman\b|\bman\b|\bin (?:her|his|their) (?:l
 
 
 def youth_cues(text: str) -> tuple[str, ...]:
-    """Youth or childlike cues found in ``text``, lower-cased, in order of appearance."""
+    """Canvas-side youth cues in ``text`` (see ``YOUTH_CUES``), lower-cased, in order of appearance.
+
+    The gate's prompt filter still screens the same text for everything else.
+    """
     return tuple(match.group(1).casefold() for match in _CUE_RE.finditer(text))
 
 
@@ -171,7 +177,7 @@ def improve_adult(rewriter: object, prompt: str, base_system: str) -> str:
     """One adult Improve-prompt call. The caller still screens the result with the gate.
 
     Raises:
-        GenerationBlocked: A stated age is under 18, or the reply has a youth cue.
+        GenerationBlocked: A stated age is under 18, or the reply has a Canvas-side youth cue.
             The reply is refused as it is; it is never rephrased.
     """
     from canvas.safety.gate import GenerationBlocked

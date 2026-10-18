@@ -11,6 +11,7 @@ from canvas.pipeline.enhance import SYSTEM_PROMPT as ENHANCE_SYSTEM
 from canvas.pipeline.photoshoot import SYSTEM_PROMPT as SCENARIO_SYSTEM
 from canvas.pipeline.photoshoot import scenario_request
 from canvas.pipeline.series import run_series
+from canvas.safety.denylist import explain
 from canvas.safety.gate import GenerationBlocked
 from tests.fakes import World
 
@@ -75,7 +76,22 @@ def _series(tmp_path: Path, rewrite, lines: list[str], statuses: list[tuple[int,
 def test_module_text_and_examples_have_no_youth_cues() -> None:
     hits = {text[:60]: adult.youth_cues(text) for text in adult.prompt_texts() if adult.youth_cues(text)}
     assert hits == {}
-    assert adult.youth_cues("a petite schoolgirl in anime style") == ("petite", "schoolgirl", "anime")
+    for text in adult.prompt_texts():
+        trace = explain(text)
+        # The direction's own "under 18" instruction is model guidance, not a prompt, so only terms count.
+        assert not (trace.minor_terms or trace.minor_sexual_terms or trace.youth_context_terms
+                    or trace.stylised_terms), text[:60]
+    assert adult.youth_cues("a barely legal, youthful adolescent") == ("barely legal", "youthful", "adolescent")
+    assert adult.youth_cues("juvenile, girlish, boyish, young-looking") == (
+        "juvenile", "girlish", "boyish", "young-looking")
+
+
+def test_ordinary_adult_wording_is_not_a_canvas_cue() -> None:
+    # The gate's filter covers minor, school and stylised cues; Canvas does not repeat them,
+    # and ordinary adult wording passes (no-paranoia rule, 2026-10-18).
+    for text in ("petite woman in her 30s", "girl next door, 28 years old", "porcelain doll makeup",
+                 "cute smile", "young woman in a silk robe", "little black dress"):
+        assert adult.youth_cues(text) == (), text
 
 
 def test_adult_anchor_only_when_the_policy_is_on() -> None:
@@ -111,14 +127,14 @@ def test_six_shots_never_repeat_a_pose_or_a_light(tmp_path: Path) -> None:
 
 
 def test_a_shot_with_a_youth_cue_is_refused_and_not_rewritten(tmp_path: Path) -> None:
-    rewrite, calls = _director({2: "petite pose by the window"})
+    rewrite, calls = _director({2: "youthful pose by the window"})
     lines: list[str] = []
     statuses: list[tuple[int, str]] = []
     result = _series(tmp_path, rewrite, lines, statuses)
     assert result.stopped == ""
     assert (2, "blocked") in statuses
     assert len(lines) == 5
-    assert all("petite" not in line for line in lines)
+    assert all("youthful" not in line for line in lines)
     assert len(calls) == 1
 
 
@@ -135,8 +151,11 @@ def test_a_scenario_the_gate_refuses_stops_without_a_rewrite(tmp_path: Path) -> 
 def test_the_gate_filter_refuses_a_youth_line(tmp_path: Path) -> None:
     gate = _adult_world_gate()
     gate.review_prompt(f"{adult.ADULT_ANCHOR}, boutique hotel suite, black lace lingerie")
-    with pytest.raises(GenerationBlocked):
-        gate.review_prompt("teen in lingerie, boudoir")
+    gate.review_prompts(["petite woman in her 30s, black lace lingerie", "girl next door, 28, nude, boudoir"])
+    for line in ("teen in lingerie, boudoir", "schoolgirl in lingerie", "nude student in a classroom",
+                 "anime waifu, nude, 25 years old"):
+        with pytest.raises(GenerationBlocked):
+            gate.review_prompt(line)
 
 
 class _Rewriter:
@@ -154,7 +173,7 @@ class _Rewriter:
 
 
 def test_improve_refuses_a_youth_reply_without_rewriting() -> None:
-    rewriter = _Rewriter("petite model on a bed, soft window light")
+    rewriter = _Rewriter("barely legal model on a bed, soft window light")
     with pytest.raises(GenerationBlocked):
         adult.improve_adult(rewriter, IDEA, ENHANCE_SYSTEM)
     assert len(rewriter.calls) == 1 and rewriter.closed

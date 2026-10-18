@@ -12,7 +12,8 @@ from voxprint_common.ui.simple_image import Phase
 
 from canvas.app.i18n import text
 from canvas.app.info import ENLARGE_NAME
-from canvas.app.shell_run import RunStopped
+from canvas.app.shell_gate import reviewed_output
+from canvas.app.shell_run import RunStopped, load_rgb
 from canvas.infra.paths import models_dir
 from canvas.models.mdl_registry import selectable
 from canvas.models.modes import Mode
@@ -96,7 +97,8 @@ def run_photoshoot(window: ShellWindow) -> None:
         else:
             if hasattr(runner, "img2img_strength"):
                 runner.img2img_strength = strength
-            raw_hero = hero if isinstance(hero, RawImage) else RawImage(hero.width, hero.height, hero.to_bytes())
+            # Always a copy: the pipeline wipes its inputs, and the hero is reused for every shot.
+            raw_hero = RawImage(hero.width, hero.height, hero.to_bytes())
             fresh = (PendingInput(ImageRole.INIT, raw_hero),)
         try:
             raw = runner(picture, fresh)
@@ -104,7 +106,6 @@ def run_photoshoot(window: ShellWindow) -> None:
             if exc.unavailable:
                 raise _Halt(exc.message, unavailable=True) from exc
             return None
-        window._photoshoot_frame = raw
         return raw
 
     def on_scenario(scenario: Scenario) -> None:
@@ -117,11 +118,6 @@ def run_photoshoot(window: ShellWindow) -> None:
         if status == "drawing":
             window._advance(index, total, tr("photoshoot.progress.frame", current=index + 1, total=total))
         bar.mark(index, status)
-        if status == "kept":
-            _remember(window, bar.line_for(index), folder / f"{index + 1:02}.png")
-            if not bar._stop and index + 1 < len(bar.rows) and layout.phase is not Phase.BUSY:
-                layout.set_prompt(idea)
-                layout.generate()
         window.view.refresh()
         bar.sync()
 
@@ -159,10 +155,8 @@ def _finish(window: ShellWindow, result: SeriesResult, idea: str) -> None:
     layout.set_prompt(idea)
     if result.stopped == "idea" or result.stopped == "scenario":
         layout.block(result.reason or tr("photoshoot.scenario.stopped"))
-    elif result.stopped == "cancelled":
-        pass
-    elif result.stopped == "":
-        if layout.phase is Phase.BUSY:
+    elif result.stopped == "cancelled" or result.stopped == "":
+        if not _record_series(window, result, idea) and layout.phase is Phase.BUSY:
             layout.cancel()
     else:
         assert_never(result.stopped)
@@ -170,27 +164,37 @@ def _finish(window: ShellWindow, result: SeriesResult, idea: str) -> None:
     window.photoshoot.sync()
 
 
-def _remember(window: ShellWindow, line: str, picture: Path) -> None:
+def _record_series(window: ShellWindow, result: SeriesResult, idea: str) -> bool:
+    """Add the kept frames to the history as one grouped series entry.
+
+    The hero frame is staged so the content gate reviews it again through
+    ``finish``; every frame was already released by the gate in ``run_series``.
+
+    Returns:
+        True when the series entry was added.
+    """
+    if not result.kept or result.folder is None:
+        return False
     layout = window.shell.layout
-    idea = layout.prompt
-    raw = getattr(window, "_photoshoot_frame", None)
-    if not isinstance(raw, RawImage):
-        return
-    if layout.phase is not Phase.BUSY:
-        return
-    item_id = uuid.uuid4().hex
-    window.shell.gate.stage(item_id, RawImage(raw.width, raw.height, raw.to_bytes()))
-    layout.set_prompt(line)
+    hero = result.kept[0]
     try:
-        kept = layout.finish(item_id)
+        raw = load_rgb(hero)
+    except OSError:
+        return False
+    if layout.phase is not Phase.BUSY and not layout.generate():
+        return False
+    item_id = f"series-{result.folder.name}"
+    window.shell.gate.stage(item_id, RawImage(raw.width, raw.height, raw.to_bytes()))
+    try:
+        kept = layout.finish(item_id, reviewed_output(raw))
     except ValueError:
-        layout.set_prompt(idea)
-        return
-    if kept is not None:
-        window._pictures[item_id] = str(picture)
-        window._series_folders[item_id] = str(picture.parent)
-        record_series_frame(window.shell.state_dir, item_id, picture)
-    layout.set_prompt(idea)
+        return False
+    if kept is None:
+        return False
+    window._pictures[item_id] = str(hero)
+    window._series_folders[item_id] = str(result.folder)
+    record_series(window.shell.state_dir, item_id, result.folder, result.kept, idea)
+    return True
 
 
 def load_series_folders(state_dir: Path) -> dict[str, str]:
@@ -209,17 +213,26 @@ def load_series_folders(state_dir: Path) -> dict[str, str]:
     return folders
 
 
-def record_series_frame(state_dir: Path, item_id: str, picture: Path) -> None:
-    """Remember that ``item_id`` belongs to the series folder of ``picture``.
+def record_series(state_dir: Path, item_id: str, folder: Path, frames: tuple[Path, ...], idea: str) -> None:
+    """Remember that history item ``item_id`` is one grouped series.
 
     Args:
         state_dir: The Canvas state directory.
-        item_id: History item id.
-        picture: Kept frame inside the series folder.
+        item_id: History item id of the series entry.
+        folder: The series folder.
+        frames: Kept frames, in order. The first is the hero.
+        idea: The idea the series was written from.
     """
     path = _series_map_path(state_dir)
     payload = _series_map(state_dir)
-    payload[item_id] = {"folder": str(picture.parent), "file": picture.name, "series": picture.parent.name}
+    payload[item_id] = {
+        "kind": "series",
+        "folder": str(folder),
+        "series": folder.name,
+        "idea": idea,
+        "frames": [frame.name for frame in frames],
+        "file": frames[0].name if frames else "",
+    }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 

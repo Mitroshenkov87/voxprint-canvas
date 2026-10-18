@@ -117,7 +117,6 @@ class ShellWindow(QMainWindow):
         self._mask_file: Path | None = None
         self._pictures: dict[str, str] = {}
         self._series_folders: dict[str, str] = load_series_folders(shell.state_dir)
-        self._photoshoot_frame: RawImage | None = None
         self._chrome_ready = False
         self.setObjectName("shell")
         self.setWindowTitle(tr("splash.app.canvas"))

@@ -289,7 +289,7 @@ def _parse_components(raw: dict[str, Any]) -> dict[str, Component]:
         components[str(key)] = Component(
             kind=str(row.get("kind") or ""),
             version=str(row.get("version") or ""),
-            path=_safe_relative(str(row.get("path") or ".")),
+            path=_stored_path(str(row.get("path") or "."), str(row.get("kind") or "")),
             sha256=str(row.get("sha256") or ""),
             installed_at=str(row.get("installed_at") or ""),
             refs=tuple(dict.fromkeys(str(item) for item in refs_raw)),
@@ -343,7 +343,8 @@ def _dump(component: Component) -> dict[str, Any]:
 
 
 def _delete_tree(shared: Path, component: Component, remaining: dict[str, Component]) -> None:
-    if component.path in ("", ".") or _keeps_shared_tree(component.path):
+    if component.path in ("", ".") or _is_absolute(component.path) or _keeps_shared_tree(component.path):
+        # Absolute model paths are VOXPrint MDL blobs; MDL owns their removal.
         return
     for other in remaining.values():
         if other.path == component.path:
@@ -414,6 +415,27 @@ def _require_sha(sha256: str) -> str:
     if not _SHA_RE.fullmatch(sha256):
         raise ManifestError("sha256 must be 64 hex characters")
     return sha256
+
+
+def _is_absolute(path: str) -> bool:
+    raw = path.replace("\\", "/")
+    return raw.startswith("/") or (len(raw) >= 2 and raw[1] == ":")
+
+
+def _stored_path(path: str, kind: str) -> str:
+    """A component path as another suite writer stored it.
+
+    VOXPrint MDL records each downloaded model file by its absolute path under the
+    shared models directory (voxprint_common.runtime_manifest allows that for
+    ``kind == "model"``). Canvas keeps such a path as it is and never deletes it.
+    Every other path must be relative and stay inside the shared folder.
+    """
+    raw = path.replace("\\", "/")
+    if kind == "model" and _is_absolute(raw):
+        if ".." in raw.split("/"):
+            raise ManifestError("a component path must stay inside the shared folder")
+        return raw
+    return _safe_relative(path)
 
 
 def _safe_relative(path: str) -> str:

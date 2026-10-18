@@ -15,12 +15,14 @@ import pytest
 
 from canvas.infra.manifest import (
     FUTURE_IMPORT,
+    MANIFEST_NAME,
     LOCK_TIMEOUT_S,
     ManifestError,
     SCHEMA,
     SHARED_RUNTIME_SCHEMA,
     load_manifest,
     manifest_lock,
+    register_app,
     register_component,
     unregister_app,
 )
@@ -279,6 +281,37 @@ def test_component_path_cannot_escape_the_shared_folder(monkeypatch, tmp_path):
             shared_dir(), "escape", kind="model", version="1",
             path="../outside", sha256=_SHA, app="canvas",
         )
+
+
+@pytest.mark.parametrize("stored", ["{blob}", "C:/Users/me/AppData/Local/VOXPrint/shared/models/blobs/ab/cd"])
+def test_an_mdl_model_with_an_absolute_path_is_read_kept_and_never_deleted(monkeypatch, tmp_path, stored):
+    # VOXPrint MDL records each downloaded file by its absolute path (windows-install, PR #42).
+    monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
+    shared = shared_dir()
+    blob = shared / "models" / "blobs" / "ab" / ("cd" * 31)
+    blob.parent.mkdir(parents=True)
+    blob.write_bytes(b"weights")
+    path = stored.format(blob=blob.as_posix())
+    (shared / MANIFEST_NAME).write_text(json.dumps({"schema": SCHEMA, "components": {
+        "model-abcdabcdabcd": {"kind": "model", "version": "1", "path": path, "sha256": _SHA,
+                                "installed_at": "2026-10-18T04:26:43+00:00", "refs": ["canvas"]},
+    }}), encoding="utf-8")
+    register_app(shared)
+    assert load_manifest(shared)["model-abcdabcdabcd"].path == path
+    assert unregister_app(shared, "canvas") == ["model-abcdabcdabcd"]
+    assert blob.is_file()
+
+
+@pytest.mark.parametrize("kind,path", [("tool", "/opt/elsewhere"), ("model", "/x/../etc"), ("runtime", "C:/x")])
+def test_other_absolute_or_escaping_paths_are_still_refused(monkeypatch, tmp_path, kind, path):
+    monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
+    shared = shared_dir()
+    shared.mkdir(parents=True, exist_ok=True)
+    (shared / MANIFEST_NAME).write_text(json.dumps({"schema": SCHEMA, "components": {
+        "x": {"kind": kind, "version": "1", "path": path, "sha256": _SHA, "installed_at": "", "refs": ["canvas"]},
+    }}), encoding="utf-8")
+    with pytest.raises(ManifestError):
+        load_manifest(shared)
 
 
 def test_cpu_onnxruntime_dist_is_not_installed():

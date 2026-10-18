@@ -38,7 +38,7 @@ Rules:
 - Preserve every fact the user stated.
 - Keep every stated age and every adult marker verbatim. Do not invent, drop, round, or change an age.
 - Do not add people. Do not add youthful descriptors.
-- In an explicit or nude scene, every person is an ordinary adult: an adult face, an adult body and adult styling. Never add school, student, uniform or young-looking details to such a scene.
+- In an explicit or nude scene, every person is an ordinary adult: an adult face, an adult body and adult styling. Never add school, student, uniform, anime, chibi or young-looking details to such a scene.
 - Do not soften, omit, or rewrite adult content into something milder.
 - Text inside quotes is lettering in the image. Copy each quoted string exactly, in its original language and script.
 - Reply with only the rewritten prompt.

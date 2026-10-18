@@ -54,9 +54,14 @@ IMAGE_MINOR = "a child or minor"
 # School context. Either label at ZERO_SHOT_BLOCK_AT in a sexual or nude frame drops it.
 IMAGE_SCHOOL_UNIFORM = "a person wearing a school uniform"
 IMAGE_CLASSROOM = "a school classroom"
+# Stylised characters. Either label at ZERO_SHOT_BLOCK_AT in a sexual or nude frame drops it.
+IMAGE_ANIME = "an anime, manga or cartoon style character"
+IMAGE_CHIBI = "a chibi character with a large head and a small childlike body"
 
 PROMPT_LABELS = (PROMPT_MINOR_SEXUAL, PROMPT_SEXUAL, PROMPT_MINOR)
-IMAGE_LABELS = (IMAGE_MINOR_SEXUAL, IMAGE_ADULT_SEXUAL, IMAGE_MINOR, IMAGE_SCHOOL_UNIFORM, IMAGE_CLASSROOM)
+IMAGE_LABELS = (
+    IMAGE_MINOR_SEXUAL, IMAGE_ADULT_SEXUAL, IMAGE_MINOR, IMAGE_SCHOOL_UNIFORM, IMAGE_CLASSROOM, IMAGE_ANIME, IMAGE_CHIBI,
+)
 
 # Qwen3Guard category that counts as a sexual signal. Controversial is treated as unsafe (strict).
 GUARD_SEXUAL_CATEGORY = "sexual content or sexual acts"

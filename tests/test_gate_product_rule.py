@@ -13,6 +13,8 @@ from canvas.safety.constants import (
     ADOLESCENT_16_17_AT,
     CLEAR_CHILD_AT,
     IMAGE_ADULT_SEXUAL,
+    IMAGE_ANIME,
+    IMAGE_CHIBI,
     IMAGE_CLASSROOM,
     IMAGE_LABELS,
     IMAGE_MINOR_SEXUAL,
@@ -22,6 +24,7 @@ from canvas.safety.constants import (
 from canvas.safety.gate import (
     GenerationBlocked,
     SafetyUnavailable,
+    StylisedBlocked,
     YouthContextBlocked,
     image_block_reason,
     refusal_stage,
@@ -232,3 +235,52 @@ def test_the_gate_reads_no_setting_and_writes_no_file():
         for forbidden in ("os.environ", "getenv", "import logging", "getLogger", "open(", "write_text",
                           "QSettings", "suite_settings"):
             assert forbidden not in source, f"{name} uses {forbidden}"
+
+
+STYLISED = ("waifu", "loli", "lolicon", "shota", "chibi", "moe", "anime girl", "anime boy", "anime style",
+            "hentai character", "kawaii", "manga style", "вайфу", "лоли", "сёта", "чиби", "аниме-девушка",
+            "аниме стиль")
+
+
+@pytest.mark.parametrize("cue", STYLISED)
+@pytest.mark.parametrize("explicit", ["nude", "explicit", "голая"])
+def test_explicit_plus_a_stylised_cue_blocks_even_with_a_stated_adult_age(explicit, cue):
+    for prompt in (f"{explicit}, {cue}", f"{explicit}, {cue}, adult, 25 years old", f"{explicit}, {cue}, 25 лет"):
+        assert refusal_stage(prompt, "safe", ()) != "allow", prompt
+        with pytest.raises(GenerationBlocked):
+            World().gate().review_prompt(prompt)
+
+
+def test_hentai_counts_as_explicit_on_its_own():
+    with pytest.raises(GenerationBlocked):
+        World().gate().review_prompt("hentai character")
+    with pytest.raises(GenerationBlocked):
+        World().gate().review_prompt("хентай")
+
+
+@pytest.mark.parametrize("prompt", ["anime style landscape at sunset", "a chibi cat sticker", "kawaii teapot",
+                                    "manga panel of a city street", "пейзаж в стиле аниме"])
+def test_stylised_art_without_nudity_passes(prompt):
+    World().gate().review_prompt(prompt)
+
+
+def test_stylised_refusal_has_its_own_message():
+    with pytest.raises(StylisedBlocked) as caught:
+        World().gate().review_prompt("nude, waifu")
+    assert str(caught.value) == text("gate.blocked_stylised")
+    assert "аниме" in text("gate.blocked_stylised", "ru")
+
+
+@pytest.mark.parametrize("label", [IMAGE_ANIME, IMAGE_CHIBI])
+def test_output_net_drops_an_explicit_stylised_frame_only(label):
+    adult = {IMAGE_ADULT_SEXUAL: 0.9}
+    assert image_block_reason(0.95, [], _scores(**adult, **{label: ZERO_SHOT_BLOCK_AT})) == "stylised"
+    assert image_block_reason(0.95, [], _scores(**adult, **{label: ZERO_SHOT_BLOCK_AT - 0.01})) == "allow"
+    assert image_block_reason(0.10, [], _scores(**{label: 0.9})) == "allow"
+    world = World()
+    world.nsfw = 0.9
+    world.image_scores[label] = 0.7
+    with pytest.raises(GenerationBlocked):
+        world.gate().review_image(rgb(), "nude, adult, 25 years old")
+    world.nsfw = 0.1
+    assert type(world.gate().review_image(rgb(), "anime style landscape")) is SafeImage

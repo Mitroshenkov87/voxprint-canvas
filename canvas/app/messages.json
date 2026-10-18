@@ -157,6 +157,10 @@
       "en": "This request cannot be completed. Explicit content cannot be combined with school, student or young-age themes.",
       "ru": "Этот запрос нельзя выполнить. Откровенный контент нельзя сочетать со школьной, студенческой или детской тематикой."
     },
+    "gate.blocked_stylised": {
+      "en": "This request cannot be completed. Explicit content cannot be combined with anime, manga or other stylised characters.",
+      "ru": "Этот запрос нельзя выполнить. Откровенный контент нельзя сочетать с аниме, мангой или другими стилизованными персонажами."
+    },
     "gate.unavailable": {
       "en": "Image generation is unavailable.",
       "ru": "Генерация изображений недоступна."

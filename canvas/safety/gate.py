@@ -11,7 +11,9 @@ accepts only a ``ScreenedInput``. Explicit or nude intent together with a child,
 teen or minor term, a stated age under 18, or a school or student cue blocks. A
 clothed school or student scene passes. The output check is a lighter net: in a
 sexual frame it drops a clear child or adolescent reading at the existing
-thresholds, a minor-sexual image score, or a visible school uniform or classroom.
+thresholds, a minor-sexual image score, a visible school uniform or classroom, or
+an anime, manga, cartoon or chibi character. Explicit intent with an anime or
+stylised-character cue also blocks the prompt, whatever age is stated.
 A youngest-adult or babyface reading with no other marker passes.
 
 Nothing here logs or stores a decision, a score, a prompt or any pixel data.
@@ -31,6 +33,8 @@ from canvas.safety.constants import (
     CLEAR_CHILD_AT,
     GUARD_SEXUAL_CATEGORY,
     IMAGE_ADULT_SEXUAL,
+    IMAGE_ANIME,
+    IMAGE_CHIBI,
     IMAGE_LABELS,
     IMAGE_MINOR,
     IMAGE_MINOR_SEXUAL,
@@ -72,6 +76,12 @@ class YouthContextBlocked(GenerationBlocked):
     """Explicit content was combined with a school, student or young-age cue."""
 
     message_key = "gate.blocked_youth"
+
+
+class StylisedBlocked(GenerationBlocked):
+    """Explicit content was combined with an anime or other stylised character."""
+
+    message_key = "gate.blocked_stylised"
 
 
 class SafetyUnavailable(SafetyError):
@@ -173,12 +183,13 @@ def image_block_reason(
     scores: dict[str, float],
     *,
     support: Literal["none", "adult", "strong"] = "none",
-) -> Literal["allow", "minor-sexual", "clear-child", "adolescent", "school-context"]:
+) -> Literal["allow", "minor-sexual", "clear-child", "adolescent", "school-context", "stylised"]:
     """Why a picture would stop, or ``allow``.
 
     Adult sexual content passes. A minor-sexual image score blocks on its own.
     A school-uniform or classroom score at the zero-shot line blocks in a sexual
-    frame and passes in a clothed one.
+    frame and passes in a clothed one. So does an anime, manga or cartoon
+    character, or chibi proportions.
     P(age <= 15) at the child line blocks with sexual content, and a stated age
     cannot remove that. P(16 or 17) blocks only at its own higher line. A stated
     age of 18 or 19 raises that line, and a stated age of 20 or more removes it.
@@ -189,6 +200,7 @@ def image_block_reason(
     adult_sexual = _at_least(_score(scores, IMAGE_ADULT_SEXUAL))
     _score(scores, IMAGE_MINOR)
     school = _at_least(_score(scores, IMAGE_SCHOOL_UNIFORM)) or _at_least(_score(scores, IMAGE_CLASSROOM))
+    stylised = _at_least(_score(scores, IMAGE_ANIME)) or _at_least(_score(scores, IMAGE_CHIBI))
     sexual = float(nsfw) >= SEXUAL_SCORE_BLOCK_AT or adult_sexual or minor_sexual
     clear = any(at_most_15 >= CLEAR_CHILD_AT for at_most_15, _band in parsed)
     match support:
@@ -208,6 +220,8 @@ def image_block_reason(
         return "adolescent"
     if sexual and school:
         return "school-context"
+    if sexual and stylised:
+        return "stylised"
     return "allow"
 
 
@@ -252,7 +266,9 @@ def refusal_stage(text: str, safety: str, categories: Sequence[str]) -> str:
     ``lexicon-minor-sexual`` and ``lexicon-minor`` come from the term list.
     ``guard-restricted`` is a Qwen3Guard category that names a minor or non-consent.
     ``lexicon-youth-context`` is explicit intent (term list or the Qwen3Guard
-    sexual category) together with a school or student cue. Unsafe or
+    sexual category) together with a school or student cue.
+    ``lexicon-stylised`` is explicit intent together with an anime or other
+    stylised-character cue; a stated adult age does not change it. Unsafe or
     controversial plus the plain sexual category alone is not a block.
     """
     signals = scan(text)
@@ -265,6 +281,8 @@ def refusal_stage(text: str, safety: str, categories: Sequence[str]) -> str:
         return "lexicon-minor"
     if sexual and signals.youth_context:
         return "lexicon-youth-context"
+    if sexual and signals.stylised:
+        return "lexicon-stylised"
     return "allow"
 
 
@@ -282,6 +300,8 @@ class AgeGate:
         stage = refusal_stage(text, verdict.safety, verdict.categories)
         if stage == "lexicon-youth-context":
             raise YouthContextBlocked("prompt")
+        if stage == "lexicon-stylised":
+            raise StylisedBlocked("prompt")
         if stage != "allow":
             raise GenerationBlocked("prompt")
 
@@ -343,7 +363,7 @@ class AgeGate:
         match reason:
             case "allow":
                 return
-            case "minor-sexual" | "clear-child" | "adolescent" | "school-context":
+            case "minor-sexual" | "clear-child" | "adolescent" | "school-context" | "stylised":
                 raise GenerationBlocked(code)
             case _ as unexpected:
                 assert_never(unexpected)

@@ -8,7 +8,7 @@ Cover metadata (kept in the build script, as in Audiobook Builder's build_manual
 Headings: "#" = chapter, "##" = section, "###" = sub-section. The build numbers chapters and sections.
 UI labels are written exactly as in canvas/ui/locales/en.json, canvas/app/messages.json and the
 voxprint-common 0.3.1 catalog, in bold. Screenshots: ![caption](screens/<id>.png), listed in screens.md.
-Lines starting with "TODO(check)" inside HTML comments must be resolved before the PDF is published.
+Checked notes that used to sit in HTML comments have been resolved in the text below.
 -->
 
 # What Canvas is
@@ -40,7 +40,7 @@ The picture model is **Z-Image-Turbo** in BF16 on every graphics card that Canva
 | Disk space | About 28 GB for the default model pack, plus room for the program libraries and your pictures. Optional packs need more (see below). |
 | Internet | During installation and for each optional pack you download |
 
-<!-- TODO(check): disk space for the program libraries (Python, PyTorch for CUDA 13.0, the shared suite runtime) is not stated anywhere in the code. Add a measured figure. -->
+Setup also downloads the program libraries (Python, PyTorch and the shared suite runtime). This release does not fix their size; leave free space beyond the model pack.
 
 ## Graphics card tiers
 
@@ -66,7 +66,7 @@ The setup file is small. It does not contain the graphics libraries or the model
 
 Models are kept in the shared VOXPrint models folder, so other VOXPrint apps can use the same files without downloading them again.
 
-<!-- TODO(check): on a 24 GB card the plan uses the 24 GB Z-Image-Turbo entry (z-image-turbo-bf16), which is marked optional in mdl.json. Confirm it shares its files with the default 16 GB entry and needs no extra download. -->
+On a 24 GB card the plan names a separate Z-Image-Turbo entry (`z-image-turbo-bf16`). That entry is the same files as the default 16 GB pack, stored once, so it is not downloaded again. The 24 GB tier still adds the optional Creative Z-Image pack (**Bolder**) and the full ControlNet pack when you choose them.
 
 # Installing on Windows
 
@@ -80,17 +80,15 @@ Get-FileHash .\VoxprintCanvasSetup-0.1.0-rc.13.exe -Algorithm SHA256
 
 with the line for that file in `SHA256SUMS`.
 
-<!-- TODO(check): is the setup code-signed? If not, describe the SmartScreen warning ("More info", then "Run anyway") here, as Audiobook Builder's manual does. -->
+The setup file is not code-signed. Windows SmartScreen may say that it prevented an unrecognized app from starting. Choose **More info**, then **Run anyway**.
 
 ## Run Setup
 
 1. Double-click the setup file. Windows asks for administrator rights; Setup installs for all users.
-2. If the language of Windows is not English or Russian, Setup asks which language to use.
+2. On an English Windows, Setup uses English and does not ask. On a Russian Windows, Setup uses Russian and does not ask. When Windows uses another language, Setup asks which language to use.
 3. Setup installs the program into `C:\Program Files\VOXPrint AI Suite\Canvas\`. There is no folder page: the location is fixed.
-4. Setup then runs its install steps. A console window shows what is happening: Python, PyTorch, the suite libraries and the default model pack. This takes a while, mostly because of the model download.
-5. When Setup finishes, the Start menu has a **VOXPrint AI Suite** folder with **VOXPrint AI Canvas** and **Uninstall VOXPrint AI Canvas**.
-
-<!-- TODO(check): the language dialog uses ShowLanguageDialog=auto. Confirm when exactly it appears on an English and on a Russian Windows. -->
+4. Setup then runs its install steps. The wizard shows *Installing the program libraries and models. This can take a while; progress is written to the setup log.* There is no separate console window. This takes a while, mostly because of the model download.
+5. When Setup finishes, the Start menu has a **VOXPrint AI Suite** folder with **VOXPrint AI Canvas**, **VOXPrint AI Canvas Guide (English)**, **Руководство VOXPrint AI Canvas (русский)** and **Uninstall VOXPrint AI Canvas**.
 
 ## PowerShell 7
 
@@ -111,9 +109,7 @@ Canvas works the same either way. PowerShell 7 is recommended; you can install i
 
 ## Model download
 
-The default model pack (about 28 GB) is downloaded during Setup through VOXPrint MDL, the shared model downloader of the suite. Each file is checked against its pinned checksum before it is used. If a download breaks off, run Setup again: files that are already complete are not downloaded twice.
-
-<!-- TODO(check): confirm that a repeated Setup resumes the model download and that a partly downloaded file is resumed, not restarted. -->
+The default model pack (about 28 GB) is downloaded during Setup through VOXPrint MDL, the shared model downloader of the suite. Each file is checked against its pinned checksum before it is used. A file that is already complete, with a matching size and a verification marker, is not downloaded again. A stopped download is kept as a partial file. The next run continues that file from where it stopped when the source accepts a range request. If the source ignores the range, that file starts again.
 
 ## First launch
 
@@ -121,9 +117,7 @@ Open **Start → VOXPrint AI Suite → VOXPrint AI Canvas**. A startup window ap
 
 ![The startup window.](screens/splash.png)
 
-The interface is in English or Russian.
-
-<!-- TODO(check): which setting decides the interface language? voxprint-common uses ui_language in suite.json, then VOXPRINT_LANG, then the Windows display language; canvas/app/i18n.py uses the process locale. Confirm both agree and describe how to switch. -->
+The main window follows, in order, `ui_language` in the suite settings file, the `VOXPRINT_LANG` environment variable, the operating-system display language, then English. Canvas dialogs follow the process locale: Russian when it starts with `ru`, otherwise English. There is no language control in the window. To use one language for both, set the display language (on Linux, `LANG`) and do not set a different `ui_language`. `VOXPRINT_LANG` changes the main window only. The suite settings file is `%LOCALAPPDATA%\VOXPrint AI Suite\state\suite.json` on Windows and `~/.local/share/voxprint-ai-suite/state/suite.json` on Linux. `VOXPRINT_HOME` replaces that data folder.
 
 If the startup window closes and no main window appears, the computer does not meet the requirements. See chapter 15.
 
@@ -139,9 +133,7 @@ A silent Setup does not offer PowerShell 7. It uses PowerShell 7 when it is inst
 
 # Installing on Linux
 
-You need a Linux distribution released in 2025 or later, the NVIDIA driver, and `curl`.
-
-<!-- TODO(check): list the exact packages install.sh expects (curl, sha256sum, tar, sudo, an NVIDIA driver with nvidia-smi) and the oldest supported driver version. -->
+You need a Linux distribution released in 2025 or later, and `curl`, `tar` and `sha256sum`. The installer needs permission to create `/opt/voxprint-ai-suite/canvas/` (`sudo` when you are not root). It does not run `nvidia-smi` and it does not name a minimum driver version. The graphics-card rules in chapter 1 still apply.
 
 1. Download `voxprint-canvas-<version>-linux-x86_64.tar.gz` and `SHA256SUMS` from the releases page and check the archive:
 
@@ -168,9 +160,7 @@ You need a Linux distribution released in 2025 or later, the NVIDIA driver, and 
 
 After installation, **VOXPrint AI Canvas** is in the applications menu, in the Graphics category. You can also start it from a terminal with `voxprint-canvas`; the command-line tool is `voxprint-canvas-cli`.
 
-> The Linux installer ignores proxy settings from the environment (`HTTP_PROXY`, `HTTPS_PROXY` and similar) on purpose.
-
-<!-- TODO(check): what should a user behind a mandatory proxy do on Linux? -->
+> The Linux installer ignores proxy settings from the environment (`HTTP_PROXY`, `HTTPS_PROXY` and similar) on purpose, and it has no proxy setting of its own. A machine that can reach the network only through a proxy cannot pass those variables into this installer.
 
 # The main window
 
@@ -228,7 +218,7 @@ While Canvas works, the picture area shows *Creating the picture...*, a stage (*
 
 When it is done, the picture appears with the action bar under it:
 
-- **More like this** makes another picture with the same description and settings;
+- **More like this** makes another picture from the same description, settings and seed;
 - **Save** saves a copy of the picture wherever you choose;
 - **Open folder** opens the folder where Canvas keeps your pictures;
 - **Use prompt again** puts this picture's description and settings back on the screen;
@@ -311,11 +301,12 @@ The panel has two groups.
 
 | Field | What it does |
 |---|---|
-| **Adult content (18+)** | An Expert setting for the prompt; off by default |
+| **Adult content (18+)** | Off by default |
 | **Exact size** | **Match the choice**, **Standard**, **2K** or **4K** (chapter 8) |
 
-<!-- TODO(check): Seed shows 0 by default. Confirm whether 0 means a new seed for every Generate and how to repeat a picture exactly. -->
-<!-- TODO(check): Picture size shows the preset value (for example 1344x768 for 16:9), but the generator takes the frame from the aspect ratio (1280×720 for 16:9, chapter 8). Confirm whether typing a size here has any effect. -->
+**Seed** starts at 0, and 0 is a real seed, not a new number each time. The same **Seed** repeats the picture. Change **Seed** for a different picture. When **Number of pictures** is greater than 1, Canvas uses that seed and then the next integers. **Use prompt again** restores that picture's seed. **More like this** copies the history seed and generates again, so the seed stays the same.
+
+**Picture size** shows the preset text (for example `1344x768` for 16:9). The generator uses the aspect ratio from the **Size** row: 16:9 is 1280×720 (chapter 8). Typing a size in this field does not change the picture.
 
 ## Your own values and the presets
 
@@ -354,7 +345,7 @@ When **4K** is selected, a **Detail** row appears with **Light**, **Medium** and
 
 ![4K selected, with the Detail row.](screens/output-4k-detail.png)
 
-<!-- TODO(check): what exactly does the Detail row change? In the presets it writes shell.lora_weight (0.4 / 0.7 / 1.1), the same value as LoRA strength. -->
+The **Detail** row writes the same number as **LoRA strength**: **Light** is 0.4, **Medium** is 0.7 and **Strong** is 1.1. That number is applied only when an add-on is selected. With none selected, the row only stores the number.
 
 ## File types
 
@@ -419,9 +410,13 @@ If you open **Edit the mask** before choosing a picture, it says *Open a picture
 
 ## Extend (outpaint)
 
-**Extend** grows the picture past its edges. Like **Paint over**, it needs a picture and a mask.
+**Extend** uses the same mask editor as **Paint over**. The editor paints only inside the picture, at the picture's size.
 
-<!-- TODO(check): how does the user mark the new area for Extend? The mask editor paints only inside the picture, at the picture's size. Describe the real steps. -->
+1. Choose a picture.
+2. Click **Edit the mask** and paint the area that should change.
+3. Click **Use this mask**. Canvas sets **Change** to **Paint over**.
+4. Open **Picture setup**, choose **From a picture** and **Extend**.
+5. Describe what should appear and click **Generate**.
 
 ## Structure guidance (ControlNet)
 
@@ -439,7 +434,7 @@ These three modes take the structure from your picture and draw a new picture on
 
 Structure guidance needs the ControlNet pack (ControlNet lite on the 16 GB tier, ControlNet on the 24 GB tier). If it is not installed, download it in **More → Manage models**.
 
-<!-- TODO(check): does Canvas offer the optional pack itself (size and estimated time, then Download) when a mode needs it, or does the user always go to Manage models? The same for Creative Z-Image (Bolder). -->
+Canvas does not offer those packs from the picture screen. Open **More → Manage models** and download the pack there. The same applies to Creative Z-Image (**Bolder**). When the default models are missing, the window says *Models are not ready yet. Use Manage models.*
 
 # Upscaling through Enlarge
 
@@ -486,9 +481,7 @@ Canvas first writes a short scenario: one line per shot, with the subject and th
 
 ![A series in progress.](screens/photoshoot-running.png)
 
-A series has 6 shots.
-
-<!-- TODO(check): the locale files contain How many shots (6 / 12 / 20), Place (Same place / Different places), Seed, How close and other series options, but no control for them is on the screen in rc.13. Confirm that a series is always 6 shots in the same place, or document the controls once they are added. -->
+A series is always 6 shots, in one place (**Same place**), with **Seed** set to **In order** and **How close** set to **Usual**. The catalog also names **How many shots** (6 / 12 / 20), **Place** (**Different places**), **Same seed**, **Random**, **Looser** and **Closer**. Those controls are not on the screen. The shot list cannot be edited.
 
 ## Stop a series
 
@@ -516,18 +509,16 @@ Each add-on is one folder:
     <id>.safetensors
 ```
 
-The folder name is the add-on's id. Model Forge writes this folder for you; you don't need to copy anything by hand. The models folder is, by default:
+The folder name is the add-on's id. Model Forge writes each add-on into that folder when it exports the add-on into the shared models folder. The models folder is, by default:
 
 | System | Models folder |
 |---|---|
 | Windows | `%LOCALAPPDATA%\VOXPrint AI Suite\models` |
 | Linux | `~/.local/share/voxprint-ai-suite/models` |
 
-If you moved the models folder for the suite, Canvas uses that folder.
+To use another models folder, set `VOXPRINT_MODELS_DIR` to an absolute path, or set `models_dir` to an absolute path in the suite settings file (`suite.json`, see chapter 2). `VOXPRINT_MODELS_DIR` wins when both are set. Canvas does not name a Model Forge screen or button for this export.
 
 Only add-ons made for Z-Image-Turbo are listed.
-
-<!-- TODO(check): name the Model Forge screen and button that export a LoRA into user-models/lora, and how a user moves the models folder (suite.json models_dir or VOXPRINT_MODELS_DIR). -->
 
 ## Choose an add-on
 
@@ -579,7 +570,7 @@ Download the new setup from the releases page and run it. The update removes the
 
 Download and unpack the new archive and run `sudo ./install.sh` again, as in chapter 3. Your data in `~/.local/share/voxprint-ai-suite` stays.
 
-<!-- TODO(check): confirm that running a newer install.sh over an existing /opt/voxprint-ai-suite/canvas replaces the old program cleanly. -->
+A newer `install.sh` installs into the same `/opt/voxprint-ai-suite/canvas`. It keeps a Python that is already there, installs the libraries again when the CUDA check fails, rewrites the menu entry and the command links, and runs the model download again. Files that are already complete are kept. It does not delete the program folder first. Your data under `~/.local/share/voxprint-ai-suite` stays.
 
 ## Uninstall on Windows
 
@@ -592,9 +583,7 @@ Your pictures and the shared models stay in `%LOCALAPPDATA%\VOXPrint AI Suite`, 
 
 ## Uninstall on Linux
 
-There is no separate uninstall script.
-
-<!-- TODO(check): confirm the official Linux uninstall steps. From install.sh: run "voxprint-canvas-cli --unregister-models" as your user, then remove /opt/voxprint-ai-suite/canvas, ~/.local/share/applications/voxprint-canvas.desktop, ~/.local/bin/voxprint-canvas and voxprint-canvas-cli, and /usr/local/bin/voxprint-canvas and voxprint-canvas-cli if present. -->
+There is no uninstall script. As your user, run `voxprint-canvas-cli --unregister-models`. Then remove `/opt/voxprint-ai-suite/canvas`, `~/.local/share/applications/voxprint-canvas.desktop`, `~/.local/bin/voxprint-canvas`, `~/.local/bin/voxprint-canvas-cli`, and the copies in `/usr/local/bin` when they are present. Your pictures and models under `~/.local/share/voxprint-ai-suite` stay.
 
 # Troubleshooting
 
@@ -644,7 +633,7 @@ If the startup window closes and no main window appears, Canvas found a requirem
 | *An NVIDIA RTX 40 series GPU or newer is required.* | The graphics card is not supported, or the NVIDIA driver is missing |
 | *This GPU does not have enough memory.* | The card has less than 15.5 GB of video memory |
 
-<!-- TODO(check): the window program only prints these messages to the console. Confirm whether a message box is shown on Windows; if not, consider documenting the command line route only. -->
+These messages are printed to the console only. A Start-menu launch does not show them. Run `voxprint-canvas-cli --selftest` to see which requirement failed. Add `--json` for the detailed report.
 
 ## Messages in the main window
 
@@ -685,7 +674,7 @@ The models that Canvas downloads keep their own licences. Z-Image-Turbo, Creativ
 
 The libraries that Setup installs (for example PyTorch and Qt for Python) keep their own licences.
 
-<!-- TODO(check): Canvas does not ship a THIRD_PARTY_NOTICES file like Audiobook Builder. Decide whether one is added for the final release and reference it here. -->
+There is no separate third-party notices file in this release. `LICENSE` and `NOTICE` in the program folder are the notice files this release ships.
 
 Third-party add-ons are provided by their authors, who are responsible for the licence and training data. Voxprint does not host or redistribute them.
 

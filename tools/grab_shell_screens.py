@@ -95,17 +95,17 @@ def _open(state: Path, tier: Tier, name: str) -> ShellWindow:
     return window
 
 
-def _window(state: Path, tier: Tier) -> ShellWindow:
+def _window(state: Path, tier: Tier, history_count: int = 50) -> ShellWindow:
     state.mkdir(parents=True, exist_ok=True)
-    _history(state / "image-history.json")
+    _history(state / "image-history.json", history_count)
     shell = open_layout(state, gate=World().gate(), enlarge_installed=False)
     return ShellWindow(shell, tier=tier, enlarge=object(), runner=lambda *_args: rgb(), improver=lambda prompt: prompt)
 
 
-def _history(path: Path) -> None:
+def _history(path: Path, count: int = 50) -> None:
     items = [
         {"id": f"pic-{index:02d}", "prompt": f"picture {index}", "presets": [], "seed": index}
-        for index in range(1, 51)
+        for index in range(1, count + 1)
     ]
     path.write_text(json.dumps({"schema": 1, "items": items}) + "\n", encoding="utf-8")
 

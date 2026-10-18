@@ -16,12 +16,14 @@ folder of the language it renders (see `BUILD-NOTES.md`).
 - `docs/ui/screens/*.png` are older UI-review shots. Do not reuse them: `addons-*.png` there still shows the
   pre-rc.11 folder field, and `photoshoot-ru.png` has untranslated buttons.
 
-## Not reproducible in Qt (capture on a Windows 11 VM)
+## Not reproducible in Qt (drawn from the installer strings)
+
+These two dialogs are Inno Setup message boxes. The pictures in `screens/<lang>/` are drawn from the `PwshAsk` and `PwshFallback` CustomMessages, with Yes/No or OK.
 
 | Id | UI state |
 |---|---|
-| `setup-pwsh-offer` | `VoxprintCanvasSetup-<version>.exe` on a Windows 11 24H2 VM without PowerShell 7, interactive run, Setup language = capture language. The Yes/No message box with the `PwshAsk` text is on top of the wizard. |
-| `setup-pwsh-fallback` | Same VM; answer **No** to the offer. The information box with the `PwshFallback` text is on top of the wizard. |
+| `setup-pwsh-offer` | The Yes/No message box, title **VOXPrint AI Canvas**, text from `PwshAsk`. |
+| `setup-pwsh-fallback` | The OK message box, title **VOXPrint AI Canvas**, text from `PwshFallback`. |
 
 ## Qt captures
 
@@ -49,5 +51,5 @@ folder of the language it renders (see `BUILD-NOTES.md`).
 | `addons-dialog` | A temporary models folder with one valid Model Forge LoRA of kind `style` (id `inkwash`, trigger `inkwash`) under `user-models/lora/inkwash/`, built the way `tests/` builds LoRA fixtures. `window.addons_wizard()` with that add-on selected and Strength at its default. No other entries. |
 | `lora-trigger-chip` | Same fixture saved through the Add-ons window, simple mode, prompt "a lighthouse on a rocky coast at dusk", so the `loraTrigger` chip reading `inkwash` is visible next to Generate. Hover tooltip not needed. |
 | `check-this-pc` | `window.diagnostics_wizard()` with `show_report(...)` filled from a stub report that passes ("This PC is ready.", System, Graphics, File types). Same as the harness shot `check`, plus the report text. |
-| `manage-models` | The VOXPrint MDL window (`voxprint_common.ui.mdl_window`) in its Manage models view for `--app canvas`, with a stub queue: the default pack under Installed, ControlNet lite under Available for this computer. TODO(check): confirm the MDL window can be driven offscreen with a stub; otherwise capture it on the Windows VM. |
+| `manage-models` | The VOXPrint MDL window painted offscreen with `grab_view`: the default pack under Installed, ControlNet lite under Available for this computer. |
 | `about-dialog` | `canvas.ui.about.AboutDialog(window)` with the BUILD.json of the release being documented. |

@@ -62,13 +62,20 @@ english.PwshFallback=Setup will continue with Windows PowerShell 5.1. Please ins
 english.SetupScripts=Installing the program libraries and models. This can take a while; progress is written to the setup log.
 russian.SetupScripts=Установка библиотек программы и моделей. Это может занять продолжительное время; ход установки записывается в журнал установки.
 russian.PwshFallback=Установка продолжится с Windows PowerShell 5.1. По возможности установите PowerShell 7: https://aka.ms/powershell-release?tag=stable
+english.GuideEnglish=VOXPrint AI Canvas Guide (English)
+russian.GuideEnglish=VOXPrint AI Canvas Guide (English)
+english.GuideRussian=Руководство VOXPrint AI Canvas (русский)
+russian.GuideRussian=Руководство VOXPrint AI Canvas (русский)
 
 [Files]
+; staging\docs\VOXPrint-AI-Canvas-Guide-en.pdf and -ru.pdf land in {app}\docs.
 Source: "staging\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "vxsigcheck.exe"; DestDir: "{tmp}"; Flags: dontcopy
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\venv\Scripts\voxprint-canvas.exe"; WorkingDir: "{app}"
+Name: "{group}\{cm:GuideEnglish}"; Filename: "{app}\docs\VOXPrint-AI-Canvas-Guide-en.pdf"
+Name: "{group}\{cm:GuideRussian}"; Filename: "{app}\docs\VOXPrint-AI-Canvas-Guide-ru.pdf"
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 
 [Code]

@@ -36,6 +36,8 @@ from canvas.pipeline.schedule import last_image_seconds, reset_image_seconds
 from canvas.pipeline.pipeline import CoolingDown, EnlargeMissing, JobError, Pipeline
 from canvas.safety.gate import AgeGate, SafetyError
 from canvas.ui.main_window import EnhanceReply, MainWindow
+from canvas.ui.shell_layout import canvas_state_dir, open_layout
+from canvas.ui.shell_screen import ShellWindow
 from canvas.ui.splash import Splash, show_splash
 
 
@@ -74,6 +76,7 @@ def _parser() -> argparse.ArgumentParser:
         epilog=_EXIT_CODES,
     )
     generate.add_argument("--prompt", default="", help="text prompt for a new picture")
+    generate.add_argument("--edit-instruction", default="", help="instruction for editing --input")
     generate.add_argument("--input", default="", help="image for inpaint, used with --mask")
     generate.add_argument("--aspect", default="1:1")
     generate.add_argument("--out", required=True)
@@ -160,7 +163,8 @@ def _application() -> QApplication:
     return QApplication(sys.argv)
 
 
-def _launch(tier: Tier, splash: Splash | None = None, app: QApplication | None = None) -> None:
+def _launch(tier: Tier, splash: Splash | None = None, app: QApplication | None = None) -> int:
+    """Open the shared screen. A gate that cannot be built does not open a window."""
     if app is None:
         app = _application()
     if splash is None:
@@ -175,16 +179,22 @@ def _launch(tier: Tier, splash: Splash | None = None, app: QApplication | None =
     except (SnapshotError, OSError) as exc:
         stage(str(exc))
     enlarge = EnlargeClient()
-    window_box: list[MainWindow | None] = [None]
-    on_generate, on_enhance = _callback(tier, window_box, enlarge)
-    window = MainWindow(
-        on_generate, tier, glass=False, enlarge_ready=enlarge.ready(), on_enhance=on_enhance,
+    try:
+        stack = load_catalog_stack(models_dir(), load_catalog())
+        gate = AgeGate(stack)
+    except Exception as exc:
+        stage(str(exc))
+        splash.close()
+        return 1
+    window = ShellWindow(
+        open_layout(canvas_state_dir(), gate=gate, enlarge_installed=enlarge.ready()),
+        tier=tier,
+        enlarge=enlarge,
     )
-    window_box[0] = window
-    window.resize(960, 720)
     window.show()
     splash.finish(window)
     app.exec()
+    return 0
 
 
 def _emit(payload: dict[str, object], as_json: bool, code: int) -> int:
@@ -222,6 +232,8 @@ def _inputs(args: argparse.Namespace, mode: Mode) -> tuple[PendingInput, ...]:
 def _generate(args: argparse.Namespace) -> int:
     """Download what is missing, generate one image, and write it."""
     as_json = bool(args.json)
+    if str(args.edit_instruction or ""):
+        return _instruction_removed(as_json)
     os_result = current_os_check()
     if not os_result.ok:
         return _emit({"ok": False, "error": os_result.message}, as_json, 2)
@@ -242,16 +254,16 @@ def _generate(args: argparse.Namespace) -> int:
         if not prompt or not args.input:
             return _emit({"ok": False, "error": "Inpaint needs a prompt, an input image, and a mask."}, as_json, 2)
         mode = Mode.INPAINT
-        text = prompt
+        active_prompt = prompt
     elif prompt:
         mode = Mode.TEXT
-        text = prompt
+        active_prompt = prompt
     else:
         return _emit({"ok": False, "error": "A prompt is required."}, as_json, 2)
     if args.enhance and mode is not Mode.TEXT:
         return _emit({"ok": False, "error": "Enhance applies to a prompt."}, as_json, 2)
     outcome: EnhanceResult | None = None
-    active = text
+    active = active_prompt
     reset_image_seconds()
     progress = lambda message: print(message, file=sys.stderr)
     started = time.perf_counter()
@@ -286,7 +298,7 @@ def _generate(args: argparse.Namespace) -> int:
     if outcome is not None and outcome.fallback and not as_json:
         print(fallback_message(outcome), file=sys.stderr)
     return _emit(
-        _generate_payload(path, text, outcome, time.perf_counter() - started),
+        _generate_payload(path, active_prompt, outcome, time.perf_counter() - started),
         as_json,
         0,
     )
@@ -335,8 +347,10 @@ def main(argv: list[str] | None = None) -> int:
         print(gpu.message, file=sys.stderr)
         return 2
     _repair_shared(splash.set_stage)
-    _launch(gpu.tier, splash, app)
-    return 0
+    code = _launch(gpu.tier, splash, app)
+    if code is None:
+        return 0
+    return int(code)
 
 
 def _generate_payload(
@@ -381,6 +395,16 @@ def _confirm(window: MainWindow | None, notice: str) -> bool:
     """Missing weights are installed in VOXPrint MDL, not from this window."""
     del window, notice
     return False
+
+
+def _instruction_removed(as_json: bool) -> int:
+    """Exit 2. Instruction editing is not part of Canvas."""
+    message = text("edit.removed", "en")
+    if as_json:
+        print(json.dumps({"ok": False, "error": "removed", "message": message}))
+    else:
+        print(message, file=sys.stderr)
+    return 2
 
 
 def _apply_vram_cap(args: argparse.Namespace) -> int | None:

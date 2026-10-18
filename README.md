@@ -20,7 +20,7 @@ Pictures, models, and the shared manifest stay in `%LOCALAPPDATA%\Voxprint` on W
 
 - **OS:** Windows 11 24H2 or newer, or a Linux distribution released in 2025 or later.
 - **GPU:** NVIDIA GeForce RTX 40 series or newer, with 16 GB of memory (24 GB unlocks the larger plans). PCs without a supported NVIDIA GPU are not supported.
-- **Python:** 3.12 or newer, when running from source.
+- **Python:** 3.14 or newer, when running from source.
 
 ## Responsibility
 

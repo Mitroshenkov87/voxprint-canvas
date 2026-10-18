@@ -1,0 +1,139 @@
+{
+  "schema": 1,
+  "app": "canvas",
+  "runtimes": [],
+  "models": [
+    {
+      "id": "z-image-turbo-bf16-16gb",
+      "version": "placeholder",
+      "vram_tier": "16gb",
+      "status": "unavailable",
+      "reason": "placeholder",
+      "files": [],
+      "display_name": "z-image-turbo-bf16-16gb",
+      "on_demand": true,
+      "optional": true
+    },
+    {
+      "id": "z-image-turbo-bf16",
+      "version": "placeholder",
+      "vram_tier": "24gb",
+      "status": "unavailable",
+      "reason": "placeholder",
+      "files": [],
+      "display_name": "z-image-turbo-bf16",
+      "on_demand": true,
+      "optional": true
+    },
+    {
+      "id": "z-image-creative-bf16",
+      "version": "placeholder",
+      "vram_tier": "24gb",
+      "status": "unavailable",
+      "reason": "placeholder",
+      "files": [],
+      "display_name": "z-image-creative-bf16",
+      "on_demand": true,
+      "optional": true
+    },
+    {
+      "id": "z-image-turbo-fun-controlnet-union-bf16-lite",
+      "version": "placeholder",
+      "vram_tier": "16gb",
+      "status": "unavailable",
+      "reason": "placeholder",
+      "files": [],
+      "display_name": "z-image-turbo-fun-controlnet-union-bf16-lite",
+      "on_demand": true,
+      "optional": true
+    },
+    {
+      "id": "z-image-turbo-fun-controlnet-union-bf16",
+      "version": "placeholder",
+      "vram_tier": "24gb",
+      "status": "unavailable",
+      "reason": "placeholder",
+      "files": [],
+      "display_name": "z-image-turbo-fun-controlnet-union-bf16",
+      "on_demand": true,
+      "optional": true
+    },
+    {
+      "id": "qwen3guard-gen-0.6b",
+      "version": "placeholder",
+      "vram_tier": "any",
+      "status": "unavailable",
+      "reason": "placeholder",
+      "files": [],
+      "display_name": "qwen3guard-gen-0.6b",
+      "on_demand": true,
+      "optional": true
+    },
+    {
+      "id": "siglip2-so400m-patch14-384",
+      "version": "placeholder",
+      "vram_tier": "any",
+      "status": "unavailable",
+      "reason": "placeholder",
+      "files": [],
+      "display_name": "siglip2-so400m-patch14-384",
+      "on_demand": true,
+      "optional": true
+    },
+    {
+      "id": "yunet-face",
+      "version": "placeholder",
+      "vram_tier": "any",
+      "status": "unavailable",
+      "reason": "placeholder",
+      "files": [],
+      "display_name": "yunet-face",
+      "on_demand": true,
+      "optional": true
+    },
+    {
+      "id": "fairface-age",
+      "version": "placeholder",
+      "vram_tier": "any",
+      "status": "unavailable",
+      "reason": "placeholder",
+      "files": [],
+      "display_name": "fairface-age",
+      "on_demand": true,
+      "optional": true
+    },
+    {
+      "id": "nsfw-image-detection",
+      "version": "placeholder",
+      "vram_tier": "any",
+      "status": "unavailable",
+      "reason": "placeholder",
+      "files": [],
+      "display_name": "nsfw-image-detection",
+      "on_demand": true,
+      "optional": true
+    },
+    {
+      "id": "z-image-turbo-svdquant-int4",
+      "version": "placeholder",
+      "vram_tier": "16gb",
+      "status": "unavailable",
+      "reason": "placeholder",
+      "files": [],
+      "display_name": "z-image-turbo-svdquant-int4",
+      "on_demand": true,
+      "optional": true
+    },
+    {
+      "id": "z-image-turbo-svdquant-int4-r256",
+      "version": "placeholder",
+      "vram_tier": "16gb",
+      "status": "unavailable",
+      "reason": "placeholder",
+      "files": [],
+      "display_name": "z-image-turbo-svdquant-int4-r256",
+      "on_demand": true,
+      "optional": true
+    }
+  ]
+}

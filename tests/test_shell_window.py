@@ -521,3 +521,17 @@ def test_yitro_slots_and_live_settings_reach_the_job(app, home: Path, tmp_path: 
     assert job.steps == 7
     assert job.sampler == "euler"
     assert window.shell.gate.age_gate is not None
+
+
+def test_generate_keeps_the_picture_through_the_gate(app, home: Path, monkeypatch) -> None:
+    del app
+    from tests.fakes import rgb
+
+    monkeypatch.setattr("canvas.ui.shell_screen.selectable", lambda: (object(),))
+    window = _window(home, runner=lambda job, inputs: rgb(8, 8))
+    window.view.set_prompt_text("a red bicycle")
+    window.findChild(QPushButton, "generate").click()
+    layout = window.shell.layout
+    assert layout.phase is Phase.READY, layout.reason
+    assert len(layout.history) == 1
+    assert Path(window._pictures[layout.history[0].item_id]).is_file()

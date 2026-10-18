@@ -27,6 +27,7 @@ from voxprint_common.ui.simple_image import Phase, SimpleImageWidget as SimpleWi
 from canvas.app.i18n import text
 from canvas.app.info import APP_VERSION, ENLARGE_NAME
 from canvas.app.selftest import selftest_report
+from canvas.app.shell_gate import reviewed_output
 from canvas.app.shell_run import RunStopped, ShellRunner, improve_prompt, load_rgb
 from canvas.app.updates import check_for_update
 from canvas.core.formats import extension, save_image
@@ -363,7 +364,7 @@ class ShellWindow(QMainWindow):
         layout = self.shell.layout
         item_id = uuid.uuid4().hex
         self.shell.gate.stage(item_id, RawImage(raw.width, raw.height, raw.to_bytes()))
-        if layout.finish(item_id) is None:
+        if layout.finish(item_id, reviewed_output(raw)) is None:
             self.view.refresh()
             return False
         safe = self.shell.gate.kept.pop(item_id, None)

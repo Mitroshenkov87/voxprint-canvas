@@ -6,6 +6,8 @@ gate instance.
 """
 from __future__ import annotations
 
+from voxprint_common.ui.safety import ReviewedOutput
+
 from canvas.app.i18n import text
 from canvas.safety.gate import AgeGate, SafetyError
 from canvas.safety.image import RawImage, SafeImage
@@ -72,3 +74,14 @@ class ContentCheck:
             return text("gate.unavailable")
         self.kept[item_id] = safe
         return None
+
+
+def reviewed_output(image: RawImage) -> ReviewedOutput:
+    """The output copy Yitro's ``finish`` needs. A missing copy is blocked there.
+
+    The age gate still reviews the staged pixels, not this copy.
+
+    Args:
+        image: The finished, unreviewed picture.
+    """
+    return ReviewedOutput(data=image.to_bytes(), mime=f"image/x-raw-rgb;width={image.width};height={image.height}")

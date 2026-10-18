@@ -195,3 +195,10 @@ def test_gate_bench_times_every_stage_and_forces_the_age_stage(monkeypatch, tmp_
     assert isinstance(frame["age_stage"]["fine_s"], float)
     text = json.dumps(body)
     assert PROMPTS[0] not in text and "0.01" not in text
+
+
+def test_smoke_outputs_use_the_app_default_format():
+    from canvas.core.formats import DEFAULT_FORMAT, extension
+
+    assert smoke_16gb.OUTPUT_SUFFIX == extension(DEFAULT_FORMAT)
+    assert ".png\"" not in Path(smoke_16gb.__file__).read_text(encoding="utf-8")

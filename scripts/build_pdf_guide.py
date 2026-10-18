@@ -8,6 +8,7 @@ figure. DejaVu is embedded so Cyrillic prints.
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 from pathlib import Path
@@ -18,19 +19,20 @@ from weasyprint import CSS, HTML
 GUIDE = Path(__file__).resolve().parents[1] / "docs" / "guide"
 LANGUAGES = ("en", "ru")
 FONTS = Path("/usr/share/fonts/truetype/dejavu")
+BUILD = json.loads((GUIDE.parents[1] / "BUILD.json").read_text(encoding="utf-8"))["build"]
 
 META = {
     "en": {
         "title": "VOXPrint AI Canvas",
         "subtitle": "User guide",
-        "version": "Version 0.1.0 (release candidate) · build 12 · guide of 18 October 2026",
+        "version": f"Version 0.1.0 (release candidate) · build {BUILD} · guide of 18 October 2026",
         "licence": "Apache-2.0 · © 2026 Aleksandr Mitroshenkov",
         "contents": "Contents",
     },
     "ru": {
         "title": "VOXPrint AI Canvas",
         "subtitle": "Руководство пользователя",
-        "version": "Версия 0.1.0 (кандидат в релиз) · сборка 12 · руководство от 18 октября 2026 г.",
+        "version": f"Версия 0.1.0 (кандидат в релиз) · сборка {BUILD} · руководство от 18 октября 2026 г.",
         "licence": "Apache-2.0 · © 2026 Aleksandr Mitroshenkov",
         "contents": "Содержание",
     },

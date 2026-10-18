@@ -36,6 +36,28 @@ python tools/audit.py --python python
 
 Tests do not download weights and do not need a GPU. AVIF, JPEG XL, WebP and JPEG are written by the installed libraries. HEIC still needs a system codec. The Windows setup and the Linux archive install Python when it is missing, the GPU libraries, and the default Z-Image-Turbo pack. Optional packs download when you choose them, after the window shows the size and the estimated time.
 
+### GPU smoke test on Windows
+
+Proving Ground runs this on Windows Server 2025 or Windows 11 24H2 (build 26100 or newer, which the Setup requires) with an NVIDIA RTX 4090. Plain Windows PowerShell 5.1 or PowerShell 7 is enough; WSL and bash are not used.
+
+1. Download the `VoxprintCanvasSetup` artifact from the `windows-install` job of the commit under test and unzip it.
+2. Install from an elevated PowerShell prompt:
+
+```powershell
+$setup = Start-Process -FilePath .\VoxprintCanvasSetup.exe -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/SP-","/NORESTART","/LOG=$env:TEMP\voxprint-setup.log" -Wait -PassThru
+$setup.ExitCode   # 0 means installed
+```
+
+3. Run both passes from a normal PowerShell prompt in a folder you can write to:
+
+```powershell
+$smoke = "$env:ProgramFiles\VOXPrint AI Suite\Canvas\tools\smoke_16gb.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File $smoke -VramCapGB 16 -Out .\smoke-results   # 16 GB tier, group offload
+powershell -NoProfile -ExecutionPolicy Bypass -File $smoke -Out .\smoke-results                 # 24 GB tier, uncapped
+```
+
+The script uses the Python the Setup installed (`-Python <python.exe>` picks another one). It verifies the voxprint-common 0.2.5 wheel, downloads the models through VOXPrint MDL, generates five neutral 1024x1024 pictures through the content gate, and times the gate by stage, with the age stage forced on those frames. The results are `smoke-results\result-16gb.json` and `smoke-results\result-24gb.json`. Exit codes: 0 pass, 1 a picture failed, 2 setup (no Python, wheel hash, wrong tier), 3 no GPU, 4 gate unavailable, 5 an MDL download or hash check failed.
+
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE). Models downloaded by the app keep their own licences.

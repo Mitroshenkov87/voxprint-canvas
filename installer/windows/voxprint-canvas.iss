@@ -59,6 +59,8 @@ russian.PwshInstalling=Установка PowerShell 7 (Microsoft)
 english.PwshInstallingDesc=Downloading and checking the official installer from Microsoft.
 russian.PwshInstallingDesc=Загрузка и проверка официального установщика Microsoft.
 english.PwshFallback=Setup will continue with Windows PowerShell 5.1. Please install PowerShell 7 when possible: https://aka.ms/powershell-release?tag=stable
+english.SetupScripts=Installing the program libraries and models. This can take a while; progress is written to the setup log.
+russian.SetupScripts=Установка библиотек программы и моделей. Это может занять продолжительное время; ход установки записывается в журнал установки.
 russian.PwshFallback=Установка продолжится с Windows PowerShell 5.1. По возможности установите PowerShell 7: https://aka.ms/powershell-release?tag=stable
 
 [Files]
@@ -189,7 +191,7 @@ begin
       ScriptHost,
       Params,
       ExpandConstant('{app}'),
-      SW_SHOW,
+      SW_HIDE,
       ewWaitUntilTerminated,
       ResultCode
     );
@@ -200,7 +202,7 @@ begin
       ScriptHost,
       Params,
       ExpandConstant('{app}'),
-      SW_SHOW,
+      SW_HIDE,
       ewWaitUntilTerminated,
       ResultCode
     );
@@ -227,6 +229,8 @@ var
 begin
   if CurStep <> ssPostInstall then
     Exit;
+  WizardForm.StatusLabel.Caption := CustomMessage('SetupScripts');
+  WizardForm.ProgressGauge.Style := npbstMarquee;
   Code := RunSetup(ExpandConstant('-NoProfile -ExecutionPolicy Bypass -File "{app}\install.ps1" -Scope Machine'), False);
   if Code = 0 then
     Code := RunSetup(ExpandConstant('-NoProfile -ExecutionPolicy Bypass -File "{app}\install.ps1" -Scope User'), True);

@@ -237,11 +237,46 @@ jobs:
           MKL_NUM_THREADS: "1"
           TOKENIZERS_PARALLELISM: "false"
         run: .venv/bin/python -m pytest tests/test_enhance_weights.py
+  pdf-guide:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: PDF libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            fonts-dejavu-core \
+            libpango-1.0-0 \
+            libpangocairo-1.0-0 \
+            libpangoft2-1.0-0 \
+            libcairo2 \
+            libgdk-pixbuf-2.0-0 \
+            shared-mime-info
+      - name: Build the guides
+        run: |
+          python -m pip install --require-hashes -r installer/requirements-pdf.txt
+          python scripts/build_pdf_guide.py docs/guide/dist
+          VOXPRINT_PDF_GUIDE_DIR=docs/guide/dist python -m pytest tests/test_pdf_guide.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pdf-guide
+          path: docs/guide/dist/*.pdf
+          if-no-files-found: error
   windows-install:
+    needs: pdf-guide
     runs-on: windows-latest
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
+      - name: Guide PDFs
+        uses: actions/download-artifact@v4
+        with:
+          name: pdf-guide
+          path: installer/windows/staging/docs
       - name: Free disk space
         shell: pwsh
         run: |
@@ -290,6 +325,10 @@ jobs:
           Copy-Item $uvExe.FullName (Join-Path $stage "uv.exe")
           Copy-Item installer\windows\install.ps1 (Join-Path $stage "install.ps1")
           Copy-Item installer\windows\voxprint-canvas.cmd (Join-Path $stage "voxprint-canvas.cmd")
+          foreach ($pdf in @("VOXPrint-AI-Canvas-Guide-en.pdf", "VOXPrint-AI-Canvas-Guide-ru.pdf")) {
+            $guide = Join-Path $stage "docs\$pdf"
+            if (-not (Test-Path -LiteralPath $guide)) { throw "missing guide PDF: $guide" }
+          }
           Get-ChildItem $stage -Recurse -Directory -Filter __pycache__ | Remove-Item -Recurse -Force
           $iscc = @(
             "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",

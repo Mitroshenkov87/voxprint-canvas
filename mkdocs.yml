@@ -6,6 +6,7 @@ docs_dir: docs
 exclude_docs: |
   ARCHITECTURE.md
   RELEASE-NOTES-TEMPLATE.md
+  guide/
 theme:
   name: material
 nav:

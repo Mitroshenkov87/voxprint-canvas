@@ -410,7 +410,7 @@
     },
     "canvas.models.missing": {
       "en": "Models are not ready yet. Use Manage models.",
-      "ru": "Модели ещё не готовы. Откройте «Управление моделями»."
+      "ru": "Модели ещё не готовы. Откройте «Управлять моделями»."
     },
     "canvas.stage.prepare": {
       "en": "Preparing",

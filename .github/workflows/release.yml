@@ -125,7 +125,8 @@ jobs:
           tag="${GITHUB_REF_NAME#v}"
           notes="docs/release-notes/${tag}.md"
           test -f "$notes"
-          title=$(PYTHONPATH=. python -c "from canvas.app.identity import release_title; print(release_title())")
+          label=$(python -c "import importlib.util as u; s=u.spec_from_file_location('identity', 'canvas/app/identity.py'); m=u.module_from_spec(s); s.loader.exec_module(m); print(m.version_label())")
+          title="VOXPrint AI Canvas ${label}"
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release delete "$GITHUB_REF_NAME" --yes
           fi

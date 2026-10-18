@@ -66,7 +66,7 @@ jobs:
             .venv/bin/python -m pytest
           fi
   model-index:
-    # mdl.json must match the signed Model Forge index pinned in tools/check_model_index.py.
+    # mdl.json must match the signed Model Forge index (tools/check_model_index.py).
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -75,10 +75,12 @@ jobs:
         with:
           python-version: "3.14"
       - name: Install the pinned voxprint-common
-        # The same voxprint-common pin as pyproject.toml; it carries the Model Forge key.
+        # The release wheel the installers vendor, checked by sha256; it carries the Model Forge key.
         run: |
-          pin=$(python -c "import tomllib; d=tomllib.load(open('pyproject.toml','rb')); print(next(r for r in d['project']['dependencies'] if r.startswith('voxprint-common')).replace('[ui]', ''))")
-          python -m pip install -q "$pin"
+          curl -fsSL -o voxprint_common-0.3.1-py3-none-any.whl \
+            https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.3.1/voxprint_common-0.3.1-py3-none-any.whl
+          echo "f14036fc70db07e40e5e5376427cea28c3173a94f1d031997a3259ed0afc91fd  voxprint_common-0.3.1-py3-none-any.whl" | sha256sum -c -
+          python -m pip install -q -c constraints.txt voxprint_common-0.3.1-py3-none-any.whl
       - name: Compare mdl.json with the signed model index
         run: python tools/check_model_index.py
   enlarge-release:

@@ -384,6 +384,8 @@ jobs:
           if ($result.exit_code -ne 3 -or $result.pass -ne "16gb" -or $result.vram_cap_gb -ne 16) { throw "unexpected result-16gb.json" }
           & powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\smoke_16gb.ps1 -Python C:\missing\python.exe -Out $out
           if ($LASTEXITCODE -ne 2) { throw "a missing -Python exited $LASTEXITCODE instead of 2" }
+          Write-Host "smoke_16gb.ps1: exit 3 without a GPU, exit 2 without Python"
+          exit 0
       - name: A failing install.ps1 makes Setup exit non-zero
         shell: pwsh
         run: |

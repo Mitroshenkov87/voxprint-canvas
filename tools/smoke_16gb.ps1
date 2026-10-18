@@ -91,8 +91,9 @@ try {
     $probe = $LASTEXITCODE
     $ErrorActionPreference = "Stop"
     if ($probe -ne 0) { Write-Host "Canvas is not installed in this Python."; exit 2 }
-    Write-Host "Models: python -m voxprint_common.mdl download --app canvas --manifest $Manifest"
-    & $Python -m voxprint_common.mdl download --app canvas --manifest $Manifest
+    $Generator = if ($Pass -eq "16gb") { "z-image-turbo-bf16-16gb" } else { "z-image-turbo-bf16" }
+    Write-Host "Models: python -m voxprint_common.mdl download --app canvas --manifest $Manifest --model $Generator"
+    & $Python -m voxprint_common.mdl download --app canvas --manifest $Manifest --model $Generator
     if ($LASTEXITCODE -ne 0) { Write-Host "MDL download or hash check failed."; exit 5 }
 
     $toolArgs = @((Join-Path $Root "tools\smoke_16gb.py"), "--python", $Python, "--out", $Out, "--pass", $Pass, "--manifest", $Manifest)

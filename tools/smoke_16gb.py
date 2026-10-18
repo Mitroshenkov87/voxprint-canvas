@@ -143,7 +143,7 @@ def gate_ready(report: dict[str, object]) -> bool:
 
 
 def manifest_ids(path: Path | None = None) -> set[str]:
-    """Model ids the installer downloads through MDL (``mdl.json``)."""
+    """Required model ids in ``mdl.json``. Optional entries are fetched only on request."""
     source = ROOT / "mdl.json" if path is None else path
     try:
         body = json.loads(source.read_text(encoding="utf-8"))
@@ -152,16 +152,16 @@ def manifest_ids(path: Path | None = None) -> set[str]:
     rows = body.get("models") if isinstance(body, dict) else None
     if not isinstance(rows, list):
         return set()
-    return {str(row.get("id")) for row in rows if isinstance(row, dict) and row.get("id")}
+    return {str(row.get("id")) for row in rows
+            if isinstance(row, dict) and row.get("id") and not row.get("optional")}
 
 
 def manifest_failures(report: dict[str, object], wanted: set[str],
                       generator: str = "z-image-turbo-bf16-16gb") -> list[str]:
     """Problems from a deep self-test: an empty manifest, a missing file or a hash failure.
 
-    Every row must pass its hash. Every id the manifest lists, and the 16 GB
-    generator for this pass, must be downloaded. Optional packs that are not in the manifest
-    may stay absent.
+    Every row must pass its hash. Every required manifest id, and the generator
+    for this pass, must be downloaded. Optional entries may stay absent.
     """
     if not wanted:
         return ["mdl.json lists no models"]

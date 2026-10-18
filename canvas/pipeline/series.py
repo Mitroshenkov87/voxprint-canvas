@@ -23,6 +23,7 @@ from canvas.pipeline.photoshoot import (
     scenario_request,
     validate_scenario,
 )
+from canvas.safety.denylist import scan
 from canvas.safety.gate import AgeGate, SafetyError
 from canvas.safety.image import RawImage, SafeImage
 
@@ -111,9 +112,10 @@ def run_series(
     if scenario is None or len(scenario.shots) < 6:
         return SeriesResult("scenario", "", (), None)
     lines = [assemble_line(scenario.subject_block, shot, include_camera=True) for shot in scenario.shots]
-    reason = _refuse_prompt(age_gate, "\n".join(lines))
-    if reason:
-        return SeriesResult("scenario", reason, (), None)
+    refused = [_refuse_prompt(age_gate, _with_idea(idea, line)) for line in lines]
+    hard = [reason for line, reason in zip(lines, refused, strict=True) if reason and scan(line).minor_sexual]
+    if hard or all(refused):
+        return SeriesResult("scenario", (hard or refused)[0] or "", (), None)
     if adult and not ages_allowed("\n".join(lines)):
         return SeriesResult("scenario", "", (), None)
     if on_scenario is not None:
@@ -143,7 +145,9 @@ def run_series(
                 _status(on_status, index, "blocked")
                 continue
             line = with_adult_anchor(line)
-        shot_reason = _refuse_prompt(age_gate, line)
+        shot_reason = refused[index] or (
+            None if line == lines[index] else _refuse_prompt(age_gate, _with_idea(idea, line))
+        )
         if shot_reason:
             blocked.append(index)
             _status(on_status, index, "blocked")
@@ -171,6 +175,10 @@ def run_series(
         _write_meta(folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept)
     _write_meta(folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept)
     return SeriesResult("", "", tuple(kept), folder)
+
+
+def _with_idea(idea: str, line: str) -> str:
+    return f"{idea}\n{line}"
 
 
 def _refuse_prompt(age_gate: AgeGate, prompt: str) -> str | None:

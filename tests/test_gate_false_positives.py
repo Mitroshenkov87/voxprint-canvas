@@ -44,7 +44,7 @@ BLOCK = [
     "голый ребенок",
     # b) any other "baby" with explicit content, and the infant terms
     "nude baby",
-    "hey baby, nude",
+    "a baby, nude",
     "nude, baby",
     "nude, babies",
     "explicit, infant",

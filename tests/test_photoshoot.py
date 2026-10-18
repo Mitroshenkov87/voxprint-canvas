@@ -214,8 +214,9 @@ def test_the_gate_is_called_by_name_on_every_text_and_frame(tmp_path: Path, monk
     assert result.stopped == ""
     assert prompts[0] == IDEA
     assert any("\n" in item for item in prompts)
-    assert len(prompts) == 8
-    assert frames == [line for line in prompts if "\n" not in line and line != IDEA]
+    assert len(prompts) == 13
+    assert all(item.startswith(IDEA + "\n") for item in prompts[1:])
+    assert frames == [item.split("\n", 1)[1] for item in prompts[7:]]
     assert len(frames) == 6
 
 

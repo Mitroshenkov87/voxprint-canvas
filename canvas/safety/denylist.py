@@ -196,6 +196,30 @@ def _drop_exempt(raw: list[str]) -> list[str]:
     return kept
 
 
+_ADDRESS_WORD = "baby"
+_ADDRESS_LEAD = frozenset({"hey", "oh", "yes"})
+_ADDRESS_LEAD_CLOSED = frozenset({"my"})
+_ADDRESS_CLOSE = frozenset(",.!?;:\"'»“”")
+_ADDRESS_INNER = frozenset(",\"'»“”")
+
+
+def _drop_address(folded: str, raw: list[str]) -> list[str]:
+    kept = list(raw)
+    spans = [match.span() for match in re.finditer(r"[0-9a-zа-я]+", folded)]
+    for index, token in enumerate(raw):
+        if token != _ADDRESS_WORD:
+            continue
+        start, end = spans[index]
+        left = folded[:start].rstrip()
+        right = folded[end:].lstrip()
+        before = raw[index - 1] if index > 0 else ""
+        closed = right == "" or right[0] in _ADDRESS_CLOSE
+        inner = right != "" and right[0] in _ADDRESS_INNER
+        if before in _ADDRESS_LEAD or ((before in _ADDRESS_LEAD_CLOSED or left == "") and closed) or (left.endswith(",") and inner):
+            kept[index] = ""
+    return kept
+
+
 # Two-word phrases matched as one token ("barely legal" -> "barelylegal").
 _PHRASES = frozenset({("barely", "legal")})
 
@@ -207,7 +231,7 @@ def _phrases(tokens: list[str]) -> list[str]:
 def tokenise(text: str) -> list[str]:
     """Normalised tokens plus glued spellings and Russian transliterations."""
     folded = _base(text).translate(_LEET)
-    raw = _drop_exempt(re.findall(r"[0-9a-zа-я]+", folded))
+    raw = _drop_address(folded, _drop_exempt(re.findall(r"[0-9a-zа-я]+", folded)))
     primary: list[str] = []
     extra: list[str] = []
     for token in raw:

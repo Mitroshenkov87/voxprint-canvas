@@ -183,33 +183,27 @@ def image_block_reason(
     scores: dict[str, float],
     *,
     support: Literal["none", "adult", "strong"] = "none",
-) -> Literal["allow", "minor-sexual", "clear-child", "adolescent", "school-context", "stylised"]:
-    """Why a picture would stop, or ``allow``.
-
-    Adult sexual content passes. A minor-sexual image score blocks on its own.
-    A school-uniform or classroom score at the zero-shot line blocks in a sexual
-    frame and passes in a clothed one. So does an anime, manga or cartoon
-    character, or chibi proportions.
-    P(age <= 15) at the child line blocks with sexual content, and a stated age
-    cannot remove that. P(16 or 17) blocks only at its own higher line. A stated
-    age of 18 or 19 raises that line, and a stated age of 20 or more removes it.
-    Years 18 and older are not part of either band.
-    """
+) -> Literal["allow", "minor-sexual", "clear-child", "adolescent", "minor-body", "school-context", "stylised"]:
+    """Score an image."""
     parsed = tuple(_band_pair(item) for item in bands)
     minor_sexual = _at_least(_score(scores, IMAGE_MINOR_SEXUAL))
     adult_sexual = _at_least(_score(scores, IMAGE_ADULT_SEXUAL))
-    _score(scores, IMAGE_MINOR)
-    school = _at_least(_score(scores, IMAGE_SCHOOL_UNIFORM)) or _at_least(_score(scores, IMAGE_CLASSROOM))
+    minor = _at_least(_score(scores, IMAGE_MINOR))
+    uniform = _at_least(_score(scores, IMAGE_SCHOOL_UNIFORM))
+    classroom = _at_least(_score(scores, IMAGE_CLASSROOM))
     stylised = _at_least(_score(scores, IMAGE_ANIME)) or _at_least(_score(scores, IMAGE_CHIBI))
     sexual = float(nsfw) >= SEXUAL_SCORE_BLOCK_AT or adult_sexual or minor_sexual
     clear = any(at_most_15 >= CLEAR_CHILD_AT for at_most_15, _band in parsed)
     match support:
         case "strong":
+            band = False
             adolescent = False
         case "adult":
-            adolescent = any(band >= ADOLESCENT_16_17_AT_AGE_18 for _at_most_15, band in parsed)
+            band = any(value >= ADOLESCENT_16_17_AT_AGE_18 for _at_most_15, value in parsed)
+            adolescent = band
         case "none":
-            adolescent = any(band >= ADOLESCENT_16_17_AT for _at_most_15, band in parsed)
+            band = any(value >= ADOLESCENT_16_17_AT for _at_most_15, value in parsed)
+            adolescent = band
         case _ as unexpected:
             assert_never(unexpected)
     if minor_sexual:
@@ -218,7 +212,9 @@ def image_block_reason(
         return "clear-child"
     if sexual and adolescent:
         return "adolescent"
-    if sexual and school:
+    if sexual and minor and not parsed:
+        return "minor-body"
+    if sexual and (uniform or (classroom and (minor or band or clear))):
         return "school-context"
     if sexual and stylised:
         return "stylised"
@@ -373,7 +369,7 @@ class AgeGate:
         match reason:
             case "allow":
                 return
-            case "minor-sexual" | "clear-child" | "adolescent" | "school-context" | "stylised":
+            case "minor-sexual" | "clear-child" | "adolescent" | "minor-body" | "school-context" | "stylised":
                 raise GenerationBlocked(code)
             case _ as unexpected:
                 assert_never(unexpected)

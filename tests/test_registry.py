@@ -81,7 +81,8 @@ def test_release_pins_match_the_frozen_snapshots():
     catalog = load_catalog()
     turbo = catalog.by_id("z-image-turbo-bf16")
     assert turbo.revision == "f332072aa78be7aecdf3ee76d5c247082da564a6"
-    assert turbo.mirror_revision == "588702b873e82c328ab82c76742bf67843411f37"
+    assert turbo.mirror_revision == "75806c7417b435993a2b8b8346dd993dc09a52d5"
+    assert turbo.fallback_mirror_revision == "75806c7417b435993a2b8b8346dd993dc09a52d5"
     assert turbo.pinned()
     assert turbo.files["transformer/diffusion_pytorch_model-00001-of-00003.safetensors"] == (
         "d38279715f7d31232fd14602dec2810f91bf2b4ec2d2960ff9501d3d939f7357"

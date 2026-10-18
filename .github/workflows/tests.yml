@@ -65,6 +65,17 @@ jobs:
           else
             .venv/bin/python -m pytest
           fi
+  model-index:
+    # mdl.json must match the signed Model Forge index pinned in tools/check_model_index.py.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compare mdl.json with the model index
+        run: python tools/check_model_index.py
   enlarge-release:
     runs-on: ubuntu-latest
     timeout-minutes: 30

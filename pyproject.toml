@@ -31,6 +31,8 @@ gen = [
     # CVE-2026-9856 floor is 5.14. 5.19.0 is the newest 5.x and includes the regex ReDoS fixes from 5.14 and 5.15.
     "transformers==5.19.0",
     "torchao==0.18.0",
+    # timm is Apache-2.0.
+    "timm==1.0.30",
     "safetensors==0.8.0",
     "tokenizers==0.23.3",
     "huggingface-hub==1.33.0",

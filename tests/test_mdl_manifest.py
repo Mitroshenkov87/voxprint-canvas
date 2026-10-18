@@ -9,7 +9,7 @@ from canvas.models.provision import default_specs
 from canvas.models.registry import load_catalog
 
 MANIFEST = Path("mdl.json")
-GATE_ROLES = ("prompt-guard", "zero-shot", "face-detector", "age", "nsfw")
+GATE_ROLES = ("prompt-guard", "zero-shot", "face-detector", "age", "nsfw", "age-fine")
 
 
 def _doc() -> dict:

@@ -16,7 +16,7 @@ from canvas.infra.runtime import python_supports_tensorrt
 from canvas.models.registry import ModelSpec, load_catalog
 from canvas.models.snapshots import SnapshotError, snapshot_ready, snapshot_status
 from canvas.models.verified import VerifiedCache
-from canvas.safety.adapters import FairFaceAge, NsfwViT, Qwen3GuardGen, SiglipZeroShot, YuNetFaces
+from canvas.safety.adapters import FaceAgeRegressor, FairFaceAge, NsfwViT, Qwen3GuardGen, SiglipZeroShot, YuNetFaces
 from canvas.safety.gate import SafetyError, issue
 from canvas.safety.image import RawImage
 
@@ -98,6 +98,7 @@ def _classifiers(catalog, root: Path, cache: VerifiedCache) -> list[dict[str, ob
         ("face-detector", YuNetFaces),
         ("age", FairFaceAge),
         ("nsfw", NsfwViT),
+        ("age-fine", FaceAgeRegressor),
     )
     for role, cls in binding:
         found = catalog.by_role(role)

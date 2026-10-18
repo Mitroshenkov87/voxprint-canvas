@@ -8,3 +8,9 @@ The GPU lock, model-user file, VRAM policy, thermal pause, palette, backdrop
 and audit script are adapted from other Voxprint programs, also Apache-2.0,
 Copyright Aleksandr Mitroshenkov: Voxprint AI Audiobook Builder and Voxprint AI
 Movie Dubber.
+
+canvas/safety/estimator_net.py is adapted from MiVOLO
+(https://github.com/WildChlamydia/MiVOLO), Apache-2.0, Copyright 2023 Irina
+Tolstykh and Maxim Kuprashevich, and uses timm
+(https://github.com/huggingface/pytorch-image-models), Apache-2.0. The MiVOLO v2
+weights (https://huggingface.co/iitolstykh/mivolo_v2) are Apache-2.0.

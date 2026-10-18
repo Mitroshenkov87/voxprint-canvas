@@ -16,7 +16,7 @@ from PIL import Image
 from canvas.infra.paths import models_dir
 from canvas.models.registry import load_catalog
 from canvas.models.snapshots import snapshot_ready
-from canvas.safety.adapters import FairFaceAge, NsfwViT, Qwen3GuardGen, SiglipZeroShot, YuNetFaces
+from canvas.safety.adapters import FaceAgeRegressor, FairFaceAge, NsfwViT, Qwen3GuardGen, SiglipZeroShot, YuNetFaces
 from canvas.safety.constants import IMAGE_LABELS
 from canvas.safety.gate import (
     AgeGate,
@@ -77,6 +77,7 @@ def _gate() -> AgeGate:
         "face-detector": YuNetFaces,
         "age": FairFaceAge,
         "nsfw": NsfwViT,
+        "age-fine": FaceAgeRegressor,
     }
     loaded = {}
     for role, cls in roles.items():
@@ -91,6 +92,7 @@ def _gate() -> AgeGate:
         loaded["face-detector"],
         loaded["age"],
         loaded["nsfw"],
+        loaded["age-fine"],
     )
     return AgeGate(stack)
 

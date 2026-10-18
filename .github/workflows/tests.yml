@@ -172,7 +172,7 @@ jobs:
         env:
           VOXPRINT_HOME: /home/runner/.cache/voxprint-gate
         run: |
-          .venv/bin/python -c 'from canvas.infra.paths import models_dir; from canvas.models.registry import load_catalog; from canvas.models.snapshots import download_snapshot; root = models_dir(); catalog = load_catalog(); roles = ("prompt-guard", "zero-shot", "face-detector", "age", "nsfw"); [download_snapshot(spec, root) for spec in catalog.models if spec.role in roles]'
+          .venv/bin/python -c 'from canvas.infra.paths import models_dir; from canvas.models.registry import load_catalog; from canvas.models.snapshots import download_snapshot; root = models_dir(); catalog = load_catalog(); roles = ("prompt-guard", "zero-shot", "face-detector", "age", "nsfw", "age-fine"); [download_snapshot(spec, root) for spec in catalog.models if spec.role in roles]'
       - name: Real-weight checks
         env:
           VOXPRINT_REQUIRE_GATE: "1"

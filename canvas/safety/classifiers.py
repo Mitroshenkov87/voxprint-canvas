@@ -54,6 +54,13 @@ class AgeEstimator(Protocol):
         """Estimate."""
 
 
+class AgeRegressor(Protocol):
+    """AgeRegressor."""
+
+    def estimate(self, image: RawImage, faces: Sequence[Face]) -> Sequence[float]:
+        """Estimate."""
+
+
 class NsfwDetector(Protocol):
     """NsfwDetector."""
 

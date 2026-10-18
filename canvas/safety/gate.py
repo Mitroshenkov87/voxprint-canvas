@@ -6,12 +6,14 @@ from dataclasses import dataclass
 from typing import Literal, Sequence, assert_never
 
 from canvas.app.i18n import text
-from canvas.safety.classifiers import AgeEstimator, FaceDetector, NsfwDetector, PromptGuard, ZeroShot
+from canvas.safety.classifiers import AgeEstimator, AgeRegressor, FaceDetector, NsfwDetector, PromptGuard, ZeroShot
 from canvas.safety.constants import (
     ADOLESCENT_16_17_AT,
     ADOLESCENT_16_17_AT_AGE_18,
     CLASSIFIER_TIMEOUT_S,
     CLEAR_CHILD_AT,
+    ESTIMATE_CONFIRM_BELOW,
+    ESTIMATE_DROP_BELOW,
     GUARD_SEXUAL_CATEGORY,
     IMAGE_ADULT_SEXUAL,
     IMAGE_ANIME,
@@ -80,6 +82,7 @@ class SafetyStack:
     faces: FaceDetector
     ages: AgeEstimator
     nsfw: NsfwDetector
+    fine: AgeRegressor
 
 
 def issue(raw: RawImage) -> SafeImage:
@@ -151,15 +154,36 @@ def _band_pair(item: object) -> tuple[float, float]:
     return (numbers[0], numbers[1])
 
 
+def _estimates(items: Sequence[object] | None, count: int) -> tuple[float, ...] | None:
+    if items is None:
+        return None
+    values = tuple(items)
+    if len(values) != count:
+        raise SafetyUnavailable("classifier_error")
+    numbers: list[float] = []
+    for value in values:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise SafetyUnavailable("classifier_error")
+        number = float(value)
+        if math.isnan(number) or math.isinf(number):
+            raise SafetyUnavailable("classifier_error")
+        numbers.append(number)
+    return tuple(numbers)
+
+
 def image_block_reason(
     nsfw: float,
     bands: Sequence[object],
     scores: dict[str, float],
     *,
     support: Literal["none", "adult", "strong"] = "none",
-) -> Literal["allow", "minor-sexual", "clear-child", "adolescent", "minor-body", "school-context", "stylised"]:
+    fine: Sequence[object] | None = None,
+) -> Literal[
+    "allow", "minor-sexual", "clear-child", "low-estimate", "adolescent", "minor-body", "school-context", "stylised",
+]:
     """Image block reason."""
     parsed = tuple(_band_pair(item) for item in bands)
+    estimates = _estimates(fine, len(parsed))
     minor_sexual = _at_least(_score(scores, IMAGE_MINOR_SEXUAL))
     adult_sexual = _at_least(_score(scores, IMAGE_ADULT_SEXUAL))
     minor = _at_least(_score(scores, IMAGE_MINOR))
@@ -176,14 +200,20 @@ def image_block_reason(
             band = any(value >= ADOLESCENT_16_17_AT_AGE_18 for _at_most_15, value in parsed)
             adolescent = band
         case "none":
-            band = any(value >= ADOLESCENT_16_17_AT for _at_most_15, value in parsed)
-            adolescent = band
+            marks = tuple(value >= ADOLESCENT_16_17_AT for _at_most_15, value in parsed)
+            band = any(marks)
+            if estimates is None:
+                adolescent = band
+            else:
+                adolescent = any(mark and age < ESTIMATE_CONFIRM_BELOW for mark, age in zip(marks, estimates))
         case _ as unexpected:
             assert_never(unexpected)
     if minor_sexual:
         return "minor-sexual"
     if sexual and clear:
         return "clear-child"
+    if sexual and estimates is not None and any(age < ESTIMATE_DROP_BELOW for age in estimates):
+        return "low-estimate"
     if sexual and adolescent:
         return "adolescent"
     if sexual and minor and not parsed:
@@ -319,15 +349,22 @@ class AgeGate:
         scores = _wait(lambda: self._stack.zeroshot.score_image(raw, IMAGE_LABELS), timeout=IMAGE_TIMEOUT_S)
         faces = tuple(_wait(lambda: self._stack.faces.detect(raw), timeout=IMAGE_TIMEOUT_S))
         ages: tuple[object, ...] = ()
+        fine: tuple[object, ...] = ()
         if faces:
             ages = tuple(_wait(lambda: self._stack.ages.estimate(raw, faces), timeout=IMAGE_TIMEOUT_S))
             if len(ages) != len(faces):
                 raise SafetyUnavailable("classifier_error")
-        reason = image_block_reason(nsfw, ages, scores, support=adult_age_support(prompt))
+            fine = tuple(_wait(lambda: self._stack.fine.estimate(raw, faces), timeout=IMAGE_TIMEOUT_S))
+            if len(fine) != len(faces):
+                raise SafetyUnavailable("classifier_error")
+        reason = image_block_reason(nsfw, ages, scores, support=adult_age_support(prompt), fine=fine)
         match reason:
             case "allow":
                 return
-            case "minor-sexual" | "clear-child" | "adolescent" | "minor-body" | "school-context" | "stylised":
+            case (
+                "minor-sexual" | "clear-child" | "low-estimate" | "adolescent" | "minor-body" | "school-context"
+                | "stylised"
+            ):
                 raise GenerationBlocked(code)
             case _ as unexpected:
                 assert_never(unexpected)

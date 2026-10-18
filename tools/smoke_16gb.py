@@ -13,8 +13,8 @@ file is a gate pass and a blocked message is a gate fail. The prompts are neutra
 
 Afterwards a gate timing benchmark loads the safety stack in this process and
 times each kept frame by stage: the prompt check, the NSFW pass and the age
-stage (SigLIP labels, YuNet, FairFace). The age stage is forced on these
-neutral frames (``forced: true``), and when YuNet finds no face FairFace reads
+stage (SigLIP labels, YuNet, FairFace, the estimator). The age stage is forced on these
+neutral frames (``forced: true``), and when YuNet finds no face FairFace and the estimator read
 one centred box, so the cost is measured even though the product gate would
 not need it. The benchmark records timings only, never scores or decisions.
 Each pass writes ``result-<pass>.json``.
@@ -273,6 +273,40 @@ def _timed(fn):
     return value, round(time.perf_counter() - started, 4)
 
 
+def _fine_gpu(raw, boxes) -> dict[str, object] | None:
+    """Estimator on CUDA in FP16: seconds per call and peak bytes. None without CUDA."""
+    try:
+        import torch
+    except ImportError:
+        return None
+    if not torch.cuda.is_available():
+        return None
+    from canvas.infra.paths import models_dir
+    from canvas.models.registry import load_catalog
+    from canvas.models.snapshots import snapshot_ready
+    from canvas.safety.adapters import FaceAgeRegressor
+
+    (spec,) = load_catalog().by_role("age-fine")
+    folder = snapshot_ready(spec, models_dir())
+    if folder is None:
+        return {"error": "not_downloaded"}
+    torch.cuda.synchronize()
+    before = torch.cuda.memory_allocated()
+    torch.cuda.reset_peak_memory_stats()
+    adapter = FaceAgeRegressor(folder, device="cuda")
+    adapter.load()
+    adapter.estimate(raw, boxes)
+    torch.cuda.synchronize()
+    started = time.perf_counter()
+    adapter.estimate(raw, boxes)
+    torch.cuda.synchronize()
+    seconds = round(time.perf_counter() - started, 4)
+    peak = int(torch.cuda.max_memory_allocated()) - int(before)
+    del adapter
+    torch.cuda.empty_cache()
+    return {"s": seconds, "faces": len(boxes), "peak_bytes": peak}
+
+
 def gate_bench(prompts: list[str], images: list[Path], cap: float | None) -> dict[str, object]:
     """Time the gate by stage on kept frames, with the age stage forced. Timings only."""
     from canvas.infra.gpu import probe_gpu
@@ -302,13 +336,16 @@ def gate_bench(prompts: list[str], images: list[Path], cap: float | None) -> dic
         synthetic = not faces
         boxes = faces or (Face(width // 4, height // 4, width // 2, height // 2),)
         _, fairface_s = _timed(lambda: stack.ages.estimate(raw, boxes))
+        _, fine_s = _timed(lambda: stack.fine.estimate(raw, boxes))
+        fine_gpu = _fine_gpu(raw, boxes)
         raw.wipe()
         frames.append({
             "image": path.name,
             "prompt_check_s": prompt_s,
             "nsfw_pass_s": nsfw_s,
-            "age_stage_s": round(siglip_s + yunet_s + fairface_s, 4),
+            "age_stage_s": round(siglip_s + yunet_s + fairface_s + fine_s, 4),
             "age_stage": {"siglip_s": siglip_s, "yunet_s": yunet_s, "fairface_s": fairface_s,
+                          "fine_s": fine_s, "fine_gpu": fine_gpu,
                           "faces": len(faces), "synthetic_face": synthetic},
         })
 

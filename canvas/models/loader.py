@@ -12,8 +12,8 @@ from canvas.models.modes import Mode, Tier
 from canvas.models.pin import PinError, require_pin, verify_file
 from canvas.models.plan import CallPlan, build_plan
 from canvas.models.registry import Catalog, ModelSpec, RegistryError, load_catalog
-from canvas.models.runtime import render
-from canvas.models.snapshots import snapshot_ready, weight_dir
+from canvas.models.runtime import WeightsLoadError, render
+from canvas.models.snapshots import fallback_ready, snapshot_ready, weight_dir
 from canvas.pipeline.bf16_schedule import (
     EmbeddingCache,
     GpuLedger,
@@ -86,6 +86,24 @@ def load_catalog_stack(root: Path, catalog: Catalog | None = None) -> SafetyStac
     return load_safety_stack(catalog or load_catalog(), root)
 
 
+def request_fp32(spec: ModelSpec) -> bool:
+    """Queue the FP32 ``<id>-upstream`` entry with VOXPrint MDL. False when it cannot be queued."""
+    if not spec.fallback_files:
+        return False
+    try:
+        from voxprint_common.mdl import enqueue
+        from voxprint_common.mdl.catalog import CatalogError
+
+        from canvas.models.mdl_registry import manifest_path
+    except ImportError:
+        return False
+    try:
+        enqueue("canvas", [f"{spec.id}-upstream"], manifests=[manifest_path()])
+    except (CatalogError, OSError, ValueError):
+        return False
+    return True
+
+
 class ZImageGenerator:
     """Diffusers generator. ``generate`` accepts only a ``ScreenedInput``."""
 
@@ -128,11 +146,23 @@ class ZImageGenerator:
             raise ModelNotReady(plan)
         control_file = _control_file(self.catalog, plan, root)
         try:
-            return render(
-                plan, folder, screened, width, height, self.tier,
-                seed=self.seed, control_file=control_file,
-                strength=self.img2img_strength,
-            )
+            try:
+                return render(
+                    plan, folder, screened, width, height, self.tier,
+                    seed=self.seed, control_file=control_file,
+                    strength=self.img2img_strength,
+                )
+            except WeightsLoadError:
+                # The BF16 weights did not open: use the author's FP32 -upstream entry.
+                fp32 = fallback_ready(spec, root)
+                if fp32 is None or fp32 == folder:
+                    request_fp32(spec)
+                    raise ModelNotReady(plan) from None
+                return render(
+                    plan, fp32, screened, width, height, self.tier,
+                    seed=self.seed, control_file=control_file,
+                    strength=self.img2img_strength,
+                )
         except ImportError as exc:
             raise ModelNotReady(plan) from exc
 

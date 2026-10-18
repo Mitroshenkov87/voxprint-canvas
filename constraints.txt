@@ -20,3 +20,8 @@ onnxruntime-gpu==1.31.0
 tensorrt-cu13==10.16.1.11
 numpy==2.5.4
 regex==2026.9.29
+# voxprint-common 0.2.6 verifies the signed model index with cryptography (Ed25519).
+cryptography==50.0.2
+cffi==2.1.1
+pycparser==3.11
+jeepney==0.9.0

@@ -93,6 +93,14 @@ def snapshot_ready(spec: ModelSpec, root: Path, cache: VerifiedCache | None = No
     return None
 
 
+def fallback_ready(spec: ModelSpec, root: Path, cache: VerifiedCache | None = None) -> Path | None:
+    """The FP32 ``-upstream`` folder when its files match the pin, else None."""
+    if not spec.fallback_files:
+        return None
+    other = weight_dir(root, snapshot_repo(spec), fallback=True)
+    return other if _complete(other, spec.fallback_files, cache) else None
+
+
 def download_snapshot(
     spec: ModelSpec, root: Path, progress: Callable[[str], None] | None = None,
 ) -> Path:

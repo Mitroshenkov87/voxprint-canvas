@@ -8,7 +8,7 @@
 #   (no cap, or 0) 24 GB pass: uncapped, on the 24 GB tier path.
 #
 # Steps: find Python (the one the Canvas installer ships, or -Python), fetch and
-# verify the voxprint-common 0.2.5 wheel, download the models through VOXPrint MDL
+# verify the voxprint-common 0.2.6 wheel, download the models through VOXPrint MDL
 # (mdl.json), generate five neutral 1024x1024 pictures through the content gate,
 # then time the gate by stage. Writes <Out>\result-16gb.json or result-24gb.json.
 #
@@ -28,9 +28,9 @@ if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction Sile
 }
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 $Root = Split-Path -Parent $PSScriptRoot
-$CommonVersion = "0.2.5"
-$CommonUrl = "https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.2.5/voxprint_common-0.2.5-py3-none-any.whl"
-$CommonSha = "4980c1ab5a75b22dec1a16b16474ccb350110c8d3d056f25b5ed74a623fe6a9b"
+$CommonVersion = "0.2.6"
+$CommonUrl = "https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.2.6/voxprint_common-0.2.6-py3-none-any.whl"
+$CommonSha = "aeb2b180025967a02a81e206dfa0dd01c3d77a2aa20447485288496123851505"
 $Installed = Join-Path $env:ProgramFiles "VOXPrint AI Suite\Canvas\venv\Scripts\python.exe"
 
 if ($Python -eq "") { $Python = $Installed }
@@ -47,11 +47,11 @@ $Out = (Resolve-Path -LiteralPath $Out).Path
 Write-Host "Python: $Python"
 Write-Host "Pass: $Pass"
 
-# voxprint-common 0.2.5: fetch, verify, and use it when the interpreter has another version.
+# voxprint-common 0.2.6: fetch, verify, and use it when the interpreter has another version.
 $Work = Join-Path $Out ".smoke-work"
 $Lib = Join-Path $Work "lib"
 New-Item -ItemType Directory -Force -Path $Work | Out-Null
-$Wheel = Join-Path $Work "voxprint_common-0.2.5-py3-none-any.whl"
+$Wheel = Join-Path $Work "voxprint_common-0.2.6-py3-none-any.whl"
 try {
     Invoke-WebRequest -Uri $CommonUrl -OutFile $Wheel -UseBasicParsing
 } catch {
@@ -72,6 +72,10 @@ if ("$have".Trim() -ne $CommonVersion) {
     if (Test-Path -LiteralPath $Lib) { Remove-Item -Recurse -Force -LiteralPath $Lib }
     & $Python -m pip install --disable-pip-version-check -q --no-deps --target $Lib $Wheel
     if ($LASTEXITCODE -ne 0) { Write-Host "The voxprint-common wheel could not be unpacked."; exit 2 }
+    # 0.2.6 verifies the signed model index with cryptography; pins match constraints.txt.
+    & $Python -m pip install --disable-pip-version-check -q --no-deps --only-binary=:all: --target $Lib `
+        "cryptography==50.0.2" "cffi==2.1.1" "pycparser==3.11"
+    if ($LASTEXITCODE -ne 0) { Write-Host "The cryptography wheels for voxprint-common could not be unpacked."; exit 2 }
     $env:PYTHONPATH = $Lib
 }
 

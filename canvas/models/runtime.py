@@ -40,6 +40,20 @@ class InferenceUnavailable(Exception):
         return text("gate.unavailable")
 
 
+class WeightsLoadError(InferenceUnavailable):
+    """The pipeline weights in one folder could not be opened (not an out-of-memory error)."""
+
+
+def _load(loader: Any, *args: Any, **kwargs: Any) -> Any:
+    """Open a pipeline. A broken or unreadable weight tree becomes ``WeightsLoadError``."""
+    try:
+        return loader(*args, **kwargs)
+    except (OSError, ValueError, KeyError, RuntimeError) as exc:
+        if type(exc).__name__ == "OutOfMemoryError" or "out of memory" in str(exc).lower():
+            raise
+        raise WeightsLoadError("the generator weights could not be loaded") from exc
+
+
 def applied_strength(requested: float | None) -> float:
     """Img2img strength. None keeps the restyle default of 0.6.
 
@@ -85,15 +99,15 @@ def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, he
     controlnet = None
     try:
         if pipeline_name == PIPELINE_TEXT:
-            pipe = diffusers.ZImagePipeline.from_pretrained(folder, torch_dtype=dtype, local_files_only=True)
+            pipe = _load(diffusers.ZImagePipeline.from_pretrained, folder, torch_dtype=dtype, local_files_only=True)
             _place(pipe, tier)
             result = _timed(pipe, **common)
         elif pipeline_name == PIPELINE_IMG2IMG:
-            pipe = diffusers.ZImageImg2ImgPipeline.from_pretrained(folder, torch_dtype=dtype, local_files_only=True)
+            pipe = _load(diffusers.ZImageImg2ImgPipeline.from_pretrained, folder, torch_dtype=dtype, local_files_only=True)
             _place(pipe, tier)
             result = _timed(pipe, image=_pil(_frame(screened, "init")), strength=applied_strength(strength), **common)
         elif pipeline_name == PIPELINE_INPAINT:
-            pipe = diffusers.ZImageInpaintPipeline.from_pretrained(folder, torch_dtype=dtype, local_files_only=True)
+            pipe = _load(diffusers.ZImageInpaintPipeline.from_pretrained, folder, torch_dtype=dtype, local_files_only=True)
             _place(pipe, tier)
             result = _timed(
                 pipe, image=_pil(_frame(screened, "init")), mask_image=_pil(_frame(screened, "mask")), **common,
@@ -103,7 +117,8 @@ def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, he
                 raise InferenceUnavailable("control weights are missing")
             controlnet = diffusers.ZImageControlNetModel.from_single_file(control_file, torch_dtype=dtype)
             if pipeline_name == PIPELINE_CONTROL:
-                pipe = diffusers.ZImageControlNetPipeline.from_pretrained(
+                pipe = _load(
+                    diffusers.ZImageControlNetPipeline.from_pretrained,
                     folder, controlnet=controlnet, torch_dtype=dtype, local_files_only=True,
                 )
                 role = _control_role(screened)
@@ -112,7 +127,8 @@ def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, he
                     pipe, control_image=_pil(_frame(screened, role)), controlnet_conditioning_scale=0.75, **common,
                 )
             else:
-                pipe = diffusers.ZImageControlNetInpaintPipeline.from_pretrained(
+                pipe = _load(
+                    diffusers.ZImageControlNetInpaintPipeline.from_pretrained,
                     folder, controlnet=controlnet, torch_dtype=dtype, local_files_only=True,
                 )
                 _place(pipe, tier)

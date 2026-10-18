@@ -75,7 +75,7 @@ def test_allowed_job_saves_only_a_released_image_and_wipes_the_request(tmp_path)
     )
     assert type(image) is SafeImage
     assert gen.calls == 1
-    assert world.calls.count("faces") == 3  # two inputs and the output
+    assert world.calls.count("nsfw") == 3  # two inputs and the output (two-stage gate: NSFW pass only)
     pipeline.export("a red boat", Mode.TEXT, (), path)
     assert avif_file(path.read_bytes())
 

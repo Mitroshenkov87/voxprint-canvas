@@ -15,6 +15,7 @@ from typing import NamedTuple
 from voxprint_common.paths import state_dir
 from voxprint_common.ui.presets import PresetFile, PresetGroup, PresetOption
 from voxprint_common.ui.settings import Choice, SettingSpec, SettingType, Settings
+from voxprint_common.ui.safety import adult_prompt_policy
 from voxprint_common.ui.simple_image import SimpleImageLayout as SimpleLayout
 from voxprint_common.ui.variants import AppSurface, settings_for, state_names, surface_for, variant_presets
 
@@ -39,6 +40,7 @@ class PictureJob(NamedTuple):
     guidance: float
     sampler: str
     copies: int
+    adult_content: bool = False
 
 
 @dataclass
@@ -119,6 +121,7 @@ def job_from(layout: SimpleLayout, live: Mapping[str, object] | None = None) -> 
         guidance=_decimal(pick("shell.guidance")),
         sampler=str(pick("shell.sampler")),
         copies=layout.batch_size(),
+        adult_content=layout.prompt_policy() == adult_prompt_policy(allowed=True),
     )
 
 

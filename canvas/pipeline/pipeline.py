@@ -115,7 +115,8 @@ class Pipeline:
         self.paused = False
 
     def generate(self, prompt: str, mode: Mode, inputs: Sequence[PendingInput] = (), *,
-                 aspect: str = "1:1", output: str = "native", probe: PeakVramProbe | None = None) -> SafeImage:
+                 aspect: str = "1:1", output: str = "native", probe: PeakVramProbe | None = None,
+                 explicit: bool = False) -> SafeImage:
         """Run one request and return a picture the window may show.
 
         The suite GPU lock is held while the picture is made. Native output uses
@@ -140,7 +141,7 @@ class Pipeline:
                 self.paused = True
                 raise CoolingDown()
             self.paused = False
-            screened = self.gate.release_request(prompt, mode.value, inputs)
+            screened = self.gate.release_request(prompt, mode.value, inputs, explicit=explicit)
             try:
                 width, height = self._frame(mode, aspect, output in {"2k", "4k"})
                 if output == "4k" and not _enlarge_ready(self.enlarge):

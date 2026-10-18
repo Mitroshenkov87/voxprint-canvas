@@ -120,7 +120,7 @@ def test_fourk_cli_releases_the_lock_and_starts_from_a_clean_environment(tmp_pat
     assert image.width == expected.width * factor
     assert image.height == expected.height * factor
     assert read_lock(lock_path()) is None
-    assert world.calls.count("image-score") == 2
+    assert world.calls.count("nsfw") == 2  # two-stage gate: clothed frames get the NSFW pass only
 
 
 def test_24gb_unloads_before_enlarge_and_image_modes_use_zimage_frames(monkeypatch, tmp_path):

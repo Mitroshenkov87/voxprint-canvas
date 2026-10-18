@@ -70,11 +70,13 @@ def test_adult_content_and_expert_values_leave_the_gate_blocking(tmp_path: Path)
         assert shell.layout.phase is Phase.BLOCKED
     world.image_scores[IMAGE_MINOR_SEXUAL] = 0.35
     with pytest.raises(GenerationBlocked):
-        gate.release_request("a red boat", "restyle", (PendingInput(ImageRole.INIT, rgb()),))
+        # Adult content on forces the full stage on inputs (two-stage gate).
+        gate.release_request("a red boat", "restyle", (PendingInput(ImageRole.INIT, rgb()),), explicit=True)
     world.image_scores[IMAGE_MINOR_SEXUAL] = 0.0
     shell.layout.set_prompt("a red bicycle")
     assert shell.layout.generate() is True
     world.image_scores[IMAGE_MINOR_SEXUAL] = 0.35
+    world.nsfw = 0.9  # two-stage gate: the label counts in a flagged frame
     shell.gate.stage("out", rgb())
     assert shell.layout.finish("out") is None
     assert shell.layout.phase is Phase.BLOCKED

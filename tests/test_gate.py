@@ -208,6 +208,9 @@ def test_image_probability_boundary_and_adult_sexual_image():
 def test_image_label_and_failed_age_are_fail_closed():
     world = World()
     world.image_scores[IMAGE_MINOR_SEXUAL] = 0.35
+    # Two-stage gate: a clothed frame (NSFW under the line) stops after the NSFW pass.
+    assert type(world.gate().review_image(rgb())) is SafeImage
+    world.nsfw = 0.9
     with pytest.raises(GenerationBlocked):
         world.gate().review_image(rgb())
     world.image_scores[IMAGE_MINOR_SEXUAL] = 0.0
@@ -221,7 +224,9 @@ def test_image_label_and_failed_age_are_fail_closed():
         world.gate().review_image(rgb())
     world.ages = [(0.0, 0.0)]
     world.nsfw = True  # type: ignore[assignment]
-    with pytest.raises(SafetyUnavailable):
+    # An unusable NSFW score counts as sexual, so a child face then blocks.
+    world.ages = [(1.0, 0.0)]
+    with pytest.raises(GenerationBlocked):
         world.gate().review_image(rgb())
     world.nsfw = 0.9
     world.ages = [(30.0, 0.0)]
@@ -250,7 +255,7 @@ def test_every_input_is_screened_and_sources_are_wiped():
     )
     assert type(screened) is ScreenedInput
     assert screened.roles() == ("init", "reference", "style")
-    assert world.calls.count("faces") == 3
+    assert world.calls.count("nsfw") == 3  # two-stage gate: clothed inputs get the NSFW pass only
     assert first.to_bytes() == b"" and second.to_bytes() == b"" and third.to_bytes() == b""
     assert screened.frames[0].to_bytes() == bytes([1, 2, 3]) * 4
 

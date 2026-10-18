@@ -10,6 +10,8 @@ PASS = [
     "a kind woman, nude",
     "all kinds of lingerie, explicit",
     "what kind of nude pose works here",
+    "a kind woman in her den, nude",
+    "a kind woman, das nude",
     # b) baby oil / baby doll / babydoll / baby blue / baby pink
     "nude woman with baby oil",
     "explicit, babydoll lingerie",
@@ -34,6 +36,8 @@ PASS = [
 BLOCK = [
     # a) German child terms and every English and Russian child term stay
     "ein nacktes Kind",
+    "das Kind, nackt",
+    "ein Kind, nude",
     "nude, kinder",
     "nude, kindern",
     "nude child",

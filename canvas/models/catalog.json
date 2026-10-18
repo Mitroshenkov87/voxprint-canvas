@@ -1088,6 +1088,7 @@
       "tier": "any",
       "repo": "iitolstykh/mivolo_v2",
       "revision": "53393526c220e34cdd7b722b36d22b6f9e5f4241",
+      "mirror_revision": "f1c929c89a30bf7d5e1781b2a63ee9a111e562e5",
       "licence": "Apache-2.0",
       "runtime": "torch",
       "device": "cpu",
@@ -1097,13 +1098,13 @@
         "config.json": {
           "sha256": "aa273722873361e4e77b0cea20d02311eb5bf39e521d8a09c66a5365d4ec4e9c",
           "size": 924,
-          "mirror": "-",
+          "mirror": "config.json",
           "upstream": "config.json"
         },
         "model.safetensors": {
           "sha256": "96efb47051c038ebeec74b73b4253c5fd000433e5afcab7deee0bd8f3fa7bf18",
           "size": 115078528,
-          "mirror": "-",
+          "mirror": "model.safetensors",
           "upstream": "model.safetensors"
         }
       },
@@ -1114,7 +1115,7 @@
         },
         {
           "kind": "huggingface-mirror",
-          "uri": ""
+          "uri": "https://huggingface.co/Mitroshenkov87/voxprint-mirror-mivolo-v2"
         },
         {
           "kind": "huggingface",

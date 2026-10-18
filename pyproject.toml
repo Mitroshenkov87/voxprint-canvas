@@ -9,7 +9,7 @@ authors = [{ name = "Aleksandr Mitroshenkov" }]
 dependencies = [
     # Shared shell, Yitro (v0.2.5).
     # Do not pin the moving branch name.
-    "voxprint-common[ui] @ git+https://github.com/Mitroshenkov87/voxprint-common@8a94b531cb4f3526425a80a86a1e64624b5de606",
+    "voxprint-common[ui] @ git+https://github.com/Mitroshenkov87/voxprint-common@75860fb6d786a6a99c0ea5fa746a350372856b11",
     "PySide6==6.12.0",
     "numpy==2.5.4",
     "pillow==12.3.0",

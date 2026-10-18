@@ -1,11 +1,11 @@
 """Check mdl.json against the signed VOXPrint model index (Model Forge).
 
-mdl.json keeps explicit per-file hashes because the voxprint-common 0.2.4/0.2.5
-MDL client cannot reference index ids: it reads only a bundled list-shaped
-index, verifies no signature, and ignores descriptor ``prebuilt`` fallbacks.
-This check pins one index commit and its digest, verifies each descriptor
-against the index, and requires every file in mdl.json to match the descriptor
-by path, size and SHA-256. In the FP32 ``-upstream`` fallback rows, the
+The index is fetched with its detached ``index.json.sig`` and accepted only when
+the Ed25519 signature verifies against the Model Forge key bundled in
+voxprint-common 0.2.6 and its serial is not older than the index bundled there
+(no rollback). Each descriptor is then checked against the signed index digest,
+and every file in mdl.json must match its descriptor by path, size and SHA-256.
+mdl.json keeps those explicit hashes. In the FP32 ``-upstream`` fallback rows, the
 transformer files are matched against the descriptor's ``prebuilt`` fallback.
 
     python tools/check_model_index.py          # network: huggingface.co
@@ -15,14 +15,16 @@ from __future__ import annotations
 import hashlib
 import json
 import sys
+import tempfile
 import urllib.request
+from collections.abc import Callable
 from pathlib import Path
+
+from voxprint_common.mdl.index import load_index, parse_index, verify_index_file
 
 ROOT = Path(__file__).resolve().parents[1]
 INDEX_REPO = "Mitroshenkov87/voxprint-model-index"
-INDEX_COMMIT = "e648da65869590749494569aeed77ea06cf75281"  # serial 9
-INDEX_SHA256 = "104742f9d8cc7c8f693f963dbd871471a3e57fda3d585d52b105b3855d49f45f"
-INDEX_SERIAL = 9
+INDEX_REVISION = "main"
 
 # index id -> mdl.json ids that must match it
 CANVAS_IDS: dict[str, tuple[str, ...]] = {
@@ -49,26 +51,53 @@ def _sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _dataset(path: str) -> bytes:
-    return _get(f"https://huggingface.co/datasets/{INDEX_REPO}/resolve/{INDEX_COMMIT}/{path}")
+def _dataset(path: str, revision: str = INDEX_REVISION) -> bytes:
+    return _get(f"https://huggingface.co/datasets/{INDEX_REPO}/resolve/{revision}/{path}")
 
 
 def _descriptor(row: dict[str, str]) -> bytes:
     repo, revision = row["repo"], row["revision"]
     if repo == f"datasets/{INDEX_REPO}":
-        return _dataset(f"descriptors/{row['id']}/voxprint-model.json")
+        return _dataset(f"descriptors/{row['id']}/voxprint-model.json", revision)
     return _get(f"https://huggingface.co/{repo}/resolve/{revision}/voxprint-model.json")
 
 
-def check(fetch_index=_dataset, fetch_descriptor=_descriptor, manifest: dict | None = None) -> list[str]:
-    """Return the problems found; empty when mdl.json matches the index."""
+def _verify_bundled(payload: bytes, signature: bytes) -> bool:
+    """Verify with the Model Forge key bundled in voxprint-common."""
+    with tempfile.TemporaryDirectory() as folder:
+        index = Path(folder) / "index.json"
+        index.write_bytes(payload)
+        (Path(folder) / "index.json.sig").write_bytes(signature)
+        return verify_index_file(index)
+
+
+def _bundled_serial() -> int:
+    return load_index(remote=False).serial
+
+
+def check(
+    fetch_index: Callable[[str], bytes] = _dataset,
+    fetch_descriptor: Callable[[dict[str, str]], bytes] = _descriptor,
+    manifest: dict | None = None,
+    *,
+    verify: Callable[[bytes, bytes], bool] = _verify_bundled,
+    min_serial: int | None = None,
+) -> list[str]:
+    """Return the problems found; empty when mdl.json matches the signed index."""
     problems: list[str] = []
     raw = fetch_index("index.json")
-    if _sha(raw) != INDEX_SHA256:
-        return [f"index.json at {INDEX_COMMIT[:8]} does not hash to the pinned digest"]
+    try:
+        signature = fetch_index("index.json.sig")
+    except OSError:
+        signature = b""
+    if not signature or not verify(raw, signature):
+        return ["index.json signature is missing or does not verify with the Model Forge key"]
     index = json.loads(raw.decode("utf-8"))
-    if index.get("serial") != INDEX_SERIAL:
-        problems.append(f"index serial is {index.get('serial')}, expected {INDEX_SERIAL}")
+    parse_index(index)
+    floor = _bundled_serial() if min_serial is None else min_serial
+    serial = index.get("serial")
+    if not isinstance(serial, int) or serial < floor:
+        problems.append(f"index serial is {serial}, older than the bundled serial {floor}")
     rows = {row["id"]: row for row in index["models"]}
     manifest = manifest or json.loads((ROOT / "mdl.json").read_text(encoding="utf-8"))
     ours = {entry["id"]: entry for entry in manifest["models"]}
@@ -108,7 +137,7 @@ def main() -> int:
     for line in problems:
         print(line, file=sys.stderr)
     if not problems:
-        print(f"mdl.json matches model index serial {INDEX_SERIAL} ({INDEX_COMMIT[:8]})")
+        print("mdl.json matches the signed model index")
     return 1 if problems else 0
 
 

@@ -7,9 +7,9 @@ license = "Apache-2.0"
 requires-python = ">=3.14"
 authors = [{ name = "Aleksandr Mitroshenkov" }]
 dependencies = [
-    # Shared shell, Yitro (v0.2.6).
+    # Shared shell, Yitro (v0.3.1).
     # Do not pin the moving branch name.
-    "voxprint-common[ui] @ git+https://github.com/Mitroshenkov87/voxprint-common@75860fb6d786a6a99c0ea5fa746a350372856b11",
+    "voxprint-common[ui] @ git+https://github.com/Mitroshenkov87/voxprint-common@faa9a1239db864c4f759927838aece38b38866e8",
     "PySide6==6.12.0",
     "numpy==2.5.4",
     "pillow==12.3.0",

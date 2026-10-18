@@ -704,13 +704,13 @@ function Invoke-Machine {
             Install-SuiteGpuPackages $Py ""
             if (-not (Test-SuiteGpuPackages $Py)) { throw "Setup stopped." }
         }
-        $CommonUrl = "https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.2.6/voxprint_common-0.2.6-py3-none-any.whl"
-        $CommonSha = "aeb2b180025967a02a81e206dfa0dd01c3d77a2aa20447485288496123851505"
-        $CommonWheel = Join-Path $Fetch "voxprint_common-0.2.6-py3-none-any.whl"
+        $CommonUrl = "https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.3.1/voxprint_common-0.3.1-py3-none-any.whl"
+        $CommonSha = "f14036fc70db07e40e5e5376427cea28c3173a94f1d031997a3259ed0afc91fd"
+        $CommonWheel = Join-Path $Fetch "voxprint_common-0.3.1-py3-none-any.whl"
         Assert-NoReparse $CommonWheel
         Invoke-WebRequest -Uri $CommonUrl -OutFile $CommonWheel
         $got = (Get-FileHash -Algorithm SHA256 -Path $CommonWheel).Hash.ToLowerInvariant()
-        if ($got -ne $CommonSha) { throw "voxprint-common 0.2.6 failed the SHA-256 check." }
+        if ($got -ne $CommonSha) { throw "voxprint-common 0.3.1 failed the SHA-256 check." }
         Assert-AdminPath $script:Uv
         Assert-AdminPath $Py
         & $script:Uv pip install --no-config --python $Py $CommonWheel

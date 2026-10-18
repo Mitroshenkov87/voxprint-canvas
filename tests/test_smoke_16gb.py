@@ -45,8 +45,22 @@ def test_manifest_failures_cover_empty_missing_and_hash(tmp_path):
     assert manifest_failures(bad, {"nsfw-image-detection"}) == ["nsfw-image-detection: hash_mismatch"]
     assert manifest_failures(good, {"nsfw-image-detection", "fairface-age"}) == ["fairface-age: not in the self-test"]
     path = tmp_path / "mdl.json"
-    path.write_text('{"schema": 1, "app": "canvas", "models": [{"id": "a"}]}', encoding="utf-8")
+    path.write_text('{"schema": 1, "app": "canvas", "models": [{"id": "a"}, {"id": "b", "optional": true}]}',
+                    encoding="utf-8")
     assert manifest_ids(path) == {"a"}
+
+
+def test_shipped_manifest_requires_no_optional_entry():
+    ids = manifest_ids()
+    assert "z-image-turbo-bf16-16gb" in ids
+    assert not {i for i in ids if i.endswith("-upstream")}
+    assert "z-image-creative-bf16" not in ids
+
+
+def test_smoke_script_requests_the_pass_generator():
+    text = (Path(__file__).resolve().parents[1] / "tools" / "smoke_16gb.ps1").read_text(encoding="utf-8")
+    assert 'if ($Pass -eq "24gb") { $mdlArgs += @("--model", "z-image-turbo-bf16") }' in text
+    assert "& $Python @mdlArgs" in text
 
 
 def test_summary_counts_gate_results_and_peaks():

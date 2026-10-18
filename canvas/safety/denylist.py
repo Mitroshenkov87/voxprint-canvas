@@ -41,7 +41,9 @@ _MINOR: tuple[tuple[str, str, tuple[str, ...]], ...] = (
                     "тинейджер")),
     ("stem", "ru-lat", ("rebenok", "rebyonok", "malolet", "nesovershennoletn", "podrostok", "shkolnits",
                         "shkolnik", "mladen", "malysh", "deti", "tineidzher")),
-    ("exact", "de", ("kind", "kinder", "kindes", "kindern", "kinds")),
+    # "kind" is checked in _german_kind: in an English prompt it is "a kind woman".
+    # "kinds" is left out ("all kinds of").
+    ("exact", "de", ("kinder", "kindes", "kindern")),
     ("stem", "de", ("minderjaehrig", "kleinkind", "saeugling", "schulmaedchen", "schuljunge",
                     "vorpubertaer", "unmuendig")),
 )
@@ -169,10 +171,34 @@ def _base(text: str) -> str:
     return unicodedata.normalize("NFKC", text).translate(_ZW).lower().translate(_LETTERS)
 
 
+# Adult phrases that contain a listed word. Only these exact neighbours exempt it;
+# the word anywhere else still counts.
+_NEXT_EXEMPT = {
+    "baby": frozenset({"oil", "doll", "blue", "pink"}),
+    "minor": frozenset({"key", "detail", "details", "flaw", "flaws"}),
+    "school": frozenset({"of"}),
+}
+_PREV_EXEMPT = {"school": frozenset({"old", "art", "film"})}
+_NEVER_EXEMPT_BEFORE = {"school": frozenset({"uniform", "uniforms", "girl", "girls", "boy", "boys"})}
+
+
+def _drop_exempt(raw: list[str]) -> list[str]:
+    """Blank a listed word inside one of the adult phrases above ('baby oil', 'old school')."""
+    kept = list(raw)
+    for index, token in enumerate(raw):
+        before = raw[index - 1] if index > 0 else ""
+        after = raw[index + 1] if index + 1 < len(raw) else ""
+        if after in _NEVER_EXEMPT_BEFORE.get(token, frozenset()):
+            continue
+        if after in _NEXT_EXEMPT.get(token, frozenset()) or before in _PREV_EXEMPT.get(token, frozenset()):
+            kept[index] = ""
+    return kept
+
+
 def tokenise(text: str) -> list[str]:
     """Normalised tokens plus glued spellings and Russian transliterations."""
     folded = _base(text).translate(_LEET)
-    raw = re.findall(r"[0-9a-zа-я]+", folded)
+    raw = _drop_exempt(re.findall(r"[0-9a-zа-я]+", folded))
     primary: list[str] = []
     extra: list[str] = []
     for token in raw:
@@ -236,10 +262,27 @@ def _age_hit(text: str) -> bool:
     )
 
 
+# German words that mark a prompt as German, so a bare "kind" there means a child.
+_GERMAN_MARKERS = frozenset({
+    "ein", "eine", "einen", "einem", "einer", "eines", "das", "der", "dem", "den", "des", "und", "mit",
+    "ist", "im", "beim", "zum", "zur", "fuer", "kleines", "kleine", "kleiner", "kleinen", "junges", "junge",
+})
+_GERMAN_SEXUAL_STEMS = ("nackt", "erotisch", "explizit", "dessous", "geschlechtsverkehr")
+
+
+def _german_kind(tokens: list[str]) -> bool:
+    """True for "kind" in a German prompt ("ein nacktes Kind"), not in English ("a kind woman")."""
+    if "kind" not in tokens:
+        return False
+    if any(token in _GERMAN_MARKERS for token in tokens):
+        return True
+    return any(_stem_match(token, stem) for token in tokens for stem in _GERMAN_SEXUAL_STEMS)
+
+
 def explain(text: str) -> ScanTrace:
     """Terms and the age flag that ``scan`` used. This is the lexicon half of a refusal trace."""
     tokens = tokenise(text)
-    minor_terms = _hits(tokens, _MINOR)
+    minor_terms = _hits(tokens, _MINOR) + (("kind",) if _german_kind(tokens) else ())
     sexual_terms = _hits(tokens, _SEXUAL)
     minor_sexual_terms = _hits(tokens, _MINOR_SEXUAL)
     youth_context_terms = _hits(tokens, _YOUTH_CONTEXT)

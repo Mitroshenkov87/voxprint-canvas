@@ -124,7 +124,7 @@ def test_thermal_pause_and_resume():
 def test_model_folder_and_users(monkeypatch, tmp_path):
     monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
     monkeypatch.setenv("VOXPRINT_MODELS_DIR", "relative/models")
-    assert models_dir() == tmp_path / "shared" / "models"
+    assert models_dir() == tmp_path / "models"
     monkeypatch.setenv("VOXPRINT_MODELS_DIR", str(tmp_path / "weights"))
     assert models_dir() == tmp_path / "weights"
     shared = shared_dir()

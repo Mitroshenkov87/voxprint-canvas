@@ -739,11 +739,46 @@ function Move-LegacySuiteHome {
     Move-Item -LiteralPath $LegacyHome -Destination $SuiteHome
 }
 
+function Move-SharedModels {
+    # voxprint-common 0.2.5 keeps weights in models_dir() (default <data home>\models).
+    # shared\ holds only the runtime and manifest.json. Move an old shared\models once,
+    # before Python runs. When the move fails, point suite.json models_dir at the old folder.
+    if (-not [string]::IsNullOrWhiteSpace($env:VOXPRINT_MODELS_DIR)) { return }
+    $old = Join-Path $Shared "models"
+    $new = Join-Path $SuiteHome "models"
+    if (-not (Test-Path -LiteralPath $old -PathType Container)) { return }
+    $suiteJson = Join-Path $SuiteHome "state\suite.json"
+    $settings = $null
+    if (Test-Path -LiteralPath $suiteJson) {
+        try { $settings = Get-Content -Raw -LiteralPath $suiteJson | ConvertFrom-Json } catch { $settings = $null }
+        if ($null -ne $settings -and $settings.PSObject.Properties["models_dir"] -and $settings.models_dir) { return }
+    }
+    if (Test-Path -LiteralPath $new) {
+        Write-Host "Both $old and $new exist. The weights in $new are used; $old is left in place."
+        return
+    }
+    Assert-NoReparse $old
+    Assert-NoReparse $SuiteHome
+    try {
+        Move-Item -LiteralPath $old -Destination $new -ErrorAction Stop
+        Write-Host "Moved the model weights from $old to $new"
+    } catch {
+        Write-Host "Could not move $old ($($_.Exception.Message)). suite.json models_dir now points at it."
+        if ($null -eq $settings) { $settings = [pscustomobject]@{} }
+        $settings | Add-Member -NotePropertyName models_dir -NotePropertyValue $old -Force
+        $stateDir = Split-Path -Parent $suiteJson
+        Assert-NoReparse $stateDir
+        New-Item -ItemType Directory -Force $stateDir | Out-Null
+        $settings | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $suiteJson -Encoding utf8
+    }
+}
+
 function Invoke-User {
     if ($Scope -eq "All") {
         Write-Host "Profile folders are written by this process because -Scope All was requested. Each path is checked for links."
     }
     Move-LegacySuiteHome
+    Move-SharedModels
     Reset-InstallerEnvironment "User"
     $logDir = Join-Path $SuiteHome "logs"
     Start-SetupLog (Join-Path $logDir "canvas-install.log")

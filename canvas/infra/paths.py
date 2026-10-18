@@ -5,7 +5,6 @@ Adapted from Voxprint AI Movie Dubber ``dubber/infra/shared_paths.py``
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from voxprint_common import paths as _common_paths
@@ -31,13 +30,12 @@ def shared_dir() -> Path:
 
 
 def models_dir() -> Path:
-    """Shared model folder. ``VOXPRINT_MODELS_DIR`` overrides it when it is absolute."""
-    override = os.environ.get("VOXPRINT_MODELS_DIR", "").strip()
-    if override:
-        path = Path(os.path.expandvars(os.path.expanduser(override)))
-        if path.is_absolute():
-            path.mkdir(parents=True, exist_ok=True)
-            return path
-    path = shared_dir() / "models"
+    """The suite weights folder, from :func:`voxprint_common.paths.models_dir`.
+
+    ``VOXPRINT_MODELS_DIR``, then ``models_dir`` in ``suite.json``, then the
+    legacy ``state/models_dir.txt``, otherwise ``<data home>/models``. The MDL
+    client downloads into this same folder.
+    """
+    path = _common_paths.models_dir()
     path.mkdir(parents=True, exist_ok=True)
     return path

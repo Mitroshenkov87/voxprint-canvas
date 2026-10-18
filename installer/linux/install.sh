@@ -206,6 +206,35 @@ if [ -z "${VOXPRINT_HOME:-}" ] && [ -d "$LEGACY_DATA" ] && [ ! -L "$LEGACY_DATA"
   as_user mv -- "$LEGACY_DATA" "$DATA"
 fi
 SHARED="$DATA/shared"
+# voxprint-common 0.2.5 keeps weights in models_dir() (default $DATA/models); shared/
+# holds only the runtime and manifest.json. Move an old shared/models once, before
+# Python runs. When the move fails, point suite.json models_dir at the old folder.
+OLD_MODELS="$SHARED/models"
+if [ -z "${VOXPRINT_MODELS_DIR:-}" ] && [ -d "$OLD_MODELS" ] && [ ! -L "$OLD_MODELS" ] \
+  && ! grep -q '"models_dir"[[:space:]]*:[[:space:]]*"' "$DATA/state/suite.json" 2>/dev/null; then
+  if [ -e "$DATA/models" ]; then
+    echo "Both $OLD_MODELS and $DATA/models exist. The weights in $DATA/models are used." >&2
+  elif as_user mv -- "$OLD_MODELS" "$DATA/models"; then
+    echo "Moved the model weights from $OLD_MODELS to $DATA/models"
+  else
+    echo "Could not move $OLD_MODELS. suite.json models_dir now points at it." >&2
+    as_user mkdir -p "$DATA/state"
+    as_user python3 - "$DATA/state/suite.json" "$OLD_MODELS" <<'PY'
+import json, sys
+path, folder = sys.argv[1], sys.argv[2]
+try:
+    with open(path, encoding="utf-8-sig") as handle:
+        data = json.load(handle)
+except (OSError, ValueError):
+    data = {}
+if not isinstance(data, dict):
+    data = {}
+data["models_dir"] = folder
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(data, handle, indent=2)
+PY
+  fi
+fi
 RUNTIME="$SHARED/$RUNTIME_REL"
 RUNTIME_SITE="$RUNTIME/lib/python3.14/site-packages"
 APP_DIR="$USER_HOME/.local/share/applications"

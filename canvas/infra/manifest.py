@@ -21,6 +21,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from canvas.infra.paths import models_dir
+
 if sys.platform == "win32":
     import msvcrt
 else:
@@ -166,13 +168,17 @@ def register_component(
     if kind not in _KINDS:
         raise ManifestError("component kind is not valid")
     digest = _require_sha(sha256)
-    relative = _safe_relative(path)
+    relative = _safe_path(path, kind)
     if _is_shared_root(relative):
         raise ManifestError("a shared root is not registered")
 
     def change(components: dict[str, Component]) -> str:
         existing = components.get(component_id)
         if existing is not None and existing.version == version and existing.sha256 == digest:
+            if existing.path != relative and not _stored_exists(shared, existing.path):
+                # The weights moved from shared/models to models_dir(); follow them.
+                existing = replace(existing, path=relative)
+                components[component_id] = existing
             if app not in existing.refs:
                 components[component_id] = replace(existing, refs=existing.refs + (app,))
             return component_id
@@ -343,16 +349,27 @@ def _dump(component: Component) -> dict[str, Any]:
 
 
 def _delete_tree(shared: Path, component: Component, remaining: dict[str, Component]) -> None:
-    if component.path in ("", ".") or _is_absolute(component.path) or _keeps_shared_tree(component.path):
-        # Absolute model paths are VOXPrint MDL blobs; MDL owns their removal.
+    if component.path in ("", ".") or _keeps_shared_tree(component.path):
         return
     for other in remaining.values():
         if other.path == component.path:
             return
-    root = shared.resolve()
-    target = (shared / component.path).resolve()
-    if target == root or root not in target.parents:
-        return
+    if _is_absolute(component.path):
+        # Only a Canvas model folder inside models_dir() is removed. VOXPrint MDL blobs
+        # (any file under a blobs/ folder) and anything outside models_dir() are kept;
+        # MDL owns their removal.
+        if component.kind != "model" or not Path(component.path).is_absolute():
+            return
+        if not _inside_models(Path(component.path)):
+            return
+        target = Path(component.path).resolve()
+        if "blobs" in target.relative_to(models_dir().resolve()).parts:
+            return
+    else:
+        root = shared.resolve()
+        target = (shared / component.path).resolve()
+        if target == root or root not in target.parents:
+            return
     if target.is_dir():
         shutil.rmtree(target)
     elif target.is_file():
@@ -379,6 +396,8 @@ def _side_path(components: dict[str, Component], path: str, sha256: str) -> str:
     while candidate in used:
         candidate = f"{stem}-{suffix}-{number}"
         number += 1
+    if Path(candidate).is_absolute():
+        return _safe_path(candidate, "model")
     return _safe_relative(candidate)
 
 
@@ -427,7 +446,8 @@ def _stored_path(path: str, kind: str) -> str:
 
     VOXPrint MDL records each downloaded model file by its absolute path under the
     shared models directory (voxprint_common.runtime_manifest allows that for
-    ``kind == "model"``). Canvas keeps such a path as it is and never deletes it.
+    ``kind == "model"``). Canvas keeps such a path as it is and never deletes an
+    MDL blob; ``_delete_tree`` removes only a Canvas model folder inside ``models_dir()``.
     Every other path must be relative and stay inside the shared folder.
     """
     raw = path.replace("\\", "/")
@@ -436,6 +456,31 @@ def _stored_path(path: str, kind: str) -> str:
             raise ManifestError("a component path must stay inside the shared folder")
         return raw
     return _safe_relative(path)
+
+
+def _safe_path(path: str, kind: str) -> str:
+    """A shared-relative path, or an absolute model folder inside ``models_dir()``.
+
+    The weights live in :func:`canvas.infra.paths.models_dir`, which need not be
+    under the shared folder. Such a model is stored with its absolute path, as
+    the voxprint-common manifest allows. The models root itself is refused.
+    """
+    raw = path.replace("\\", "/")
+    if kind == "model" and (raw.startswith("/") or (len(raw) >= 2 and raw[1] == ":")):
+        if _inside_models(Path(path)):
+            return Path(path).as_posix()
+        raise ManifestError("a model path must stay inside the models folder")
+    return _safe_relative(path)
+
+
+def _stored_exists(shared: Path, path: str) -> bool:
+    return (Path(path) if Path(path).is_absolute() else shared / path).exists()
+
+
+def _inside_models(path: Path) -> bool:
+    root = models_dir().resolve()
+    target = path.resolve()
+    return target != root and target != root / "blobs" and root in target.parents
 
 
 def _safe_relative(path: str) -> str:

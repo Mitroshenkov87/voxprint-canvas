@@ -278,8 +278,14 @@ def _spec_for(catalog: Catalog, component_id: str, component: Component) -> Mode
 
 
 def _relative_pack(folder: Path) -> str:
+    """The manifest path: shared-relative, or absolute inside ``models_dir()``."""
     shared = shared_dir().resolve()
+    resolved = folder.resolve()
     try:
-        return folder.resolve().relative_to(shared).as_posix()
-    except ValueError as exc:
-        raise SnapshotError("the model folder is outside the shared directory") from exc
+        return resolved.relative_to(shared).as_posix()
+    except ValueError:
+        pass
+    models = models_dir().resolve()
+    if resolved != models and models in resolved.parents:
+        return resolved.as_posix()
+    raise SnapshotError("the model folder is outside the models directory")

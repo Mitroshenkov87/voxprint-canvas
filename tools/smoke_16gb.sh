@@ -14,8 +14,8 @@ OUT=${1:-smoke-results}
 PASS=${PASS:-16gb}
 PY=${PYTHON:-python3.14}
 TORCH_INDEX="https://download.pytorch.org/whl/cu130"
-COMMON_URL="https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.2.5/voxprint_common-0.2.5-py3-none-any.whl"
-COMMON_SHA="4980c1ab5a75b22dec1a16b16474ccb350110c8d3d056f25b5ed74a623fe6a9b"
+COMMON_URL="https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.2.6/voxprint_common-0.2.6-py3-none-any.whl"
+COMMON_SHA="aeb2b180025967a02a81e206dfa0dd01c3d77a2aa20447485288496123851505"
 if ! command -v "$PY" >/dev/null 2>&1; then
   echo "$PY is not installed. Set PYTHON to a Python 3.14 interpreter." >&2
   exit 2
@@ -26,7 +26,7 @@ if [ ! -x "$VENV/bin/python" ]; then
 fi
 VPY="$VENV/bin/python"
 mkdir -p "$VENV/wheels"
-WHEEL="$VENV/wheels/voxprint_common-0.2.5-py3-none-any.whl"
+WHEEL="$VENV/wheels/voxprint_common-0.2.6-py3-none-any.whl"
 curl -fsSL -o "$WHEEL" "$COMMON_URL" || exit 2
 echo "$COMMON_SHA  $WHEEL" | sha256sum -c - || exit 2
 "$VPY" -m pip install -q --upgrade pip || exit 2

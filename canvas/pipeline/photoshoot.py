@@ -63,7 +63,7 @@ class Scenario:
     shots: tuple[Shot, ...]
 
 
-def scenario_request(idea: str, count: int, style: str, place_mode: str) -> str | None:
+def scenario_request(idea: str, count: int, style: str, place_mode: str, *, adult: bool = False) -> str | None:
     """JSON user message for one scenario call. None when the chips are not a series.
 
     Args:
@@ -71,15 +71,18 @@ def scenario_request(idea: str, count: int, style: str, place_mode: str) -> str 
         count: 6, 12, or 20.
         style: ``photo``, ``cinematic``, or ``portrait``.
         place_mode: ``same`` or ``different``.
+        adult: Expert adult content is on. Adds a per-shot pose and light plan.
     """
     if count not in COUNTS or style not in ("photo", "cinematic", "portrait") or place_mode not in ("same", "different"):
         return None
     if not idea.strip():
         return None
-    return json.dumps(
-        {"idea": idea, "count": count, "style": style, "place_mode": place_mode},
-        ensure_ascii=False,
-    )
+    payload: dict[str, object] = {"idea": idea, "count": count, "style": style, "place_mode": place_mode}
+    if adult:
+        from canvas.pipeline.adult_direction import shot_plan
+
+        payload["direction"] = shot_plan(count)
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def assemble_line(subject: str, shot: Shot, *, include_camera: bool) -> str:

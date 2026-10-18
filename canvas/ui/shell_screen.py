@@ -57,7 +57,7 @@ from canvas.ui.shell_chrome import (
     shell_style,
 )
 from canvas.ui.photoshoot_bar import PhotoshootBar
-from canvas.ui.photoshoot_run import load_series_folders, run_photoshoot
+from canvas.ui.photoshoot_run import adult_content, load_series_folders, run_photoshoot
 from canvas.ui.shell_layout import CanvasShell, PictureJob, job_from
 from canvas.ui.wizards import AddonsWizard, DiagnosticsWizard, MaskWizard, PictureWizard, SetupWizard
 
@@ -109,7 +109,9 @@ class ShellWindow(QMainWindow):
         )
         if improver is None:
             def improver(prompt: str) -> str:
-                return improve_prompt(gate=shell.gate.age_gate, prompt=prompt, tier=tier)
+                return improve_prompt(
+                    gate=shell.gate.age_gate, prompt=prompt, tier=tier, adult=adult_content(shell.layout),
+                )
         self._improver = improver
         self._installer = installer if installer is not None else run_shared_enlarge
         self._picture: Path | None = None

@@ -19,6 +19,7 @@ from canvas.models.mdl_registry import selectable
 from canvas.models.modes import Mode
 from canvas.models.registry import load_catalog
 from canvas.models.snapshots import SnapshotError
+from canvas.pipeline.adult_direction import scenario_system
 from canvas.pipeline.enhance import open_rewriter
 from canvas.pipeline.photoshoot import SYSTEM_PROMPT, Scenario
 from canvas.pipeline.series import SeriesFrame, SeriesResult, run_series
@@ -73,11 +74,12 @@ def run_photoshoot(window: ShellWindow) -> None:
     bar.folder = folder
     bar._stop = False
     base_seed = int(layout.seed)
+    adult = adult_content(layout)
 
     def rewrite(prompt: str) -> str:
         if bar.writer is not None:
             return bar.writer(prompt)
-        return _model_reply(window, prompt)
+        return _model_reply(window, prompt, adult)
 
     def generate(line: str, seed: int, hero: SeriesFrame | None, strength: float) -> RawImage | None:
         used = _seed(bar.seed_mode, base_seed, seed)
@@ -138,6 +140,7 @@ def run_photoshoot(window: ShellWindow) -> None:
             on_scenario=on_scenario,
             line_for=bar.line_for,
             on_status=on_status,
+            adult=adult,
         )
     except _Halt as exc:
         if exc.unavailable:
@@ -280,12 +283,20 @@ def _strength(name: str) -> float:
     raise ValueError(name)
 
 
-def _model_reply(window: ShellWindow, prompt: str) -> str:
+def adult_content(layout: SimpleLayout) -> bool:
+    """True when the Expert «Для взрослых (18+)» prompt policy is on."""
+    try:
+        return layout.get("image.adult_content") is True
+    except KeyError:
+        return False
+
+
+def _model_reply(window: ShellWindow, prompt: str, adult: bool = False) -> str:
     try:
         rewriter = open_rewriter(load_catalog(), window.tier, models_dir(), max_new_tokens=3072)
     except (SnapshotError, OSError) as exc:
         raise _Halt(str(exc), unavailable=True) from exc
     try:
-        return rewriter.complete(prompt, system=SYSTEM_PROMPT)
+        return rewriter.complete(prompt, system=scenario_system(SYSTEM_PROMPT, adult))
     finally:
         rewriter.close()

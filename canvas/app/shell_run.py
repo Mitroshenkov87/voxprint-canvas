@@ -16,6 +16,8 @@ from canvas.models.registry import load_catalog
 from canvas.models.runtime import InferenceUnavailable
 from canvas.models.snapshots import SnapshotError
 from canvas.pipeline.bf16_schedule import VramRefused
+from canvas.pipeline.adult_direction import improve_adult
+from canvas.pipeline.enhance import SYSTEM_PROMPT as ENHANCE_SYSTEM
 from canvas.pipeline.enhance import open_rewriter, resolve_prompt, rewrite_text
 from canvas.pipeline.pipeline import CoolingDown, EnlargeMissing, JobError, Pipeline
 from canvas.safety.gate import AgeGate, SafetyError, SafetyUnavailable
@@ -42,6 +44,8 @@ class ShellRunner:
         Args:
             gate: The same instance passed to the screen.
             tier: The tier chosen at startup.
+        adult: Expert adult content is on. Adds the adult photo direction; a reply
+            with a youth cue or an age under 18 is refused, never rephrased.
             enlarge: Enlarge client. 4K uses it.
         """
         self.gate = gate
@@ -99,7 +103,7 @@ class ShellRunner:
         return RawImage(safe.width, safe.height, safe.data)
 
 
-def improve_prompt(*, gate: AgeGate, prompt: str, tier: Tier) -> str:
+def improve_prompt(*, gate: AgeGate, prompt: str, tier: Tier, adult: bool = False) -> str:
     """Rewrite ``prompt`` with the same gate. Missing models leave the words as they are.
 
     Args:
@@ -114,7 +118,11 @@ def improve_prompt(*, gate: AgeGate, prompt: str, tier: Tier) -> str:
     if not selectable():
         return prompt
     catalog = load_catalog()
-    rewritten = rewrite_text(open_rewriter(catalog, tier, models_dir(), _silent), prompt)
+    rewriter = open_rewriter(catalog, tier, models_dir(), _silent)
+    if adult:
+        rewritten = improve_adult(rewriter, prompt, ENHANCE_SYSTEM)
+    else:
+        rewritten = rewrite_text(rewriter, prompt)
     return resolve_prompt(gate, prompt, rewritten).prompt
 
 

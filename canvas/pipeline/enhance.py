@@ -263,9 +263,20 @@ class QwenRewriter:
         """Generate a rewrite, then unload. The caller can close again."""
         try:
             self._load()
-            return self._complete(prompt)
+            return self._complete(prompt, SYSTEM_PROMPT)
         finally:
             self.close()
+
+    def complete(self, prompt: str, *, system: str) -> str:
+        """Generate one reply and keep the model loaded for another call.
+
+        Args:
+            prompt: User message.
+            system: System prompt. Photoshoot passes its scenario prompt.
+        """
+        self._load()
+        self.closed = False
+        return self._complete(prompt, system)
 
     def close(self) -> None:
         """Drop the model and return its memory before the diffusion pipeline."""
@@ -305,14 +316,14 @@ class QwenRewriter:
         self.device = device
         self.closed = False
 
-    def _complete(self, prompt: str) -> str:
+    def _complete(self, prompt: str, system: str) -> str:
         torch, _transformers = _generation_libs()
         tokenizer = self._tokenizer
         model = self._model
         if tokenizer is None or model is None:
             raise SnapshotError("the text encoder is not loaded")
         messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system},
             {"role": "user", "content": prompt},
         ]
         templated = tokenizer.apply_chat_template(

@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    branches: [main, ui/shell-migration]
 permissions:
   contents: read
 jobs:
@@ -270,6 +270,13 @@ jobs:
           & $iscc "/Odist" "installer\windows\voxprint-canvas.iss"
           if ($LASTEXITCODE -ne 0) { throw "the setup compiler failed" }
           if (-not (Test-Path "dist\VoxprintCanvasSetup.exe")) { throw "the setup executable is missing" }
+      - name: Upload the Setup .exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: VoxprintCanvasSetup
+          path: dist/VoxprintCanvasSetup.exe
+          if-no-files-found: error
+          retention-days: 30
       - name: Run install.ps1
         shell: pwsh
         run: |
@@ -363,6 +370,22 @@ jobs:
             }
           }
           Write-Host "torch.version.cuda is 13.0 from files under the install dir"
+      - name: Smoke script runs from Windows PowerShell 5.1 against the installed Python
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $out = Join-Path $env:RUNNER_TEMP "smoke"
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\smoke_16gb.ps1 -VramCapGB 16 -Out $out
+          $code = $LASTEXITCODE
+          Write-Host "smoke_16gb.ps1 exited $code"
+          # The runner has no GPU: setup, the wheel check and MDL must pass, then exit 3.
+          if ($code -ne 3) { throw "smoke_16gb.ps1 exited $code instead of 3 (no GPU)" }
+          $result = Get-Content -Raw (Join-Path $out "result-16gb.json") | ConvertFrom-Json
+          if ($result.exit_code -ne 3 -or $result.pass -ne "16gb" -or $result.vram_cap_gb -ne 16) { throw "unexpected result-16gb.json" }
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\smoke_16gb.ps1 -Python C:\missing\python.exe -Out $out
+          if ($LASTEXITCODE -ne 2) { throw "a missing -Python exited $LASTEXITCODE instead of 2" }
+          Write-Host "smoke_16gb.ps1: exit 3 without a GPU, exit 2 without Python"
+          exit 0
       - name: A failing install.ps1 makes Setup exit non-zero
         shell: pwsh
         run: |
@@ -382,11 +405,11 @@ jobs:
             "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
           ) | Where-Object { Test-Path $_ } | Select-Object -First 1
           if (-not $iscc) { throw "Inno Setup was not installed" }
-          & $iscc "/Odist" "installer\windows\voxprint-canvas.iss"
+          & $iscc "/Odist-broken" "installer\windows\voxprint-canvas.iss"
           if ($LASTEXITCODE -ne 0) { throw "the setup compiler failed" }
           $log = "C:\voxprint-setup.log"
           if (Test-Path $log) { Remove-Item -Force $log }
-          $setup = Start-Process -FilePath (Resolve-Path "dist\VoxprintCanvasSetup.exe") -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/SP-","/NORESTART","/LOG=$log" -Wait -PassThru
+          $setup = Start-Process -FilePath (Resolve-Path "dist-broken\VoxprintCanvasSetup.exe") -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/SP-","/NORESTART","/LOG=$log" -Wait -PassThru
           $code = $setup.ExitCode
           Write-Host "Setup exited $code"
           if (Test-Path $log) { Get-Content $log -Tail 40 }

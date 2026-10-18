@@ -40,3 +40,5 @@ audit-report.txt
 # MkDocs output and the CLI page written at docs build time
 /site/
 docs/cli.md
+.smoke-venv/
+smoke-16gb/

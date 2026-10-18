@@ -59,8 +59,8 @@ def test_shipped_manifest_requires_no_optional_entry():
 
 def test_smoke_script_requests_the_pass_generator():
     text = (Path(__file__).resolve().parents[1] / "tools" / "smoke_16gb.ps1").read_text(encoding="utf-8")
-    assert "--model $Generator" in text
-    assert '"z-image-turbo-bf16-16gb" } else { "z-image-turbo-bf16" }' in text
+    assert 'if ($Pass -eq "24gb") { $mdlArgs += @("--model", "z-image-turbo-bf16") }' in text
+    assert "& $Python @mdlArgs" in text
 
 
 def test_summary_counts_gate_results_and_peaks():

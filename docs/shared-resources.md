@@ -4,10 +4,10 @@ Suite apps share one folder and one manifest.
 
 | Platform | Folder |
 | --- | --- |
-| Windows | `%LOCALAPPDATA%\Voxprint\shared` |
-| Linux | `~/.local/share/voxprint/shared` |
+| Windows | `%LOCALAPPDATA%\VOXPrint AI Suite\shared` |
+| Linux | `~/.local/share/voxprint-ai-suite/shared` |
 
-On Linux, `XDG_DATA_HOME/voxprint/shared` is used when `XDG_DATA_HOME` is set. `VOXPRINT_HOME` replaces the Voxprint directory on either platform. The program itself is installed under `C:\Program Files\VOXPrint AI Suite\Canvas\` or `/opt/voxprint-ai-suite/canvas/`, not in this data folder.
+On Linux, `XDG_DATA_HOME/voxprint-ai-suite/shared` is used when `XDG_DATA_HOME` is set. `VOXPRINT_HOME` replaces the data home on either platform. A previous `Voxprint` or `voxprint` folder is moved to the new name once (voxprint-common 0.2.5). The program itself is installed under `C:\Program Files\VOXPrint AI Suite\Canvas\` or `/opt/voxprint-ai-suite/canvas/`, not in this data folder.
 
 The suite runtime is Python 3.14 at `shared/runtime/py314-torch2.11-cu130`. Every pinned dependency publishes a wheel that installs on Python 3.14, so Canvas uses that runtime. The runtime contains PyTorch 2.11.0 for CUDA 13.0, the matching torchvision 0.26.0, and the GPU ONNX Runtime 1.31.0. Setup resolves numpy, torchao, and the other packages from PyPI, and takes torch and torchvision from the CUDA 13.0 index. torchao is pinned with `==` and is not taken from that index. The CPU ONNX Runtime build is not installed into it, because that build would shadow the GPU build. TensorRT 10.16.1.11 is an optional component, `tensorrt-10`. Python 3.14 has no TensorRT wheel, so setup skips it. The self-test records that note and does not fail.
 
@@ -19,7 +19,7 @@ Optional packs stay out of the setup. ControlNet lite and Creative Z-Image downl
 
 ## Manifest
 
-`shared/manifest.json` is schema 1. Another suite app can read and write the same file. On Linux the path is `~/.local/share/voxprint/shared/manifest.json`. On Windows it is `%LOCALAPPDATA%\Voxprint\shared\manifest.json`.
+`shared/manifest.json` is schema 1. Another suite app can read and write the same file. On Linux the path is `~/.local/share/voxprint-ai-suite/shared/manifest.json`. On Windows it is `%LOCALAPPDATA%\VOXPrint AI Suite\shared\manifest.json`.
 
 ```json
 {

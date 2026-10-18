@@ -2,7 +2,7 @@
 # Install VOXPrint AI Canvas into /opt/voxprint-ai-suite/canvas.
 # The archive does not contain GPU libraries or model files.
 # Missing dependencies are installed here, before the first picture.
-# Per-user data stays in ~/.local/share/voxprint.
+# Per-user data stays in ~/.local/share/voxprint-ai-suite (voxprint-common 0.2.5 data home).
 # Wheels used by a privileged install live under /opt, not the user profile.
 set -eu
 
@@ -101,7 +101,7 @@ data_root() {
     esac
     return
   fi
-  printf '%s\n' "$PROFILE_XDG/voxprint"
+  printf '%s\n' "$PROFILE_XDG/voxprint-ai-suite"
 }
 
 under_user_home() {
@@ -198,6 +198,13 @@ fi
 USER_HOME=$(installing_user_home)
 PROFILE_XDG=$(profile_xdg)
 DATA=$(data_root)
+LEGACY_DATA="$PROFILE_XDG/voxprint"
+# voxprint-common 0.2.5 moved the data home. Move the old folder once, before
+# anything runs from it. When both exist, the new one is kept.
+if [ -z "${VOXPRINT_HOME:-}" ] && [ -d "$LEGACY_DATA" ] && [ ! -L "$LEGACY_DATA" ] && [ ! -e "$DATA" ]; then
+  echo "Moving the suite data from $LEGACY_DATA to $DATA"
+  as_user mv -- "$LEGACY_DATA" "$DATA"
+fi
 SHARED="$DATA/shared"
 RUNTIME="$SHARED/$RUNTIME_REL"
 RUNTIME_SITE="$RUNTIME/lib/python3.14/site-packages"
@@ -363,9 +370,9 @@ if [ "$app_ready" -eq 0 ]; then
     exit 1
   fi
 fi
-COMMON_URL="https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.2.4/voxprint_common-0.2.4-py3-none-any.whl"
-COMMON_SHA="3051bc64700964705bf5cee5182829d1311560a38a9f7436195f26481e4fa239"
-common_wheel="$WHEELS/voxprint_common-0.2.4-py3-none-any.whl"
+COMMON_URL="https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.2.5/voxprint_common-0.2.5-py3-none-any.whl"
+COMMON_SHA="4980c1ab5a75b22dec1a16b16474ccb350110c8d3d056f25b5ed74a623fe6a9b"
+common_wheel="$WHEELS/voxprint_common-0.2.5-py3-none-any.whl"
 curl -fsSL -o "$common_wheel" "$COMMON_URL"
 echo "$COMMON_SHA  $common_wheel" | sha256sum -c -
 "$UV" pip install --no-config --python "$VENV/bin/python" "$common_wheel"

@@ -35,8 +35,8 @@ def test_display_name_and_install_paths():
     assert readme.startswith("# VOXPrint AI Canvas\n")
     assert "C:\\Program Files\\VOXPrint AI Suite\\Canvas\\" in readme
     assert "/opt/voxprint-ai-suite/canvas/" in readme
-    assert "%LOCALAPPDATA%\\Voxprint" in readme
-    assert "~/.local/share/voxprint" in readme
+    assert "%LOCALAPPDATA%\\VOXPrint AI Suite" in readme
+    assert "~/.local/share/voxprint-ai-suite" in readme
     notes = Path("docs/RELEASE-NOTES-TEMPLATE.md").read_text(encoding="utf-8")
     assert 'VOXPrint AI Canvas X.Y.Z RC · build N "Tavnit"' in notes
 

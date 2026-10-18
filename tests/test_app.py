@@ -234,6 +234,42 @@ def test_generate_json_reports_the_enlarge_error(monkeypatch, capsys, tmp_path):
     assert body == {"ok": False, "error": "bad_input: cannot identify image file"}
 
 
+def test_edit_instruction_is_removed(capsys, tmp_path, monkeypatch):
+    monkeypatch.setenv("LC_ALL", "ru_RU.UTF-8")
+    monkeypatch.setenv("LANG", "ru_RU.UTF-8")
+    monkeypatch.setenv("LC_MESSAGES", "ru_RU.UTF-8")
+    code = main([
+        "generate",
+        "--edit-instruction",
+        "paint the door blue",
+        "--input",
+        "in.png",
+        "--out",
+        str(tmp_path / "out.avif"),
+        "--json",
+    ])
+    assert code == 2
+    assert json.loads(capsys.readouterr().out) == {
+        "ok": False,
+        "error": "removed",
+        "message": "Instruction editing has been removed.",
+    }
+    plain = main([
+        "generate",
+        "--edit-instruction",
+        "paint the door blue",
+        "--input",
+        "in.png",
+        "--out",
+        str(tmp_path / "out.avif"),
+    ])
+    captured = capsys.readouterr()
+    assert plain == 2
+    assert captured.out == ""
+    assert "Instruction editing has been removed." in captured.err
+    assert "temporarily" not in captured.err.casefold()
+
+
 def test_generate_command_refuses_an_unsupported_machine(capsys):
     code = main(["generate", "--prompt", "a red boat", "--aspect", "16:9", "--out", "out.avif", "--output-size", "4k", "--json"])
     assert code == 2

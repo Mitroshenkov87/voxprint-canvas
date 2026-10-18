@@ -16,7 +16,7 @@ def test_version_label_and_release_title_come_from_build_json():
     assert release_title({"GITHUB_REF_NAME": "v0.1.0-rc.13"}) == "VOXPrint AI Canvas v0.1.0-rc.13 build 12"
     assert "Tavnit" not in release_title({"GITHUB_REF_NAME": "v0.1.0-rc.13"})
     assert release_title({"GITHUB_REF_NAME": "v1.2.3-rc.4", "VOXPRINT_BUILD": "11"}) == (
-        "VOXPrint AI Canvas v1.2.3-rc.4 build 12"
+        "VOXPrint AI Canvas v1.2.3-rc.4 build 11"
     )
     assert release_title({"GITHUB_REF_NAME": "v0.1.0"}) == 'VOXPrint AI Canvas 0.1.0 RC · build 12 "Tavnit"'
     template = (ROOT / "docs" / "RELEASE-NOTES-TEMPLATE.md").read_text(encoding="utf-8")

@@ -273,7 +273,6 @@ def _age_hit(text: str) -> bool:
 
 # German words that mark a prompt as German, so a bare "kind" there means a child.
 _GERMAN_MARKERS = frozenset({
-    # "den" and "das" are left out: they are English words too ("in her den").
     "ein", "eine", "einen", "einem", "einer", "eines", "der", "dem", "des", "und", "mit",
     "ist", "im", "beim", "zum", "zur", "fuer", "kleines", "kleine", "kleiner", "kleinen", "junges", "junge",
 })

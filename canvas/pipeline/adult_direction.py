@@ -97,17 +97,16 @@ SCENARIO_ADDENDUM = f"""
 - If subject_block has no stated age, start every scene with "{ADULT_ANCHOR}" or the matching adult wording for the person in the idea.
 """
 
-# Youth wording the gate's prompt filter does not cover yet. Every adult-mode line
+# Youth-look wording the gate's prompt filter does not cover. Every adult-mode line
 # also goes through ``AgeGate.review_prompt`` / ``review_prompts`` (canvas/safety/gate.py),
 # which already refuses minor terms (child, kid, teen, minor, underage, preteen,
 # schoolgirl, ...), loli/shota terms, stated ages under 18, and explicit content with
-# school/student or anime/stylised cues. Those are not repeated here.
-# "barely legal", "juvenile" and "adolescent" stay until a gate PR adds them. The
-# other four describe a youthful look, which an adult-mode prompt never emphasises.
-# Ordinary adult wording ("girl", "young woman", "petite", "doll", "cute") is not refused.
-# Kept out of the prompt text on purpose.
+# school/student, juvenile/adolescent/barely legal, or anime/stylised cues. Those are
+# not repeated here. These four describe a youthful look, which an adult-mode prompt
+# never emphasises. Ordinary adult wording ("girl", "young woman", "petite", "doll",
+# "cute") is not refused. Kept out of the prompt text on purpose.
 YOUTH_CUES = (
-    "barely legal", "juvenile", "adolescent", "youthful", "young-looking", "girlish", "boyish",
+    "youthful", "young-looking", "girlish", "boyish",
 )
 _CUE_RE = re.compile(r"(?<![\w-])(" + "|".join(re.escape(cue) for cue in sorted(YOUTH_CUES, key=len, reverse=True))
                      + r")(?![\w-])", re.IGNORECASE)

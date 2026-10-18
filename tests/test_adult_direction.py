@@ -81,9 +81,10 @@ def test_module_text_and_examples_have_no_youth_cues() -> None:
         # The direction's own "under 18" instruction is model guidance, not a prompt, so only terms count.
         assert not (trace.minor_terms or trace.minor_sexual_terms or trace.youth_context_terms
                     or trace.stylised_terms), text[:60]
-    assert adult.youth_cues("a barely legal, youthful adolescent") == ("barely legal", "youthful", "adolescent")
-    assert adult.youth_cues("juvenile, girlish, boyish, young-looking") == (
-        "juvenile", "girlish", "boyish", "young-looking")
+    assert adult.youth_cues("youthful, girlish, boyish, young-looking") == (
+        "youthful", "girlish", "boyish", "young-looking")
+    # Covered by the gate's prompt filter now (#46), not by Canvas.
+    assert adult.youth_cues("barely legal, juvenile, adolescent") == ()
 
 
 def test_ordinary_adult_wording_is_not_a_canvas_cue() -> None:
@@ -153,7 +154,7 @@ def test_the_gate_filter_refuses_a_youth_line(tmp_path: Path) -> None:
     gate.review_prompt(f"{adult.ADULT_ANCHOR}, boutique hotel suite, black lace lingerie")
     gate.review_prompts(["petite woman in her 30s, black lace lingerie", "girl next door, 28, nude, boudoir"])
     for line in ("teen in lingerie, boudoir", "schoolgirl in lingerie", "nude student in a classroom",
-                 "anime waifu, nude, 25 years old"):
+                 "anime waifu, nude, 25 years old", "barely legal, nude", "nude adolescent"):
         with pytest.raises(GenerationBlocked):
             gate.review_prompt(line)
 
@@ -173,7 +174,7 @@ class _Rewriter:
 
 
 def test_improve_refuses_a_youth_reply_without_rewriting() -> None:
-    rewriter = _Rewriter("barely legal model on a bed, soft window light")
+    rewriter = _Rewriter("girlish model on a bed, soft window light")
     with pytest.raises(GenerationBlocked):
         adult.improve_adult(rewriter, IDEA, ENHANCE_SYSTEM)
     assert len(rewriter.calls) == 1 and rewriter.closed

@@ -1,4 +1,4 @@
-# Canvas smoke run for Proving Ground on Windows (Windows PowerShell 5.1 or PowerShell 7).
+# Canvas smoke run for Proving Ground on Windows (PowerShell 7; Windows PowerShell 5.1 also works).
 # No WSL and no bash. The Setup .exe installs this script as
 # C:\Program Files\VOXPrint AI Suite\Canvas\tools\smoke_16gb.ps1; a checkout works too.
 # Results go to .\smoke-results under the current folder unless -Out is given.
@@ -15,8 +15,9 @@
 # Exit 0 pass, 1 a picture failed, 2 setup (no Python, wheel hash, wrong tier),
 # 3 no GPU, 4 gate unavailable, 5 an MDL download or hash check failed.
 #
-#   powershell -NoProfile -ExecutionPolicy Bypass -File tools\smoke_16gb.ps1 -VramCapGB 16
-#   powershell -NoProfile -ExecutionPolicy Bypass -File tools\smoke_16gb.ps1
+#   pwsh -NoProfile -ExecutionPolicy Bypass -File tools\smoke_16gb.ps1 -VramCapGB 16
+#   pwsh -NoProfile -ExecutionPolicy Bypass -File tools\smoke_16gb.ps1
+# Without PowerShell 7, use powershell instead of pwsh (Windows PowerShell 5.1).
 param(
     [double]$VramCapGB = 0,
     [string]$Python = "",

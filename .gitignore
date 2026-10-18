@@ -42,3 +42,4 @@ audit-report.txt
 docs/cli.md
 .smoke-venv/
 smoke-16gb/
+/installer/windows/vxsigcheck.exe

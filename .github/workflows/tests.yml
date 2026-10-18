@@ -322,7 +322,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path $install | Out-Null
           Copy-Item -Path (Join-Path $source "*") -Destination $install -Recurse -Force
           $script = Join-Path $install "install.ps1"
-          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script
+          & pwsh -NoProfile -ExecutionPolicy Bypass -File $script
           if ($LASTEXITCODE -ne 0) { throw "install.ps1 exited $LASTEXITCODE" }
           Write-Host "install.ps1 exited 0"
           $programFiles = [System.IO.Path]::GetFullPath($env:ProgramFiles).TrimEnd('\') + '\'
@@ -405,11 +405,27 @@ jobs:
             }
           }
           Write-Host "torch.version.cuda is 13.0 from files under the install dir"
-      - name: Smoke script runs from Windows PowerShell 5.1 against the installed Python
+      - name: Smoke script runs from PowerShell 7 against the installed Python
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           $out = Join-Path $env:RUNNER_TEMP "smoke"
+          & pwsh -NoProfile -ExecutionPolicy Bypass -File tools\smoke_16gb.ps1 -VramCapGB 16 -Out $out
+          $code = $LASTEXITCODE
+          Write-Host "smoke_16gb.ps1 exited $code"
+          # The runner has no GPU: setup, the wheel check and MDL must pass, then exit 3.
+          if ($code -ne 3) { throw "smoke_16gb.ps1 exited $code instead of 3 (no GPU)" }
+          $result = Get-Content -Raw (Join-Path $out "result-16gb.json") | ConvertFrom-Json
+          if ($result.exit_code -ne 3 -or $result.pass -ne "16gb" -or $result.vram_cap_gb -ne 16) { throw "unexpected result-16gb.json" }
+          & pwsh -NoProfile -ExecutionPolicy Bypass -File tools\smoke_16gb.ps1 -Python C:\missing\python.exe -Out $out
+          if ($LASTEXITCODE -ne 2) { throw "a missing -Python exited $LASTEXITCODE instead of 2" }
+          Write-Host "smoke_16gb.ps1: exit 3 without a GPU, exit 2 without Python"
+          exit 0
+      - name: Smoke script still runs from Windows PowerShell 5.1 (fallback)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $out = Join-Path $env:RUNNER_TEMP "smoke-legacy"
           & powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\smoke_16gb.ps1 -VramCapGB 16 -Out $out
           $code = $LASTEXITCODE
           Write-Host "smoke_16gb.ps1 exited $code"
@@ -419,7 +435,22 @@ jobs:
           if ($result.exit_code -ne 3 -or $result.pass -ne "16gb" -or $result.vram_cap_gb -ne 16) { throw "unexpected result-16gb.json" }
           & powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\smoke_16gb.ps1 -Python C:\missing\python.exe -Out $out
           if ($LASTEXITCODE -ne 2) { throw "a missing -Python exited $LASTEXITCODE instead of 2" }
-          Write-Host "smoke_16gb.ps1: exit 3 without a GPU, exit 2 without Python"
+          Write-Host "smoke_16gb.ps1 under 5.1: exit 3 without a GPU, exit 2 without Python"
+          exit 0
+      - name: Signature-check helper accepts a Microsoft-signed file and rejects an unsigned one
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $helper = "installer\windows\vxsigcheck.exe"
+          if (-not (Test-Path -LiteralPath $helper)) { throw "the setup compiler did not build vxsigcheck.exe" }
+          $pwshExe = (Get-Command pwsh).Source
+          & $helper $pwshExe "Microsoft Corporation"
+          if ($LASTEXITCODE -ne 0) { throw "vxsigcheck rejected $pwshExe (exit $LASTEXITCODE)" }
+          & $helper $pwshExe "Someone Else"
+          if ($LASTEXITCODE -ne 2) { throw "vxsigcheck accepted the wrong publisher (exit $LASTEXITCODE)" }
+          & $helper (Resolve-Path "tools\smoke_16gb.ps1").Path "Microsoft Corporation"
+          if ($LASTEXITCODE -ne 1) { throw "vxsigcheck accepted an unsigned file (exit $LASTEXITCODE)" }
+          Write-Host "vxsigcheck: Microsoft-signed accepted, wrong publisher and unsigned rejected"
           exit 0
       - name: A failing install.ps1 makes Setup exit non-zero
         shell: pwsh
@@ -451,4 +482,5 @@ jobs:
           if (-not (Test-Path $marker)) { throw "Setup did not run install.ps1 (exit $code)" }
           if ($code -eq 0) { throw "a broken install.ps1 left Setup at exit 0" }
           if ($code -ne 9) { throw "Setup exited $code instead of install.ps1's exit 9" }
+          if (-not (Select-String -LiteralPath $log -Pattern 'Setup script host: .*\\pwsh\.exe' -Quiet)) { throw "Setup did not run its scripts under PowerShell 7" }
           Write-Host "Broken install.ps1 made Setup exit $code"

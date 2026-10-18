@@ -1,10 +1,4 @@
-"""Adult photo direction for Photoshoot and Improve prompt (Expert «Для взрослых (18+)» only).
-
-This module only adds wording for the language model and checks its output.
-It does not decide whether a picture is allowed: every scenario, shot line,
-and improved prompt still goes through the content gate before generation,
-and a refused line is dropped and reported, never rephrased.
-"""
+"""Adult direction."""
 from __future__ import annotations
 
 import re
@@ -12,9 +6,7 @@ from collections.abc import Sequence
 
 from canvas.pipeline.enhance import stated_ages
 
-# Default wording for a person whose age the user did not state.
 ADULT_ANCHOR = "adult woman in her late 20s"
-# Appended to a line that has no adult marker at all.
 ADULT_SUFFIX = "clearly adult, in their late 20s or older"
 
 SHOT_TYPES = (
@@ -97,14 +89,6 @@ SCENARIO_ADDENDUM = f"""
 - If subject_block has no stated age, start every scene with "{ADULT_ANCHOR}" or the matching adult wording for the person in the idea.
 """
 
-# Youth-look wording the gate's prompt filter does not cover. Every adult-mode line
-# also goes through ``AgeGate.review_prompt`` / ``review_prompts`` (canvas/safety/gate.py),
-# which already refuses minor terms (child, kid, teen, minor, underage, preteen,
-# schoolgirl, ...), loli/shota terms, stated ages under 18, and explicit content with
-# school/student, juvenile/adolescent/barely legal, or anime/stylised cues. Those are
-# not repeated here. These four describe a youthful look, which an adult-mode prompt
-# never emphasises. Ordinary adult wording ("girl", "young woman", "petite", "doll",
-# "cute") is not refused. Kept out of the prompt text on purpose.
 YOUTH_CUES = (
     "youthful", "young-looking", "girlish", "boyish",
 )
@@ -115,20 +99,17 @@ _ADULT_RE = re.compile(r"\badult\b|\bwoman\b|\bman\b|\bin (?:her|his|their) (?:l
 
 
 def youth_cues(text: str) -> tuple[str, ...]:
-    """Canvas-side youth cues in ``text`` (see ``YOUTH_CUES``), lower-cased, in order of appearance.
-
-    The gate's prompt filter still screens the same text for everything else.
-    """
+    """Youth cues."""
     return tuple(match.group(1).casefold() for match in _CUE_RE.finditer(text))
 
 
 def ages_allowed(text: str) -> bool:
-    """True when every stated age in ``text`` is 18 or older."""
+    """Ages allowed."""
     return all(age >= 18 for age in stated_ages(text))
 
 
 def with_adult_anchor(line: str) -> str:
-    """Add the adult wording to a line that has no adult marker or adult age."""
+    """With adult anchor."""
     ages = stated_ages(line)
     if (ages and all(age >= 18 for age in ages)) or _ADULT_RE.search(line):
         return line
@@ -146,10 +127,7 @@ def scenario_system(base: str, adult: bool) -> str:
 
 
 def shot_plan(count: int) -> list[dict[str, str]]:
-    """A pose family and a light for each shot. No pose or light repeats within any six shots.
-
-    Pairs never repeat across the whole series.
-    """
+    """Shot plan."""
     plan: list[dict[str, str]] = []
     seen: set[tuple[int, int]] = set()
     for index in range(count):
@@ -173,12 +151,7 @@ def prompt_texts() -> Sequence[str]:
 
 
 def improve_adult(rewriter: object, prompt: str, base_system: str) -> str:
-    """One adult Improve-prompt call. The caller still screens the result with the gate.
-
-    Raises:
-        GenerationBlocked: A stated age is under 18, or the reply has a Canvas-side youth cue.
-            The reply is refused as it is; it is never rephrased.
-    """
+    """Improve adult."""
     from canvas.safety.gate import GenerationBlocked
 
     if not ages_allowed(prompt):

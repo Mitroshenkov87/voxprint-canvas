@@ -1,12 +1,4 @@
-"""Classifier adapters.
-
-The classes know which registry model they bind to. Calling an adapter before
-its weights are on disk refuses the request. NudeNet is not an adapter.
-
-torch, transformers and opencv are imported inside the load methods. That is
-not a circular import. Those packages are optional so the unit tests can import
-this module without them.
-"""
+"""Classifier adapters."""
 import math
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -19,8 +11,6 @@ from canvas.safety.classifiers import Face, GuardVerdict
 from canvas.safety.gate import SafetyUnavailable
 from canvas.safety.image import RawImage
 
-# Lower edge of each FairFace age bucket. The image gate does not use this floor.
-# 20-29 maps to 20, which is how a twenty-year bucket used to be treated as under 25.
 FAIRFACE_AGE_LOW = {
     "0-2": 0.0,
     "3-9": 3.0,
@@ -34,9 +24,6 @@ FAIRFACE_AGE_LOW = {
     "more than 70": 70.0,
 }
 
-# Share of each bucket that is age 15 or under. 10-19 covers ten years and six
-# of them are 15 or under. 18-19 inside that bucket, and every bucket from 20-29
-# up, contribute nothing, so an 18-25 face does not leak in through them.
 FAIRFACE_AT_MOST_15 = {
     "0-2": 1.0,
     "3-9": 1.0,
@@ -50,8 +37,6 @@ FAIRFACE_AT_MOST_15 = {
     "more than 70": 0.0,
 }
 
-# Share of each bucket that is 16 or 17. That is two years of the 10-19 bucket.
-# The other eight years are not this band.
 FAIRFACE_16_17 = {
     "0-2": 0.0,
     "3-9": 0.0,
@@ -70,7 +55,7 @@ _PROBABILITY_SUM_HIGH = 1.01
 
 
 def apparent_age_from_bucket(label: str) -> float:
-    """Map a FairFace bucket to its lower edge in years."""
+    """Apparent age from bucket."""
     try:
         return FAIRFACE_AGE_LOW[label]
     except KeyError as exc:
@@ -78,7 +63,7 @@ def apparent_age_from_bucket(label: str) -> float:
 
 
 def _distribution_weight(probs: Mapping[str, float], table: Mapping[str, float]) -> float:
-    """Weighted sum of one FairFace softmax. A bad distribution refuses the request."""
+    """Distribution weight."""
     if not probs:
         raise SafetyUnavailable("classifier_error")
     total = 0.0
@@ -101,16 +86,12 @@ def _distribution_weight(probs: Mapping[str, float], table: Mapping[str, float])
 
 
 def age_bands(probs: Mapping[str, float]) -> tuple[float, float]:
-    """(P(age <= 15), P(age in 16 or 17)) from a full FairFace softmax.
-
-    An unknown label, a non-numeric weight, or a distribution that does not sum
-    to one refuses the request. Years 18 and older contribute to neither band.
-    """
+    """Age bands."""
     return (_distribution_weight(probs, FAIRFACE_AT_MOST_15), _distribution_weight(probs, FAIRFACE_16_17))
 
 
 def fairface_age_bands(id2label: Mapping[int | str, str], values: Sequence[float]) -> tuple[float, float]:
-    """Age bands for one face. ``values`` aligns with class ids ``0 .. n-1``."""
+    """Fairface age bands."""
     mapped: dict[str, float] = {}
     for index, value in enumerate(values):
         if index in id2label:
@@ -127,7 +108,7 @@ def fairface_age_bands(id2label: Mapping[int | str, str], values: Sequence[float
 
 
 def parse_qwen3guard(text: str) -> GuardVerdict:
-    """Parse a Qwen3Guard-Gen reply (``Safety:`` and ``Categories:`` lines)."""
+    """Parse qwen3guard."""
     safety = ""
     categories: list[str] = []
     for line in text.splitlines():
@@ -156,10 +137,7 @@ def _rgb(image: RawImage) -> Image.Image:
 
 
 def _pooled_features(out: Any) -> Any:
-    """Tensor from ``get_*_features``.
-
-    Transformers 5 returns ``BaseModelOutputWithPooling``. Older releases return a tensor, which has ``norm``.
-    """
+    """Tensor from ``get_*_features``."""
     if hasattr(out, "norm"):
         return out
     pooled = getattr(out, "pooler_output", None)
@@ -169,7 +147,7 @@ def _pooled_features(out: Any) -> Any:
 
 
 class Qwen3GuardGen:
-    """``Qwen/Qwen3Guard-Gen-0.6B`` prompt classifier."""
+    """Qwen3GuardGen."""
 
     model_id = REPO_GUARD
 
@@ -179,19 +157,19 @@ class Qwen3GuardGen:
         self._tokenizer: Any = None
 
     def load(self) -> None:
-        """Open the pinned snapshot. A missing folder refuses the request."""
+        """Load."""
         folder = _need_folder(self.folder)
         if self._model is not None:
             return
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
-        self._tokenizer = AutoTokenizer.from_pretrained(folder, local_files_only=True)  # nosec B615
-        self._model = AutoModelForCausalLM.from_pretrained(  # nosec B615
+        self._tokenizer = AutoTokenizer.from_pretrained(folder, local_files_only=True)
+        self._model = AutoModelForCausalLM.from_pretrained(
             folder, torch_dtype=torch.float32, local_files_only=True,
         )
 
     def assess(self, text: str) -> GuardVerdict:
-        """Classify one prompt with the loaded guard model."""
+        """Assess."""
         self.load()
         import torch
         tokenizer = self._tokenizer
@@ -209,7 +187,7 @@ class Qwen3GuardGen:
 
 
 class SiglipZeroShot:
-    """``google/siglip2-so400m-patch14-384`` scores for the fixed labels."""
+    """SiglipZeroShot."""
 
     model_id = REPO_SIGLIP
 
@@ -219,20 +197,20 @@ class SiglipZeroShot:
         self._processor: Any = None
 
     def load(self) -> None:
-        """Open the pinned snapshot. A missing folder refuses the request."""
+        """Load."""
         folder = _need_folder(self.folder)
         if self._model is not None:
             return
         from transformers import AutoModel, AutoProcessor
-        self._processor = AutoProcessor.from_pretrained(folder, local_files_only=True)  # nosec B615
-        self._model = AutoModel.from_pretrained(folder, local_files_only=True)  # nosec B615
+        self._processor = AutoProcessor.from_pretrained(folder, local_files_only=True)
+        self._model = AutoModel.from_pretrained(folder, local_files_only=True)
 
     def score_text(self, text: str, labels: Sequence[str]) -> dict[str, float]:
-        """SigLIP2 text scores for the fixed labels."""
+        """Score text."""
         return self._score(text=text, image=None, labels=labels)
 
     def score_image(self, image: RawImage, labels: Sequence[str]) -> dict[str, float]:
-        """SigLIP2 image scores for the fixed labels."""
+        """Score image."""
         return self._score(text=None, image=image, labels=labels)
 
     def _score(self, *, text: str | None, image: RawImage | None, labels: Sequence[str]) -> dict[str, float]:
@@ -262,7 +240,7 @@ class SiglipZeroShot:
 
 
 class YuNetFaces:
-    """OpenCV YuNet face detector. The weights are MIT."""
+    """YuNetFaces."""
 
     model_id = REPO_YUNET
 
@@ -271,7 +249,7 @@ class YuNetFaces:
         self._path: Path | None = None
 
     def load(self) -> None:
-        """Open the pinned ONNX file. A missing folder refuses the request."""
+        """Load."""
         folder = _need_folder(self.folder)
         if self._path is not None:
             return
@@ -281,7 +259,7 @@ class YuNetFaces:
         self._path = matches[0]
 
     def detect(self, image: RawImage) -> Sequence[Face]:
-        """YuNet boxes. An empty sequence means no face, not a failure."""
+        """Detect."""
         self.load()
         import cv2
         pixels = np.frombuffer(image.to_bytes(), dtype=np.uint8).reshape(image.height, image.width, 3)
@@ -301,7 +279,7 @@ class YuNetFaces:
 
 
 class FairFaceAge:
-    """``dima806/fairface_age_image_detection`` apparent-age buckets."""
+    """FairFaceAge."""
 
     model_id = REPO_AGE
 
@@ -311,18 +289,18 @@ class FairFaceAge:
         self._processor: Any = None
 
     def load(self) -> None:
-        """Open the pinned snapshot. A missing folder refuses the request."""
+        """Load."""
         folder = _need_folder(self.folder)
         if self._model is not None:
             return
         from transformers import AutoImageProcessor, AutoModelForImageClassification
-        self._processor = AutoImageProcessor.from_pretrained(folder, local_files_only=True)  # nosec B615
-        self._model = AutoModelForImageClassification.from_pretrained(  # nosec B615
+        self._processor = AutoImageProcessor.from_pretrained(folder, local_files_only=True)
+        self._model = AutoModelForImageClassification.from_pretrained(
             folder, local_files_only=True,
         )
 
     def estimate(self, image: RawImage, faces: Sequence[Face]) -> Sequence[tuple[float, float]]:
-        """(P(age <= 15), P(age in 16 or 17)) for each face."""
+        """Estimate."""
         self.load()
         import torch
         picture = _rgb(image)
@@ -339,7 +317,7 @@ class FairFaceAge:
 
 
 class NsfwViT:
-    """``Falconsai/nsfw_image_detection`` (Apache-2.0). Not NudeNet."""
+    """NsfwViT."""
 
     model_id = REPO_NSFW
 
@@ -349,18 +327,18 @@ class NsfwViT:
         self._processor: Any = None
 
     def load(self) -> None:
-        """Open the pinned snapshot. A missing folder refuses the request."""
+        """Load."""
         folder = _need_folder(self.folder)
         if self._model is not None:
             return
         from transformers import AutoImageProcessor, AutoModelForImageClassification
-        self._processor = AutoImageProcessor.from_pretrained(folder, local_files_only=True)  # nosec B615
-        self._model = AutoModelForImageClassification.from_pretrained(  # nosec B615
+        self._processor = AutoImageProcessor.from_pretrained(folder, local_files_only=True)
+        self._model = AutoModelForImageClassification.from_pretrained(
             folder, local_files_only=True,
         )
 
     def sexual_score(self, image: RawImage) -> float:
-        """Probability that the image is sexual, from 0 to 1."""
+        """Sexual score."""
         self.load()
         import torch
         inputs = self._processor(images=_rgb(image), return_tensors="pt")

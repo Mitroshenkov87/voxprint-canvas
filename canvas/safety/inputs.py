@@ -34,7 +34,7 @@ class PendingInput:
 
 
 def role_name(role: ImageRole) -> str:
-    """Return the stored name. A new role fails here until it is handled."""
+    """Role name."""
     if role is ImageRole.INIT:
         return role.value
     if role is ImageRole.MASK:

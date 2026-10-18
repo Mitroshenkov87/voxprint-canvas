@@ -91,3 +91,25 @@ def test_setup_scripts_run_without_a_console_window():
     iss = (ROOT / "installer" / "windows" / "voxprint-canvas.iss").read_text(encoding="utf-8")
     assert "SW_SHOW" not in iss
     assert "english.SetupScripts=" in iss and "russian.SetupScripts=" in iss
+
+
+def test_setup_logs_each_stage_result_and_the_script_failure():
+    iss = ISS.read_text(encoding="utf-8")
+    run_setup = _code(iss).split("function RunSetup", 1)[1].split("procedure CurStepChanged", 1)[0]
+    assert "Setup stage %s could not start" in run_setup
+    assert "Setup stage %s finished with result code %d." in run_setup
+    assert run_setup.index("finished with result code") < run_setup.index("if ResultCode <> 0 then")
+    step = _code(iss).split("procedure CurStepChanged", 1)[1].split("procedure CurUninstallStepChanged", 1)[0]
+    for stage in ("Machine", "User", "Cleanup"):
+        assert f"RunSetup('{stage}', " in step
+    assert step.index("Setup exits with %d.") < step.index("ExitProcess(Code)")
+    script = (ROOT / "installer" / "windows" / "install.ps1").read_text(encoding="utf-8")
+    assert "function Write-SetupFailure" in script
+    assert "ScriptLineNumber" in script and "ScriptStackTrace" in script
+    assert "Script host: " in script
+    # The reason is written before the transcript closes, in both logged scopes.
+    for name in ("function Invoke-Machine", "function Invoke-User"):
+        body = script.split(name, 1)[1].split("\nfunction ", 1)[0]
+        assert "Write-SetupHost" in body
+        assert body.index("Write-SetupFailure $_") < body.index("Stop-SetupLog")
+    assert "Invoke-WebRequest -UseBasicParsing" in script

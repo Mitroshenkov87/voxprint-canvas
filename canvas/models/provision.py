@@ -176,7 +176,10 @@ def repair(catalog: Catalog, progress: Callable[[str], None]) -> list[str]:
     try:
         components = load_manifest(shared)
     except ManifestError as exc:
-        progress(str(exc))
+        if exc.args and exc.args[0] == "manifest.lock timed out":
+            progress(text("startup.lock"))
+        else:
+            progress(str(exc))
         return []
     cache = VerifiedCache.open(False)
     fixed: list[str] = []

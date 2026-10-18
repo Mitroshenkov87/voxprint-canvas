@@ -85,6 +85,7 @@ def main() -> int:
     try:
         stack = load_catalog_stack(models_dir())
         gate = AgeGate(stack)
+        gate.warm()
         catalog = load_catalog()
         generator = ZImageGenerator(catalog, _worker_tier())
         result = handle_message(payload if isinstance(payload, dict) else {}, gate, generator)

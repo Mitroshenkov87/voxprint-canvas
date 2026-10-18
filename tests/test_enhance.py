@@ -195,6 +195,9 @@ def test_enhance_flag_unloads_before_diffusion_and_json_returns_both_prompts(mon
         def __init__(self, stack: object) -> None:
             order.append("gate")
 
+        def warm(self) -> None:
+            order.append("warm")
+
         def review_prompt(self, text: str) -> None:
             order.append(f"review:{text}")
 
@@ -261,6 +264,9 @@ def test_enhance_age_mismatch_falls_back_and_still_returns_both_prompts(monkeypa
         def __init__(self, stack: object) -> None:
             return None
 
+        def warm(self) -> None:
+            return None
+
         def review_prompt(self, text: str) -> None:
             return None
 
@@ -320,6 +326,9 @@ def test_a_blocked_rewrite_does_not_generate(monkeypatch, tmp_path, capsys):
     class FakeGate:
         def __init__(self, stack: object) -> None:
             self.real = World().gate()
+
+        def warm(self) -> None:
+            return None
 
         def review_prompt(self, text: str) -> None:
             self.real.review_prompt(text)

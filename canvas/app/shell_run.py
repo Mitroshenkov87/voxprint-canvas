@@ -5,7 +5,9 @@ from pathlib import Path
 
 from PIL import Image
 
+from canvas.app.i18n import text
 from canvas.infra.enlarge import EnlargeError
+from canvas.infra.gpu_lock import GpuLockTimeout, lock_path, release
 from canvas.infra.paths import models_dir
 from canvas.models.loader import ModelNotReady, ZImageGenerator
 from canvas.models.mdl_registry import selectable
@@ -83,27 +85,32 @@ class ShellRunner:
             enlarge=self.enlarge,
         )
         try:
-            safe = pipeline.generate(job.prompt, job.mode, inputs, aspect=job.aspect, output=job.output,
-                                     explicit=job.adult_content)
-        except SafetyUnavailable as exc:
-            raise RunStopped(exc.user_message, unavailable=True) from exc
-        except SafetyError as exc:
-            raise RunStopped(exc.user_message) from exc
-        except EnlargeMissing as exc:
-            raise RunStopped(str(exc), unavailable=True) from exc
-        except (JobError, ModeUnavailable, CoolingDown, BaseNotSelected) as exc:
-            raise RunStopped(str(exc)) from exc
-        except (
-            ModelNotReady,
-            InferenceUnavailable,
-            SnapshotError,
-            DownloadDeclined,
-            VramRefused,
-            EnlargeError,
-            OSError,
-        ) as exc:
-            raise RunStopped(str(exc), unavailable=True) from exc
-        return RawImage(safe.width, safe.height, safe.data)
+            try:
+                safe = pipeline.generate(job.prompt, job.mode, inputs, aspect=job.aspect, output=job.output,
+                                         explicit=job.adult_content)
+            except SafetyUnavailable as exc:
+                raise RunStopped(exc.user_message, unavailable=True) from exc
+            except GpuLockTimeout as exc:
+                raise RunStopped(text("startup.lock"), unavailable=True) from exc
+            except SafetyError as exc:
+                raise RunStopped(exc.user_message) from exc
+            except EnlargeMissing as exc:
+                raise RunStopped(str(exc), unavailable=True) from exc
+            except (JobError, ModeUnavailable, CoolingDown, BaseNotSelected) as exc:
+                raise RunStopped(str(exc)) from exc
+            except (
+                ModelNotReady,
+                InferenceUnavailable,
+                SnapshotError,
+                DownloadDeclined,
+                VramRefused,
+                EnlargeError,
+                OSError,
+            ) as exc:
+                raise RunStopped(str(exc), unavailable=True) from exc
+            return RawImage(safe.width, safe.height, safe.data)
+        finally:
+            release(lock_path())
 
 
 def improve_prompt(*, gate: AgeGate, prompt: str, tier: Tier, adult: bool = False) -> str:

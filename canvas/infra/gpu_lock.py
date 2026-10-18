@@ -172,6 +172,26 @@ def try_acquire(job: str, eta_s: float, path: Path, owner: str = OWNER) -> dict[
     return None
 
 
+def prepare_startup_lock() -> str | None:
+    """Drop a lock whose owner is gone.
+
+    Returns ``busy`` when a live process still holds the lock.
+    """
+    path = lock_path()
+    current = read_lock(path)
+    if not current:
+        return None
+    if is_stale(current):
+        try:
+            path.unlink()
+        except OSError:
+            return "busy"
+        return None
+    if current.get("owner") == OWNER and current.get("pid") == os.getpid():
+        return None
+    return "busy"
+
+
 def release(path: Path, owner: str = OWNER) -> None:
     """Remove the lock when this process owns it."""
     current = read_lock(path)

@@ -2,12 +2,14 @@
 import argparse
 import json
 import sys
+import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
 
 from PIL import Image
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
+from voxprint_common.i18n import tr
 
 from canvas.app.identity import version_label
 from canvas.app.i18n import text
@@ -20,6 +22,8 @@ from canvas.safety.image import RawImage
 from canvas.safety.inputs import ImageRole, PendingInput
 from canvas.infra.enlarge import EnlargeClient, EnlargeError
 from canvas.infra.gpu import probe_gpu
+from canvas.infra.gpu_lock import prepare_startup_lock
+from canvas.infra.manifest import ManifestError
 from canvas.infra.models_users import register, unregister
 from canvas.infra.paths import models_dir, shared_dir
 from canvas.infra.vram import peak_allocated_bytes, set_vram_cap_gb
@@ -32,6 +36,9 @@ from canvas.models.plan import BaseNotSelected, ModeUnavailable, build_plan
 from canvas.models.registry import load_catalog
 from canvas.models.snapshots import SnapshotError
 from canvas.app.photoshoot_bench import live_generate, live_rewrite, run_bench
+from canvas.app.photoshoot_cli import model_generate, model_rewrite, reject_frames, run_command
+from canvas.pipeline.photoshoot import DEFAULT_FRAMES, MAX_FRAMES
+from canvas.ui.styles import LOOKS
 from canvas.pipeline.bf16_schedule import VramRefused
 from canvas.pipeline.enhance import EnhanceResult, fallback_message, open_rewriter, resolve_prompt, rewrite_text
 from canvas.pipeline.schedule import last_image_seconds, reset_image_seconds
@@ -108,6 +115,45 @@ def _parser() -> argparse.ArgumentParser:
     bench.add_argument("--out", required=True, help="folder for the series")
     bench.add_argument("--seed", type=int, default=1)
     bench.add_argument("--json", action="store_true")
+    photoshoot = commands.add_parser(
+        "photoshoot",
+        help="write a Photoshoot series and exit",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=_EXIT_CODES,
+    )
+    photoshoot.add_argument("--prompt", required=True, help="theme or idea for the series")
+    photoshoot.add_argument(
+        "--frames",
+        type=int,
+        default=DEFAULT_FRAMES,
+        help=f"how many frames to write, from 1 to {MAX_FRAMES}",
+    )
+    photoshoot.add_argument("--out", required=True, help="folder for the frames and scenario.txt")
+    photoshoot.add_argument("--seed", type=int, default=1)
+    photoshoot.add_argument(
+        "--style",
+        default="photo",
+        choices=tuple(look.style_id for look in LOOKS),
+        help="style id, the same ids as the app",
+    )
+    photoshoot.add_argument(
+        "--places",
+        default="same",
+        choices=("same", "different"),
+        help="one place, or a different place for each frame",
+    )
+    photoshoot.add_argument(
+        "--adult",
+        action="store_true",
+        help="use the Expert adult-content prompt policy",
+    )
+    photoshoot.add_argument(
+        "--vram-cap-gb",
+        type=float,
+        default=argparse.SUPPRESS,
+        help="plan as if the GPU had this many GB (CANVAS_VRAM_CAP_GB)",
+    )
+    photoshoot.add_argument("--json", action="store_true")
     return parser
 
 
@@ -176,12 +222,34 @@ def _application() -> QApplication:
     return QApplication(sys.argv)
 
 
+def _prepare_gate(gate: AgeGate) -> None:
+    """Load stack components."""
+    try:
+        gate.warm()
+    except SafetyError:
+        return
+
+
+def _stop_startup(splash: Splash, message: str) -> int:
+    """Show ``message`` and leave. The splash alone closes before it can be read."""
+    print(message, file=sys.stderr)
+    splash.set_stage(message)
+    box = QMessageBox()
+    box.setIcon(QMessageBox.Icon.Warning)
+    box.setWindowTitle(text("app.name"))
+    box.setText(message)
+    box.exec()
+    splash.close()
+    return 1
+
+
 def _launch(tier: Tier, splash: Splash | None = None, app: QApplication | None = None) -> int:
     """Open the shared screen. A gate that cannot be built does not open a window."""
     if app is None:
         app = _application()
     if splash is None:
         splash = show_splash()
+    lock_note = prepare_startup_lock()
 
     def stage(message: str) -> None:
         print(message, file=sys.stderr)
@@ -189,22 +257,31 @@ def _launch(tier: Tier, splash: Splash | None = None, app: QApplication | None =
 
     try:
         install_defaults(load_catalog(), stage)
+    except ManifestError:
+        lock_note = "busy"
     except (SnapshotError, OSError) as exc:
         stage(str(exc))
     enlarge = EnlargeClient()
     try:
         stack = load_catalog_stack(models_dir(), load_catalog())
         gate = AgeGate(stack)
+    except ManifestError:
+        return _stop_startup(splash, text("startup.lock"))
     except Exception as exc:
-        stage(str(exc))
-        splash.close()
-        return 1
+        message = str(exc).strip() or text("gate.unavailable")
+        return _stop_startup(splash, message)
+    stage(text("canvas.stage.prepare"))
+    app.processEvents()
+    threading.Thread(target=_prepare_gate, args=(gate,), name="canvas-prepare", daemon=True).start()
     window = ShellWindow(
         open_layout(canvas_state_dir(), gate=gate, enlarge_installed=enlarge.ready()),
         tier=tier,
         enlarge=enlarge,
     )
     window.show()
+    if lock_note == "busy":
+        window.shell.layout.unavailable(text("startup.lock"))
+        window.view.refresh()
     splash.finish(window)
     app.exec()
     return 0
@@ -285,6 +362,7 @@ def _generate(args: argparse.Namespace) -> int:
         install_supporting(catalog, progress)
         stack = load_catalog_stack(root, catalog)
         gate = AgeGate(stack)
+        gate.warm()
         if args.enhance:
             gate.review_prompt(prompt)
             rewritten = rewrite_text(open_rewriter(catalog, gpu.tier, root, progress), prompt)
@@ -331,6 +409,7 @@ def _photoshoot_bench(args: argparse.Namespace) -> int:
         install_supporting(load_catalog(), lambda message: print(message, file=sys.stderr))
         stack = load_catalog_stack(models_dir(), load_catalog())
         gate = AgeGate(stack)
+        gate.warm()
         report = run_bench(
             prompt=str(args.prompt),
             folder=folder,
@@ -349,6 +428,88 @@ def _photoshoot_bench(args: argparse.Namespace) -> int:
     return _emit(report, as_json, 0 if report.get("ok") else 1)
 
 
+def _photoshoot(args: argparse.Namespace) -> int:
+    """Write a series into --out. A stopped frame is reported, not a crash."""
+    as_json = bool(args.json)
+    frames = int(args.frames)
+    if frames < 1 or frames > MAX_FRAMES:
+        return _emit_photoshoot(reject_frames(frames), as_json, 2)
+    os_result = current_os_check()
+    if not os_result.ok:
+        return _emit({"ok": False, "error": os_result.message}, as_json, 2)
+    gpu = check_gpu(probe_gpu())
+    if not gpu.ok or gpu.tier is None:
+        return _emit({"ok": False, "error": gpu.message}, as_json, 2)
+    folder = Path(args.out)
+    adult = bool(args.adult)
+    style = str(args.style)
+    try:
+        install_supporting(load_catalog(), lambda message: print(message, file=sys.stderr))
+        stack = load_catalog_stack(models_dir(), load_catalog())
+        gate = AgeGate(stack)
+        gate.warm()
+        payload, code = run_command(
+            idea=str(args.prompt),
+            folder=folder,
+            frames=frames,
+            seed=int(args.seed),
+            style=style,
+            places=str(args.places),
+            adult=adult,
+            age_gate=gate,
+            rewrite=model_rewrite(gpu.tier, adult),
+            generate=model_generate(gate, gpu.tier, style, adult),
+        )
+    except (
+        SafetyError, SnapshotError, DownloadDeclined, InferenceUnavailable, ModelNotReady,
+        ModeUnavailable, BaseNotSelected, JobError, CoolingDown, EnlargeMissing, EnlargeError, VramRefused,
+        OSError,
+    ) as exc:
+        return _emit({"ok": False, "error": str(exc)}, as_json, 1)
+    return _emit_photoshoot(payload, as_json, code)
+
+
+def _emit_photoshoot(payload: dict[str, object], as_json: bool, code: int) -> int:
+    if as_json:
+        print(json.dumps(payload))
+        return code
+    if not payload.get("ok"):
+        print(_photoshoot_console(payload), file=sys.stderr)
+        return code
+    frames = payload.get("frames")
+    if isinstance(frames, list):
+        for path in frames:
+            print(path)
+    scenario = payload.get("scenario")
+    if isinstance(scenario, str) and scenario:
+        print(scenario)
+    shots = payload.get("shots")
+    if isinstance(shots, list):
+        for shot in shots:
+            if isinstance(shot, dict) and shot.get("code") == "not_produced":
+                print(tr("photoshoot.frame.blocked"), file=sys.stderr)
+    return code
+
+
+def _photoshoot_console(payload: dict[str, object]) -> str:
+    error = str(payload.get("error") or "")
+    if error == "bad_frames":
+        return tr("photoshoot.frames.invalid", limit=MAX_FRAMES)
+    if error == "not_produced":
+        return tr("photoshoot.frame.blocked")
+    if error == "scenario":
+        return tr("photoshoot.scenario.stopped")
+    if error == "idea":
+        reason = payload.get("message")
+        if isinstance(reason, str) and reason.strip():
+            return reason
+        return tr("photoshoot.scenario.stopped")
+    message = payload.get("message")
+    if isinstance(message, str) and message.strip():
+        return message
+    return error
+
+
 def main(argv: list[str] | None = None) -> int:
     """Register the shared model folder, check for a release, or open the window."""
     args = _parser().parse_args(argv)
@@ -362,6 +523,8 @@ def main(argv: list[str] | None = None) -> int:
         return _generate(args)
     if getattr(args, "command", None) == "photoshoot-bench":
         return _photoshoot_bench(args)
+    if getattr(args, "command", None) == "photoshoot":
+        return _photoshoot(args)
     if args.selftest:
         report = selftest_report(deep=bool(args.deep))
         if args.json:

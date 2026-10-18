@@ -14,6 +14,7 @@ from canvas.app.i18n import text
 from canvas.app.info import ENLARGE_NAME
 from canvas.app.shell_gate import reviewed_output
 from canvas.app.shell_run import RunStopped, load_rgb
+from canvas.infra.gpu_lock import lock_path, release
 from canvas.infra.paths import models_dir
 from canvas.models.mdl_registry import selectable
 from canvas.models.modes import Mode
@@ -30,6 +31,7 @@ from canvas.safety.image import RawImage
 from canvas.safety.inputs import ImageRole, PendingInput
 from canvas.ui.shell_layout import SimpleLayout, job_from
 from canvas.ui.styles import look_for
+from canvas.ui.ui_call import on_ui, run_off_ui
 
 
 class _Halt(Exception):
@@ -111,36 +113,47 @@ def run_photoshoot(window: ShellWindow) -> None:
         return raw
 
     def on_scenario(scenario: Scenario) -> None:
-        bar.show_scenario(scenario.subject_block, scenario.shots)
-        window.view.refresh()
-        bar.sync()
+        def show(scenario: Scenario = scenario) -> None:
+            bar.show_scenario(scenario.subject_block, scenario.shots)
+            window.view.refresh()
+            bar.sync()
+
+        on_ui(show)
 
     def on_status(index: int, status: str) -> None:
-        total = max(len(bar.rows), 1)
-        if status == "drawing":
-            window._advance(index, total, tr("photoshoot.progress.frame", current=index + 1, total=total))
-        bar.mark(index, status)
-        window.view.refresh()
-        bar.sync()
+        def show(index: int = index, status: str = status) -> None:
+            total = max(len(bar.rows), 1)
+            if status == "drawing":
+                window._advance(index, total, tr("photoshoot.progress.frame", current=index + 1, total=total))
+            bar.mark(index, status)
+            window.view.refresh()
+            bar.sync()
+
+        on_ui(show)
+
+    def stopped() -> bool:
+        return bool(on_ui(lambda: bar._stop or layout.phase is not Phase.BUSY))
 
     try:
-        result = run_series(
-            idea=idea,
-            count=bar.count,
-            style=style,
-            place_mode=bar.place,
-            seed=base_seed,
-            strength=_strength(bar.strength),
-            include_camera=lambda: False,
-            rewrite=rewrite,
-            age_gate=window.shell.gate.age_gate,
-            draw_frame=generate,
-            cancelled=lambda: bar._stop or layout.phase is not Phase.BUSY,
-            folder=folder,
-            on_scenario=on_scenario,
-            line_for=bar.line_for,
-            on_status=on_status,
-            adult=adult,
+        result = run_off_ui(
+            lambda: run_series(
+                idea=idea,
+                count=bar.count,
+                style=style,
+                place_mode=bar.place,
+                seed=base_seed,
+                strength=_strength(bar.strength),
+                include_camera=lambda: False,
+                rewrite=rewrite,
+                age_gate=window.shell.gate.age_gate,
+                draw_frame=generate,
+                cancelled=stopped,
+                folder=folder,
+                on_scenario=on_scenario,
+                line_for=bar.line_for,
+                on_status=on_status,
+                adult=adult,
+            ),
         )
     except _Halt as exc:
         if exc.unavailable:
@@ -150,6 +163,8 @@ def run_photoshoot(window: ShellWindow) -> None:
         window.view.refresh()
         bar.sync()
         return
+    finally:
+        release(lock_path())
     _finish(window, result, idea)
 
 

@@ -11,9 +11,11 @@ from pathlib import Path
 from typing import Literal, Protocol, assert_never
 
 from canvas.app.i18n import text
+from canvas.core.formats import OutputFormat, extension, save_image
 from canvas.pipeline.enhance import stated_ages
 from canvas.pipeline.adult_direction import ages_allowed, with_adult_anchor, youth_cues
 from canvas.pipeline.photoshoot import (
+    SCENARIO_CHUNK,
     PlaceMode,
     Scenario,
     Shot,
@@ -68,6 +70,7 @@ def run_series(
     line_for: Callable[[int], str] | None = None,
     on_status: Callable[[int, str], None] | None = None,
     adult: bool = False,
+    container: OutputFormat | None = None,
 ) -> SeriesResult:
     """Run series."""
     if place_mode == "same":
@@ -84,8 +87,8 @@ def run_series(
         return SeriesResult("idea", reason, (), None)
     if adult and not ages_allowed(idea):
         return SeriesResult("idea", "", (), None)
-    scenario = _scenario(idea, count, mode, request, rewrite)
-    if scenario is None or len(scenario.shots) < 6:
+    scenario = _scenario(idea, count, style, mode, rewrite, adult=adult)
+    if scenario is None or len(scenario.shots) < count:
         return SeriesResult("scenario", "", (), None)
     lines = [assemble_line(scenario.subject_block, shot, include_camera=True) for shot in scenario.shots]
     refused = [_refuse_prompt(age_gate, _with_idea(idea, line)) for line in lines]
@@ -133,15 +136,12 @@ def run_series(
             _write_meta(folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept)
             return SeriesResult("cancelled", "", tuple(kept), folder)
         image = draw_frame(line, seed + index, hero, strength)
-        width = 0 if image is None else image.width
-        height = 0 if image is None else image.height
-        pixels = None if image is None else _released_frame(age_gate, image, line)
-        if pixels is None:
+        released = None if image is None else _released_frame(age_gate, image, line)
+        if released is None:
             blocked.append(index)
             _status(on_status, index, "blocked")
             continue
-        path = folder / f"{index + 1:02}.png"
-        _write_png(path, width, height, pixels)
+        path = _store_frame(folder, index, released, container)
         kept.append(path)
         saved_lines.append(line)
         seeds.append(seed + index)
@@ -168,7 +168,15 @@ def _refuse_prompt(age_gate: AgeGate, prompt: str) -> str | None:
     return None
 
 
-def _released_frame(age_gate: AgeGate, image: SeriesFrame, line: str) -> bytes | None:
+@dataclass(frozen=True)
+class _Released:
+    width: int
+    height: int
+    data: bytes
+    safe: SafeImage | None
+
+
+def _released_frame(age_gate: AgeGate, image: SeriesFrame, line: str) -> _Released | None:
     """Released frame."""
     raw = RawImage(image.width, image.height, image.to_bytes())
     try:
@@ -178,8 +186,18 @@ def _released_frame(age_gate: AgeGate, image: SeriesFrame, line: str) -> bytes |
     except Exception:
         return None
     if isinstance(released, SafeImage):
-        return released.data
-    return image.to_bytes()
+        return _Released(released.width, released.height, released.data, released)
+    return _Released(image.width, image.height, image.to_bytes(), None)
+
+
+def _store_frame(folder: Path, index: int, released: _Released, container: OutputFormat | None) -> Path:
+    if container is None or released.safe is None:
+        path = folder / f"{index + 1:02}.png"
+        _write_png(path, released.width, released.height, released.data)
+        return path
+    path = folder / f"{index + 1:02}{extension(container)}"
+    save_image(released.safe, path, container)
+    return path
 
 
 def _status(callback: Callable[[int, str], None] | None, index: int, status: str) -> None:
@@ -190,28 +208,68 @@ def _status(callback: Callable[[int, str], None] | None, index: int, status: str
 def _scenario(
     idea: str,
     count: int,
+    style: str,
+    mode: PlaceMode,
+    rewrite: Callable[[str], str],
+    *,
+    adult: bool,
+) -> Scenario | None:
+    collected: list[Shot] = []
+    subject = ""
+    descriptors: tuple[str, ...] = ()
+    place = ""
+    ready = False
+    while len(collected) < count:
+        before = len(collected)
+        ask = min(SCENARIO_CHUNK, count - len(collected))
+        previous = tuple(assemble_line(subject, shot, include_camera=True) for shot in collected) if ready else ()
+        request = scenario_request(idea, ask, style, mode, adult=adult, previous=previous)
+        if request is None:
+            return None
+        scenario = _read_chunk(idea, ask, mode, request, rewrite)
+        if scenario is None:
+            break
+        if not ready:
+            subject = scenario.subject_block
+            descriptors = scenario.descriptors
+            place = scenario.place
+            ready = True
+            fresh = list(scenario.shots)
+        else:
+            fresh = []
+            for shot in scenario.shots:
+                accepted = _accept_extra(idea, subject, mode, place, collected + fresh, shot)
+                if accepted is not None:
+                    fresh.append(accepted)
+        collected.extend(fresh[: count - len(collected)])
+        if len(fresh) < ask:
+            attempts = 0
+            while len(collected) < count and attempts < 2:
+                attempts += 1
+                extra = parse_shot(rewrite(one_shot_request(subject, mode)))
+                if extra is None:
+                    continue
+                candidate = _accept_extra(idea, subject, mode, place, collected, extra)
+                if candidate is not None:
+                    collected.append(candidate)
+        if len(collected) == before:
+            break
+    if not ready or len(collected) < count:
+        return None
+    return Scenario(subject, descriptors, place, tuple(collected))
+
+
+def _read_chunk(
+    idea: str,
+    ask: int,
     mode: PlaceMode,
     request: str,
     rewrite: Callable[[str], str],
 ) -> Scenario | None:
-    scenario = validate_scenario(idea, rewrite(request), count=count, place_mode=mode)
+    scenario = validate_scenario(idea, rewrite(request), count=ask, place_mode=mode)
     if scenario is None:
-        scenario = validate_scenario(idea, rewrite(request), count=count, place_mode=mode)
-    if scenario is None:
-        return None
-    shots = list(scenario.shots)
-    attempts = 0
-    while len(shots) < count and attempts < 2:
-        attempts += 1
-        extra = parse_shot(rewrite(one_shot_request(scenario.subject_block, mode)))
-        if extra is None:
-            continue
-        candidate = _accept_extra(idea, scenario.subject_block, mode, scenario.place, shots, extra)
-        if candidate is not None:
-            shots.append(candidate)
-    if len(shots) < 6:
-        return None
-    return Scenario(scenario.subject_block, scenario.descriptors, scenario.place, tuple(shots))
+        scenario = validate_scenario(idea, rewrite(request), count=ask, place_mode=mode)
+    return scenario
 
 
 def _accept_extra(
@@ -257,7 +315,7 @@ def _write_meta(
         "blocked": blocked,
     }
     (folder / "series.json").write_text(json.dumps(document, ensure_ascii=False, indent=2), encoding="utf-8")
-    if not kept:
+    if not kept or any(path.suffix.lower() != ".png" for path in kept):
         return
     _write_sheet(folder / "overview.png", kept)
     with zipfile.ZipFile(folder / "series.zip", "w") as archive:

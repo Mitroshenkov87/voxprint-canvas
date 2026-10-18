@@ -19,7 +19,7 @@ IDEA = "Yellow ceramic teapot with a blue handle"
 AGED = "a woman, 34 years old, in a red coat"
 
 
-def _shots(count: int, place: str, *, scene_age: str = "") -> list[dict[str, str]]:
+def _shots(count: int, place: str, *, scene_age: str = "", start: int = 0) -> list[dict[str, str]]:
     scenes = [
         "close view",
         "three-quarter view",
@@ -35,18 +35,27 @@ def _shots(count: int, place: str, *, scene_age: str = "") -> list[dict[str, str
         "with a cup",
     ]
     found = []
-    for index in range(count):
-        scene = scenes[index % len(scenes)]
-        if index == 1 and scene_age:
+    for offset in range(count):
+        number = start + offset
+        scene = scenes[number] if number < len(scenes) else f"angle {number}"
+        if offset == 1 and scene_age:
             scene = f"{scene}, {scene_age}"
         found.append({"scene": scene, "pose": "still", "camera": "50 mm", "place": place})
     return found
 
 
-def _payload(idea: str, count: int = 6, *, place_mode: str = "same", subject: str | None = None, scene_age: str = "") -> str:
+def _payload(
+    idea: str,
+    count: int = 6,
+    *,
+    place_mode: str = "same",
+    subject: str | None = None,
+    scene_age: str = "",
+    start: int = 0,
+) -> str:
     place = "kitchen table" if place_mode == "same" else ""
-    places = ["kitchen table"] * count if place_mode == "same" else [f"room {index}" for index in range(count)]
-    shots = _shots(count, places[0], scene_age=scene_age)
+    places = ["kitchen table"] * count if place_mode == "same" else [f"room {start + index}" for index in range(count)]
+    shots = _shots(count, places[0], scene_age=scene_age, start=start)
     for shot, name in zip(shots, places, strict=True):
         shot["place"] = name
     body = {
@@ -90,9 +99,53 @@ def test_place_mode_accepts_one_place_or_distinct_places() -> None:
     assert validate_scenario(IDEA, json.dumps(parsed), count=6, place_mode="different") is None
 
 
-def test_count_outside_the_series_is_refused() -> None:
-    message = scenario_request(IDEA, 4, "photo", "same")
-    assert message is None
+def test_frame_count_bounds_are_one_to_fifty() -> None:
+    assert scenario_request(IDEA, 0, "photo", "same") is None
+    assert scenario_request(IDEA, 51, "photo", "same") is None
+    assert scenario_request(IDEA, 1, "photo", "same") is not None
+    assert scenario_request(IDEA, 50, "photo", "same") is not None
+    one = validate_scenario(IDEA, _payload(IDEA, 1), count=1, place_mode="same")
+    fifty = validate_scenario(IDEA, _payload(IDEA, 50), count=50, place_mode="same")
+    assert one is not None and len(one.shots) == 1
+    assert fifty is not None and len(fifty.shots) == 50
+    assert validate_scenario(IDEA, _payload(IDEA, 1), count=0, place_mode="same") is None
+    assert validate_scenario(IDEA, _payload(IDEA, 1), count=51, place_mode="same") is None
+
+
+def test_one_frame_series_is_kept(tmp_path: Path) -> None:
+    result = _run(
+        tmp_path,
+        count=1,
+        rewrite=lambda prompt: _payload(IDEA, int(json.loads(prompt)["count"])),
+    )
+    assert result.stopped == ""
+    assert len(result.kept) == 1
+
+
+def test_a_long_scenario_is_requested_in_chunks_until_the_count(tmp_path: Path) -> None:
+    calls: list[str] = []
+
+    def rewrite(prompt: str) -> str:
+        calls.append(prompt)
+        assert "write one different shot" not in prompt
+        body = json.loads(prompt)
+        count = int(body["count"])
+        assert count <= 10
+        previous = body.get("previous", [])
+        assert isinstance(previous, list)
+        return _payload(IDEA, count, start=len(previous))
+
+    result = _run(tmp_path, count=23, rewrite=rewrite)
+    assert result.stopped == ""
+    assert len(result.kept) == 23
+    counts = [int(json.loads(prompt)["count"]) for prompt in calls]
+    assert counts == [10, 10, 3]
+    assert "previous" not in json.loads(calls[0])
+    assert len(json.loads(calls[1])["previous"]) == 10
+    assert len(json.loads(calls[2])["previous"]) == 20
+    lines = json.loads((tmp_path / "series.json").read_text(encoding="utf-8"))["lines"]
+    assert len(lines) == 23
+    assert len({line for line in lines}) == 23
 
 
 def test_blocked_idea_stops_before_the_model(tmp_path: Path) -> None:
@@ -274,9 +327,10 @@ def _run(folder: Path, **overrides: object):
     rewrite = overrides.pop("rewrite", None)
     generate = overrides.pop("generate", None)
     cancelled = overrides.pop("cancelled", None)
+    count = overrides.pop("count", 6)
     return run_series(
         idea=idea,
-        count=6,
+        count=int(count) if isinstance(count, int) else 6,
         style="photo",
         place_mode="same",
         seed=3,

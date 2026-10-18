@@ -46,6 +46,7 @@ $TorchIndex = "https://download.pytorch.org/whl/cu130"
 $Constraints = Join-Path $App "constraints.txt"
 $CudaConstraints = Join-Path $App "constraints-cuda.txt"
 $script:TranscriptOn = $false
+$script:FailureLogged = $false
 $script:Uv = Join-Path $App "uv.exe"
 $script:Base = $null
 
@@ -316,6 +317,24 @@ function Start-SetupLog([string]$Path) {
     } catch {
         Write-Host "The install log could not be opened: $Path"
     }
+}
+
+function Write-SetupHost {
+    $hostPath = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+    Write-Host ("Script host: " + $hostPath + " (PowerShell " + $PSVersionTable.PSVersion + " " + $PSVersionTable.PSEdition + ")")
+}
+
+function Write-SetupFailure($Failure) {
+    # Written while the transcript is still open, so the reason reaches the log.
+    if ($script:FailureLogged) { return }
+    $script:FailureLogged = $true
+    $info = $Failure.InvocationInfo
+    $line = if ($info) { $info.ScriptLineNumber } else { 0 }
+    $command = if ($info -and $info.MyCommand) { $info.MyCommand.Name } else { "" }
+    Write-Host "Setup stopped in scope $Scope at install.ps1 line $line ($command)."
+    Write-Host ("Error: " + $Failure.Exception.GetType().FullName + ": " + $Failure.Exception.Message)
+    if ($Failure.ScriptStackTrace) { Write-Host $Failure.ScriptStackTrace }
+    Write-SetupHost
 }
 
 function Stop-SetupLog {
@@ -651,6 +670,7 @@ function Invoke-Machine {
     Reset-InstallerEnvironment "Machine"
     Start-SetupLog (Join-Path $Work "canvas-install.log")
     try {
+        Write-SetupHost
         Write-Host "Checking Python..."
         if (-not (Test-Path -LiteralPath $script:Uv)) {
             throw "uv.exe is not bundled next to install.ps1. Install Python 3.14 from $WindowsPythonUrl and run this setup again."
@@ -711,7 +731,7 @@ function Invoke-Machine {
         $CommonSha = "f14036fc70db07e40e5e5376427cea28c3173a94f1d031997a3259ed0afc91fd"
         $CommonWheel = Join-Path $Fetch "voxprint_common-0.3.1-py3-none-any.whl"
         Assert-NoReparse $CommonWheel
-        Invoke-WebRequest -Uri $CommonUrl -OutFile $CommonWheel
+        Invoke-WebRequest -UseBasicParsing -Uri $CommonUrl -OutFile $CommonWheel
         $got = (Get-FileHash -Algorithm SHA256 -Path $CommonWheel).Hash.ToLowerInvariant()
         if ($got -ne $CommonSha) { throw "voxprint-common 0.3.1 failed the SHA-256 check." }
         Assert-AdminPath $script:Uv
@@ -724,6 +744,9 @@ function Invoke-Machine {
         if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
         & $Py -m canvas.infra.layout migrate --install-dir $App
         if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
+    } catch {
+        Write-SetupFailure $_
+        throw
     } finally {
         Stop-SetupLog
     }
@@ -786,6 +809,7 @@ function Invoke-User {
     $logDir = Join-Path $SuiteHome "logs"
     Start-SetupLog (Join-Path $logDir "canvas-install.log")
     try {
+        Write-SetupHost
         Assert-ConstraintFiles
         Resolve-BundledUv
         $script:Base = Resolve-BasePython
@@ -830,6 +854,9 @@ function Invoke-User {
         if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
         Invoke-Py @("-m", "canvas.app.main", "--register-models")
         Write-Host "Installed."
+    } catch {
+        Write-SetupFailure $_
+        throw
     } finally {
         Stop-SetupLog
     }
@@ -855,7 +882,7 @@ if ($env:VOXPRINT_INSTALL_LIB -ne "1") {
             default { throw "Setup stopped because the scope is not Machine, User, Cleanup, or All." }
         }
     } catch {
-        Write-Host $_
+        Write-SetupFailure $_
         if ((Test-Elevated) -or ($Scope -ne "User")) {
             Clear-WheelFetch
         }

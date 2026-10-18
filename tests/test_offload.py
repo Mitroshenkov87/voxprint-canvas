@@ -104,3 +104,105 @@ def test_a_failing_group_offload_falls_back_to_sequential_cpu_offload():
     installed = install_low_vram_offload(pipe)
     assert installed.kind == "sequential-cpu-offload"
     assert pipe.calls[0][0] == "sequential"
+
+
+class _Registry:
+    """Stands in for a diffusers HookRegistry on one module."""
+
+    def __init__(self) -> None:
+        self.hooks: dict[str, object] = {}
+
+    def get_hook(self, name: str) -> object | None:
+        return self.hooks.get(name)
+
+    def remove_hook(self, name: str, recurse: bool = True) -> None:
+        self.hooks.pop(name, None)
+
+
+class _Component:
+    def __init__(self, *, removable: bool = True) -> None:
+        self._diffusers_hook = _Registry() if removable else None
+        self.stuck = False
+
+    def modules(self):
+        return [self]
+
+    @property
+    def offloaded(self) -> bool:
+        return self.stuck or (self._diffusers_hook is not None and bool(self._diffusers_hook.hooks))
+
+    def hook(self) -> None:
+        if self._diffusers_hook is None:
+            self.stuck = True
+        else:
+            self._diffusers_hook.hooks["group_offloading"] = object()
+
+
+class _PartialGroupPipe:
+    """Hooks components in order like diffusers and fails on the second one.
+
+    ``fail_low_ram`` makes the per-transfer pinning retry fail the same way.
+    ``enable_sequential_cpu_offload`` refuses while any component is hooked,
+    as diffusers does.
+    """
+
+    def __init__(self, *, fail_low_ram: bool = False, removable: bool = True) -> None:
+        self.components = {"text_encoder": _Component(removable=removable), "transformer": _Component(removable=removable)}
+        self.fail_low_ram = fail_low_ram
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    def _maybe_raise_error_if_group_offload_active(self, raise_error: bool = False) -> bool:
+        active = any(item.offloaded for item in self.components.values())
+        if active and raise_error:
+            raise ValueError("You are trying to apply model/sequential CPU offloading to a pipeline that contains "
+                             "components with group offloading enabled.")
+        return active
+
+    def enable_group_offload(self, onload_device=None, offload_device=None, offload_type="block_level",
+                             num_blocks_per_group=None, non_blocking=False, use_stream=False,
+                             record_stream=False, low_cpu_mem_usage=False) -> None:
+        self.calls.append(("group", {"low_cpu_mem_usage": low_cpu_mem_usage}))
+        encoder, transformer = self.components.values()
+        encoder.hook()
+        if low_cpu_mem_usage and not self.fail_low_ram:
+            transformer.hook()
+            return
+        raise RuntimeError("CUDA error: out of memory")
+
+    def enable_sequential_cpu_offload(self) -> None:
+        self._maybe_raise_error_if_group_offload_active(raise_error=True)
+        self.calls.append(("sequential", {}))
+
+
+def test_a_partial_group_offload_is_never_followed_by_sequential_offload():
+    # rc.12, 24 GB card capped at 16 GB: group offload failed after the first
+    # component was hooked, and the sequential fallback then raised in diffusers.
+    pipe = _PartialGroupPipe()
+    installed = install_low_vram_offload(pipe)
+    assert installed.kind == "group-offload"
+    assert installed.use_stream is True
+    assert installed.pinned is False
+    assert [kind for kind, _ in pipe.calls] == ["group", "group"]
+    assert pipe.calls[0][1]["low_cpu_mem_usage"] is False
+    assert pipe.calls[1][1]["low_cpu_mem_usage"] is True
+    assert all(item.offloaded for item in pipe.components.values())
+
+
+def test_sequential_runs_alone_after_partial_group_hooks_are_removed():
+    pipe = _PartialGroupPipe(fail_low_ram=True)
+    installed = install_low_vram_offload(pipe)
+    assert installed.kind == "sequential-cpu-offload"
+    assert [kind for kind, _ in pipe.calls] == ["group", "group", "sequential"]
+    assert not any(item.offloaded for item in pipe.components.values())
+
+
+def test_group_hooks_that_cannot_be_removed_stop_without_a_second_strategy():
+    import pytest
+
+    from canvas.pipeline.offload import OffloadUnavailable
+
+    pipe = _PartialGroupPipe(removable=False)
+    with pytest.raises(OffloadUnavailable) as caught:
+        install_low_vram_offload(pipe)
+    assert isinstance(caught.value.__cause__, RuntimeError)
+    assert [kind for kind, _ in pipe.calls] == ["group"]

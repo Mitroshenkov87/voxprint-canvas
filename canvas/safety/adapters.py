@@ -339,7 +339,7 @@ class FairFaceAge:
 
 
 class NsfwViT:
-    """``Falconsai/nsfw_image_detection`` (MIT). Not NudeNet."""
+    """``Falconsai/nsfw_image_detection`` (Apache-2.0). Not NudeNet."""
 
     model_id = REPO_NSFW
 

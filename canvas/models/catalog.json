@@ -980,7 +980,7 @@
       "role": "face-detector",
       "tier": "any",
       "repo": "opencv/face_detection_yunet",
-      "revision": "2023mar",
+      "revision": "47534e27c9851bb1128ccc0102f1145e27f23f98",
       "licence": "MIT",
       "runtime": "opencv",
       "device": "cpu",
@@ -991,7 +991,7 @@
           "sha256": "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4",
           "size": 232589,
           "mirror": "-",
-          "upstream": "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx"
+          "upstream": "https://github.com/opencv/opencv_zoo/raw/47534e27c9851bb1128ccc0102f1145e27f23f98/models/face_detection_yunet/face_detection_yunet_2023mar.onnx"
         }
       },
       "sources": [
@@ -1001,7 +1001,7 @@
         },
         {
           "kind": "upstream",
-          "uri": "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx"
+          "uri": "https://github.com/opencv/opencv_zoo/raw/47534e27c9851bb1128ccc0102f1145e27f23f98/models/face_detection_yunet/face_detection_yunet_2023mar.onnx"
         },
         {
           "kind": "huggingface",
@@ -1081,7 +1081,7 @@
       "tier": "any",
       "repo": "Falconsai/nsfw_image_detection",
       "revision": "96cb0d0342c7afb80cab76ecc58b265fa44da256",
-      "licence": "MIT",
+      "licence": "Apache-2.0",
       "runtime": "transformers",
       "device": "cpu",
       "vram_hint_gb": 1,

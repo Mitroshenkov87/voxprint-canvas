@@ -16,6 +16,7 @@
           "size": 467,
           "sha256": "18a90e1bc117a29a8b7961bb200c86ff0b9704609e87c7171511dc724fcdc9d3",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/model_index.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/model_index.json"
           ]
         },
@@ -24,6 +25,7 @@
           "size": 173,
           "sha256": "3b979ab0956e4f5e8d02ec409ac6a4ece1555191d15bd10788fdc85fea5d13fc",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/scheduler/scheduler_config.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/scheduler/scheduler_config.json"
           ]
         },
@@ -32,7 +34,7 @@
           "size": 726,
           "sha256": "8ba006f74fecfaaeb392872a60f4a480e7ec9860153d2e1b769ec81f9a147f8a",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/text_encoder/config.json",
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/text_encoder/config.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/text_encoder/config.json"
           ]
         },
@@ -41,7 +43,7 @@
           "size": 239,
           "sha256": "2325da0f15bb848e018c5ae071b7943332e9f871d6b60e2ed22ca97d4cb993d2",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/text_encoder/generation_config.json",
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/text_encoder/generation_config.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/text_encoder/generation_config.json"
           ]
         },
@@ -50,7 +52,7 @@
           "size": 3957900840,
           "sha256": "328a91d3122359d5547f9d79521205bc0a46e1f79a792dfe650e99fc2d651223",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/text_encoder/model-00001-of-00003.safetensors",
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/text_encoder/model-00001-of-00003.safetensors",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/text_encoder/model-00001-of-00003.safetensors"
           ]
         },
@@ -59,7 +61,7 @@
           "size": 3987450520,
           "sha256": "6cd087b316306a68c562436b5492edbcf6e16c6dba3a1308279caa5a58e21ca5",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/text_encoder/model-00002-of-00003.safetensors",
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/text_encoder/model-00002-of-00003.safetensors",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/text_encoder/model-00002-of-00003.safetensors"
           ]
         },
@@ -68,7 +70,7 @@
           "size": 99630640,
           "sha256": "7ca841ee75b9c61267c0c6148fd8d096d3d21b6d3e161256a9b878154f91fc52",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/text_encoder/model-00003-of-00003.safetensors",
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/text_encoder/model-00003-of-00003.safetensors",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/text_encoder/model-00003-of-00003.safetensors"
           ]
         },
@@ -77,7 +79,7 @@
           "size": 32819,
           "sha256": "6dc0981b8829fead746441f68f38f24c5ca4a3a66351f652c26c6df0efc43ab2",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/text_encoder/model.safetensors.index.json",
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/text_encoder/model.safetensors.index.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/text_encoder/model.safetensors.index.json"
           ]
         },
@@ -86,7 +88,7 @@
           "size": 1671853,
           "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/tokenizer/merges.txt",
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/tokenizer/merges.txt",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/tokenizer/merges.txt"
           ]
         },
@@ -95,7 +97,7 @@
           "size": 11422654,
           "sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/tokenizer/tokenizer.json",
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/tokenizer/tokenizer.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/tokenizer/tokenizer.json"
           ]
         },
@@ -104,7 +106,7 @@
           "size": 9732,
           "sha256": "d5d09f07b48c3086c508b30d1c9114bd1189145b74e982a265350c923acd8101",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/tokenizer/tokenizer_config.json",
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/tokenizer/tokenizer_config.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/tokenizer/tokenizer_config.json"
           ]
         },
@@ -113,7 +115,7 @@
           "size": 2776833,
           "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/tokenizer/vocab.json",
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/tokenizer/vocab.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/tokenizer/vocab.json"
           ]
         },
@@ -122,7 +124,7 @@
           "size": 473,
           "sha256": "06d49d1ae533f825c4704cc616fc8bc7826e9d449dde292cc7a95163c69af24a",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/zimage-turbo-transformer-bf16.config.json",
+            "https://huggingface.co/Mitroshenkov87/voxprint-z-image-turbo-bf16/resolve/b6a12e018b150c9790626286daeaa1149d1ae598/transformer/config.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/transformer/config.json"
           ]
         },
@@ -131,7 +133,7 @@
           "size": 4994754240,
           "sha256": "d38279715f7d31232fd14602dec2810f91bf2b4ec2d2960ff9501d3d939f7357",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/zimage-turbo-transformer-bf16-00001-of-00003.safetensors"
+            "https://huggingface.co/Mitroshenkov87/voxprint-z-image-turbo-bf16/resolve/b6a12e018b150c9790626286daeaa1149d1ae598/transformer/diffusion_pytorch_model-00001-of-00003.safetensors"
           ]
         },
         {
@@ -139,7 +141,7 @@
           "size": 4986883624,
           "sha256": "880479ddfe46e2dda2b289d7f90d0d9e1f2a5db91efa0cec407fc5ef72cfa531",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/zimage-turbo-transformer-bf16-00002-of-00003.safetensors"
+            "https://huggingface.co/Mitroshenkov87/voxprint-z-image-turbo-bf16/resolve/b6a12e018b150c9790626286daeaa1149d1ae598/transformer/diffusion_pytorch_model-00002-of-00003.safetensors"
           ]
         },
         {
@@ -147,7 +149,7 @@
           "size": 2328235888,
           "sha256": "47da630f1e9cba51bf2726aed068916904b2627f4994776a332e7635369f10a1",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/zimage-turbo-transformer-bf16-00003-of-00003.safetensors"
+            "https://huggingface.co/Mitroshenkov87/voxprint-z-image-turbo-bf16/resolve/b6a12e018b150c9790626286daeaa1149d1ae598/transformer/diffusion_pytorch_model-00003-of-00003.safetensors"
           ]
         },
         {
@@ -155,7 +157,7 @@
           "size": 45821,
           "sha256": "1ae53cb8899b503c9443391868b9f0f55fda7d38d8f7a7f4caaba28305ff7fb7",
           "mirrors": [
-            "https://raw.githubusercontent.com/Mitroshenkov87/voxprint-canvas/159df97ad0d3d0f0324a747d739fe69061b4bbf7/canvas/models/turbo_transformer_index.json"
+            "https://huggingface.co/Mitroshenkov87/voxprint-z-image-turbo-bf16/resolve/b6a12e018b150c9790626286daeaa1149d1ae598/transformer/diffusion_pytorch_model.safetensors.index.json"
           ]
         },
         {
@@ -163,7 +165,7 @@
           "size": 805,
           "sha256": "e80af1e64a71883a9d10c3159d2e493e5934508da57852f6a180ae6ae63b14bd",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/vae/config.json",
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/vae/config.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/vae/config.json"
           ]
         },
@@ -172,7 +174,7 @@
           "size": 167666902,
           "sha256": "f5b59a26851551b67ae1fe58d32e76486e1e812def4696a4bea97f16604d40a3",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/vae/diffusion_pytorch_model.safetensors",
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/vae/diffusion_pytorch_model.safetensors",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/vae/diffusion_pytorch_model.safetensors"
           ]
         }
@@ -191,6 +193,7 @@
           "size": 467,
           "sha256": "18a90e1bc117a29a8b7961bb200c86ff0b9704609e87c7171511dc724fcdc9d3",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/model_index.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/model_index.json"
           ]
         },
@@ -199,6 +202,7 @@
           "size": 173,
           "sha256": "3b979ab0956e4f5e8d02ec409ac6a4ece1555191d15bd10788fdc85fea5d13fc",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/scheduler/scheduler_config.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/scheduler/scheduler_config.json"
           ]
         },
@@ -207,6 +211,7 @@
           "size": 726,
           "sha256": "8ba006f74fecfaaeb392872a60f4a480e7ec9860153d2e1b769ec81f9a147f8a",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/text_encoder/config.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/text_encoder/config.json"
           ]
         },
@@ -215,6 +220,7 @@
           "size": 239,
           "sha256": "2325da0f15bb848e018c5ae071b7943332e9f871d6b60e2ed22ca97d4cb993d2",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/text_encoder/generation_config.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/text_encoder/generation_config.json"
           ]
         },
@@ -223,6 +229,7 @@
           "size": 3957900840,
           "sha256": "328a91d3122359d5547f9d79521205bc0a46e1f79a792dfe650e99fc2d651223",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/text_encoder/model-00001-of-00003.safetensors",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/text_encoder/model-00001-of-00003.safetensors"
           ]
         },
@@ -231,6 +238,7 @@
           "size": 3987450520,
           "sha256": "6cd087b316306a68c562436b5492edbcf6e16c6dba3a1308279caa5a58e21ca5",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/text_encoder/model-00002-of-00003.safetensors",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/text_encoder/model-00002-of-00003.safetensors"
           ]
         },
@@ -239,6 +247,7 @@
           "size": 99630640,
           "sha256": "7ca841ee75b9c61267c0c6148fd8d096d3d21b6d3e161256a9b878154f91fc52",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/text_encoder/model-00003-of-00003.safetensors",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/text_encoder/model-00003-of-00003.safetensors"
           ]
         },
@@ -247,6 +256,7 @@
           "size": 32819,
           "sha256": "6dc0981b8829fead746441f68f38f24c5ca4a3a66351f652c26c6df0efc43ab2",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/text_encoder/model.safetensors.index.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/text_encoder/model.safetensors.index.json"
           ]
         },
@@ -255,6 +265,7 @@
           "size": 1671853,
           "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/tokenizer/merges.txt",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/tokenizer/merges.txt"
           ]
         },
@@ -263,6 +274,7 @@
           "size": 11422654,
           "sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/tokenizer/tokenizer.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/tokenizer/tokenizer.json"
           ]
         },
@@ -271,6 +283,7 @@
           "size": 9732,
           "sha256": "d5d09f07b48c3086c508b30d1c9114bd1189145b74e982a265350c923acd8101",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/tokenizer/tokenizer_config.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/tokenizer/tokenizer_config.json"
           ]
         },
@@ -279,6 +292,7 @@
           "size": 2776833,
           "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/tokenizer/vocab.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/tokenizer/vocab.json"
           ]
         },
@@ -287,6 +301,7 @@
           "size": 473,
           "sha256": "06d49d1ae533f825c4704cc616fc8bc7826e9d449dde292cc7a95163c69af24a",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/transformer/config.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/transformer/config.json"
           ]
         },
@@ -295,6 +310,7 @@
           "size": 9973693184,
           "sha256": "95facd593e2549e8252acb571c653d57f7ddb7f1060d4e81712f152555a88804",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/transformer/diffusion_pytorch_model-00001-of-00003.safetensors",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/transformer/diffusion_pytorch_model-00001-of-00003.safetensors"
           ]
         },
@@ -303,6 +319,7 @@
           "size": 9973714824,
           "sha256": "a4bbe43ee184a1fb5af4b412d27555f532893bdc3165b1149e304ed82b5d7015",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/transformer/diffusion_pytorch_model-00002-of-00003.safetensors",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/transformer/diffusion_pytorch_model-00002-of-00003.safetensors"
           ]
         },
@@ -311,6 +328,7 @@
           "size": 4672282880,
           "sha256": "aba4e37a590e63210878160a718d916d80398f4e1f78ab6c9b2b2a00d92769fa",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/transformer/diffusion_pytorch_model-00003-of-00003.safetensors",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/transformer/diffusion_pytorch_model-00003-of-00003.safetensors"
           ]
         },
@@ -319,6 +337,7 @@
           "size": 48969,
           "sha256": "182a119d8018bfc61c9a62685a384af3b7d4a2f8aabbe766e07c9e1eda5b97ab",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/transformer/diffusion_pytorch_model.safetensors.index.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/transformer/diffusion_pytorch_model.safetensors.index.json"
           ]
         },
@@ -327,6 +346,7 @@
           "size": 805,
           "sha256": "e80af1e64a71883a9d10c3159d2e493e5934508da57852f6a180ae6ae63b14bd",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/vae/config.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/vae/config.json"
           ]
         },
@@ -335,6 +355,7 @@
           "size": 167666902,
           "sha256": "f5b59a26851551b67ae1fe58d32e76486e1e812def4696a4bea97f16604d40a3",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/vae/diffusion_pytorch_model.safetensors",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/vae/diffusion_pytorch_model.safetensors"
           ]
         }
@@ -353,6 +374,7 @@
           "size": 467,
           "sha256": "18a90e1bc117a29a8b7961bb200c86ff0b9704609e87c7171511dc724fcdc9d3",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/model_index.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/model_index.json"
           ]
         },
@@ -361,6 +383,7 @@
           "size": 173,
           "sha256": "3b979ab0956e4f5e8d02ec409ac6a4ece1555191d15bd10788fdc85fea5d13fc",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/scheduler/scheduler_config.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/scheduler/scheduler_config.json"
           ]
         },
@@ -369,7 +392,7 @@
           "size": 726,
           "sha256": "8ba006f74fecfaaeb392872a60f4a480e7ec9860153d2e1b769ec81f9a147f8a",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/text_encoder/config.json",
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/text_encoder/config.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/text_encoder/config.json"
           ]
         },
@@ -378,7 +401,7 @@
           "size": 239,
           "sha256": "2325da0f15bb848e018c5ae071b7943332e9f871d6b60e2ed22ca97d4cb993d2",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/text_encoder/generation_config.json",
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/text_encoder/generation_config.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/text_encoder/generation_config.json"
           ]
         },
@@ -387,7 +410,7 @@
           "size": 3957900840,
           "sha256": "328a91d3122359d5547f9d79521205bc0a46e1f79a792dfe650e99fc2d651223",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/text_encoder/model-00001-of-00003.safetensors",
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/text_encoder/model-00001-of-00003.safetensors",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/text_encoder/model-00001-of-00003.safetensors"
           ]
         },
@@ -396,7 +419,7 @@
           "size": 3987450520,
           "sha256": "6cd087b316306a68c562436b5492edbcf6e16c6dba3a1308279caa5a58e21ca5",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/text_encoder/model-00002-of-00003.safetensors",
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/text_encoder/model-00002-of-00003.safetensors",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/text_encoder/model-00002-of-00003.safetensors"
           ]
         },
@@ -405,7 +428,7 @@
           "size": 99630640,
           "sha256": "7ca841ee75b9c61267c0c6148fd8d096d3d21b6d3e161256a9b878154f91fc52",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/text_encoder/model-00003-of-00003.safetensors",
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/text_encoder/model-00003-of-00003.safetensors",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/text_encoder/model-00003-of-00003.safetensors"
           ]
         },
@@ -414,7 +437,7 @@
           "size": 32819,
           "sha256": "6dc0981b8829fead746441f68f38f24c5ca4a3a66351f652c26c6df0efc43ab2",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/text_encoder/model.safetensors.index.json",
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/text_encoder/model.safetensors.index.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/text_encoder/model.safetensors.index.json"
           ]
         },
@@ -423,7 +446,7 @@
           "size": 1671853,
           "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/tokenizer/merges.txt",
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/tokenizer/merges.txt",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/tokenizer/merges.txt"
           ]
         },
@@ -432,7 +455,7 @@
           "size": 11422654,
           "sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/tokenizer/tokenizer.json",
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/tokenizer/tokenizer.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/tokenizer/tokenizer.json"
           ]
         },
@@ -441,7 +464,7 @@
           "size": 9732,
           "sha256": "d5d09f07b48c3086c508b30d1c9114bd1189145b74e982a265350c923acd8101",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/tokenizer/tokenizer_config.json",
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/tokenizer/tokenizer_config.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/tokenizer/tokenizer_config.json"
           ]
         },
@@ -450,7 +473,7 @@
           "size": 2776833,
           "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/tokenizer/vocab.json",
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/tokenizer/vocab.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/tokenizer/vocab.json"
           ]
         },
@@ -459,7 +482,7 @@
           "size": 473,
           "sha256": "06d49d1ae533f825c4704cc616fc8bc7826e9d449dde292cc7a95163c69af24a",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/zimage-turbo-transformer-bf16.config.json",
+            "https://huggingface.co/Mitroshenkov87/voxprint-z-image-turbo-bf16/resolve/b6a12e018b150c9790626286daeaa1149d1ae598/transformer/config.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/transformer/config.json"
           ]
         },
@@ -468,7 +491,7 @@
           "size": 4994754240,
           "sha256": "d38279715f7d31232fd14602dec2810f91bf2b4ec2d2960ff9501d3d939f7357",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/zimage-turbo-transformer-bf16-00001-of-00003.safetensors"
+            "https://huggingface.co/Mitroshenkov87/voxprint-z-image-turbo-bf16/resolve/b6a12e018b150c9790626286daeaa1149d1ae598/transformer/diffusion_pytorch_model-00001-of-00003.safetensors"
           ]
         },
         {
@@ -476,7 +499,7 @@
           "size": 4986883624,
           "sha256": "880479ddfe46e2dda2b289d7f90d0d9e1f2a5db91efa0cec407fc5ef72cfa531",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/zimage-turbo-transformer-bf16-00002-of-00003.safetensors"
+            "https://huggingface.co/Mitroshenkov87/voxprint-z-image-turbo-bf16/resolve/b6a12e018b150c9790626286daeaa1149d1ae598/transformer/diffusion_pytorch_model-00002-of-00003.safetensors"
           ]
         },
         {
@@ -484,7 +507,7 @@
           "size": 2328235888,
           "sha256": "47da630f1e9cba51bf2726aed068916904b2627f4994776a332e7635369f10a1",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/zimage-turbo-transformer-bf16-00003-of-00003.safetensors"
+            "https://huggingface.co/Mitroshenkov87/voxprint-z-image-turbo-bf16/resolve/b6a12e018b150c9790626286daeaa1149d1ae598/transformer/diffusion_pytorch_model-00003-of-00003.safetensors"
           ]
         },
         {
@@ -492,7 +515,7 @@
           "size": 45821,
           "sha256": "1ae53cb8899b503c9443391868b9f0f55fda7d38d8f7a7f4caaba28305ff7fb7",
           "mirrors": [
-            "https://raw.githubusercontent.com/Mitroshenkov87/voxprint-canvas/159df97ad0d3d0f0324a747d739fe69061b4bbf7/canvas/models/turbo_transformer_index.json"
+            "https://huggingface.co/Mitroshenkov87/voxprint-z-image-turbo-bf16/resolve/b6a12e018b150c9790626286daeaa1149d1ae598/transformer/diffusion_pytorch_model.safetensors.index.json"
           ]
         },
         {
@@ -500,7 +523,7 @@
           "size": 805,
           "sha256": "e80af1e64a71883a9d10c3159d2e493e5934508da57852f6a180ae6ae63b14bd",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/vae/config.json",
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/vae/config.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/vae/config.json"
           ]
         },
@@ -509,7 +532,7 @@
           "size": 167666902,
           "sha256": "f5b59a26851551b67ae1fe58d32e76486e1e812def4696a4bea97f16604d40a3",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/vae/diffusion_pytorch_model.safetensors",
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/vae/diffusion_pytorch_model.safetensors",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/vae/diffusion_pytorch_model.safetensors"
           ]
         }
@@ -528,6 +551,7 @@
           "size": 467,
           "sha256": "18a90e1bc117a29a8b7961bb200c86ff0b9704609e87c7171511dc724fcdc9d3",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/model_index.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/model_index.json"
           ]
         },
@@ -536,6 +560,7 @@
           "size": 173,
           "sha256": "3b979ab0956e4f5e8d02ec409ac6a4ece1555191d15bd10788fdc85fea5d13fc",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/scheduler/scheduler_config.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/scheduler/scheduler_config.json"
           ]
         },
@@ -544,6 +569,7 @@
           "size": 726,
           "sha256": "8ba006f74fecfaaeb392872a60f4a480e7ec9860153d2e1b769ec81f9a147f8a",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/text_encoder/config.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/text_encoder/config.json"
           ]
         },
@@ -552,6 +578,7 @@
           "size": 239,
           "sha256": "2325da0f15bb848e018c5ae071b7943332e9f871d6b60e2ed22ca97d4cb993d2",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/text_encoder/generation_config.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/text_encoder/generation_config.json"
           ]
         },
@@ -560,6 +587,7 @@
           "size": 3957900840,
           "sha256": "328a91d3122359d5547f9d79521205bc0a46e1f79a792dfe650e99fc2d651223",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/text_encoder/model-00001-of-00003.safetensors",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/text_encoder/model-00001-of-00003.safetensors"
           ]
         },
@@ -568,6 +596,7 @@
           "size": 3987450520,
           "sha256": "6cd087b316306a68c562436b5492edbcf6e16c6dba3a1308279caa5a58e21ca5",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/text_encoder/model-00002-of-00003.safetensors",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/text_encoder/model-00002-of-00003.safetensors"
           ]
         },
@@ -576,6 +605,7 @@
           "size": 99630640,
           "sha256": "7ca841ee75b9c61267c0c6148fd8d096d3d21b6d3e161256a9b878154f91fc52",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/text_encoder/model-00003-of-00003.safetensors",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/text_encoder/model-00003-of-00003.safetensors"
           ]
         },
@@ -584,6 +614,7 @@
           "size": 32819,
           "sha256": "6dc0981b8829fead746441f68f38f24c5ca4a3a66351f652c26c6df0efc43ab2",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/text_encoder/model.safetensors.index.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/text_encoder/model.safetensors.index.json"
           ]
         },
@@ -592,6 +623,7 @@
           "size": 1671853,
           "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/tokenizer/merges.txt",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/tokenizer/merges.txt"
           ]
         },
@@ -600,6 +632,7 @@
           "size": 11422654,
           "sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/tokenizer/tokenizer.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/tokenizer/tokenizer.json"
           ]
         },
@@ -608,6 +641,7 @@
           "size": 9732,
           "sha256": "d5d09f07b48c3086c508b30d1c9114bd1189145b74e982a265350c923acd8101",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/tokenizer/tokenizer_config.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/tokenizer/tokenizer_config.json"
           ]
         },
@@ -616,6 +650,7 @@
           "size": 2776833,
           "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/tokenizer/vocab.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/tokenizer/vocab.json"
           ]
         },
@@ -624,6 +659,7 @@
           "size": 473,
           "sha256": "06d49d1ae533f825c4704cc616fc8bc7826e9d449dde292cc7a95163c69af24a",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/transformer/config.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/transformer/config.json"
           ]
         },
@@ -632,6 +668,7 @@
           "size": 9973693184,
           "sha256": "95facd593e2549e8252acb571c653d57f7ddb7f1060d4e81712f152555a88804",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/transformer/diffusion_pytorch_model-00001-of-00003.safetensors",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/transformer/diffusion_pytorch_model-00001-of-00003.safetensors"
           ]
         },
@@ -640,6 +677,7 @@
           "size": 9973714824,
           "sha256": "a4bbe43ee184a1fb5af4b412d27555f532893bdc3165b1149e304ed82b5d7015",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/transformer/diffusion_pytorch_model-00002-of-00003.safetensors",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/transformer/diffusion_pytorch_model-00002-of-00003.safetensors"
           ]
         },
@@ -648,6 +686,7 @@
           "size": 4672282880,
           "sha256": "aba4e37a590e63210878160a718d916d80398f4e1f78ab6c9b2b2a00d92769fa",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/transformer/diffusion_pytorch_model-00003-of-00003.safetensors",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/transformer/diffusion_pytorch_model-00003-of-00003.safetensors"
           ]
         },
@@ -656,6 +695,7 @@
           "size": 48969,
           "sha256": "182a119d8018bfc61c9a62685a384af3b7d4a2f8aabbe766e07c9e1eda5b97ab",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/transformer/diffusion_pytorch_model.safetensors.index.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/transformer/diffusion_pytorch_model.safetensors.index.json"
           ]
         },
@@ -664,6 +704,7 @@
           "size": 805,
           "sha256": "e80af1e64a71883a9d10c3159d2e493e5934508da57852f6a180ae6ae63b14bd",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/vae/config.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/vae/config.json"
           ]
         },
@@ -672,6 +713,7 @@
           "size": 167666902,
           "sha256": "f5b59a26851551b67ae1fe58d32e76486e1e812def4696a4bea97f16604d40a3",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/vae/diffusion_pytorch_model.safetensors",
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/vae/diffusion_pytorch_model.safetensors"
           ]
         }
@@ -706,7 +748,7 @@
           "size": 726,
           "sha256": "8ba006f74fecfaaeb392872a60f4a480e7ec9860153d2e1b769ec81f9a147f8a",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/text_encoder/config.json",
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/text_encoder/config.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image/resolve/04cc4abb7c5069926f75c9bfde9ef43d49423021/text_encoder/config.json"
           ]
         },
@@ -715,7 +757,7 @@
           "size": 239,
           "sha256": "2325da0f15bb848e018c5ae071b7943332e9f871d6b60e2ed22ca97d4cb993d2",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/text_encoder/generation_config.json",
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/text_encoder/generation_config.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image/resolve/04cc4abb7c5069926f75c9bfde9ef43d49423021/text_encoder/generation_config.json"
           ]
         },
@@ -724,7 +766,7 @@
           "size": 3957900840,
           "sha256": "328a91d3122359d5547f9d79521205bc0a46e1f79a792dfe650e99fc2d651223",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/text_encoder/model-00001-of-00003.safetensors",
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/text_encoder/model-00001-of-00003.safetensors",
             "https://huggingface.co/Tongyi-MAI/Z-Image/resolve/04cc4abb7c5069926f75c9bfde9ef43d49423021/text_encoder/model-00001-of-00003.safetensors"
           ]
         },
@@ -733,7 +775,7 @@
           "size": 3987450520,
           "sha256": "6cd087b316306a68c562436b5492edbcf6e16c6dba3a1308279caa5a58e21ca5",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/text_encoder/model-00002-of-00003.safetensors",
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/text_encoder/model-00002-of-00003.safetensors",
             "https://huggingface.co/Tongyi-MAI/Z-Image/resolve/04cc4abb7c5069926f75c9bfde9ef43d49423021/text_encoder/model-00002-of-00003.safetensors"
           ]
         },
@@ -742,7 +784,7 @@
           "size": 99630640,
           "sha256": "7ca841ee75b9c61267c0c6148fd8d096d3d21b6d3e161256a9b878154f91fc52",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/text_encoder/model-00003-of-00003.safetensors",
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/text_encoder/model-00003-of-00003.safetensors",
             "https://huggingface.co/Tongyi-MAI/Z-Image/resolve/04cc4abb7c5069926f75c9bfde9ef43d49423021/text_encoder/model-00003-of-00003.safetensors"
           ]
         },
@@ -751,7 +793,7 @@
           "size": 32819,
           "sha256": "6dc0981b8829fead746441f68f38f24c5ca4a3a66351f652c26c6df0efc43ab2",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/text_encoder/model.safetensors.index.json",
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/text_encoder/model.safetensors.index.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image/resolve/04cc4abb7c5069926f75c9bfde9ef43d49423021/text_encoder/model.safetensors.index.json"
           ]
         },
@@ -760,7 +802,7 @@
           "size": 1671853,
           "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/tokenizer/merges.txt",
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/tokenizer/merges.txt",
             "https://huggingface.co/Tongyi-MAI/Z-Image/resolve/04cc4abb7c5069926f75c9bfde9ef43d49423021/tokenizer/merges.txt"
           ]
         },
@@ -769,7 +811,7 @@
           "size": 11422654,
           "sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/tokenizer/tokenizer.json",
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/tokenizer/tokenizer.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image/resolve/04cc4abb7c5069926f75c9bfde9ef43d49423021/tokenizer/tokenizer.json"
           ]
         },
@@ -778,7 +820,7 @@
           "size": 9732,
           "sha256": "d5d09f07b48c3086c508b30d1c9114bd1189145b74e982a265350c923acd8101",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/tokenizer/tokenizer_config.json",
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/tokenizer/tokenizer_config.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image/resolve/04cc4abb7c5069926f75c9bfde9ef43d49423021/tokenizer/tokenizer_config.json"
           ]
         },
@@ -787,7 +829,7 @@
           "size": 2776833,
           "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/tokenizer/vocab.json",
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/tokenizer/vocab.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image/resolve/04cc4abb7c5069926f75c9bfde9ef43d49423021/tokenizer/vocab.json"
           ]
         },
@@ -796,7 +838,7 @@
           "size": 500,
           "sha256": "2cf1166cbc4a597de70c8f6ee9bc5e792a43a3eceb0ec0a2a3cd30591142443c",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/zimage-transformer-bf16/config.json",
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/zimage-transformer-bf16/config.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image/resolve/04cc4abb7c5069926f75c9bfde9ef43d49423021/transformer/config.json"
           ]
         },
@@ -805,7 +847,7 @@
           "size": 9973727144,
           "sha256": "ecd5df7768856215812af84d5cc785ba9d84c6d8c84e6939c7ccf30a2e0d2425",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/zimage-transformer-bf16/diffusion_pytorch_model-00001-of-00002.safetensors",
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/zimage-transformer-bf16/diffusion_pytorch_model-00001-of-00002.safetensors",
             "https://huggingface.co/Tongyi-MAI/Z-Image/resolve/04cc4abb7c5069926f75c9bfde9ef43d49423021/transformer/diffusion_pytorch_model-00001-of-00002.safetensors"
           ]
         },
@@ -814,7 +856,7 @@
           "size": 2336146728,
           "sha256": "e2d5fb75ca504b2d669a33af9380b68e0c1632ecddbfca85f82631958a4b81b1",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/zimage-transformer-bf16/diffusion_pytorch_model-00002-of-00002.safetensors",
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/zimage-transformer-bf16/diffusion_pytorch_model-00002-of-00002.safetensors",
             "https://huggingface.co/Tongyi-MAI/Z-Image/resolve/04cc4abb7c5069926f75c9bfde9ef43d49423021/transformer/diffusion_pytorch_model-00002-of-00002.safetensors"
           ]
         },
@@ -823,7 +865,7 @@
           "size": 48969,
           "sha256": "8edf79f7a11cc6dbc5f080f1f8bce44bfcd3c1d9a472d6724ff76b65b359fea4",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/zimage-transformer-bf16/diffusion_pytorch_model.safetensors.index.json",
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/zimage-transformer-bf16/diffusion_pytorch_model.safetensors.index.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image/resolve/04cc4abb7c5069926f75c9bfde9ef43d49423021/transformer/diffusion_pytorch_model.safetensors.index.json"
           ]
         },
@@ -832,7 +874,7 @@
           "size": 820,
           "sha256": "ad6f0acb584ceb3d136d1e32b684dec65db24bffe9223df2bac0b45539d4e6b5",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/zimage-vae/config.json",
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/zimage-vae/config.json",
             "https://huggingface.co/Tongyi-MAI/Z-Image/resolve/04cc4abb7c5069926f75c9bfde9ef43d49423021/vae/config.json"
           ]
         },
@@ -841,7 +883,7 @@
           "size": 167666902,
           "sha256": "f5b59a26851551b67ae1fe58d32e76486e1e812def4696a4bea97f16604d40a3",
           "mirrors": [
-            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/588702b873e82c328ab82c76742bf67843411f37/vae/diffusion_pytorch_model.safetensors",
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/vae/diffusion_pytorch_model.safetensors",
             "https://huggingface.co/Tongyi-MAI/Z-Image/resolve/04cc4abb7c5069926f75c9bfde9ef43d49423021/vae/diffusion_pytorch_model.safetensors"
           ]
         }
@@ -860,6 +902,7 @@
           "size": 2016627488,
           "sha256": "3ea098db9bd145be525c7e2366920b6d76c5ffd46b3d7aa8169bbc943fdaee35",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo-controlnet-union-2.1/resolve/34c99d2bcaa323341a4c0df5f867d049f420333a/Z-Image-Turbo-Fun-Controlnet-Union-2.1-lite-2602-8steps.safetensors",
             "https://huggingface.co/alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union-2.1/resolve/5155fc56d17821007d6f62ac192c09e0f0e72016/Z-Image-Turbo-Fun-Controlnet-Union-2.1-lite-2602-8steps.safetensors"
           ]
         }
@@ -878,6 +921,7 @@
           "size": 6712485600,
           "sha256": "d1251cc7bc3486bc61d25c3be498ef394c31c85ddf4ee9137d2e933411f4a689",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo-controlnet-union-2.1/resolve/34c99d2bcaa323341a4c0df5f867d049f420333a/Z-Image-Turbo-Fun-Controlnet-Union-2.1-2602-8steps.safetensors",
             "https://huggingface.co/alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union-2.1/resolve/5155fc56d17821007d6f62ac192c09e0f0e72016/Z-Image-Turbo-Fun-Controlnet-Union-2.1-2602-8steps.safetensors"
           ]
         }
@@ -896,6 +940,7 @@
           "size": 727,
           "sha256": "4674816bdf440c113a9ca87aedfa069b67f7cabbd89e71da7d4e4a68adce4af4",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-qwen3guard-gen-0.6b/resolve/1e5fb12633c55f4cb07fd22445839226c30efbeb/config.json",
             "https://huggingface.co/Qwen/Qwen3Guard-Gen-0.6B/resolve/fada3b2f655b89601929198343c94cd2f64d93cc/config.json"
           ]
         },
@@ -904,6 +949,7 @@
           "size": 161,
           "sha256": "5f0bc42aae9f779d06bf620ce685a02cb0cde802d0f27f05c7331aaf0e1fd2d7",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-qwen3guard-gen-0.6b/resolve/1e5fb12633c55f4cb07fd22445839226c30efbeb/generation_config.json",
             "https://huggingface.co/Qwen/Qwen3Guard-Gen-0.6B/resolve/fada3b2f655b89601929198343c94cd2f64d93cc/generation_config.json"
           ]
         },
@@ -912,6 +958,7 @@
           "size": 1671853,
           "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-qwen3guard-gen-0.6b/resolve/1e5fb12633c55f4cb07fd22445839226c30efbeb/merges.txt",
             "https://huggingface.co/Qwen/Qwen3Guard-Gen-0.6B/resolve/fada3b2f655b89601929198343c94cd2f64d93cc/merges.txt"
           ]
         },
@@ -920,6 +967,7 @@
           "size": 1503300328,
           "sha256": "4f3ce47ebd968cddb67de08d8764f8ede7c410a7d1fb9e08145a4c7a2f2e5c0f",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-qwen3guard-gen-0.6b/resolve/1e5fb12633c55f4cb07fd22445839226c30efbeb/model.safetensors",
             "https://huggingface.co/Qwen/Qwen3Guard-Gen-0.6B/resolve/fada3b2f655b89601929198343c94cd2f64d93cc/model.safetensors"
           ]
         },
@@ -928,6 +976,7 @@
           "size": 11422654,
           "sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-qwen3guard-gen-0.6b/resolve/1e5fb12633c55f4cb07fd22445839226c30efbeb/tokenizer.json",
             "https://huggingface.co/Qwen/Qwen3Guard-Gen-0.6B/resolve/fada3b2f655b89601929198343c94cd2f64d93cc/tokenizer.json"
           ]
         },
@@ -936,6 +985,7 @@
           "size": 9601,
           "sha256": "934e187433b06c5d28519e0347dd293084cf28621f00a86ae7e24e42f8b53e81",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-qwen3guard-gen-0.6b/resolve/1e5fb12633c55f4cb07fd22445839226c30efbeb/tokenizer_config.json",
             "https://huggingface.co/Qwen/Qwen3Guard-Gen-0.6B/resolve/fada3b2f655b89601929198343c94cd2f64d93cc/tokenizer_config.json"
           ]
         },
@@ -944,6 +994,7 @@
           "size": 2776833,
           "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-qwen3guard-gen-0.6b/resolve/1e5fb12633c55f4cb07fd22445839226c30efbeb/vocab.json",
             "https://huggingface.co/Qwen/Qwen3Guard-Gen-0.6B/resolve/fada3b2f655b89601929198343c94cd2f64d93cc/vocab.json"
           ]
         }
@@ -962,6 +1013,7 @@
           "size": 559,
           "sha256": "73477b47ae9a395f008f993ebd8fb5c16ce0b5e8419ffdf2f5b2183b260f9cff",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-siglip2-so400m-patch14-384/resolve/9c2b8022209e02798ce8cb10206de07c725caa59/config.json",
             "https://huggingface.co/google/siglip2-so400m-patch14-384/resolve/e8e487298228002f3d8a82e0cd5c8ea9c567f57f/config.json"
           ]
         },
@@ -970,6 +1022,7 @@
           "size": 4544143072,
           "sha256": "9f4f4a49f908ef0c979bce8ff5a5c0e88882dc6c5dc4304387cbbd152558e2c2",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-siglip2-so400m-patch14-384/resolve/9c2b8022209e02798ce8cb10206de07c725caa59/model.safetensors",
             "https://huggingface.co/google/siglip2-so400m-patch14-384/resolve/e8e487298228002f3d8a82e0cd5c8ea9c567f57f/model.safetensors"
           ]
         },
@@ -978,6 +1031,7 @@
           "size": 394,
           "sha256": "fb2817d3523ca3b666c859f15320c7138416bc38ffc515e2963f78c868c51c90",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-siglip2-so400m-patch14-384/resolve/9c2b8022209e02798ce8cb10206de07c725caa59/preprocessor_config.json",
             "https://huggingface.co/google/siglip2-so400m-patch14-384/resolve/e8e487298228002f3d8a82e0cd5c8ea9c567f57f/preprocessor_config.json"
           ]
         },
@@ -986,6 +1040,7 @@
           "size": 636,
           "sha256": "baec30ea10906f16adb8c18af7a34023002c1746542612b8b41c9f09e1351351",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-siglip2-so400m-patch14-384/resolve/9c2b8022209e02798ce8cb10206de07c725caa59/special_tokens_map.json",
             "https://huggingface.co/google/siglip2-so400m-patch14-384/resolve/e8e487298228002f3d8a82e0cd5c8ea9c567f57f/special_tokens_map.json"
           ]
         },
@@ -994,6 +1049,7 @@
           "size": 34363039,
           "sha256": "cb9140fae3ac5122c972d37adf83e1248471a38147ad76f8215c8872c6fd8322",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-siglip2-so400m-patch14-384/resolve/9c2b8022209e02798ce8cb10206de07c725caa59/tokenizer.json",
             "https://huggingface.co/google/siglip2-so400m-patch14-384/resolve/e8e487298228002f3d8a82e0cd5c8ea9c567f57f/tokenizer.json"
           ]
         },
@@ -1002,6 +1058,7 @@
           "size": 4241003,
           "sha256": "61a7b147390c64585d6c3543dd6fc636906c9af3865a5548f27f31aee1d4c8e2",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-siglip2-so400m-patch14-384/resolve/9c2b8022209e02798ce8cb10206de07c725caa59/tokenizer.model",
             "https://huggingface.co/google/siglip2-so400m-patch14-384/resolve/e8e487298228002f3d8a82e0cd5c8ea9c567f57f/tokenizer.model"
           ]
         },
@@ -1010,6 +1067,7 @@
           "size": 47164,
           "sha256": "14afe629fe4959b9e0d51e1852b8d9f7ad074f90a1a7125a4fcdd17f06e78fc8",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-siglip2-so400m-patch14-384/resolve/9c2b8022209e02798ce8cb10206de07c725caa59/tokenizer_config.json",
             "https://huggingface.co/google/siglip2-so400m-patch14-384/resolve/e8e487298228002f3d8a82e0cd5c8ea9c567f57f/tokenizer_config.json"
           ]
         }
@@ -1046,6 +1104,7 @@
           "size": 967,
           "sha256": "1ce878a77395b4a6a4da291a09b2b627d7d9b31bbe3be1fb1a37ad4d63f1a7e2",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-fairface-age-image-detection/resolve/321f7b4a5388a9dbb571096e6d98e9de410d2e41/config.json",
             "https://huggingface.co/dima806/fairface_age_image_detection/resolve/4e02ab8057ea7fd74b1670940995c5dfda3e6ec0/config.json"
           ]
         },
@@ -1054,6 +1113,7 @@
           "size": 343245508,
           "sha256": "1265d8e5a8a363a615898be873c224aebc6f310654bf23b1745da0975a7b7555",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-fairface-age-image-detection/resolve/321f7b4a5388a9dbb571096e6d98e9de410d2e41/model.safetensors",
             "https://huggingface.co/dima806/fairface_age_image_detection/resolve/4e02ab8057ea7fd74b1670940995c5dfda3e6ec0/model.safetensors"
           ]
         },
@@ -1062,6 +1122,7 @@
           "size": 351,
           "sha256": "445c77049d082004aa07593344d5e1f521f1198228bf586196f70ce7ae021414",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-fairface-age-image-detection/resolve/321f7b4a5388a9dbb571096e6d98e9de410d2e41/preprocessor_config.json",
             "https://huggingface.co/dima806/fairface_age_image_detection/resolve/4e02ab8057ea7fd74b1670940995c5dfda3e6ec0/preprocessor_config.json"
           ]
         }
@@ -1080,6 +1141,7 @@
           "size": 724,
           "sha256": "cd8c0a19566f199b5c64da402f1d6a9daf80d094fe6536befb060a2cc59449c2",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-nsfw-image-detection/resolve/5a304d9137e475cc0bd95da9db1d8c0bea854c3b/config.json",
             "https://huggingface.co/Falconsai/nsfw_image_detection/resolve/96cb0d0342c7afb80cab76ecc58b265fa44da256/config.json"
           ]
         },
@@ -1088,6 +1150,7 @@
           "size": 343223968,
           "sha256": "97b2ce64ec146884b37f98ee7944ca4891aa72f6827dc0cb10684a1cbecd5830",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-nsfw-image-detection/resolve/5a304d9137e475cc0bd95da9db1d8c0bea854c3b/model.safetensors",
             "https://huggingface.co/Falconsai/nsfw_image_detection/resolve/96cb0d0342c7afb80cab76ecc58b265fa44da256/model.safetensors"
           ]
         },
@@ -1096,6 +1159,7 @@
           "size": 325,
           "sha256": "a34861a24e781942424ad790b82bc99348404a2e64ea882de88c40905851698d",
           "mirrors": [
+            "https://huggingface.co/Mitroshenkov87/voxprint-mirror-nsfw-image-detection/resolve/5a304d9137e475cc0bd95da9db1d8c0bea854c3b/preprocessor_config.json",
             "https://huggingface.co/Falconsai/nsfw_image_detection/resolve/96cb0d0342c7afb80cab76ecc58b265fa44da256/preprocessor_config.json"
           ]
         }

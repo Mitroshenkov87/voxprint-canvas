@@ -61,6 +61,7 @@ class ModelSpec:
     origins: dict[str, tuple[str, str]] = field(default_factory=dict)
     fallback_files: dict[str, str] = field(default_factory=dict)
     fallback_revision: str = ""
+    fallback_mirror_revision: str = ""
     nbytes: int = 0
 
     def pinned(self) -> bool:
@@ -185,6 +186,7 @@ def _spec(row: dict[str, Any]) -> ModelSpec:
         origins=_origins(files),
         fallback_files=_sha_map(fallback_files),
         fallback_revision=str(fallback.get("revision") or ""),
+        fallback_mirror_revision=str(fallback.get("mirror_revision") or ""),
         nbytes=_nbytes(files),
     )
 

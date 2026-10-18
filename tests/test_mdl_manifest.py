@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from canvas.models.mdl_manifest import BF16_TRANSFORMER, render
+from canvas.models.mdl_manifest import render
 from canvas.models.provision import default_specs
 from canvas.models.registry import load_catalog
 
@@ -54,13 +54,41 @@ def test_pins_licences_and_sources():
     assert not any("/raw/main/" in url for row in rows.values() for f in row["files"] for url in f["mirrors"])
     turbo = rows["z-image-turbo-bf16-16gb"]
     assert turbo["source"] == "primary"
-    shards = [f for f in turbo["files"] if f["path"].startswith("transformer/diffusion_pytorch_model-")]
-    assert len(shards) == 3
-    repo, revision = BF16_TRANSFORMER
-    assert all(f["mirrors"][0].startswith(f"{repo}/resolve/{revision}/") for f in shards)
+    bf16 = "https://huggingface.co/Mitroshenkov87/voxprint-z-image-turbo-bf16/resolve/b6a12e018b150c9790626286daeaa1149d1ae598/"
+    mirror = "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo/resolve/75806c7417b435993a2b8b8346dd993dc09a52d5/"
+    for item in turbo["files"]:
+        if item["path"].startswith("transformer/"):
+            assert item["mirrors"][0] == bf16 + item["path"]
+        else:
+            assert item["mirrors"][0] == mirror + item["path"]
+            assert "Tongyi-MAI/Z-Image-Turbo/resolve/f332072" in item["mirrors"][1]
     fallback = rows["z-image-turbo-bf16-16gb-upstream"]
     assert fallback["source"] == "fallback" and fallback["optional"] is True
-    assert all("Tongyi-MAI/Z-Image-Turbo/resolve/f332072" in f["mirrors"][0] for f in fallback["files"])
+    for item in fallback["files"]:
+        assert item["mirrors"][0] == mirror + item["path"]
+        assert "Tongyi-MAI/Z-Image-Turbo/resolve/f332072" in item["mirrors"][1]
+    gate_mirrors = {
+        "qwen3guard-gen-0.6b": "voxprint-mirror-qwen3guard-gen-0.6b/resolve/1e5fb12633c55f4cb07fd22445839226c30efbeb/",
+        "siglip2-so400m-patch14-384": "voxprint-mirror-siglip2-so400m-patch14-384/resolve/9c2b8022209e02798ce8cb10206de07c725caa59/",
+        "fairface-age": "voxprint-mirror-fairface-age-image-detection/resolve/321f7b4a5388a9dbb571096e6d98e9de410d2e41/",
+        "nsfw-image-detection": "voxprint-mirror-nsfw-image-detection/resolve/5a304d9137e475cc0bd95da9db1d8c0bea854c3b/",
+    }
+    for model_id, prefix in gate_mirrors.items():
+        for item in rows[model_id]["files"]:
+            assert item["mirrors"][0] == "https://huggingface.co/Mitroshenkov87/" + prefix + item["path"]
+            assert len(item["mirrors"]) == 2
+    control = "voxprint-mirror-z-image-turbo-controlnet-union-2.1/resolve/34c99d2bcaa323341a4c0df5f867d049f420333a/"
+    for model_id in ("z-image-turbo-fun-controlnet-union-bf16", "z-image-turbo-fun-controlnet-union-bf16-lite"):
+        (item,) = rows[model_id]["files"]
+        assert item["mirrors"][0] == "https://huggingface.co/Mitroshenkov87/" + control + item["path"]
+
+
+def test_no_reference_to_the_removed_bf16_mirror_paths():
+    for name in ("mdl.json", "canvas/models/catalog.json"):
+        body = Path(name).read_text(encoding="utf-8")
+        assert "zimage-turbo-transformer-bf16" not in body
+        assert "588702b873e82c328ab82c76742bf67843411f37" not in body
+        assert "package:" not in body
 
 
 def test_mdl_accepts_the_manifest_and_plans_the_default_pack():

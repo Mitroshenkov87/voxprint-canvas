@@ -197,8 +197,12 @@ def _fetch_one(
 
 def _urls(spec: ModelSpec, name: str, revision: str, *, fallback: bool) -> tuple[str, ...]:
     if fallback:
+        # The author's original files: the suite mirror copy first, then upstream.
         remote = name
         found: list[str] = []
+        mirror_copy = _uri(spec, "huggingface-mirror")
+        if mirror_copy and spec.fallback_mirror_revision:
+            found.append(_hf(mirror_copy, spec.fallback_mirror_revision, remote))
         for source in spec.sources:
             if source.kind == "huggingface" and source.uri:
                 found.append(_hf(source.uri, revision, remote))

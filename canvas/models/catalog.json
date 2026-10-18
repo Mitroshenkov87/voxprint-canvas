@@ -88,13 +88,13 @@
         "model_index.json": {
           "sha256": "18a90e1bc117a29a8b7961bb200c86ff0b9704609e87c7171511dc724fcdc9d3",
           "size": 467,
-          "mirror": "-",
+          "mirror": "model_index.json",
           "upstream": "model_index.json"
         },
         "scheduler/scheduler_config.json": {
           "sha256": "3b979ab0956e4f5e8d02ec409ac6a4ece1555191d15bd10788fdc85fea5d13fc",
           "size": 173,
-          "mirror": "-",
+          "mirror": "scheduler/scheduler_config.json",
           "upstream": "scheduler/scheduler_config.json"
         },
         "text_encoder/config.json": {
@@ -160,31 +160,31 @@
         "transformer/config.json": {
           "sha256": "06d49d1ae533f825c4704cc616fc8bc7826e9d449dde292cc7a95163c69af24a",
           "size": 473,
-          "mirror": "zimage-turbo-transformer-bf16.config.json",
+          "mirror": "https://huggingface.co/Mitroshenkov87/voxprint-z-image-turbo-bf16/resolve/b6a12e018b150c9790626286daeaa1149d1ae598/transformer/config.json",
           "upstream": "transformer/config.json"
         },
         "transformer/diffusion_pytorch_model-00001-of-00003.safetensors": {
           "sha256": "d38279715f7d31232fd14602dec2810f91bf2b4ec2d2960ff9501d3d939f7357",
           "size": 4994754240,
-          "mirror": "zimage-turbo-transformer-bf16-00001-of-00003.safetensors",
+          "mirror": "https://huggingface.co/Mitroshenkov87/voxprint-z-image-turbo-bf16/resolve/b6a12e018b150c9790626286daeaa1149d1ae598/transformer/diffusion_pytorch_model-00001-of-00003.safetensors",
           "upstream": "-"
         },
         "transformer/diffusion_pytorch_model-00002-of-00003.safetensors": {
           "sha256": "880479ddfe46e2dda2b289d7f90d0d9e1f2a5db91efa0cec407fc5ef72cfa531",
           "size": 4986883624,
-          "mirror": "zimage-turbo-transformer-bf16-00002-of-00003.safetensors",
+          "mirror": "https://huggingface.co/Mitroshenkov87/voxprint-z-image-turbo-bf16/resolve/b6a12e018b150c9790626286daeaa1149d1ae598/transformer/diffusion_pytorch_model-00002-of-00003.safetensors",
           "upstream": "-"
         },
         "transformer/diffusion_pytorch_model-00003-of-00003.safetensors": {
           "sha256": "47da630f1e9cba51bf2726aed068916904b2627f4994776a332e7635369f10a1",
           "size": 2328235888,
-          "mirror": "zimage-turbo-transformer-bf16-00003-of-00003.safetensors",
+          "mirror": "https://huggingface.co/Mitroshenkov87/voxprint-z-image-turbo-bf16/resolve/b6a12e018b150c9790626286daeaa1149d1ae598/transformer/diffusion_pytorch_model-00003-of-00003.safetensors",
           "upstream": "-"
         },
         "transformer/diffusion_pytorch_model.safetensors.index.json": {
           "sha256": "1ae53cb8899b503c9443391868b9f0f55fda7d38d8f7a7f4caaba28305ff7fb7",
           "size": 45821,
-          "mirror": "package:turbo_transformer_index.json",
+          "mirror": "https://huggingface.co/Mitroshenkov87/voxprint-z-image-turbo-bf16/resolve/b6a12e018b150c9790626286daeaa1149d1ae598/transformer/diffusion_pytorch_model.safetensors.index.json",
           "upstream": "-"
         },
         "vae/config.json": {
@@ -223,7 +223,7 @@
         }
       ],
       "text_base": "z-image-turbo",
-      "mirror_revision": "588702b873e82c328ab82c76742bf67843411f37",
+      "mirror_revision": "75806c7417b435993a2b8b8346dd993dc09a52d5",
       "fallback": {
         "revision": "f332072aa78be7aecdf3ee76d5c247082da564a6",
         "files": {
@@ -303,7 +303,8 @@
             "sha256": "f5b59a26851551b67ae1fe58d32e76486e1e812def4696a4bea97f16604d40a3",
             "size": 167666902
           }
-        }
+        },
+        "mirror_revision": "75806c7417b435993a2b8b8346dd993dc09a52d5"
       }
     },
     {
@@ -336,13 +337,13 @@
         "model_index.json": {
           "sha256": "18a90e1bc117a29a8b7961bb200c86ff0b9704609e87c7171511dc724fcdc9d3",
           "size": 467,
-          "mirror": "-",
+          "mirror": "model_index.json",
           "upstream": "model_index.json"
         },
         "scheduler/scheduler_config.json": {
           "sha256": "3b979ab0956e4f5e8d02ec409ac6a4ece1555191d15bd10788fdc85fea5d13fc",
           "size": 173,
-          "mirror": "-",
+          "mirror": "scheduler/scheduler_config.json",
           "upstream": "scheduler/scheduler_config.json"
         },
         "text_encoder/config.json": {
@@ -408,31 +409,31 @@
         "transformer/config.json": {
           "sha256": "06d49d1ae533f825c4704cc616fc8bc7826e9d449dde292cc7a95163c69af24a",
           "size": 473,
-          "mirror": "zimage-turbo-transformer-bf16.config.json",
+          "mirror": "https://huggingface.co/Mitroshenkov87/voxprint-z-image-turbo-bf16/resolve/b6a12e018b150c9790626286daeaa1149d1ae598/transformer/config.json",
           "upstream": "transformer/config.json"
         },
         "transformer/diffusion_pytorch_model-00001-of-00003.safetensors": {
           "sha256": "d38279715f7d31232fd14602dec2810f91bf2b4ec2d2960ff9501d3d939f7357",
           "size": 4994754240,
-          "mirror": "zimage-turbo-transformer-bf16-00001-of-00003.safetensors",
+          "mirror": "https://huggingface.co/Mitroshenkov87/voxprint-z-image-turbo-bf16/resolve/b6a12e018b150c9790626286daeaa1149d1ae598/transformer/diffusion_pytorch_model-00001-of-00003.safetensors",
           "upstream": "-"
         },
         "transformer/diffusion_pytorch_model-00002-of-00003.safetensors": {
           "sha256": "880479ddfe46e2dda2b289d7f90d0d9e1f2a5db91efa0cec407fc5ef72cfa531",
           "size": 4986883624,
-          "mirror": "zimage-turbo-transformer-bf16-00002-of-00003.safetensors",
+          "mirror": "https://huggingface.co/Mitroshenkov87/voxprint-z-image-turbo-bf16/resolve/b6a12e018b150c9790626286daeaa1149d1ae598/transformer/diffusion_pytorch_model-00002-of-00003.safetensors",
           "upstream": "-"
         },
         "transformer/diffusion_pytorch_model-00003-of-00003.safetensors": {
           "sha256": "47da630f1e9cba51bf2726aed068916904b2627f4994776a332e7635369f10a1",
           "size": 2328235888,
-          "mirror": "zimage-turbo-transformer-bf16-00003-of-00003.safetensors",
+          "mirror": "https://huggingface.co/Mitroshenkov87/voxprint-z-image-turbo-bf16/resolve/b6a12e018b150c9790626286daeaa1149d1ae598/transformer/diffusion_pytorch_model-00003-of-00003.safetensors",
           "upstream": "-"
         },
         "transformer/diffusion_pytorch_model.safetensors.index.json": {
           "sha256": "1ae53cb8899b503c9443391868b9f0f55fda7d38d8f7a7f4caaba28305ff7fb7",
           "size": 45821,
-          "mirror": "package:turbo_transformer_index.json",
+          "mirror": "https://huggingface.co/Mitroshenkov87/voxprint-z-image-turbo-bf16/resolve/b6a12e018b150c9790626286daeaa1149d1ae598/transformer/diffusion_pytorch_model.safetensors.index.json",
           "upstream": "-"
         },
         "vae/config.json": {
@@ -471,7 +472,7 @@
         }
       ],
       "text_base": "z-image-turbo",
-      "mirror_revision": "588702b873e82c328ab82c76742bf67843411f37",
+      "mirror_revision": "75806c7417b435993a2b8b8346dd993dc09a52d5",
       "fallback": {
         "revision": "f332072aa78be7aecdf3ee76d5c247082da564a6",
         "files": {
@@ -551,7 +552,8 @@
             "sha256": "f5b59a26851551b67ae1fe58d32e76486e1e812def4696a4bea97f16604d40a3",
             "size": 167666902
           }
-        }
+        },
+        "mirror_revision": "75806c7417b435993a2b8b8346dd993dc09a52d5"
       }
     },
     {
@@ -709,7 +711,7 @@
           "uri": ""
         }
       ],
-      "mirror_revision": "588702b873e82c328ab82c76742bf67843411f37"
+      "mirror_revision": "75806c7417b435993a2b8b8346dd993dc09a52d5"
     },
     {
       "id": "z-image-turbo-fun-controlnet-union-bf16-lite",
@@ -738,7 +740,7 @@
         "Z-Image-Turbo-Fun-Controlnet-Union-2.1-lite-2602-8steps.safetensors": {
           "sha256": "3ea098db9bd145be525c7e2366920b6d76c5ffd46b3d7aa8169bbc943fdaee35",
           "size": 2016627488,
-          "mirror": "-",
+          "mirror": "Z-Image-Turbo-Fun-Controlnet-Union-2.1-lite-2602-8steps.safetensors",
           "upstream": "Z-Image-Turbo-Fun-Controlnet-Union-2.1-lite-2602-8steps.safetensors"
         }
       },
@@ -749,7 +751,7 @@
         },
         {
           "kind": "huggingface-mirror",
-          "uri": ""
+          "uri": "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo-controlnet-union-2.1"
         },
         {
           "kind": "huggingface",
@@ -763,7 +765,8 @@
           "kind": "torrent",
           "uri": ""
         }
-      ]
+      ],
+      "mirror_revision": "34c99d2bcaa323341a4c0df5f867d049f420333a"
     },
     {
       "id": "z-image-turbo-fun-controlnet-union-bf16",
@@ -792,7 +795,7 @@
         "Z-Image-Turbo-Fun-Controlnet-Union-2.1-2602-8steps.safetensors": {
           "sha256": "d1251cc7bc3486bc61d25c3be498ef394c31c85ddf4ee9137d2e933411f4a689",
           "size": 6712485600,
-          "mirror": "-",
+          "mirror": "Z-Image-Turbo-Fun-Controlnet-Union-2.1-2602-8steps.safetensors",
           "upstream": "Z-Image-Turbo-Fun-Controlnet-Union-2.1-2602-8steps.safetensors"
         }
       },
@@ -803,7 +806,7 @@
         },
         {
           "kind": "huggingface-mirror",
-          "uri": ""
+          "uri": "https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo-controlnet-union-2.1"
         },
         {
           "kind": "huggingface",
@@ -817,7 +820,8 @@
           "kind": "torrent",
           "uri": ""
         }
-      ]
+      ],
+      "mirror_revision": "34c99d2bcaa323341a4c0df5f867d049f420333a"
     },
     {
       "id": "qwen3guard-gen-0.6b",
@@ -834,43 +838,43 @@
         "config.json": {
           "sha256": "4674816bdf440c113a9ca87aedfa069b67f7cabbd89e71da7d4e4a68adce4af4",
           "size": 727,
-          "mirror": "-",
+          "mirror": "config.json",
           "upstream": "config.json"
         },
         "generation_config.json": {
           "sha256": "5f0bc42aae9f779d06bf620ce685a02cb0cde802d0f27f05c7331aaf0e1fd2d7",
           "size": 161,
-          "mirror": "-",
+          "mirror": "generation_config.json",
           "upstream": "generation_config.json"
         },
         "merges.txt": {
           "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
           "size": 1671853,
-          "mirror": "-",
+          "mirror": "merges.txt",
           "upstream": "merges.txt"
         },
         "model.safetensors": {
           "sha256": "4f3ce47ebd968cddb67de08d8764f8ede7c410a7d1fb9e08145a4c7a2f2e5c0f",
           "size": 1503300328,
-          "mirror": "-",
+          "mirror": "model.safetensors",
           "upstream": "model.safetensors"
         },
         "tokenizer.json": {
           "sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
           "size": 11422654,
-          "mirror": "-",
+          "mirror": "tokenizer.json",
           "upstream": "tokenizer.json"
         },
         "tokenizer_config.json": {
           "sha256": "934e187433b06c5d28519e0347dd293084cf28621f00a86ae7e24e42f8b53e81",
           "size": 9601,
-          "mirror": "-",
+          "mirror": "tokenizer_config.json",
           "upstream": "tokenizer_config.json"
         },
         "vocab.json": {
           "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
           "size": 2776833,
-          "mirror": "-",
+          "mirror": "vocab.json",
           "upstream": "vocab.json"
         }
       },
@@ -881,7 +885,7 @@
         },
         {
           "kind": "huggingface-mirror",
-          "uri": ""
+          "uri": "https://huggingface.co/Mitroshenkov87/voxprint-mirror-qwen3guard-gen-0.6b"
         },
         {
           "kind": "huggingface",
@@ -895,7 +899,8 @@
           "kind": "torrent",
           "uri": ""
         }
-      ]
+      ],
+      "mirror_revision": "1e5fb12633c55f4cb07fd22445839226c30efbeb"
     },
     {
       "id": "siglip2-so400m-patch14-384",
@@ -912,43 +917,43 @@
         "config.json": {
           "sha256": "73477b47ae9a395f008f993ebd8fb5c16ce0b5e8419ffdf2f5b2183b260f9cff",
           "size": 559,
-          "mirror": "-",
+          "mirror": "config.json",
           "upstream": "config.json"
         },
         "model.safetensors": {
           "sha256": "9f4f4a49f908ef0c979bce8ff5a5c0e88882dc6c5dc4304387cbbd152558e2c2",
           "size": 4544143072,
-          "mirror": "-",
+          "mirror": "model.safetensors",
           "upstream": "model.safetensors"
         },
         "preprocessor_config.json": {
           "sha256": "fb2817d3523ca3b666c859f15320c7138416bc38ffc515e2963f78c868c51c90",
           "size": 394,
-          "mirror": "-",
+          "mirror": "preprocessor_config.json",
           "upstream": "preprocessor_config.json"
         },
         "special_tokens_map.json": {
           "sha256": "baec30ea10906f16adb8c18af7a34023002c1746542612b8b41c9f09e1351351",
           "size": 636,
-          "mirror": "-",
+          "mirror": "special_tokens_map.json",
           "upstream": "special_tokens_map.json"
         },
         "tokenizer.json": {
           "sha256": "cb9140fae3ac5122c972d37adf83e1248471a38147ad76f8215c8872c6fd8322",
           "size": 34363039,
-          "mirror": "-",
+          "mirror": "tokenizer.json",
           "upstream": "tokenizer.json"
         },
         "tokenizer.model": {
           "sha256": "61a7b147390c64585d6c3543dd6fc636906c9af3865a5548f27f31aee1d4c8e2",
           "size": 4241003,
-          "mirror": "-",
+          "mirror": "tokenizer.model",
           "upstream": "tokenizer.model"
         },
         "tokenizer_config.json": {
           "sha256": "14afe629fe4959b9e0d51e1852b8d9f7ad074f90a1a7125a4fcdd17f06e78fc8",
           "size": 47164,
-          "mirror": "-",
+          "mirror": "tokenizer_config.json",
           "upstream": "tokenizer_config.json"
         }
       },
@@ -959,7 +964,7 @@
         },
         {
           "kind": "huggingface-mirror",
-          "uri": ""
+          "uri": "https://huggingface.co/Mitroshenkov87/voxprint-mirror-siglip2-so400m-patch14-384"
         },
         {
           "kind": "huggingface",
@@ -973,7 +978,8 @@
           "kind": "torrent",
           "uri": ""
         }
-      ]
+      ],
+      "mirror_revision": "9c2b8022209e02798ce8cb10206de07c725caa59"
     },
     {
       "id": "yunet-face",
@@ -1036,19 +1042,19 @@
         "config.json": {
           "sha256": "1ce878a77395b4a6a4da291a09b2b627d7d9b31bbe3be1fb1a37ad4d63f1a7e2",
           "size": 967,
-          "mirror": "-",
+          "mirror": "config.json",
           "upstream": "config.json"
         },
         "model.safetensors": {
           "sha256": "1265d8e5a8a363a615898be873c224aebc6f310654bf23b1745da0975a7b7555",
           "size": 343245508,
-          "mirror": "-",
+          "mirror": "model.safetensors",
           "upstream": "model.safetensors"
         },
         "preprocessor_config.json": {
           "sha256": "445c77049d082004aa07593344d5e1f521f1198228bf586196f70ce7ae021414",
           "size": 351,
-          "mirror": "-",
+          "mirror": "preprocessor_config.json",
           "upstream": "preprocessor_config.json"
         }
       },
@@ -1059,7 +1065,7 @@
         },
         {
           "kind": "huggingface-mirror",
-          "uri": ""
+          "uri": "https://huggingface.co/Mitroshenkov87/voxprint-mirror-fairface-age-image-detection"
         },
         {
           "kind": "huggingface",
@@ -1073,7 +1079,8 @@
           "kind": "torrent",
           "uri": ""
         }
-      ]
+      ],
+      "mirror_revision": "321f7b4a5388a9dbb571096e6d98e9de410d2e41"
     },
     {
       "id": "nsfw-image-detection",
@@ -1090,19 +1097,19 @@
         "config.json": {
           "sha256": "cd8c0a19566f199b5c64da402f1d6a9daf80d094fe6536befb060a2cc59449c2",
           "size": 724,
-          "mirror": "-",
+          "mirror": "config.json",
           "upstream": "config.json"
         },
         "model.safetensors": {
           "sha256": "97b2ce64ec146884b37f98ee7944ca4891aa72f6827dc0cb10684a1cbecd5830",
           "size": 343223968,
-          "mirror": "-",
+          "mirror": "model.safetensors",
           "upstream": "model.safetensors"
         },
         "preprocessor_config.json": {
           "sha256": "a34861a24e781942424ad790b82bc99348404a2e64ea882de88c40905851698d",
           "size": 325,
-          "mirror": "-",
+          "mirror": "preprocessor_config.json",
           "upstream": "preprocessor_config.json"
         }
       },
@@ -1113,7 +1120,7 @@
         },
         {
           "kind": "huggingface-mirror",
-          "uri": ""
+          "uri": "https://huggingface.co/Mitroshenkov87/voxprint-mirror-nsfw-image-detection"
         },
         {
           "kind": "huggingface",
@@ -1127,7 +1134,8 @@
           "kind": "torrent",
           "uri": ""
         }
-      ]
+      ],
+      "mirror_revision": "5a304d9137e475cc0bd95da9db1d8c0bea854c3b"
     }
   ]
 }

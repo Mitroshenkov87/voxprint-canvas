@@ -7,7 +7,8 @@ default pack needs. Regenerate it after a catalog change and commit both:
     python -m canvas.models.mdl_manifest          # write mdl.json
     python -m canvas.models.mdl_manifest --check  # exit 1 when it is stale
 
-URLs are the ones Canvas already uses (suite mirror first, then upstream).
+URLs are the ones Canvas uses: the primary source (our BF16 repo or the suite mirror)
+first, then upstream.
 """
 from __future__ import annotations
 
@@ -23,29 +24,18 @@ from canvas.models.snapshots import _urls
 ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = ROOT / "mdl.json"
 
-# Files the catalog serves from the package ("package:<name>") are served to MDL
-# from this repository at the commit that added them. The digest still decides.
-PACKAGE_URL = "https://raw.githubusercontent.com/Mitroshenkov87/voxprint-canvas/{commit}/canvas/models/{name}"
-PACKAGE_COMMITS = {"turbo_transformer_index.json": "159df97ad0d3d0f0324a747d739fe69061b4bbf7"}
-
-# TODO(Aleksandr, 2026-10-18): our BF16 Z-Image-Turbo transformer moves to a separate
-# voxprint repo (Model Forge is creating it); the mirror will then hold the author's
-# original files. When Model Forge sends the links, change BF16_TRANSFORMER below to
-# (new repo URL, revision) and update the transformer sha256/size rows in catalog.json,
-# then regenerate. The author's original stays the fallback (``<id>-upstream``).
-BF16_TRANSFORMER = ("https://huggingface.co/Mitroshenkov87/voxprint-mirror-z-image-turbo", "588702b873e82c328ab82c76742bf67843411f37")
-_BF16_PREFIX = "zimage-turbo-transformer-bf16"
+# Decision (Aleksandr, 2026-10-18): our BF16 Z-Image-Turbo transformer lives in its own
+# repo (Mitroshenkov87/voxprint-z-image-turbo-bf16); the suite mirror holds the author's
+# original files. The primary rows point at the BF16 repo in catalog.json. The author's
+# FP32 transformer is the optional ``<id>-upstream`` fallback (mirror copy, then upstream);
+# the runtime loads it with torch_dtype=bfloat16, so it is cast at load time.
 
 
-def _primary_urls(spec: ModelSpec, name: str, mirror_name: str) -> list[str]:
+def _primary_urls(spec: ModelSpec, name: str) -> list[str]:
     urls: list[str] = []
-    if mirror_name.startswith(_BF16_PREFIX):
-        repo, revision = BF16_TRANSFORMER
-        urls.append(f"{repo.rstrip('/')}/resolve/{revision}/{mirror_name}")
     for url in _urls(spec, name, spec.revision, fallback=False):
-        if url.startswith("package:"):
-            package = url.split(":", 1)[1]
-            url = PACKAGE_URL.format(commit=PACKAGE_COMMITS[package], name=package)
+        if not url.startswith("https://"):
+            raise ValueError(f"{spec.id}/{name}: MDL needs an https address, got {url}")
         if url not in urls:
             urls.append(url)
     return urls
@@ -81,7 +71,7 @@ def build(catalog: Catalog | None = None) -> dict[str, object]:
         row = rows[spec.id]
         files: list[dict[str, object]] = []
         for name, meta in row["files"].items():
-            urls = _primary_urls(spec, name, str(meta.get("mirror") or ""))
+            urls = _primary_urls(spec, name)
             if not urls:
                 raise ValueError(f"{spec.id}/{name} has no download address")
             files.append({"path": name, "size": int(meta["size"]), "sha256": meta["sha256"], "mirrors": urls})

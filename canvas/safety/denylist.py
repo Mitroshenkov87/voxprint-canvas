@@ -1,10 +1,4 @@
-"""Minor-term and sexual-term lists for English, Russian and German.
-
-Matching is deterministic and runs even when a classifier says the prompt is safe.
-Obfuscation covered here: leetspeak, inserted separators, Latin/Cyrillic confusables,
-German umlaut folding, and Russian-to-Latin transliteration. The lists are source
-constants. They are not loaded from settings.
-"""
+"""Denylist."""
 from __future__ import annotations
 
 import re
@@ -17,7 +11,6 @@ _LEET = str.maketrans({
     "0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t",
     "@": "a", "$": "s", "!": "i", "|": "i",
 })
-# Cyrillic letters that are used to disguise Latin words. Applied only to Latin-majority tokens.
 _CONFUSABLE = str.maketrans({
     "а": "a", "е": "e", "о": "o", "р": "p", "с": "c", "у": "y", "х": "x",
     "і": "i", "ї": "i",
@@ -30,8 +23,6 @@ _TRANSLIT = {
     "ь": "", "э": "e", "ю": "yu", "я": "ya",
 }
 
-# mode "exact": the token is one of the needles. mode "prefix": token equals or starts with the needle.
-# mode "stem": the needle occurs inside a token (needles are long enough to stay distinctive).
 _MINOR: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("exact", "en", ("kid", "kids", "minor", "minors", "baby", "babies")),
     ("prefix", "en", ("child", "underage", "preteen", "toddler", "infant", "newborn", "schoolgirl", "schoolboy")),
@@ -41,13 +32,10 @@ _MINOR: tuple[tuple[str, str, tuple[str, ...]], ...] = (
                     "тинейджер")),
     ("stem", "ru-lat", ("rebenok", "rebyonok", "malolet", "nesovershennoletn", "podrostok", "shkolnits",
                         "shkolnik", "mladen", "malysh", "deti", "tineidzher")),
-    # "kind" is checked in _german_kind: in an English prompt it is "a kind woman".
-    # "kinds" is left out ("all kinds of").
     ("exact", "de", ("kinder", "kindes", "kindern")),
     ("stem", "de", ("minderjaehrig", "kleinkind", "saeugling", "schulmaedchen", "schuljunge",
                     "vorpubertaer", "unmuendig")),
 )
-# These name sexual content involving a minor. They block on their own.
 _MINOR_SEXUAL: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("exact", "en", ("loli", "lolis", "lolita", "shota", "shotas", "csam", "jailbait", "pedo", "paedo")),
     ("prefix", "en", ("lolicon", "shotacon", "pedophile", "paedophile", "pedophil")),
@@ -55,8 +43,6 @@ _MINOR_SEXUAL: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("stem", "ru-lat", ("loli", "shota", "lolicon", "shotacon", "pedofil")),
     ("stem", "de", ("kindesmissbrauch", "kinderporn", "paedophil")),
 )
-# School and student context. Alone, or in a clothed scene, these pass. Together
-# with explicit or nude content they block (product rule 2026-10-18).
 _YOUTH_CONTEXT: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("exact", "en", ("school", "schools", "schoolkid", "schoolkids", "highschool", "student", "students",
                      "pupil", "pupils", "classroom", "classrooms", "schoolyard",
@@ -67,8 +53,6 @@ _YOUTH_CONTEXT: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("stem", "ru-lat", ("shkol", "student", "uchenik", "uchenits", "starsheklas")),
     ("exact", "de", ("schule", "schueler", "schuelerin", "schuluniform", "klassenzimmer", "student", "studentin")),
 )
-# Anime and other stylised characters. With explicit or nude content these block,
-# even when an adult age is stated (product rule 2026-10-18). Alone they pass.
 _STYLISED: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("exact", "en", ("waifu", "waifus", "chibi", "moe", "kawaii", "anime", "manga", "hentai")),
     ("prefix", "en", ("animegirl", "animeboy", "animestyle")),
@@ -86,8 +70,6 @@ _SEXUAL: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("exact", "de", ("sex",)),
 )
 
-# The number is a whole token under 18. "30" and "85" do not match, and a digit
-# inside a longer number does not match.
 _AGE_NUMBER = r"(?<!\d)\b(?:1[0-7]|[1-9])(?!\d)"
 _AGE_DIGIT = re.compile(_AGE_NUMBER + r"\s*(?:years?\s*old|year\s*old|yo|jahre?\s*alt|jaehrig|лет|года)\b")
 _AGE_COMPACT = re.compile(_AGE_NUMBER + r"yo\b")
@@ -113,7 +95,7 @@ _DECLARED_AGE = re.compile(
 
 @dataclass(frozen=True)
 class TextSignals:
-    """Whether the prompt names a minor, sexual content, or sexual content about a minor."""
+    """TextSignals."""
 
     minor: bool
     sexual: bool
@@ -124,7 +106,7 @@ class TextSignals:
 
 @dataclass(frozen=True)
 class ScanTrace:
-    """Lexicon hits for one prompt. ``age`` is an explicit age under 18."""
+    """ScanTrace."""
 
     minor: bool
     sexual: bool
@@ -168,12 +150,10 @@ def _glue(tokens: list[str]) -> list[str]:
 
 
 def _base(text: str) -> str:
-    """NFKC, lower case, umlaut folding. Digits stay digits so ages still match."""
+    """Base."""
     return unicodedata.normalize("NFKC", text).translate(_ZW).lower().translate(_LETTERS)
 
 
-# Adult phrases that contain a listed word. Only these exact neighbours exempt it;
-# the word anywhere else still counts.
 _NEXT_EXEMPT = {
     "baby": frozenset({"oil", "doll", "blue", "pink"}),
     "minor": frozenset({"key", "detail", "details", "flaw", "flaws"}),
@@ -184,7 +164,7 @@ _NEVER_EXEMPT_BEFORE = {"school": frozenset({"uniform", "uniforms", "girl", "gir
 
 
 def _drop_exempt(raw: list[str]) -> list[str]:
-    """Blank a listed word inside one of the adult phrases above ('baby oil', 'old school')."""
+    """Drop exempt."""
     kept = list(raw)
     for index, token in enumerate(raw):
         before = raw[index - 1] if index > 0 else ""
@@ -196,7 +176,30 @@ def _drop_exempt(raw: list[str]) -> list[str]:
     return kept
 
 
-# Two-word phrases matched as one token ("barely legal" -> "barelylegal").
+_ADDRESS_WORD = "baby"
+_ADDRESS_LEAD = frozenset({"hey", "oh", "yes"})
+_ADDRESS_LEAD_CLOSED = frozenset({"my"})
+_ADDRESS_CLOSE = frozenset(",.!?;:\"'»“”")
+_ADDRESS_INNER = frozenset(",\"'»“”")
+
+
+def _drop_address(folded: str, raw: list[str]) -> list[str]:
+    kept = list(raw)
+    spans = [match.span() for match in re.finditer(r"[0-9a-zа-я]+", folded)]
+    for index, token in enumerate(raw):
+        if token != _ADDRESS_WORD:
+            continue
+        start, end = spans[index]
+        left = folded[:start].rstrip()
+        right = folded[end:].lstrip()
+        before = raw[index - 1] if index > 0 else ""
+        closed = right == "" or right[0] in _ADDRESS_CLOSE
+        inner = right != "" and right[0] in _ADDRESS_INNER
+        if before in _ADDRESS_LEAD or ((before in _ADDRESS_LEAD_CLOSED or left == "") and closed) or (left.endswith(",") and inner):
+            kept[index] = ""
+    return kept
+
+
 _PHRASES = frozenset({("barely", "legal")})
 
 
@@ -205,9 +208,9 @@ def _phrases(tokens: list[str]) -> list[str]:
 
 
 def tokenise(text: str) -> list[str]:
-    """Normalised tokens plus glued spellings and Russian transliterations."""
+    """Tokenise."""
     folded = _base(text).translate(_LEET)
-    raw = _drop_exempt(re.findall(r"[0-9a-zа-я]+", folded))
+    raw = _drop_address(folded, _drop_exempt(re.findall(r"[0-9a-zа-я]+", folded)))
     primary: list[str] = []
     extra: list[str] = []
     for token in raw:
@@ -219,8 +222,6 @@ def tokenise(text: str) -> list[str]:
     return primary + _glue(primary) + _phrases(primary) + extra
 
 
-# A stem is a prefix of an inflected form, not a substring. The remainder is empty,
-# starts with a vowel, or is one of these endings. "секс" does not match "секстант".
 _INFLECTION = frozenset("аеёиоуыэюяьъaeiouy")
 _ENDINGS = (
     "граф", "ный", "ная", "ное", "ные", "ного", "ному", "ным", "ными", "ных",
@@ -271,7 +272,6 @@ def _age_hit(text: str) -> bool:
     )
 
 
-# German words that mark a prompt as German, so a bare "kind" there means a child.
 _GERMAN_MARKERS = frozenset({
     "ein", "eine", "einen", "einem", "einer", "eines", "der", "dem", "des", "und", "mit",
     "ist", "im", "beim", "zum", "zur", "fuer", "kleines", "kleine", "kleiner", "kleinen", "junges", "junge",
@@ -280,7 +280,7 @@ _GERMAN_SEXUAL_STEMS = ("nackt", "erotisch", "explizit", "dessous", "geschlechts
 
 
 def _german_kind(tokens: list[str]) -> bool:
-    """True for "kind" in a German prompt ("ein nacktes Kind"), not in English ("a kind woman")."""
+    """German kind."""
     if "kind" not in tokens:
         return False
     if any(token in _GERMAN_MARKERS for token in tokens):
@@ -289,7 +289,7 @@ def _german_kind(tokens: list[str]) -> bool:
 
 
 def explain(text: str) -> ScanTrace:
-    """Terms and the age flag that ``scan`` used. This is the lexicon half of a refusal trace."""
+    """Explain."""
     tokens = tokenise(text)
     minor_terms = _hits(tokens, _MINOR) + (("kind",) if _german_kind(tokens) else ())
     sexual_terms = _hits(tokens, _SEXUAL)
@@ -312,7 +312,7 @@ def explain(text: str) -> ScanTrace:
 
 
 def scan(text: str) -> TextSignals:
-    """Return minor and sexual signals. A minor signal alone does not block."""
+    """Scan."""
     detail = explain(text)
     return TextSignals(
         minor=detail.minor,

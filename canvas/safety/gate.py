@@ -1,23 +1,4 @@
-"""Content checks before a generator runs and before an output image can leave.
-
-Input images are screened before a ``ScreenedInput`` is issued. Output images are
-screened before a ``SafeImage`` is issued. A missing model, a bad hash, a load
-error, a timeout or any other classifier error refuses the request. Nothing in
-this module reads settings, environment variables or flags.
-
-Product rule (2026-10-18). The prompt check is the primary filter: it runs on the
-final prompt string a generator receives, on every route, because a generator
-accepts only a ``ScreenedInput``. Explicit or nude intent together with a child,
-teen or minor term, a stated age under 18, or a school or student cue blocks. A
-clothed school or student scene passes. The output check is a lighter net: in a
-sexual frame it drops a clear child or adolescent reading at the existing
-thresholds, a minor-sexual image score, a visible school uniform or classroom, or
-an anime, manga, cartoon or chibi character. Explicit intent with an anime or
-stylised-character cue also blocks the prompt, whatever age is stated.
-A youngest-adult or babyface reading with no other marker passes.
-
-Nothing here logs or stores a decision, a score, a prompt or any pixel data.
-"""
+"""Gate."""
 import math
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeout
@@ -59,7 +40,7 @@ class SafetyError(Exception):
 
     @property
     def user_message(self) -> str:
-        """The catalog line for this refusal, in the process language."""
+        """User message."""
         return text(self.message_key)
 
     def __str__(self) -> str:
@@ -73,13 +54,13 @@ class GenerationBlocked(SafetyError):
 
 
 class YouthContextBlocked(GenerationBlocked):
-    """Explicit content was combined with a school, student or young-age cue."""
+    """YouthContextBlocked."""
 
     message_key = "gate.blocked_youth"
 
 
 class StylisedBlocked(GenerationBlocked):
-    """Explicit content was combined with an anime or other stylised character."""
+    """StylisedBlocked."""
 
     message_key = "gate.blocked_stylised"
 
@@ -102,12 +83,12 @@ class SafetyStack:
 
 
 def issue(raw: RawImage) -> SafeImage:
-    """Copy released pixels into a SafeImage. Only ``review_image`` may call this."""
+    """Issue."""
     return SafeImage(_OUTPUT_TOKEN, raw.width, raw.height, raw.mode, raw.to_bytes())
 
 
 def issue_input(prompt: str, mode: str, frames: tuple[tuple[str, int, int, bytes], ...]) -> ScreenedInput:
-    """Copy screened input images. Only ``release_request`` may call this."""
+    """Issue input."""
     built = tuple(ScreenedFrame(role, width, height, data) for role, width, height, data in frames)
     return ScreenedInput(_INPUT_TOKEN, prompt, mode, built)
 
@@ -143,14 +124,7 @@ def _at_least(value: float) -> bool:
 
 
 def adult_age_support(text: str) -> Literal["none", "adult", "strong"]:
-    """How a stated age can support an ambiguous face.
-
-    ``strong`` means every stated age is 20 or more. ``adult`` means every stated
-    age is 18 or 19, or a mix of those with older ages. No stated age, or any
-    stated age under 18, is ``none``. This never changes the child band.
-
-    The enhancer imports this module, so the age reader stays local.
-    """
+    """Adult age support."""
     from canvas.pipeline.enhance import stated_ages
 
     ages = stated_ages(text)
@@ -183,33 +157,27 @@ def image_block_reason(
     scores: dict[str, float],
     *,
     support: Literal["none", "adult", "strong"] = "none",
-) -> Literal["allow", "minor-sexual", "clear-child", "adolescent", "school-context", "stylised"]:
-    """Why a picture would stop, or ``allow``.
-
-    Adult sexual content passes. A minor-sexual image score blocks on its own.
-    A school-uniform or classroom score at the zero-shot line blocks in a sexual
-    frame and passes in a clothed one. So does an anime, manga or cartoon
-    character, or chibi proportions.
-    P(age <= 15) at the child line blocks with sexual content, and a stated age
-    cannot remove that. P(16 or 17) blocks only at its own higher line. A stated
-    age of 18 or 19 raises that line, and a stated age of 20 or more removes it.
-    Years 18 and older are not part of either band.
-    """
+) -> Literal["allow", "minor-sexual", "clear-child", "adolescent", "minor-body", "school-context", "stylised"]:
+    """Image block reason."""
     parsed = tuple(_band_pair(item) for item in bands)
     minor_sexual = _at_least(_score(scores, IMAGE_MINOR_SEXUAL))
     adult_sexual = _at_least(_score(scores, IMAGE_ADULT_SEXUAL))
-    _score(scores, IMAGE_MINOR)
-    school = _at_least(_score(scores, IMAGE_SCHOOL_UNIFORM)) or _at_least(_score(scores, IMAGE_CLASSROOM))
+    minor = _at_least(_score(scores, IMAGE_MINOR))
+    uniform = _at_least(_score(scores, IMAGE_SCHOOL_UNIFORM))
+    classroom = _at_least(_score(scores, IMAGE_CLASSROOM))
     stylised = _at_least(_score(scores, IMAGE_ANIME)) or _at_least(_score(scores, IMAGE_CHIBI))
     sexual = float(nsfw) >= SEXUAL_SCORE_BLOCK_AT or adult_sexual or minor_sexual
     clear = any(at_most_15 >= CLEAR_CHILD_AT for at_most_15, _band in parsed)
     match support:
         case "strong":
+            band = False
             adolescent = False
         case "adult":
-            adolescent = any(band >= ADOLESCENT_16_17_AT_AGE_18 for _at_most_15, band in parsed)
+            band = any(value >= ADOLESCENT_16_17_AT_AGE_18 for _at_most_15, value in parsed)
+            adolescent = band
         case "none":
-            adolescent = any(band >= ADOLESCENT_16_17_AT for _at_most_15, band in parsed)
+            band = any(value >= ADOLESCENT_16_17_AT for _at_most_15, value in parsed)
+            adolescent = band
         case _ as unexpected:
             assert_never(unexpected)
     if minor_sexual:
@@ -218,16 +186,15 @@ def image_block_reason(
         return "clear-child"
     if sexual and adolescent:
         return "adolescent"
-    if sexual and school:
+    if sexual and minor and not parsed:
+        return "minor-body"
+    if sexual and (uniform or (classroom and (minor or band or clear))):
         return "school-context"
     if sexual and stylised:
         return "stylised"
     return "allow"
 
 
-# Qwen3Guard has one sexual category for adult sexual content and for non-consent.
-# The category name itself does not name a minor. Only a category whose name names
-# a minor or non-consent blocks on its own. Adult sexual content stays a signal.
 _GUARD_RESTRICTED = (
     "minor",
     "child",
@@ -252,7 +219,7 @@ def _guard_sexual(safety: str, categories: Sequence[str]) -> bool:
 
 
 def _guard_restricted(categories: Sequence[str]) -> bool:
-    """True when a guard category names a minor or non-consent, not plain adult sexual content."""
+    """Guard restricted."""
     for category in categories:
         folded = category.casefold()
         if any(marker in folded for marker in _GUARD_RESTRICTED):
@@ -261,16 +228,7 @@ def _guard_restricted(categories: Sequence[str]) -> bool:
 
 
 def refusal_stage(text: str, safety: str, categories: Sequence[str]) -> str:
-    """Why a prompt would stop, or ``allow``.
-
-    ``lexicon-minor-sexual`` and ``lexicon-minor`` come from the term list.
-    ``guard-restricted`` is a Qwen3Guard category that names a minor or non-consent.
-    ``lexicon-youth-context`` is explicit intent (term list or the Qwen3Guard
-    sexual category) together with a school or student cue.
-    ``lexicon-stylised`` is explicit intent together with an anime or other
-    stylised-character cue; a stated adult age does not change it. Unsafe or
-    controversial plus the plain sexual category alone is not a block.
-    """
+    """Refusal stage."""
     signals = scan(text)
     if signals.minor_sexual:
         return "lexicon-minor-sexual"
@@ -311,11 +269,7 @@ class AgeGate:
         return scan(text).sexual or _guard_sexual(verdict.safety, verdict.categories)
 
     def review_prompts(self, texts: Sequence[str]) -> None:
-        """Screen every text of a multi-part request, such as an idea, a scenario and each shot line.
-
-        One blocked text stops the whole request. Each shot still goes through
-        ``release_request`` with its final prompt before it is generated.
-        """
+        """Review prompts."""
         for item in texts:
             self.review_prompt(item)
 
@@ -373,7 +327,7 @@ class AgeGate:
         match reason:
             case "allow":
                 return
-            case "minor-sexual" | "clear-child" | "adolescent" | "school-context" | "stylised":
+            case "minor-sexual" | "clear-child" | "adolescent" | "minor-body" | "school-context" | "stylised":
                 raise GenerationBlocked(code)
             case _ as unexpected:
                 assert_never(unexpected)

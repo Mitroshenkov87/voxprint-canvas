@@ -1,9 +1,4 @@
-"""Pixel values that have passed or not yet passed the content checks.
-
-``RawImage`` is unreviewed. ``ScreenedInput`` is the only value a generator may
-accept. ``SafeImage`` is the only value the UI may show or save. Both released
-types are constructed only by ``canvas.safety.gate``.
-"""
+"""Image."""
 from __future__ import annotations
 
 import inspect
@@ -30,7 +25,7 @@ def _wipe(buf: bytearray) -> None:
 
 
 class RawImage:
-    """Unreviewed RGB pixels. Wipe discards them in place."""
+    """RawImage."""
 
     __slots__ = ("width", "height", "mode", "_buf")
 
@@ -80,7 +75,7 @@ class ScreenedFrame:
 
 
 class ScreenedInput:
-    """A prompt plus input images the generator is allowed to see."""
+    """ScreenedInput."""
 
     __slots__ = ("prompt", "mode", "frames")
 
@@ -96,7 +91,7 @@ class ScreenedInput:
         return tuple(frame.role for frame in self.frames)
 
     def wipe(self) -> None:
-        """Clear the prompt and the input images."""
+        """Wipe."""
         self.prompt = ""
         self.mode = ""
         for frame in self.frames:

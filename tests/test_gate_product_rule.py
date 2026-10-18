@@ -17,6 +17,7 @@ from canvas.safety.constants import (
     IMAGE_CHIBI,
     IMAGE_CLASSROOM,
     IMAGE_LABELS,
+    IMAGE_MINOR,
     IMAGE_MINOR_SEXUAL,
     IMAGE_SCHOOL_UNIFORM,
     ZERO_SHOT_BLOCK_AT,
@@ -173,12 +174,16 @@ def test_clear_child_or_teen_readings_on_an_explicit_frame_drop():
 
 @pytest.mark.parametrize("label", [IMAGE_SCHOOL_UNIFORM, IMAGE_CLASSROOM])
 def test_school_context_drops_only_in_an_explicit_frame(label):
-    assert image_block_reason(0.95, [], _scores(**{label: ZERO_SHOT_BLOCK_AT})) == "school-context"
-    assert image_block_reason(0.95, [], _scores(**{label: ZERO_SHOT_BLOCK_AT - 0.01})) == "allow"
+    bands = [(0.0, ADOLESCENT_16_17_AT)] if label == IMAGE_CLASSROOM else []
+    face = [(0.05, 0.01)]
+    assert image_block_reason(0.95, face, _scores(**{label: ZERO_SHOT_BLOCK_AT, IMAGE_MINOR: 0.9 if bands else 0.0})) == "school-context"
+    assert image_block_reason(0.95, face, _scores(**{label: ZERO_SHOT_BLOCK_AT - 0.01, IMAGE_MINOR: 0.9 if bands else 0.0})) == "allow"
     assert image_block_reason(0.10, [], _scores(**{label: 0.9})) == "allow"
     world = World()
     world.nsfw = 0.9
     world.image_scores[label] = 0.6
+    if bands:
+        world.image_scores[IMAGE_MINOR] = 0.9
     raw = rgb()
     with pytest.raises(GenerationBlocked):
         world.gate().review_image(raw)

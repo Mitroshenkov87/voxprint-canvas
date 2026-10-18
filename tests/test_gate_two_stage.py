@@ -5,6 +5,7 @@ from canvas.safety.classifiers import Face
 from canvas.safety.constants import (
     IMAGE_ANIME,
     IMAGE_CLASSROOM,
+    IMAGE_MINOR,
     IMAGE_MINOR_SEXUAL,
     IMAGE_SCHOOL_UNIFORM,
     SEXUAL_SCORE_BLOCK_AT,
@@ -94,6 +95,8 @@ def test_school_and_stylised_labels_still_drop_a_flagged_frame(label):
     world = World()
     world.nsfw = 0.9
     world.image_scores[label] = 0.9
+    if label == IMAGE_CLASSROOM:
+        world.image_scores[IMAGE_MINOR] = 0.9
     with pytest.raises(GenerationBlocked):
         world.gate().review_image(rgb())
 

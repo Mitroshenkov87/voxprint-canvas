@@ -1,18 +1,4 @@
-"""Rewrite a prompt into English with the Qwen3-4B text encoder.
-
-Z-Image-Turbo ships that encoder as ``Qwen3ForCausalLM`` with
-``tie_word_embeddings`` set. The checkpoint has ``model.embed_tokens.weight``
-and no separate ``lm_head``, which is the same layout as ``Qwen/Qwen3-4B``.
-Tied embeddings are enough to generate text, so this module loads the encoder
-already on disk. It does not download a second language-model pack.
-
-torch and transformers are imported inside the load method. That is not a
-circular import. Those packages are optional so the unit tests can import this
-module without them.
-
-The model is loaded for one rewrite and unloaded before the caller returns, so
-a 16 GB card is free for the diffusion pipeline.
-"""
+"""Rewrite a prompt into English with the Qwen3-4B text encoder."""
 from __future__ import annotations
 
 import gc
@@ -119,12 +105,7 @@ class EnhanceResult:
 
 
 def causal_lm_ready(config: Mapping[str, object], tensor_names: Iterable[str]) -> bool:
-    """True when a Qwen3 checkpoint can generate text.
-
-    A separate ``lm_head`` weight is enough. Tied embeddings are enough too:
-    ``tie_word_embeddings`` is true and ``embed_tokens`` is the output matrix.
-    That is how the shipped Z-Image text encoder and upstream Qwen3-4B are packed.
-    """
+    """True when a Qwen3 checkpoint can generate text."""
     architectures = config.get("architectures") or []
     if not isinstance(architectures, (list, tuple)):
         return False
@@ -139,7 +120,7 @@ def causal_lm_ready(config: Mapping[str, object], tensor_names: Iterable[str]) -
 
 
 def stated_ages(text: str) -> tuple[int, ...]:
-    """Numeric and word ages in ``text``, in reading order. Values above 120 are ignored."""
+    """Stated ages."""
     folded = unicodedata.normalize("NFKC", text).casefold().replace("ё", "е")
     spans: list[tuple[int, int, int]] = []
     for pattern in _age_patterns():
@@ -167,11 +148,7 @@ def quoted_spans(text: str) -> tuple[str, ...]:
 
 
 def resolve_prompt(gate: object, original: str, rewritten: str | None) -> EnhanceResult:
-    """Screen the original and the rewrite. Keep the original when ages or quotes change.
-
-    A blocked text raises. Both texts are screened before that raise, so a blocked
-    rewrite is not replaced by the original.
-    """
+    """Resolve prompt."""
     reviewer = getattr(gate, "review_prompt")
     candidates = (original,) if rewritten is None else (original, rewritten)
     first: SafetyError | None = None
@@ -189,7 +166,7 @@ def resolve_prompt(gate: object, original: str, rewritten: str | None) -> Enhanc
 
 
 def fallback_message(result: EnhanceResult) -> str:
-    """A short line when the rewrite was discarded. Empty when it was kept."""
+    """Fallback message."""
     if result.fallback == "":
         return ""
     if result.fallback in _FALLBACK_KEYS:
@@ -268,18 +245,13 @@ class QwenRewriter:
             self.close()
 
     def complete(self, prompt: str, *, system: str) -> str:
-        """Generate one reply and keep the model loaded for another call.
-
-        Args:
-            prompt: User message.
-            system: System prompt. Photoshoot passes its scenario prompt.
-        """
+        """Generate one reply and keep the model loaded for another call."""
         self._load()
         self.closed = False
         return self._complete(prompt, system)
 
     def close(self) -> None:
-        """Drop the model and return its memory before the diffusion pipeline."""
+        """Close."""
         self._model = None
         self._tokenizer = None
         self.closed = True
@@ -300,7 +272,7 @@ class QwenRewriter:
         if not isinstance(names, dict) or not causal_lm_ready(config, names):
             raise SnapshotError("the text encoder cannot generate text")
         device = self.device or ("cuda" if torch.cuda.is_available() else "cpu")
-        tokenizer = transformers.AutoTokenizer.from_pretrained(  # nosec B615
+        tokenizer = transformers.AutoTokenizer.from_pretrained(
             self.tokenizer_dir, local_files_only=True,
         )
         try:
@@ -346,12 +318,8 @@ class QwenRewriter:
 
 
 def _causal_model(transformers: Any, torch: Any, folder: Path, device: str) -> Any:
-    """Load the causal LM. ``device`` is ``cuda`` or ``cpu``.
-
-    A CPU load stays where ``from_pretrained`` put it. Moving it again would
-    copy the weights and can exhaust a 16 GB machine.
-    """
-    model = transformers.AutoModelForCausalLM.from_pretrained(  # nosec B615
+    """Load the causal LM. ``device`` is ``cuda`` or ``cpu``."""
+    model = transformers.AutoModelForCausalLM.from_pretrained(
         folder,
         torch_dtype=torch.bfloat16,
         local_files_only=True,
@@ -377,7 +345,7 @@ def _generation_libs() -> tuple[Any, Any]:
 
 
 def _visible_reply(text: str) -> str:
-    """Drop a reasoning trace. An unclosed trace is not a prompt."""
+    """Visible reply."""
     visible = _THINKING.sub("", text).strip()
     if "<think>" in visible:
         return ""

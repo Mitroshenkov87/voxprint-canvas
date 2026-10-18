@@ -23,6 +23,7 @@ from canvas.pipeline.photoshoot import (
     scenario_request,
     validate_scenario,
 )
+from canvas.safety.denylist import scan
 from canvas.safety.gate import AgeGate, SafetyError
 from canvas.safety.image import RawImage, SafeImage
 
@@ -41,7 +42,7 @@ class SeriesFrame(Protocol):
 
 @dataclass(frozen=True)
 class SeriesResult:
-    """What the series kept, and why it stopped when it did."""
+    """SeriesResult."""
 
     stopped: StopCode
     reason: str
@@ -68,31 +69,7 @@ def run_series(
     on_status: Callable[[int, str], None] | None = None,
     adult: bool = False,
 ) -> SeriesResult:
-    """Write the scenario, check it, and save the frames the gate allows.
-
-    A blocked idea or scenario stops the series. The rewrite is not asked to
-    soften a blocked text. A blocked frame is left out and is not the hero.
-
-    Args:
-        idea: Prompt-field text.
-        count: 6, 12, or 20.
-        style: Everyday look id.
-        place_mode: ``same`` or ``different``.
-        seed: Hero seed. Shot ``i`` uses ``seed + i``.
-        strength: Img2img strength for shots after the hero.
-        include_camera: True when Expert keeps the camera clause on the line.
-        rewrite: One language-model call. The argument is the user message.
-        age_gate: The minors gate. ``review_prompt`` and ``review_image`` are called by name.
-        draw_frame: Returns pixels, or None when that frame is blocked.
-        cancelled: True when the user has cancelled.
-        folder: Series directory. Created only after the scenario is accepted.
-        on_scenario: Shows the accepted shots before the first frame.
-        line_for: The line to send for that index, after an Expert edit.
-        on_status: ``drawing``, ``kept``, or ``blocked`` for one row.
-        adult: Expert adult content is on. Lines get the adult wording, a line with
-            a youth cue is refused (not rephrased), and a stated age under 18 stops
-            the series. The gate still reviews every text and frame.
-    """
+    """Run series."""
     if place_mode == "same":
         mode: PlaceMode = "same"
     elif place_mode == "different":
@@ -111,9 +88,10 @@ def run_series(
     if scenario is None or len(scenario.shots) < 6:
         return SeriesResult("scenario", "", (), None)
     lines = [assemble_line(scenario.subject_block, shot, include_camera=True) for shot in scenario.shots]
-    reason = _refuse_prompt(age_gate, "\n".join(lines))
-    if reason:
-        return SeriesResult("scenario", reason, (), None)
+    refused = [_refuse_prompt(age_gate, _with_idea(idea, line)) for line in lines]
+    hard = [reason for line, reason in zip(lines, refused, strict=True) if reason and scan(line).minor]
+    if hard or all(refused):
+        return SeriesResult("scenario", (hard or refused)[0] or "", (), None)
     if adult and not ages_allowed("\n".join(lines)):
         return SeriesResult("scenario", "", (), None)
     if on_scenario is not None:
@@ -143,7 +121,9 @@ def run_series(
                 _status(on_status, index, "blocked")
                 continue
             line = with_adult_anchor(line)
-        shot_reason = _refuse_prompt(age_gate, line)
+        shot_reason = refused[index] or (
+            None if line == lines[index] else _refuse_prompt(age_gate, _with_idea(idea, line))
+        )
         if shot_reason:
             blocked.append(index)
             _status(on_status, index, "blocked")
@@ -173,11 +153,12 @@ def run_series(
     return SeriesResult("", "", tuple(kept), folder)
 
 
-def _refuse_prompt(age_gate: AgeGate, prompt: str) -> str | None:
-    """The gate's own sentence, or None when ``prompt`` may continue.
+def _with_idea(idea: str, line: str) -> str:
+    return f"{idea}\n{line}"
 
-    A failure stops this text. The words are not sent back to the rewriter.
-    """
+
+def _refuse_prompt(age_gate: AgeGate, prompt: str) -> str | None:
+    """Refuse prompt."""
     try:
         age_gate.review_prompt(prompt)
     except SafetyError as exc:
@@ -188,7 +169,7 @@ def _refuse_prompt(age_gate: AgeGate, prompt: str) -> str | None:
 
 
 def _released_frame(age_gate: AgeGate, image: SeriesFrame, line: str) -> bytes | None:
-    """Pixels ``review_image`` released, or None when the frame is dropped."""
+    """Released frame."""
     raw = RawImage(image.width, image.height, image.to_bytes())
     try:
         released = age_gate.review_image(raw, line)

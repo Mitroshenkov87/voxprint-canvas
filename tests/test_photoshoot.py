@@ -185,6 +185,7 @@ def test_blocked_frame_is_dropped_without_a_rewrite(tmp_path: Path) -> None:
 
 def test_an_image_gate_failure_drops_every_frame(tmp_path: Path) -> None:
     world = World()
+    world.nsfw = 0.9  # two-stage gate: the face check runs on flagged frames
     world.error = "faces"
     calls: list[str] = []
     result = _run(tmp_path, age_gate=world.gate(), rewrite=lambda prompt: calls.append(prompt) or _payload(IDEA))

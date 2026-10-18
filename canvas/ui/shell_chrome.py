@@ -177,6 +177,28 @@ def polish(window):
     _labels(window)
     _fit_controls(window)
     _wrap_rows(window)
+    _sync_lora_chip(window)
+
+
+def _sync_lora_chip(window):
+    """Show the selected trigger as a chip. Pressing it inserts the word."""
+    button = getattr(window, "_lora_chip", None)
+    if button is None:
+        button = QPushButton()
+        button.setObjectName("loraTrigger")
+        button.setProperty("chip", True)
+        button.clicked.connect(window.insert_trigger)
+        window._lora_chip = button
+    if button.parentWidget() is None:
+        generate = window.view.root.findChild(QPushButton, "generate")
+        parent = None if generate is None else generate.parentWidget()
+        layout = None if parent is None else parent.layout()
+        if layout is not None:
+            layout.insertWidget(layout.indexOf(generate), button)
+    word = window.lora_trigger()
+    button.setText(word)
+    button.setToolTip(text("canvas.addons.trigger"))
+    button.setVisible(bool(word))
 
 
 def _toolbar(window, row):

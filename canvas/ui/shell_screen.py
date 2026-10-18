@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
     QMainWindow,
+    QPlainTextEdit,
     QPushButton,
 )
 
@@ -34,6 +35,7 @@ from canvas.core.formats import extension, save_image
 from canvas.infra.enlarge import EnlargeClient
 from canvas.infra.vram import set_vram_cap_gb
 from canvas.models.mdl_registry import selectable
+from canvas.models.user_lora import discover, resolve_selected
 from canvas.models.modes import Mode, Tier
 from canvas.models.sizes import closest_aspect
 from canvas.safety.image import RawImage
@@ -219,8 +221,32 @@ class ShellWindow(QMainWindow):
         """The add-ons screen. It reads and writes the shared expert values."""
         layout = self.shell.layout
         strength = layout.get("shell.lora_weight")
-        number = float(strength) if isinstance(strength, int | float) else 0.7
-        return AddonsWizard(self, str(layout.get("shell.addons") or ""), number, self._save_addons)
+        number = float(strength) if isinstance(strength, int | float) and not isinstance(strength, bool) else 0.7
+        return AddonsWizard(self, discover(), str(layout.get("shell.addons") or ""), number, self._save_addons)
+
+    def lora_trigger(self) -> str:
+        """The trigger word of the selected LoRA, or empty when nothing is selected."""
+        selected = resolve_selected(str(self.shell.layout.get("shell.addons") or ""))
+        if selected is None:
+            return ""
+        return selected.trigger
+
+    def insert_trigger(self) -> None:
+        """Insert the selected trigger word at the cursor. Nothing is inserted on its own."""
+        word = self.lora_trigger()
+        if not word:
+            return
+        box = self.findChild(QPlainTextEdit, "promptBox")
+        if box is None:
+            return
+        cursor = box.textCursor()
+        current = box.toPlainText()
+        position = cursor.position()
+        prefix = " " if position > 0 and current[position - 1] not in " \n" else ""
+        suffix = " " if position < len(current) and current[position:position + 1] not in " \n" else ""
+        cursor.insertText(f"{prefix}{word}{suffix}")
+        box.setTextCursor(cursor)
+        self.shell.layout.set_prompt(box.toPlainText())
 
     def diagnostics_wizard(self) -> DiagnosticsWizard:
         """The PC check. It does not run until a button is pressed."""

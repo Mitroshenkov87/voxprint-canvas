@@ -41,6 +41,8 @@ class PictureJob(NamedTuple):
     sampler: str
     copies: int
     adult_content: bool = False
+    lora_path: str = ""
+    lora_weight: float = 0.7
 
 
 @dataclass
@@ -122,6 +124,8 @@ def job_from(layout: SimpleLayout, live: Mapping[str, object] | None = None) -> 
         sampler=str(pick("shell.sampler")),
         copies=layout.batch_size(),
         adult_content=layout.prompt_policy() == adult_prompt_policy(allowed=True),
+        lora_path=str(pick("shell.addons") or ""),
+        lora_weight=_decimal(pick("shell.lora_weight")),
     )
 
 

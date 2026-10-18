@@ -7,4 +7,5 @@
 ::: canvas.models.sizes
 ::: canvas.models.downloader
 ::: canvas.models.addons
+::: canvas.models.user_lora
 ::: canvas.models.pin

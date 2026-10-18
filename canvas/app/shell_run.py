@@ -66,6 +66,8 @@ class ShellRunner:
         catalog = load_catalog()
         generator = ZImageGenerator(catalog, self.tier)
         generator.seed = job.seed
+        generator.lora_path = job.lora_path
+        generator.lora_strength = job.lora_weight
         if self.img2img_strength is not None:
             generator.img2img_strength = self.img2img_strength
         generator.models = models_dir()

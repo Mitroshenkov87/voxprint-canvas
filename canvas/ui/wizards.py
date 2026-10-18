@@ -15,18 +15,19 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QPushButton,
+    QRadioButton,
+    QScrollArea,
     QSizePolicy,
     QSlider,
     QVBoxLayout,
     QWidget,
 )
 
-from canvas.ui.shell_chrome import shell_style
-
 from canvas.app.i18n import text
+from canvas.models.user_lora import LoraIndex, UserLora, clamp_strength
 from canvas.safety.image import RawImage
+from canvas.ui.shell_chrome import shell_style
 
 
 _SETUP_ROWS: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -288,12 +289,13 @@ class MaskWizard(QDialog):
 
 
 class AddonsWizard(QDialog):
-    """The third-party notice, the folder, and the strength. They share the expert values."""
+    """The discovered LoRAs and a strength. They share the expert values."""
 
     def __init__(
         self,
         parent: QWidget | None,
-        path: str,
+        index: LoraIndex,
+        selected: str,
         strength: float,
         on_save: Callable[[str, float], None],
     ) -> None:
@@ -301,8 +303,9 @@ class AddonsWizard(QDialog):
 
         Args:
             parent: The shell window.
-            path: The current add-ons folder.
-            strength: The current strength.
+            index: Listed LoRAs and the folders that were skipped.
+            selected: The current expert folder, or empty.
+            strength: The current expert strength.
             on_save: Writes the folder and the strength into the shared state.
         """
         super().__init__(parent)
@@ -310,31 +313,95 @@ class AddonsWizard(QDialog):
         self.setWindowTitle(text("canvas.addons.title"))
         self.setStyleSheet(shell_style())
         self._on_save = on_save
+        self._items: dict[QRadioButton, UserLora | None] = {}
+        self._loading = True
         notice = QLabel(text("notice.third_party"))
         notice.setObjectName("thirdPartyNotice")
         notice.setWordWrap(True)
-        self._path = QLineEdit(path)
-        self._path.setObjectName("addonsPath")
+        host = QWidget()
+        rows = QVBoxLayout(host)
+        group = QButtonGroup(self)
+        group.setExclusive(True)
+        none = QRadioButton(text("canvas.addons.none"))
+        none.setObjectName("addonsNone")
+        none.setChecked(True)
+        group.addButton(none)
+        self._items[none] = None
+        none.toggled.connect(lambda checked: self._on_toggle(checked, None))
+        rows.addWidget(none)
+        if not index.available:
+            empty = QLabel(text("canvas.addons.empty"))
+            empty.setObjectName("addonsEmpty")
+            empty.setWordWrap(True)
+            rows.addWidget(empty)
+        chosen: UserLora | None = None
+        for item in index.available:
+            button = QRadioButton(_lora_label(item))
+            button.setObjectName(f"loraOption-{item.id}")
+            group.addButton(button)
+            self._items[button] = item
+            button.toggled.connect(lambda checked, lora=item: self._on_toggle(checked, lora))
+            if _matches(item, selected):
+                button.setChecked(True)
+                chosen = item
+            rows.addWidget(button)
+        for skipped in index.skipped:
+            label = QLabel(text("canvas.addons.skipped", name=skipped.name, reason=text(skipped.reason_key)))
+            label.setObjectName("addonsSkipped")
+            label.setWordWrap(True)
+            rows.addWidget(label)
+        scroll = QScrollArea()
+        scroll.setObjectName("addonsList")
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(host)
         self._strength = QDoubleSpinBox()
         self._strength.setObjectName("addonsStrength")
-        self._strength.setRange(0.0, 2.0)
-        self._strength.setSingleStep(0.1)
-        self._strength.setValue(float(strength))
+        self._strength.setDecimals(2)
+        self._strength.setSingleStep(0.05)
+        self._apply_strength(chosen, strength if chosen is not None else None)
+        if chosen is None:
+            self._strength.setValue(float(strength))
+        self._loading = False
         save = QPushButton(text("canvas.addons.save"))
         save.setObjectName("addonsSave")
         save.clicked.connect(self._save)
         _fit_button(save)
         layout = QVBoxLayout(self)
         layout.addWidget(notice)
-        layout.addWidget(QLabel(text("canvas.addons.path")))
-        layout.addWidget(self._path)
+        layout.addWidget(scroll)
         layout.addWidget(QLabel(text("canvas.addons.strength")))
         layout.addWidget(self._strength)
         layout.addWidget(save)
+        self.setMinimumWidth(420)
+
+    def _on_toggle(self, checked: bool, lora: UserLora | None) -> None:
+        if not checked or self._loading:
+            return
+        self._apply_strength(lora, None)
+
+    def _apply_strength(self, lora: UserLora | None, saved: float | None) -> None:
+        if lora is None:
+            self._strength.setRange(0.0, 2.0)
+            return
+        low, high = lora.strength_range
+        self._strength.setRange(low, high)
+        value = lora.default_strength if saved is None else saved
+        self._strength.setValue(min(max(float(value), low), high))
 
     def _save(self) -> None:
-        self._on_save(self._path.text(), float(self._strength.value()))
+        selected = self._selected()
+        strength = float(self._strength.value())
+        if selected is None:
+            self._on_save("", strength)
+        else:
+            self._on_save(str(selected.folder), clamp_strength(selected, strength))
         self.accept()
+
+    def _selected(self) -> UserLora | None:
+        for button, lora in self._items.items():
+            if button.isChecked():
+                return lora
+        return None
 
 
 class DiagnosticsWizard(QDialog):
@@ -479,6 +546,24 @@ class _MaskBoard(QWidget):
         painter.drawEllipse(x - radius, y - radius, radius * 2, radius * 2)
         painter.end()
         self.update()
+
+
+def _lora_label(lora: UserLora) -> str:
+    name = lora.trigger or lora.id
+    if lora.adult_content:
+        return f"{name} — {text('canvas.addons.adult_label')}"
+    return name
+
+
+def _matches(lora: UserLora, selected: str) -> bool:
+    if not selected:
+        return False
+    if selected == lora.id:
+        return True
+    try:
+        return Path(selected).resolve() == lora.folder.resolve()
+    except OSError:
+        return False
 
 
 def _fit_button(button: QPushButton) -> None:

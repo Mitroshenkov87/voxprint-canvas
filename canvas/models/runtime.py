@@ -24,6 +24,7 @@ from canvas.models.pins import (
     PIPELINE_TEXT,
 )
 from canvas.models.plan import CallPlan
+from canvas.models.user_lora import UserLora, apply_lora, unload_lora
 from canvas.pipeline.offload import OffloadUnavailable, install_low_vram_offload
 from canvas.pipeline.schedule import note_image_seconds
 from canvas.safety.image import RawImage, ScreenedFrame, ScreenedInput
@@ -75,7 +76,8 @@ def applied_strength(requested: float | None) -> float:
 
 def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, height: int, tier: Tier, *,
            seed: int = 0, control_file: Path | None = None,
-           strength: float | None = None) -> RawImage:
+           strength: float | None = None, lora: UserLora | None = None,
+           lora_strength: float | None = None) -> RawImage:
     """Run one pinned snapshot. ``folder`` is a local diffusers tree."""
     reset_peak_allocated()
     torch = _import_torch()
@@ -100,15 +102,15 @@ def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, he
     try:
         if pipeline_name == PIPELINE_TEXT:
             pipe = _load(diffusers.ZImagePipeline.from_pretrained, folder, torch_dtype=dtype, local_files_only=True)
-            _place(pipe, tier)
+            _place_and_bind(pipe, tier, lora, lora_strength)
             result = _timed(pipe, **common)
         elif pipeline_name == PIPELINE_IMG2IMG:
             pipe = _load(diffusers.ZImageImg2ImgPipeline.from_pretrained, folder, torch_dtype=dtype, local_files_only=True)
-            _place(pipe, tier)
+            _place_and_bind(pipe, tier, lora, lora_strength)
             result = _timed(pipe, image=_pil(_frame(screened, "init")), strength=applied_strength(strength), **common)
         elif pipeline_name == PIPELINE_INPAINT:
             pipe = _load(diffusers.ZImageInpaintPipeline.from_pretrained, folder, torch_dtype=dtype, local_files_only=True)
-            _place(pipe, tier)
+            _place_and_bind(pipe, tier, lora, lora_strength)
             result = _timed(
                 pipe, image=_pil(_frame(screened, "init")), mask_image=_pil(_frame(screened, "mask")), **common,
             )
@@ -122,7 +124,7 @@ def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, he
                     folder, controlnet=controlnet, torch_dtype=dtype, local_files_only=True,
                 )
                 role = _control_role(screened)
-                _place(pipe, tier)
+                _place_and_bind(pipe, tier, lora, lora_strength)
                 result = _timed(
                     pipe, control_image=_pil(_frame(screened, role)), controlnet_conditioning_scale=0.75, **common,
                 )
@@ -131,7 +133,7 @@ def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, he
                     diffusers.ZImageControlNetInpaintPipeline.from_pretrained,
                     folder, controlnet=controlnet, torch_dtype=dtype, local_files_only=True,
                 )
-                _place(pipe, tier)
+                _place_and_bind(pipe, tier, lora, lora_strength)
                 result = _timed(
                     pipe,
                     image=_pil(_frame(screened, "init")),
@@ -145,6 +147,7 @@ def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, he
         image = result.images[0].convert("RGB")
         return RawImage(image.width, image.height, image.tobytes())
     finally:
+        _release_lora(pipe)
         _release_inference(torch, pipe, controlnet)
 
 
@@ -185,6 +188,27 @@ def _release_inference(torch: Any, pipe: Any, controlnet: Any) -> None:
         ipc_collect = getattr(torch.cuda, "ipc_collect", None)
         if ipc_collect is not None:
             ipc_collect()
+
+
+def _place_and_bind(pipe: Any, tier: Tier, lora: UserLora | None, lora_strength: float | None) -> None:
+    """Place the pipeline, then load the selected LoRA on its transformer."""
+    _place(pipe, tier)
+    if lora is None:
+        return
+    transformer = getattr(pipe, "transformer", None)
+    if transformer is None:
+        raise InferenceUnavailable("the generator has no transformer")
+    requested = lora.default_strength if lora_strength is None else lora_strength
+    apply_lora(transformer, lora, requested)
+
+
+def _release_lora(pipe: Any) -> None:
+    """Remove adapters before the pipeline is dropped."""
+    if pipe is None:
+        return
+    transformer = getattr(pipe, "transformer", None)
+    if transformer is not None:
+        unload_lora(transformer)
 
 
 def _place(pipe: Any, tier: Tier) -> None:

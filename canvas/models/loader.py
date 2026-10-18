@@ -13,6 +13,7 @@ from canvas.models.pin import PinError, require_pin, verify_file
 from canvas.models.plan import CallPlan, build_plan
 from canvas.models.registry import Catalog, ModelSpec, RegistryError, load_catalog
 from canvas.models.runtime import WeightsLoadError, render
+from canvas.models.user_lora import UserLora, resolve_selected
 from canvas.models.snapshots import SnapshotError, fallback_ready, snapshot_ready, weight_dir
 from canvas.pipeline.bf16_schedule import (
     EmbeddingCache,
@@ -139,6 +140,8 @@ class ZImageGenerator:
         self.seed = 0
         self.img2img_strength: float | None = None
         self.models: Path | None = None
+        self.lora_path = ""
+        self.lora_strength = 0.7
 
     def attach_probe(self, probe: PeakVramProbe | None) -> None:
         """Stage marks land on this probe. The pipeline calls it before ``generate``."""
@@ -165,12 +168,14 @@ class ZImageGenerator:
         if folder is None or width is None or height is None:
             raise ModelNotReady(plan)
         control_file = _control_file(self.catalog, plan, root)
+        lora, lora_strength = self._selected_lora()
         try:
             try:
                 return render(
                     plan, folder, screened, width, height, self.tier,
                     seed=self.seed, control_file=control_file,
                     strength=self.img2img_strength,
+                    lora=lora, lora_strength=lora_strength,
                 )
             except WeightsLoadError:
                 # The BF16 weights did not open: use the author's FP32 -upstream entry.
@@ -182,9 +187,19 @@ class ZImageGenerator:
                     plan, fp32, screened, width, height, self.tier,
                     seed=self.seed, control_file=control_file,
                     strength=self.img2img_strength,
+                    lora=lora, lora_strength=lora_strength,
                 )
         except ImportError as exc:
             raise ModelNotReady(plan) from exc
+
+    def _selected_lora(self) -> tuple[UserLora | None, float | None]:
+        """The listed LoRA for the expert field, and the strength to apply."""
+        if not self.lora_path:
+            return None, None
+        selected = resolve_selected(self.lora_path, self.models)
+        if selected is None:
+            return None, None
+        return selected, self.lora_strength
 
     def _schedule(self, plan: CallPlan, mode: Mode, width: int, height: int, prompt: str) -> None:
         """Plan memory before weights move. 24 GB stays resident and does not mark stages."""

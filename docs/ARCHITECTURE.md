@@ -34,6 +34,8 @@ Both tabs offer the same aspect picker, grouped as Landscape (16:9, 21:9, 3:2, 4
 
 Third-party add-ons are off until you turn them on. The curated list has one model, Chroma1-HD, fetched from its upstream address when you ask. Files are stored in a `third-party` folder under the shared models directory. Voxprint does not host or redistribute those files.
 
+Model Forge LoRAs live in `user-models/lora/<id>` under the shared models folder. A folder is listed in Add-ons (LoRA) when `voxprint-model.json` is schema `voxprint-model/1`, the weight file matches the recorded size and SHA-256, and `base.mdl_id` is the Z-Image-Turbo base this app runs. One LoRA can be selected. LoRA strength is the expert field, kept inside the range recorded on that LoRA. The trigger word is a chip and is added to the prompt only when you press the chip. `tools/declared_age_shadow.py` writes a count report for a folder of images. The app does not import it.
+
 Weight files in the main registry are pinned by SHA-256. The loader refuses a missing file or a bad hash. A picture uses the pinned snapshot through diffusers 0.41.0 when those files are already on disk. The setup downloads the default Z-Image-Turbo pack. Z-Image-Turbo is taken from the public mirror first, then from the upstream repository.
 
 ## Content safety checks

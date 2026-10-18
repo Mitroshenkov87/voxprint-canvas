@@ -552,6 +552,58 @@
       "en": "Save",
       "ru": "Сохранить"
     },
+    "canvas.addons.none": {
+      "en": "None",
+      "ru": "Нет"
+    },
+    "canvas.addons.empty": {
+      "en": "No add-ons in the models folder.",
+      "ru": "В папке моделей нет дополнений."
+    },
+    "canvas.addons.adult_label": {
+      "en": "Adult content",
+      "ru": "Для взрослых"
+    },
+    "canvas.addons.trigger": {
+      "en": "Insert this word",
+      "ru": "Вставить это слово"
+    },
+    "canvas.addons.skipped": {
+      "en": "{name}: {reason}",
+      "ru": "{name}: {reason}"
+    },
+    "canvas.addons.reason.record": {
+      "en": "This add-on record cannot be read.",
+      "ru": "Запись дополнения не читается."
+    },
+    "canvas.addons.reason.schema": {
+      "en": "This add-on record uses an unsupported schema.",
+      "ru": "Схема записи дополнения не поддерживается."
+    },
+    "canvas.addons.reason.type": {
+      "en": "This add-on is not a LoRA.",
+      "ru": "Это дополнение не LoRA."
+    },
+    "canvas.addons.reason.base": {
+      "en": "This add-on is for a different base model.",
+      "ru": "Это дополнение для другой базовой модели."
+    },
+    "canvas.addons.reason.file": {
+      "en": "This add-on file does not match its record.",
+      "ru": "Файл дополнения не совпадает с записью."
+    },
+    "canvas.addons.reason.person": {
+      "en": "This person add-on is missing a required field.",
+      "ru": "У дополнения человека не хватает обязательного поля."
+    },
+    "canvas.addons.reason.incomplete": {
+      "en": "This add-on is incomplete.",
+      "ru": "Дополнение неполное."
+    },
+    "canvas.addons.reason.preview": {
+      "en": "The preview file does not match its record.",
+      "ru": "Файл предпросмотра не совпадает с записью."
+    },
     "canvas.check.title": {
       "en": "Check this PC",
       "ru": "Проверить компьютер"

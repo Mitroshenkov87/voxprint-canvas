@@ -200,6 +200,10 @@ def _json(stdout: str) -> dict[str, object]:
     return {}
 
 
+# The app writes AVIF by default and refuses PNG.
+OUTPUT_SUFFIX = ".avif"
+
+
 def run_image(python: str, cap: float | None, index: int, prompt: str, dest: Path) -> dict[str, object]:
     """Generate one picture and describe the result."""
     started = time.perf_counter()
@@ -417,13 +421,13 @@ def main(argv: list[str] | None = None) -> int:
     rows: list[dict[str, object]] = []
     try:
         for index, prompt in enumerate(PROMPTS, start=1):
-            dest = folder / f"smoke-{tier_pass}-{index}.png"
+            dest = folder / f"smoke-{tier_pass}-{index}{OUTPUT_SUFFIX}"
             rows.append(run_image(args.python, cap, index, prompt, dest))
             if rows[-1]["gate"] == "unavailable":
                 break
         payload = {**summarise(rows, peak[0], gpu, tier, model), "canvas_version": base["canvas_version"],
                    "pass": tier_pass, "vram_cap_gb": cap}
-        kept = [(str(r["prompt"]), folder / f"smoke-{tier_pass}-{r['index']}.png") for r in rows if r["gate"] == "pass"]
+        kept = [(str(r["prompt"]), folder / f"smoke-{tier_pass}-{r['index']}{OUTPUT_SUFFIX}") for r in rows if r["gate"] == "pass"]
         if kept and not args.no_bench:
             try:
                 payload["gate_timing"] = gate_bench([k[0] for k in kept], [k[1] for k in kept], cap)

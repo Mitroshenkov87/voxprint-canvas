@@ -385,7 +385,7 @@ def test_installers_use_the_suite_runtime():
     assert "onnxruntime-gpu" in windows
     assert "$SHARED/wheels" not in linux
     assert 'WHEELS="$APP/setup-work/wheels"' in linux
-    assert "Voxprint\\shared" in windows
+    assert 'Join-Path $SuiteHome "shared"' in windows
     assert "Installing the default image pack..." in linux
     assert "Installing the default image pack..." in windows
 
@@ -550,7 +550,7 @@ def test_installers_resolve_numpy_from_pypi_and_pin_cuda_torch():
     assert "if Code = 0 then" in step
     assert "ExpandConstant('{app}')" in post
     assert "ExpandConstant('{app}\\setup-work\\canvas-install.log')" in post
-    assert "ExpandConstant('{localappdata}\\Voxprint\\logs\\canvas-install.log')" in post
+    assert "ExpandConstant('{localappdata}\\VOXPrint AI Suite\\logs\\canvas-install.log')" in post
     assert "ExecAsOriginalUser" not in uninstall
     assert "-I -m canvas.app.main --unregister-models" in uninstall
     assert "icacls.exe" not in iss
@@ -637,7 +637,7 @@ printf '%s\\n' "$user" "$data" "$PROFILE_XDG"
     result = _source_install_functions(env, script, root)
     user, data, xdg = result.stdout.splitlines()
     assert user == str(home)
-    assert data == str(home / ".local" / "share" / "voxprint")
+    assert data == str(home / ".local" / "share" / "voxprint-ai-suite")
     assert xdg == str(home / ".local" / "share")
 
     inside = home / ".config" / "share"
@@ -646,7 +646,7 @@ printf '%s\\n' "$user" "$data" "$PROFILE_XDG"
     result = _source_install_functions(env, script, root)
     user, data, xdg = result.stdout.splitlines()
     assert user == str(home)
-    assert data == str(inside / "voxprint")
+    assert data == str(inside / "voxprint-ai-suite")
     assert xdg == str(inside)
 
     env["VOXPRINT_HOME"] = "relative/voxprint"

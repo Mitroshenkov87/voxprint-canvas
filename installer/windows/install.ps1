@@ -1,5 +1,5 @@
 # Install VOXPrint AI Canvas. Program files live beside this script.
-# Per-user data stays in %LOCALAPPDATA%\Voxprint.
+# Per-user data stays in %LOCALAPPDATA%\VOXPrint AI Suite (voxprint-common 0.2.5 data home).
 # The setup does not contain GPU libraries or model files.
 # Missing dependencies are installed here, before the first picture.
 # Scope Machine writes only under the install folder and runs elevated.
@@ -18,7 +18,9 @@ if ([string]::IsNullOrWhiteSpace($scriptPath)) { $scriptPath = $PSCommandPath }
 $App = Split-Path -Parent $scriptPath
 $Venv = Join-Path $App "venv"
 $Py = Join-Path $Venv "Scripts\python.exe"
-$Shared = Join-Path $env:LOCALAPPDATA "Voxprint\shared"
+$SuiteHome = Join-Path $env:LOCALAPPDATA "VOXPrint AI Suite"
+$LegacyHome = Join-Path $env:LOCALAPPDATA "Voxprint"
+$Shared = Join-Path $SuiteHome "shared"
 $RuntimeRel = "runtime/py314-torch2.11-cu130"
 $Runtime = Join-Path $Shared ($RuntimeRel -replace '/', '\')
 $RuntimePy = Join-Path $Runtime "Scripts\python.exe"
@@ -279,8 +281,8 @@ function Reset-InstallerEnvironment([string]$Mode) {
     $env:PYTHONNOUSERSITE = "1"
     Set-Location -LiteralPath $App
     if ($Mode -eq "User") {
-        $userCache = Join-Path $env:LOCALAPPDATA "Voxprint\uv-cache"
-        $userTemp = Join-Path $env:LOCALAPPDATA "Voxprint\setup-temp"
+        $userCache = Join-Path $SuiteHome "uv-cache"
+        $userTemp = Join-Path $SuiteHome "setup-temp"
         Assert-NoReparse $userCache
         Assert-NoReparse $userTemp
         New-Item -ItemType Directory -Force $userCache, $userTemp | Out-Null
@@ -702,13 +704,13 @@ function Invoke-Machine {
             Install-SuiteGpuPackages $Py ""
             if (-not (Test-SuiteGpuPackages $Py)) { throw "Setup stopped." }
         }
-        $CommonUrl = "https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.2.4/voxprint_common-0.2.4-py3-none-any.whl"
-        $CommonSha = "3051bc64700964705bf5cee5182829d1311560a38a9f7436195f26481e4fa239"
-        $CommonWheel = Join-Path $Fetch "voxprint_common-0.2.4-py3-none-any.whl"
+        $CommonUrl = "https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.2.5/voxprint_common-0.2.5-py3-none-any.whl"
+        $CommonSha = "4980c1ab5a75b22dec1a16b16474ccb350110c8d3d056f25b5ed74a623fe6a9b"
+        $CommonWheel = Join-Path $Fetch "voxprint_common-0.2.5-py3-none-any.whl"
         Assert-NoReparse $CommonWheel
         Invoke-WebRequest -Uri $CommonUrl -OutFile $CommonWheel
         $got = (Get-FileHash -Algorithm SHA256 -Path $CommonWheel).Hash.ToLowerInvariant()
-        if ($got -ne $CommonSha) { throw "voxprint-common 0.2.4 failed the SHA-256 check." }
+        if ($got -ne $CommonSha) { throw "voxprint-common 0.2.5 failed the SHA-256 check." }
         Assert-AdminPath $script:Uv
         Assert-AdminPath $Py
         & $script:Uv pip install --no-config --python $Py $CommonWheel
@@ -724,12 +726,26 @@ function Invoke-Machine {
     }
 }
 
+function Move-LegacySuiteHome {
+    # voxprint-common 0.2.5 moved the data home. Move the old folder before
+    # anything runs from it: Windows cannot rename a folder that holds a
+    # running interpreter or an open log. When both exist, the new one is kept
+    # and the old one is left in place, as voxprint-common does.
+    if (-not (Test-Path -LiteralPath $LegacyHome -PathType Container)) { return }
+    if (Test-Path -LiteralPath $SuiteHome) { return }
+    Assert-NoReparse $LegacyHome
+    Assert-NoReparse (Split-Path -Parent $SuiteHome)
+    Write-Host "Moving the suite data from $LegacyHome to $SuiteHome"
+    Move-Item -LiteralPath $LegacyHome -Destination $SuiteHome
+}
+
 function Invoke-User {
     if ($Scope -eq "All") {
         Write-Host "Profile folders are written by this process because -Scope All was requested. Each path is checked for links."
     }
+    Move-LegacySuiteHome
     Reset-InstallerEnvironment "User"
-    $logDir = Join-Path $env:LOCALAPPDATA "Voxprint\logs"
+    $logDir = Join-Path $SuiteHome "logs"
     Start-SetupLog (Join-Path $logDir "canvas-install.log")
     try {
         Assert-ConstraintFiles
@@ -761,7 +777,7 @@ function Invoke-User {
             New-Item -ItemType Directory -Force $Trt | Out-Null
             Invoke-Py @("-m", "pip", "--isolated", "install", "-c", $Constraints, "--target", $Trt, "--upgrade-strategy", "only-if-needed", "tensorrt-cu13==10.16.1.11")
         }
-        $dataRoot = Join-Path $env:LOCALAPPDATA "Voxprint"
+        $dataRoot = $SuiteHome
         Assert-NoReparse $dataRoot
         $Mdl = Join-Path $App "mdl.json"
         if (-not (Test-Path -LiteralPath $Mdl)) { throw "mdl.json is missing from the setup. The install cannot continue." }

@@ -8,6 +8,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import assert_never
 
+from PIL import Image
 from PySide6.QtCore import QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
@@ -110,6 +111,7 @@ class ShellWindow(QMainWindow):
         self._installer = installer if installer is not None else run_shared_enlarge
         self._picture: Path | None = None
         self._mask: RawImage | None = None
+        self._mask_file: Path | None = None
         self._pictures: dict[str, str] = {}
         self._chrome_ready = False
         self.setObjectName("shell")
@@ -167,6 +169,7 @@ class ShellWindow(QMainWindow):
         """
         image = load_rgb(path)
         self._picture = path
+        self.shell.layout.set_source_path(str(path))
         self.shell.layout.set_value("canvas.source", "picture")
         self.shell.layout.choose("size", closest_aspect(image.width, image.height))
         self.view.refresh()
@@ -178,6 +181,7 @@ class ShellWindow(QMainWindow):
             image: White pixels are painted over.
         """
         self._mask = image
+        self._mask_file = self._write_mask(image)
         self.shell.layout.set_value("canvas.source", "picture")
         self.shell.layout.set_value("canvas.change", "inpaint")
         self.view.refresh()
@@ -264,14 +268,39 @@ class ShellWindow(QMainWindow):
             self.view.refresh()
             return current
 
+    def _write_mask(self, image: RawImage) -> Path | None:
+        """Save the mask beside the state and store it in the Yitro mask slot."""
+        path = self.shell.state_dir / "mask.png"
+        try:
+            Image.frombytes("RGB", (image.width, image.height), image.to_bytes()).save(path)
+        except OSError:
+            return None
+        self.shell.layout.set_mask_path(str(path))
+        return path
+
+    def _adopt_slots(self, live: dict[str, object]) -> None:
+        """Use a picture or mask set through the Yitro slots (drop or Expert path)."""
+        source = str(live.get("image.source") or "")
+        if source and (self._picture is None or Path(source) != self._picture) and Path(source).is_file():
+            # The chips still choose words or picture; the slot only names the file.
+            self._picture = Path(source)
+        mask = str(live.get("image.mask") or "")
+        if mask and (self._mask_file is None or Path(mask) != self._mask_file) and Path(mask).is_file():
+            loaded = _safe_load(Path(mask))
+            if loaded is not None:
+                self._mask = loaded
+                self._mask_file = Path(mask)
+
     def _on_generate(self, settings: object = None) -> None:
         layout = self.shell.layout
+        live = dict(settings) if isinstance(settings, dict) else layout.live_settings()
+        self._adopt_slots(live)
         if not selectable():
             layout.unavailable(text("canvas.models.missing"))
             self.view.refresh()
             return
         try:
-            job = job_from(layout)
+            job = job_from(layout, live)
         except (ValueError, KeyError):
             layout.block(text("gate.unavailable"))
             self.view.refresh()

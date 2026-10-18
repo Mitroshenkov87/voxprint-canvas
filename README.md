@@ -14,7 +14,7 @@ Windows setup places the app in `C:\Program Files\VOXPrint AI Suite\Canvas\`. Th
 
 Linux setup places the app in `/opt/voxprint-ai-suite/canvas/`.
 
-Pictures, models, and the shared manifest stay in `%LOCALAPPDATA%\Voxprint` on Windows and `~/.local/share/voxprint` on Linux. An upgrade removes the previous program folder and its shortcuts, and leaves that data in place.
+Pictures, models, and the shared manifest stay in `%LOCALAPPDATA%\VOXPrint AI Suite` on Windows and `~/.local/share/voxprint-ai-suite` on Linux. An upgrade removes the previous program folder and its shortcuts, and leaves that data in place.
 
 ## Requirements
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from collections.abc import Mapping
 from typing import NamedTuple
 
 from voxprint_common.paths import state_dir
@@ -85,18 +86,27 @@ def open_layout(state_dir_path: Path, *, gate: AgeGate, enlarge_installed: bool 
         settings=settings,
         state_dir=state_dir_path,
         gate=check,
+        source_picture=True,
+        mask=True,
         state_name=names[0],
         history_name=names[1],
     )
     return CanvasShell(layout, settings, check, state_dir_path, surface)
 
 
-def job_from(layout: SimpleLayout) -> PictureJob:
+def job_from(layout: SimpleLayout, live: Mapping[str, object] | None = None) -> PictureJob:
     """Read the live chips and expert values into one job.
 
     Args:
         layout: A screen opened by :func:`open_layout`.
+        live: The live settings Yitro passes to the generator. Its steps,
+            guidance, and sampler win over the stored values when present.
     """
+    values = dict(live or {})
+
+    def pick(key: str) -> object:
+        return values[key] if values.get(key) not in (None, "") else layout.get(key)
+
     return PictureJob(
         prompt=composed_prompt(layout),
         negative=composed_negative(layout),
@@ -105,9 +115,9 @@ def job_from(layout: SimpleLayout) -> PictureJob:
         output=output_name(layout),
         fmt=_format(layout.get("canvas.format")),
         seed=int(layout.seed),
-        steps=_whole(layout.get("shell.steps")),
-        guidance=_decimal(layout.get("shell.guidance")),
-        sampler=str(layout.get("shell.sampler")),
+        steps=_whole(pick("shell.steps")),
+        guidance=_decimal(pick("shell.guidance")),
+        sampler=str(pick("shell.sampler")),
         copies=layout.batch_size(),
     )
 

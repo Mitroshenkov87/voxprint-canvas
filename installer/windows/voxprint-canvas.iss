@@ -83,7 +83,7 @@ begin
   end;
   if ResultCode <> 0 then
   begin
-    SuppressibleMsgBox('VOXPrint AI Canvas setup failed. The machine log is ' + ExpandConstant('{app}\setup-work\canvas-install.log') + '. The user log is ' + ExpandConstant('{localappdata}\Voxprint\logs\canvas-install.log') + '.', mbError, MB_OK, IDOK);
+    SuppressibleMsgBox('VOXPrint AI Canvas setup failed. The machine log is ' + ExpandConstant('{app}\setup-work\canvas-install.log') + '. The user log is ' + ExpandConstant('{localappdata}\VOXPrint AI Suite\logs\canvas-install.log') + '.', mbError, MB_OK, IDOK);
     if (ResultCode > 0) and (ResultCode <= 255) then
       Result := ResultCode
     else

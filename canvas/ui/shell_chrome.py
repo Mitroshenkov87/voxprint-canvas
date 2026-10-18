@@ -162,6 +162,7 @@ def polish(window):
         window: The shell window.
     """
     _adopt_rows(window)
+    _source_drop(window)
     _size_menu(window)
     _output(window)
     _detail(window)
@@ -651,6 +652,17 @@ def _wrap_rows(window):
     _flow_heights(window, shown)
 
 
+def _source_drop(window):
+    """Hide the shared drop box. Canvas opens pictures from Picture setup.
+
+    The Yitro source slot still holds the path; only the extra box above the
+    prompt is hidden so the picture keeps its 300 px.
+    """
+    drop = window.view.root.findChild(QWidget, "sourceDrop")
+    if drop is not None and not drop.isHidden():
+        drop.hide()
+
+
 def _adopt_rows(window):
     """Move each shared chip row (Yitro ``pillRow``) onto the Canvas flow.
 
@@ -775,7 +787,7 @@ class _Flow(QLayout):
         inner = max(0, width - margins.left() - margins.right())
         origin_x = margins.left() if rect is None else rect.x() + margins.left()
         origin_y = margins.top() if rect is None else rect.y() + margins.top()
-        one_row = _fit_style_font(self._items, inner, spacing)
+        one_row = _fit_style_font(self._items, inner, spacing, warn=rect is not None)
         squeeze = _squeeze(self._items, inner, spacing)
         lines = []
         current = []
@@ -820,7 +832,7 @@ def _row_fits(items, inner, spacing):
     return total + spacing * max(0, len(shown) - 1) <= inner
 
 
-def _fit_style_font(items, inner, spacing):
+def _fit_style_font(items, inner, spacing, warn=True):
     """Shrink the style chip font, in steps down to 80%, so the row stays on one line.
 
     Returns True when the row holds style chips; such a row never wraps. When it
@@ -837,7 +849,8 @@ def _fit_style_font(items, inner, spacing):
             _scale_chip_font(chip, step)
         if _row_fits(items, inner, spacing):
             return True
-    logging.getLogger(__name__).warning("style chip row does not fit in %d px at the 80%% font floor", inner)
+    if warn:
+        logging.getLogger(__name__).warning("style chip row does not fit in %d px at the 80%% font floor", inner)
     return True
 
 
@@ -885,8 +898,10 @@ def _squeeze(items, inner, spacing):
 
 
 def _flow_hidden(item):
+    # isHidden, not isVisible: before the window is shown every chip reads as
+    # not visible, and a row arranged then would leave its chips unplaced.
     widget = item.widget()
-    return widget is not None and not widget.isVisible()
+    return widget is not None and widget.isHidden()
 
 
 def _flow_size(item):

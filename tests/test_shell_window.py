@@ -44,6 +44,18 @@ def app():
     return QApplication.instance() or QApplication([])
 
 
+@pytest.fixture(autouse=True)
+def _close_shell_windows():
+    """Close the windows a test showed, so later tests do not paint them."""
+    yield
+    instance = QApplication.instance()
+    if instance is None:
+        return
+    for widget in instance.topLevelWidgets():
+        if isinstance(widget, ShellWindow) and widget.isVisible():
+            widget.close()
+
+
 @pytest.fixture
 def home(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
@@ -484,3 +496,28 @@ def test_the_enlarge_question_uses_the_registry_size(home: Path) -> None:
     (state / "installed-apps.json").write_text(json.dumps(registry) + "\n", encoding="utf-8")
     assert enlarge_download_bytes() == 1572864
     assert enlarge_question() == text("canvas.enlarge.confirm.size", size=format_size(1572864))
+
+
+def test_yitro_slots_and_live_settings_reach_the_job(app, home: Path, tmp_path: Path) -> None:
+    del app
+    from PIL import Image
+
+    from canvas.safety.image import RawImage
+    from canvas.ui.shell_layout import job_from
+
+    window = _window(home)
+    layout = window.shell.layout
+    assert layout.source_picture and layout.mask
+    path = tmp_path / "dot.png"
+    Image.new("RGB", (8, 8), (20, 30, 40)).save(path)
+    window.use_picture(path)
+    assert layout.get("image.source") == str(path)
+    window.use_mask(RawImage(8, 8, b"\xff" * 192))
+    assert Path(str(layout.get("image.mask"))).is_file()
+    live = dict(layout.live_settings())
+    live["shell.steps"] = 7
+    live["shell.sampler"] = "euler"
+    job = job_from(layout, live)
+    assert job.steps == 7
+    assert job.sampler == "euler"
+    assert window.shell.gate.age_gate is not None

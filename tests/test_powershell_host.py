@@ -85,3 +85,9 @@ def test_ci_runs_pwsh_and_still_covers_the_51_fallback():
     for name in ("install.ps1", "tools/smoke_16gb.ps1"):
         path = ROOT / "installer" / "windows" / name if name == "install.ps1" else ROOT / name
         assert "#Requires" not in path.read_text(encoding="utf-8")
+
+
+def test_setup_scripts_run_without_a_console_window():
+    iss = (ROOT / "installer" / "windows" / "voxprint-canvas.iss").read_text(encoding="utf-8")
+    assert "SW_SHOW" not in iss
+    assert "english.SetupScripts=" in iss and "russian.SetupScripts=" in iss

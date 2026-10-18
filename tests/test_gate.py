@@ -112,11 +112,12 @@ def test_adult_russian_shower_prompt_stays_open_when_the_guard_says_sexual():
 
 def test_denylist_is_not_cleared_by_a_safe_verdict(caplog):
     world = World()
-    with caplog.at_level(logging.INFO):
+    with caplog.at_level(logging.DEBUG):
         with pytest.raises(GenerationBlocked):
             world.gate().review_prompt("nude child secret-phrase")
     assert "secret-phrase" not in caplog.text
-    assert "content check refused a prompt" in caplog.text
+    # The product keeps no record of a content decision.
+    assert not [record for record in caplog.records if record.name.startswith("voxprint")]
 
 
 def test_prompt_screening_ignores_text_zero_shot_scores():

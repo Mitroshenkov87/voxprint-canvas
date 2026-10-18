@@ -154,3 +154,24 @@ def test_the_adult_content_setting_reaches_the_gate_as_explicit(tmp_path):
     assert job_from(shell.layout).adult_content is False
     shell.layout.set_value("image.adult_content", True)
     assert job_from(shell.layout).adult_content is True
+
+
+def test_toggle_off_with_an_explicit_prompt_still_runs_stage_two_on_inputs(tmp_path):
+    from canvas.ui.shell_layout import job_from, open_layout
+
+    world = World()
+    shell = open_layout(tmp_path, gate=world.gate())
+    shell.layout.set_value("image.adult_content", False)
+    job = job_from(shell.layout)
+    assert job.adult_content is False
+    world.faces = [Face(0, 0, 2, 2)]
+    world.ages = [(0.0, 0.0)]
+    world.gate().release_request("nude adult woman, 30 years old", "restyle", _inputs()[:1],
+                                 explicit=job.adult_content)
+    assert world.calls[:2] == ["guard", "nsfw"]
+    assert STAGE_TWO <= set(world.calls)
+    world = World()  # a clothed input (NSFW 0.0) still meets the stage-2 labels
+    world.image_scores[IMAGE_MINOR_SEXUAL] = 0.9
+    with pytest.raises(GenerationBlocked):
+        world.gate().release_request("nude adult woman, 30 years old", "restyle", _inputs()[:1],
+                                     explicit=job.adult_content)

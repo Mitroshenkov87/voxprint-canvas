@@ -113,8 +113,10 @@ def live_generate(age_gate: AgeGate, tier: Tier) -> Callable[[str, int, SeriesFr
             fresh = (PendingInput(ImageRole.INIT, raw),)
         try:
             return runner(job, fresh)
-        except RunStopped:
-            return None
+        except RunStopped as exc:
+            if exc.unavailable:
+                return None
+            raise
 
     return generate
 

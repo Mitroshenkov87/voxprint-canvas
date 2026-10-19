@@ -7,6 +7,7 @@ the unit tests can import Canvas without them.
 from __future__ import annotations
 
 import gc
+import threading
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -62,6 +63,7 @@ def _load(loader: Any, *args: Any, **kwargs: Any) -> Any:
 _BASE_PIPELINES = frozenset({PIPELINE_TEXT, PIPELINE_IMG2IMG, PIPELINE_INPAINT})
 _PARK_RAM_BYTES = 64 * 1024**3
 _scope_depth = 0
+_lock = threading.RLock()
 
 
 @dataclass
@@ -103,34 +105,41 @@ def _should_retain() -> bool:
 def pipeline_scope() -> Iterator[None]:
     """Keep one pipeline, and its placement, until the outermost run ends."""
     global _scope_depth
-    _scope_depth += 1
+    with _lock:
+        _scope_depth += 1
     try:
         yield
     except Exception:
         release_pipeline()
         raise
     finally:
-        _scope_depth = max(0, _scope_depth - 1)
-        if _scope_depth == 0 and not _park_between_runs():
-            release_pipeline()
+        with _lock:
+            _scope_depth = max(0, _scope_depth - 1)
+            if _scope_depth == 0 and not _park_between_runs():
+                release_pipeline()
 
 
 def release_pipeline() -> None:
-    """Drop the kept pipeline. Safe when nothing is loaded and when torch is absent."""
+    """Drop the kept pipeline. Safe when nothing is loaded and when torch is absent.
+
+    Waits for a picture another thread is drawing, so no pipeline is dropped mid-call.
+    """
     global _slot
-    held = _slot
-    _slot = None
-    if held is None:
-        return
-    _release_lora(held.pipe)
-    _release_inference(held.torch, held.pipe, held.controlnet)
+    with _lock:
+        held = _slot
+        _slot = None
+        if held is None:
+            return
+        _release_lora(held.pipe)
+        _release_inference(held.torch, held.pipe, held.controlnet)
 
 
 def reset_pipeline_cache() -> None:
     """Drop a pipeline and a scope left open by a test."""
     global _scope_depth
-    release_pipeline()
-    _scope_depth = 0
+    with _lock:
+        release_pipeline()
+        _scope_depth = 0
 
 
 def _weights_key(folder: Path, tier: Tier, dtype: object, control_file: Path | None) -> tuple[str, Tier, object, str]:
@@ -293,42 +302,43 @@ def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, he
     common.update(guidance)
     pipeline_name = plan.pipeline_class
     failed = False
-    try:
-        pipe = _pipeline_for(
-            diffusers, torch, pipeline_name, folder, dtype, tier, lora, lora_strength, control_file,
-        )
-        if pipeline_name == PIPELINE_TEXT:
-            result = _timed(pipe, **common)
-        elif pipeline_name == PIPELINE_IMG2IMG:
-            result = _timed(pipe, image=_pil(_frame(screened, "init")), strength=applied_strength(strength), **common)
-        elif pipeline_name == PIPELINE_INPAINT:
-            result = _timed(
-                pipe, image=_pil(_frame(screened, "init")), mask_image=_pil(_frame(screened, "mask")), **common,
+    with _lock:
+        try:
+            pipe = _pipeline_for(
+                diffusers, torch, pipeline_name, folder, dtype, tier, lora, lora_strength, control_file,
             )
-        elif pipeline_name == PIPELINE_CONTROL:
-            role = _control_role(screened)
-            result = _timed(
-                pipe, control_image=_pil(_frame(screened, role)), controlnet_conditioning_scale=0.75, **common,
-            )
-        elif pipeline_name == PIPELINE_CONTROL_INPAINT:
-            result = _timed(
-                pipe,
-                image=_pil(_frame(screened, "init")),
-                mask_image=_pil(_frame(screened, "mask")),
-                control_image=_pil(_frame(screened, _control_role(screened))),
-                controlnet_conditioning_scale=0.75,
-                **common,
-            )
-        else:
-            raise InferenceUnavailable(f"unknown pipeline {pipeline_name}")
-        image = result.images[0].convert("RGB")
-        return RawImage(image.width, image.height, image.tobytes())
-    except Exception:
-        failed = True
-        raise
-    finally:
-        if failed or not _should_retain():
-            release_pipeline()
+            if pipeline_name == PIPELINE_TEXT:
+                result = _timed(pipe, **common)
+            elif pipeline_name == PIPELINE_IMG2IMG:
+                result = _timed(pipe, image=_pil(_frame(screened, "init")), strength=applied_strength(strength), **common)
+            elif pipeline_name == PIPELINE_INPAINT:
+                result = _timed(
+                    pipe, image=_pil(_frame(screened, "init")), mask_image=_pil(_frame(screened, "mask")), **common,
+                )
+            elif pipeline_name == PIPELINE_CONTROL:
+                role = _control_role(screened)
+                result = _timed(
+                    pipe, control_image=_pil(_frame(screened, role)), controlnet_conditioning_scale=0.75, **common,
+                )
+            elif pipeline_name == PIPELINE_CONTROL_INPAINT:
+                result = _timed(
+                    pipe,
+                    image=_pil(_frame(screened, "init")),
+                    mask_image=_pil(_frame(screened, "mask")),
+                    control_image=_pil(_frame(screened, _control_role(screened))),
+                    controlnet_conditioning_scale=0.75,
+                    **common,
+                )
+            else:
+                raise InferenceUnavailable(f"unknown pipeline {pipeline_name}")
+            image = result.images[0].convert("RGB")
+            return RawImage(image.width, image.height, image.tobytes())
+        except Exception:
+            failed = True
+            raise
+        finally:
+            if failed or not _should_retain():
+                release_pipeline()
 
 
 def _timed(pipe: Any, **kwargs: Any) -> Any:

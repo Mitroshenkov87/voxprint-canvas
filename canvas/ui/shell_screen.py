@@ -5,13 +5,12 @@ import shutil
 import subprocess
 import uuid
 from collections.abc import Callable
-from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import assert_never
 
 from PIL import Image
 from PySide6.QtCore import QUrl
-from PySide6.QtGui import QCloseEvent, QDesktopServices
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -155,22 +154,6 @@ class ShellWindow(QMainWindow):
         self.photoshoot = PhotoshootBar(self)
         self._chrome_ready = True
         polish(self)
-        scope = pipeline_scope()
-        self._pipeline_scope: AbstractContextManager[None] | None = scope
-        scope.__enter__()
-
-    def _end_pipeline_scope(self) -> None:
-        """Release the window's pipeline when the window closes."""
-        scope = getattr(self, "_pipeline_scope", None)
-        if scope is None:
-            return
-        self._pipeline_scope = None
-        scope.__exit__(None, None, None)
-
-    def closeEvent(self, event: QCloseEvent) -> None:
-        """Close the window and drop the pipeline kept for this session."""
-        self._end_pipeline_scope()
-        super().closeEvent(event)
 
     def set_expert(self, enabled: bool) -> None:
         """Store Expert mode and show or hide the side panel.

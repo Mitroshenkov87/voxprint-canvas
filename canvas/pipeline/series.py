@@ -31,12 +31,13 @@ from canvas.pipeline.photoshoot import (
     scenario_request,
 )
 from canvas.safety.denylist import scan
-from canvas.safety.gate import AgeGate, SafetyError
+from canvas.safety.gate import AgeGate, GenerationBlocked, SafetyError, StylisedBlocked, YouthContextBlocked
 from canvas.safety.image import RawImage, SafeImage
 
 StopCode = Literal["", "idea", "scenario", "cancelled", "error"]
 Source = Literal["", "writer", "mixed", "planned"]
 _RAW_LIMIT = 6000
+_PICTURE_CODES = frozenset({"image", "input"})
 
 
 class SeriesFrame(Protocol):
@@ -100,8 +101,12 @@ def run_series(
     if scenario is None or len(scenario.shots) < count:
         return _stop("scenario", "", fail_code if scenario is None else "scenario.count")
     lines = [assemble_line(scenario.subject_block, shot, include_camera=True) for shot in scenario.shots]
-    refused = [_refuse_prompt(age_gate, _with_idea(idea, line)) for line in lines]
-    hard = [reason for line, reason in zip(lines, refused, strict=True) if reason and scan(line).minor]
+    verdicts = [_prompt_verdict(age_gate, _with_idea(idea, line)) for line in lines]
+    refused = [_verdict_message(verdict) for verdict in verdicts]
+    hard = [
+        reason for line, reason, verdict in zip(lines, refused, verdicts, strict=True)
+        if reason and (_ends_series(verdict) or scan(line).minor)
+    ]
     if hard or all(refused):
         code = "scenario.minor" if hard else "scenario.policy"
         return _stop("scenario", (hard or refused)[0] or "", code, source)
@@ -135,13 +140,12 @@ def run_series(
                     _status(on_status, index, "blocked")
                     continue
                 line = with_adult_anchor(line)
-            shot_reason = refused[index] or (
-                None if line == lines[index] else _refuse_prompt(age_gate, _with_idea(idea, line))
-            )
+            verdict = verdicts[index] if line == lines[index] else _prompt_verdict(age_gate, _with_idea(idea, line))
+            shot_reason = _verdict_message(verdict)
             if shot_reason:
                 blocked.append(index)
                 _status(on_status, index, "blocked")
-                if scan(line).minor:
+                if _ends_series(verdict) or scan(line).minor:
                     return _stop_kept(
                         "scenario", shot_reason, "scenario.minor", source,
                         folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept,
@@ -156,7 +160,7 @@ def run_series(
             except RunStopped as exc:
                 blocked.append(index)
                 _status(on_status, index, "blocked")
-                if exc.code == "prompt" and scan(line).minor:
+                if _ends_series(exc) or (exc.code == "prompt" and scan(line).minor):
                     return _stop_kept(
                         "scenario", exc.message, "scenario.minor", source,
                         folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept,
@@ -172,10 +176,15 @@ def run_series(
                     exc.code or "internal",
                     source,
                 )
-            released = None if image is None else _released_frame(age_gate, image, line)
+            released, refusal = (None, None) if image is None else _released_frame(age_gate, image, line)
             if released is None:
                 blocked.append(index)
                 _status(on_status, index, "blocked")
+                if _ends_series(refusal):
+                    return _stop_kept(
+                        "scenario", _verdict_message(refusal) or "", "scenario.minor", source,
+                        folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept,
+                    )
                 continue
             path = _store_frame(folder, index, released, container)
             kept.append(path)
@@ -224,13 +233,35 @@ def _with_idea(idea: str, line: str) -> str:
 
 def _refuse_prompt(age_gate: AgeGate, prompt: str) -> str | None:
     """Refuse prompt."""
+    return _verdict_message(_prompt_verdict(age_gate, prompt))
+
+
+def _prompt_verdict(age_gate: AgeGate, prompt: str) -> Exception | None:
+    """The stop a prompt review raised, or None when it may continue."""
     try:
         age_gate.review_prompt(prompt)
-    except SafetyError as exc:
-        return exc.user_message
-    except Exception:
-        return text("gate.unavailable")
+    except Exception as exc:
+        return exc
     return None
+
+
+def _verdict_message(verdict: BaseException | None) -> str | None:
+    if verdict is None:
+        return None
+    if isinstance(verdict, SafetyError):
+        return verdict.user_message
+    return text("gate.unavailable")
+
+
+def _ends_series(error: BaseException | None) -> bool:
+    """True when this per-frame stop ends the series with ``scenario.minor``."""
+    if isinstance(error, RunStopped):
+        error = error.__cause__
+    if not isinstance(error, GenerationBlocked):
+        return False
+    if error.code in _PICTURE_CODES:
+        return True
+    return error.code == "prompt" and not isinstance(error, (StylisedBlocked, YouthContextBlocked))
 
 
 @dataclass(frozen=True)
@@ -241,18 +272,18 @@ class _Released:
     safe: SafeImage | None
 
 
-def _released_frame(age_gate: AgeGate, image: SeriesFrame, line: str) -> _Released | None:
-    """Released frame."""
+def _released_frame(
+    age_gate: AgeGate, image: SeriesFrame, line: str,
+) -> tuple[_Released | None, Exception | None]:
+    """The released frame, or None with the stop the review raised."""
     raw = RawImage(image.width, image.height, image.to_bytes())
     try:
         released = age_gate.review_image(raw, line)
-    except SafetyError:
-        return None
-    except Exception:
-        return None
+    except Exception as exc:
+        return None, exc
     if isinstance(released, SafeImage):
-        return _Released(released.width, released.height, released.data, released)
-    return _Released(image.width, image.height, image.to_bytes(), None)
+        return _Released(released.width, released.height, released.data, released), None
+    return _Released(image.width, image.height, image.to_bytes(), None), None
 
 
 def _store_frame(folder: Path, index: int, released: _Released, container: OutputFormat | None) -> Path:

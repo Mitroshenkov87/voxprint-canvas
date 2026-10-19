@@ -1,6 +1,7 @@
 """One pipeline load for a run, and the paths that release it."""
 from __future__ import annotations
 
+import threading
 import types
 from pathlib import Path
 
@@ -211,7 +212,7 @@ def test_the_writer_load_releases_the_pipeline(tmp_path: Path, monkeypatch) -> N
     assert loads[0] == 2
 
 
-def test_the_window_reuses_the_pipeline_until_it_closes(tmp_path: Path, monkeypatch) -> None:
+def test_the_window_does_not_keep_the_pipeline_between_runs(tmp_path: Path, monkeypatch) -> None:
     QApplication.instance() or QApplication([])
     loads, _places = _install(monkeypatch)
     monkeypatch.setattr(runtime, "system_ram_bytes", lambda: _GB32)
@@ -220,8 +221,44 @@ def test_the_window_reuses_the_pipeline_until_it_closes(tmp_path: Path, monkeypa
     window = ShellWindow(shell, tier=Tier.GB16, enlarge=object())
     folder = tmp_path / "weights"
     _render(gate, folder, IDEA, None)
-    _render(gate, folder, IDEA, None)
-    assert loads[0] == 1
-    window.close()
+    assert runtime._slot is None
     _render(gate, folder, IDEA, None)
     assert loads[0] == 2
+    assert runtime._slot is None
+    window.close()
+
+
+def test_a_release_from_another_thread_waits_for_the_picture(tmp_path: Path, monkeypatch) -> None:
+    loads, _places = _install(monkeypatch)
+    gate = World().gate()
+    folder = tmp_path / "weights"
+    started = threading.Event()
+    go_on = threading.Event()
+    seen: list[str] = []
+    real_timed = runtime._timed
+
+    def slow_timed(pipe, **kwargs):
+        started.set()
+        go_on.wait(5)
+        seen.append("drawn")
+        return real_timed(pipe, **kwargs)
+
+    monkeypatch.setattr(runtime, "_timed", slow_timed)
+
+    def other() -> None:
+        started.wait(5)
+        runtime.release_pipeline()
+        seen.append("released")
+
+    with runtime.pipeline_scope():
+        helper = threading.Thread(target=other)
+        helper.start()
+        worker = threading.Thread(target=lambda: _render(gate, folder, IDEA, None))
+        worker.start()
+        started.wait(5)
+        go_on.set()
+        worker.join(5)
+        helper.join(5)
+    assert seen == ["drawn", "released"]
+    assert loads[0] == 1
+    assert runtime._slot is None

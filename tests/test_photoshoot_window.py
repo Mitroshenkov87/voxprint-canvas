@@ -13,7 +13,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QPushButton, QSpinBox
 
 from canvas.models.modes import Mode, Tier
-from canvas.safety.gate import GenerationBlocked
+from canvas.safety.gate import SafetyUnavailable
 from canvas.ui.shell_layout import open_layout
 from canvas.ui.shell_screen import ShellWindow
 from tests.fakes import World, rgb
@@ -176,7 +176,7 @@ def test_a_blocked_frame_is_labelled_and_is_not_the_hero(app, home: Path, monkey
 
     def review_image(raw, prompt=""):
         if "three-quarter" in prompt:
-            raise GenerationBlocked("image")
+            raise SafetyUnavailable("classifier_error")
         return real(raw, prompt)
 
     gate.review_image = review_image

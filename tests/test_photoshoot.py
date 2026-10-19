@@ -17,7 +17,7 @@ from canvas.pipeline.photoshoot import (
 )
 from canvas.pipeline.series import ages_allowed, run_series
 from canvas.safety.denylist import scan
-from canvas.safety.gate import AgeGate, GenerationBlocked
+from canvas.safety.gate import AgeGate, GenerationBlocked, SafetyUnavailable, StylisedBlocked
 from tests.fakes import World
 
 
@@ -243,7 +243,7 @@ def test_blocked_frame_is_dropped_without_a_rewrite(tmp_path: Path) -> None:
 
     def review_image(raw: object, prompt: str = "") -> object:
         if "three-quarter" in prompt:
-            raise GenerationBlocked("image")
+            raise SafetyUnavailable("classifier_error")
         return real(raw, prompt)
 
     gate.review_image = review_image
@@ -464,7 +464,7 @@ def _refuse_lines():
 
     def review(prompt: str) -> None:
         if "\n" in prompt:
-            raise GenerationBlocked("prompt")
+            raise StylisedBlocked("prompt")
         real(prompt)
 
     gate.review_prompt = review

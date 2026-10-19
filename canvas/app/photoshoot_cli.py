@@ -10,7 +10,7 @@ from voxprint_common.ui.safety import adult_prompt_policy
 
 from canvas.app.i18n import text
 from canvas.app.info import ENLARGE_NAME
-from canvas.app.shell_run import RunStopped, ShellRunner
+from canvas.app.shell_run import ShellRunner
 from canvas.core.formats import DEFAULT_FORMAT, extension
 from canvas.infra.enlarge import EnlargeClient
 from canvas.infra.paths import models_dir
@@ -106,12 +106,7 @@ def model_generate(
         if hero is not None:
             raw = RawImage(hero.width, hero.height, hero.to_bytes())
             fresh = (PendingInput(ImageRole.INIT, raw),)
-        try:
-            return runner(job, fresh)
-        except RunStopped as exc:
-            if exc.unavailable or exc.code == "prompt":
-                raise
-            return None
+        return runner(job, fresh)
 
     return generate
 

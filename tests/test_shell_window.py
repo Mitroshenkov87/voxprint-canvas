@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QLabel,
+    QMenu,
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
@@ -105,6 +106,8 @@ def test_simple_mode_hides_expert_words_and_keeps_picture_tools(app, home: Path)
     assert window.findChild(QAction, "actionAddons") is not None
     assert window.findChild(QAction, "actionCheck") is not None
     assert window.findChild(QAction, "actionSetup") is not None
+    help_menu = window.findChild(QMenu, "menuHelp")
+    assert help_menu is not None and len(help_menu.actions()) == 2
     ratio = window.findChild(QComboBox, "sizeRatio")
     assert ratio is not None and ratio.isVisible()
     square = window.findChild(QPushButton, "chip-size-1-1")

@@ -795,6 +795,18 @@
     "writer.download": {
       "en": "Downloading the text model",
       "ru": "Загрузка текстовой модели"
+    },
+    "menu.help": {
+      "en": "Help",
+      "ru": "Справка"
+    },
+    "menu.help.guide_en": {
+      "en": "VOXPrint AI Canvas Guide (English)",
+      "ru": "Руководство VOXPrint AI Canvas (английский)"
+    },
+    "menu.help.guide_ru": {
+      "en": "VOXPrint AI Canvas Guide (Russian)",
+      "ru": "Руководство VOXPrint AI Canvas (русский)"
     }
   }
 }

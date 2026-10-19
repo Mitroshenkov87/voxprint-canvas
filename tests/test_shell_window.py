@@ -66,6 +66,19 @@ def home(monkeypatch, tmp_path: Path):
     set_language("en")
 
 
+def _assert_chips_whole(window, chips) -> None:
+    panel = window.findChild(QWidget, "promptPanel")
+    assert panel is not None
+    for index, chip in enumerate(chips):
+        font = QFont(chip.font())
+        font.setWeight(QFont.Weight.DemiBold)
+        assert chip.width() >= QFontMetrics(font).horizontalAdvance(chip.text()) + 12
+        right = chip.mapTo(panel, chip.rect().topRight()).x()
+        assert 0 <= chip.mapTo(panel, chip.rect().topLeft()).x() and right < panel.width()
+        for other in chips[index + 1:]:
+            assert not chip.geometry().intersects(other.geometry())
+
+
 def _window(home: Path, *, runner=None, improver=None, installer=None, enlarge_installed: bool = False) -> ShellWindow:
     shell = open_layout(home / "state", gate=World().gate(), enlarge_installed=enlarge_installed)
     return ShellWindow(
@@ -143,7 +156,9 @@ def test_simple_mode_hides_expert_words_and_keeps_picture_tools(app, home: Path)
     style_names = ("photo", "cinematic", "portrait", "illustration", "anime", "3d", "painting", "sketch")
     style_chips = [window.findChild(QPushButton, f"chip-style-{name}") for name in style_names]
     assert all(chip is not None and chip.isVisible() for chip in style_chips)
-    assert len({chip.y() for chip in style_chips}) == 1
+    # The left panel may wrap the style chips (line count depends on the system font);
+    # each chip keeps its full label inside the panel.
+    _assert_chips_whole(window, style_chips)
     spins = [item for item in window.findChildren(QSpinBox, "shell.steps") if item.isVisible()]
     assert len(spins) == 1
     spin = spins[0]
@@ -311,7 +326,9 @@ def test_russian_buttons_keep_their_full_labels(app, home: Path, monkeypatch) ->
     style_names = ("photo", "cinematic", "portrait", "illustration", "anime", "3d", "painting", "sketch")
     style_chips = [window.findChild(QPushButton, f"chip-style-{name}") for name in style_names]
     assert all(chip is not None and chip.isVisible() for chip in style_chips)
-    assert len({chip.y() for chip in style_chips}) == 1
+    # The left panel may wrap the style chips (line count depends on the system font);
+    # each chip keeps its full label inside the panel.
+    _assert_chips_whole(window, style_chips)
     assert not style_chips[3].geometry().intersects(style_chips[4].geometry())
     combo = window.findChild(QComboBox, "canvas.output_size")
     assert combo is not None and combo.isVisible()

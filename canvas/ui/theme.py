@@ -7,6 +7,11 @@ background is translucent in Acrylic mode.
 """
 from __future__ import annotations
 
+# Corner radius for every button, chip, tab and field. Mirrors the shared
+# density.button_radius_px (voxprint-common PR #25); read it from that token
+# once Canvas repins past 0.3.1.
+BUTTON_RADIUS = 4
+
 TEXT = "#f2f2f5"
 TEXT_MUTED = "#c4c4d0"
 TEXT_FAINT = "#a8a8b8"
@@ -71,7 +76,7 @@ QLabel#title {{ font-size: 22px; font-weight: 600; }}
 QLabel#subtitle, QLabel#footer, QLabel#hint {{ color: {faint}; }}
 QLabel#footer {{ font-size: 12px; }}
 QFrame#card {{ background: {card_bg}; border: 1px solid {border}; border-radius: 12px; }}
-QPushButton {{ background: {control}; border: 1px solid {border}; border-radius: 8px; padding: 6px 14px; }}
+QPushButton {{ background: {control}; border: 1px solid {border}; border-radius: {BUTTON_RADIUS}px; padding: 6px 14px; }}
 QPushButton:hover {{ background: {hover}; }}
 QPushButton:disabled {{ color: {disabled}; background: #1f1f28; border-color: #34343f; }}
 QPushButton#aspect {{ padding: 4px 8px; }}
@@ -81,11 +86,11 @@ QLabel#aspect-group {{ color: {faint}; font-size: 12px; }}
 QPushButton#primary {{ background: {primary}; border: 1px solid {primary_border}; font-size: 16px; font-weight: 600; padding: 10px 18px; color: {on_primary}; }}
 QPushButton#primary:hover {{ background: {primary_hover}; }}
 QPushButton#primary:disabled {{ background: {primary_dis_bg}; color: {primary_dis_text}; border-color: #4a4430; }}
-QComboBox, QLineEdit, QPlainTextEdit {{ background: {control}; border: 1px solid {border}; border-radius: 8px; padding: 6px 12px; }}
+QComboBox, QLineEdit, QPlainTextEdit {{ background: {control}; border: 1px solid {border}; border-radius: {BUTTON_RADIUS}px; padding: 6px 12px; }}
 QComboBox QAbstractItemView {{ background: {menu_bg}; border: 1px solid {border}; selection-background-color: {menu_sel}; selection-color: #ffffff; }}
 QComboBox QAbstractItemView::item:disabled {{ color: {disabled}; }}
 QTabWidget::pane {{ border: 1px solid {border}; border-radius: 8px; background: {card_bg}; }}
-QTabBar::tab {{ background: {control}; color: {text}; padding: 8px 16px; border-top-left-radius: 8px; border-top-right-radius: 8px; }}
+QTabBar::tab {{ background: {control}; color: {text}; padding: 8px 16px; border-top-left-radius: {BUTTON_RADIUS}px; border-top-right-radius: {BUTTON_RADIUS}px; }}
 QTabBar::tab:selected {{ background: {menu_bg}; }}
 QProgressBar {{ background: {control}; border: 1px solid {border}; border-radius: 8px; }}
 QProgressBar::chunk {{ background: {splash}; border-radius: 7px; }}
@@ -102,6 +107,7 @@ def build_style(glass: bool, more: bool = False) -> str:
     else:
         root_bg, card_bg = ROOT_PLAIN, CARD_PLAIN
     return _STYLE.format(
+        BUTTON_RADIUS=BUTTON_RADIUS,
         font=_FONT_CSS,
         text=TEXT, faint=TEXT_FAINT, muted=TEXT_MUTED, disabled=TEXT_DISABLED,
         control=CONTROL_BG, hover=CONTROL_HOVER, border=CONTROL_BORDER,

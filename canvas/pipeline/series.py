@@ -14,6 +14,7 @@ from canvas.app.i18n import text
 from canvas.app.shell_run import RunStopped
 from canvas.core.formats import OutputFormat, extension, save_image
 from canvas.infra.errors import note_debug, note_error
+from canvas.models.runtime import pipeline_scope
 from canvas.pipeline.enhance import mask_numbers
 from canvas.pipeline.adult_direction import ages_allowed, with_adult_anchor, youth_cues
 from canvas.pipeline.photoshoot import (
@@ -114,75 +115,107 @@ def run_series(
     blocked: list[int] = []
     saved_lines: list[str] = []
     seeds: list[int] = []
-    for index, shot in enumerate(scenario.shots):
-        if cancelled():
-            _write_meta(folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept)
-            return SeriesResult("cancelled", "", tuple(kept), folder, "", source)
-        line = (
-            assemble_line(scenario.subject_block, shot, include_camera=include_camera())
-            if line_for is None
-            else line_for(index)
-        )
-        if scenario.subject_block not in line:
-            blocked.append(index)
-            _status(on_status, index, "blocked")
-            continue
-        if adult:
-            if youth_cues(line):
+    with pipeline_scope():
+        for index, shot in enumerate(scenario.shots):
+            if cancelled():
+                _write_meta(folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept)
+                return SeriesResult("cancelled", "", tuple(kept), folder, "", source)
+            line = (
+                assemble_line(scenario.subject_block, shot, include_camera=include_camera())
+                if line_for is None
+                else line_for(index)
+            )
+            if scenario.subject_block not in line:
                 blocked.append(index)
                 _status(on_status, index, "blocked")
                 continue
-            line = with_adult_anchor(line)
-        shot_reason = refused[index] or (
-            None if line == lines[index] else _refuse_prompt(age_gate, _with_idea(idea, line))
-        )
-        if shot_reason:
-            blocked.append(index)
-            _status(on_status, index, "blocked")
-            continue
-        _status(on_status, index, "drawing")
-        if cancelled():
-            _write_meta(folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept)
-            return SeriesResult("cancelled", "", tuple(kept), folder, "", source)
-        try:
-            image = draw_frame(line, seed + index, hero, strength)
-        except RunStopped as exc:
-            blocked.append(index)
-            _status(on_status, index, "blocked")
-            if not exc.unavailable:
-                continue
-            _write_meta(folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept)
-            return SeriesResult(
-                "error",
-                exc.message,
-                tuple(kept),
-                folder,
-                exc.code or "internal",
-                source,
+            if adult:
+                if youth_cues(line):
+                    blocked.append(index)
+                    _status(on_status, index, "blocked")
+                    continue
+                line = with_adult_anchor(line)
+            shot_reason = refused[index] or (
+                None if line == lines[index] else _refuse_prompt(age_gate, _with_idea(idea, line))
             )
-        released = None if image is None else _released_frame(age_gate, image, line)
-        if released is None:
-            blocked.append(index)
-            _status(on_status, index, "blocked")
-            continue
-        path = _store_frame(folder, index, released, container)
-        kept.append(path)
-        saved_lines.append(line)
-        seeds.append(seed + index)
-        if hero is None:
-            hero = image
-        _status(on_status, index, "kept")
+            if shot_reason:
+                blocked.append(index)
+                _status(on_status, index, "blocked")
+                if scan(line).minor:
+                    return _stop_kept(
+                        "scenario", shot_reason, "scenario.minor", source,
+                        folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept,
+                    )
+                continue
+            _status(on_status, index, "drawing")
+            if cancelled():
+                _write_meta(folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept)
+                return SeriesResult("cancelled", "", tuple(kept), folder, "", source)
+            try:
+                image = draw_frame(line, seed + index, hero, strength)
+            except RunStopped as exc:
+                blocked.append(index)
+                _status(on_status, index, "blocked")
+                if exc.code == "prompt" and scan(line).minor:
+                    return _stop_kept(
+                        "scenario", exc.message, "scenario.minor", source,
+                        folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept,
+                    )
+                if not exc.unavailable:
+                    continue
+                _write_meta(folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept)
+                return SeriesResult(
+                    "error",
+                    exc.message,
+                    tuple(kept),
+                    folder,
+                    exc.code or "internal",
+                    source,
+                )
+            released = None if image is None else _released_frame(age_gate, image, line)
+            if released is None:
+                blocked.append(index)
+                _status(on_status, index, "blocked")
+                continue
+            path = _store_frame(folder, index, released, container)
+            kept.append(path)
+            saved_lines.append(line)
+            seeds.append(seed + index)
+            if hero is None:
+                hero = image
+            _status(on_status, index, "kept")
+            _write_meta(folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept)
         _write_meta(folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept)
-    _write_meta(folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept)
-    if not kept:
-        note_error("not_produced")
-        return SeriesResult("", "", (), folder, "not_produced", source)
-    return SeriesResult("", "", tuple(kept), folder, "", source)
+        if not kept:
+            note_error("not_produced")
+            return SeriesResult("", "", (), folder, "not_produced", source)
+        return SeriesResult("", "", tuple(kept), folder, "", source)
 
 
 def _stop(stopped: StopCode, reason: str, code: str, source: Source = "") -> SeriesResult:
     note_error(code)
     return SeriesResult(stopped, reason, (), None, code, source)
+
+
+def _stop_kept(
+    stopped: StopCode,
+    reason: str,
+    code: str,
+    source: Source,
+    folder: Path,
+    idea: str,
+    scenario: Scenario,
+    style: str,
+    mode: PlaceMode,
+    lines: list[str],
+    seeds: list[int],
+    blocked: list[int],
+    kept: list[Path],
+) -> SeriesResult:
+    """Stop the series with frames already on disk. No later frame is drawn."""
+    _write_meta(folder, idea, scenario, style, mode, lines, seeds, blocked, kept)
+    note_error(code)
+    return SeriesResult(stopped, reason, tuple(kept), folder, code, source)
 
 
 def _with_idea(idea: str, line: str) -> str:

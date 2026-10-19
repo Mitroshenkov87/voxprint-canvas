@@ -8,9 +8,13 @@ from __future__ import annotations
 
 import gc
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, assert_never
 
+import psutil
 from PIL import Image
 
 from canvas.app.i18n import text
@@ -55,6 +59,197 @@ def _load(loader: Any, *args: Any, **kwargs: Any) -> Any:
         raise WeightsLoadError("the generator weights could not be loaded") from exc
 
 
+_BASE_PIPELINES = frozenset({PIPELINE_TEXT, PIPELINE_IMG2IMG, PIPELINE_INPAINT})
+_PARK_RAM_BYTES = 64 * 1024**3
+_scope_depth = 0
+
+
+@dataclass
+class _Held:
+    """One pipeline kept for the open run, placement included."""
+
+    folder: str
+    tier: Tier
+    dtype: object
+    control: str
+    pipeline_name: str
+    lora_key: tuple[str, float] | None
+    pipe: Any
+    controlnet: Any
+    torch: Any
+
+
+_slot: _Held | None = None
+
+
+def system_ram_bytes() -> int:
+    """Installed RAM. A failed read reports nothing, so the pipeline is not parked."""
+    try:
+        return int(psutil.virtual_memory().total)
+    except (OSError, AttributeError, ValueError):
+        return 0
+
+
+def _park_between_runs() -> bool:
+    """64 GB and above may keep the pipeline after the run. Smaller machines load it again."""
+    return system_ram_bytes() >= _PARK_RAM_BYTES
+
+
+def _should_retain() -> bool:
+    return _scope_depth > 0 or _park_between_runs()
+
+
+@contextmanager
+def pipeline_scope() -> Iterator[None]:
+    """Keep one pipeline, and its placement, until the outermost run ends."""
+    global _scope_depth
+    _scope_depth += 1
+    try:
+        yield
+    except Exception:
+        release_pipeline()
+        raise
+    finally:
+        _scope_depth = max(0, _scope_depth - 1)
+        if _scope_depth == 0 and not _park_between_runs():
+            release_pipeline()
+
+
+def release_pipeline() -> None:
+    """Drop the kept pipeline. Safe when nothing is loaded and when torch is absent."""
+    global _slot
+    held = _slot
+    _slot = None
+    if held is None:
+        return
+    _release_lora(held.pipe)
+    _release_inference(held.torch, held.pipe, held.controlnet)
+
+
+def reset_pipeline_cache() -> None:
+    """Drop a pipeline and a scope left open by a test."""
+    global _scope_depth
+    release_pipeline()
+    _scope_depth = 0
+
+
+def _weights_key(folder: Path, tier: Tier, dtype: object, control_file: Path | None) -> tuple[str, Tier, object, str]:
+    control = "" if control_file is None else str(control_file.resolve())
+    return (str(folder.resolve()), tier, dtype, control)
+
+
+def _lora_key(lora: UserLora | None, lora_strength: float | None) -> tuple[str, float] | None:
+    if lora is None:
+        return None
+    strength = lora.default_strength if lora_strength is None else float(lora_strength)
+    return (str(lora.weights), strength)
+
+
+def _pipeline_type(diffusers: Any, pipeline_name: str) -> Any:
+    if pipeline_name == PIPELINE_TEXT:
+        return diffusers.ZImagePipeline
+    if pipeline_name == PIPELINE_IMG2IMG:
+        return diffusers.ZImageImg2ImgPipeline
+    if pipeline_name == PIPELINE_INPAINT:
+        return diffusers.ZImageInpaintPipeline
+    if pipeline_name == PIPELINE_CONTROL:
+        return diffusers.ZImageControlNetPipeline
+    if pipeline_name == PIPELINE_CONTROL_INPAINT:
+        return diffusers.ZImageControlNetInpaintPipeline
+    raise InferenceUnavailable(f"unknown pipeline {pipeline_name}")
+
+
+def _retarget(diffusers: Any, held: _Held, pipeline_name: str) -> Any | None:
+    """Share the loaded weights with another pipeline class. No second load from disk."""
+    if held.pipeline_name not in _BASE_PIPELINES or pipeline_name not in _BASE_PIPELINES:
+        return None
+    convert = getattr(_pipeline_type(diffusers, pipeline_name), "from_pipe", None)
+    if not callable(convert):
+        return None
+    try:
+        return convert(held.pipe)
+    except (OSError, ValueError, KeyError, RuntimeError, AttributeError, TypeError):
+        return None
+
+
+def _bind_lora(pipe: Any, lora: UserLora | None, lora_strength: float | None) -> None:
+    if lora is None:
+        return
+    transformer = getattr(pipe, "transformer", None)
+    if transformer is None:
+        raise InferenceUnavailable("the generator has no transformer")
+    requested = lora.default_strength if lora_strength is None else lora_strength
+    apply_lora(transformer, lora, requested)
+
+
+def _open_pipeline(
+    diffusers: Any, pipeline_name: str, folder: Path, dtype: object, control_file: Path | None,
+) -> tuple[Any, Any]:
+    """Load one pipeline from disk."""
+    if pipeline_name == PIPELINE_TEXT:
+        pipe = _load(diffusers.ZImagePipeline.from_pretrained, folder, torch_dtype=dtype, local_files_only=True)
+        return pipe, None
+    if pipeline_name == PIPELINE_IMG2IMG:
+        pipe = _load(diffusers.ZImageImg2ImgPipeline.from_pretrained, folder, torch_dtype=dtype, local_files_only=True)
+        return pipe, None
+    if pipeline_name == PIPELINE_INPAINT:
+        pipe = _load(diffusers.ZImageInpaintPipeline.from_pretrained, folder, torch_dtype=dtype, local_files_only=True)
+        return pipe, None
+    if pipeline_name == PIPELINE_CONTROL or pipeline_name == PIPELINE_CONTROL_INPAINT:
+        if control_file is None:
+            raise InferenceUnavailable("control weights are missing")
+        controlnet = diffusers.ZImageControlNetModel.from_single_file(control_file, torch_dtype=dtype)
+        kind = _pipeline_type(diffusers, pipeline_name)
+        pipe = _load(kind.from_pretrained, folder, controlnet=controlnet, torch_dtype=dtype, local_files_only=True)
+        return pipe, controlnet
+    raise InferenceUnavailable(f"unknown pipeline {pipeline_name}")
+
+
+def _pipeline_for(
+    diffusers: Any,
+    torch: Any,
+    pipeline_name: str,
+    folder: Path,
+    dtype: object,
+    tier: Tier,
+    lora: UserLora | None,
+    lora_strength: float | None,
+    control_file: Path | None,
+) -> Any:
+    """Return the pipeline for this call, loading it only when the kept one cannot be used."""
+    global _slot
+    held = _slot
+    key = _weights_key(folder, tier, dtype, control_file)
+    if held is not None and (held.folder, held.tier, held.dtype, held.control) != key:
+        release_pipeline()
+        held = None
+    if held is not None and held.pipeline_name != pipeline_name:
+        converted = _retarget(diffusers, held, pipeline_name)
+        if converted is None:
+            release_pipeline()
+            held = None
+        else:
+            held.pipe = converted
+            held.pipeline_name = pipeline_name
+    if held is None:
+        pipe, controlnet = _open_pipeline(diffusers, pipeline_name, folder, dtype, control_file)
+        held = _Held(
+            folder=key[0], tier=tier, dtype=dtype, control=key[3], pipeline_name=pipeline_name,
+            lora_key=None, pipe=pipe, controlnet=controlnet, torch=torch,
+        )
+        _slot = held
+        _place_and_bind(pipe, tier, lora, lora_strength)
+        held.lora_key = _lora_key(lora, lora_strength)
+        return pipe
+    lora_key = _lora_key(lora, lora_strength)
+    if held.lora_key != lora_key:
+        _release_lora(held.pipe)
+        _bind_lora(held.pipe, lora, lora_strength)
+        held.lora_key = lora_key
+    _slot = held
+    return held.pipe
+
+
 def applied_strength(requested: float | None) -> float:
     """Img2img strength. None keeps the restyle default of 0.6.
 
@@ -97,58 +292,43 @@ def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, he
     }
     common.update(guidance)
     pipeline_name = plan.pipeline_class
-    pipe = None
-    controlnet = None
+    failed = False
     try:
+        pipe = _pipeline_for(
+            diffusers, torch, pipeline_name, folder, dtype, tier, lora, lora_strength, control_file,
+        )
         if pipeline_name == PIPELINE_TEXT:
-            pipe = _load(diffusers.ZImagePipeline.from_pretrained, folder, torch_dtype=dtype, local_files_only=True)
-            _place_and_bind(pipe, tier, lora, lora_strength)
             result = _timed(pipe, **common)
         elif pipeline_name == PIPELINE_IMG2IMG:
-            pipe = _load(diffusers.ZImageImg2ImgPipeline.from_pretrained, folder, torch_dtype=dtype, local_files_only=True)
-            _place_and_bind(pipe, tier, lora, lora_strength)
             result = _timed(pipe, image=_pil(_frame(screened, "init")), strength=applied_strength(strength), **common)
         elif pipeline_name == PIPELINE_INPAINT:
-            pipe = _load(diffusers.ZImageInpaintPipeline.from_pretrained, folder, torch_dtype=dtype, local_files_only=True)
-            _place_and_bind(pipe, tier, lora, lora_strength)
             result = _timed(
                 pipe, image=_pil(_frame(screened, "init")), mask_image=_pil(_frame(screened, "mask")), **common,
             )
-        elif pipeline_name == PIPELINE_CONTROL or pipeline_name == PIPELINE_CONTROL_INPAINT:
-            if control_file is None:
-                raise InferenceUnavailable("control weights are missing")
-            controlnet = diffusers.ZImageControlNetModel.from_single_file(control_file, torch_dtype=dtype)
-            if pipeline_name == PIPELINE_CONTROL:
-                pipe = _load(
-                    diffusers.ZImageControlNetPipeline.from_pretrained,
-                    folder, controlnet=controlnet, torch_dtype=dtype, local_files_only=True,
-                )
-                role = _control_role(screened)
-                _place_and_bind(pipe, tier, lora, lora_strength)
-                result = _timed(
-                    pipe, control_image=_pil(_frame(screened, role)), controlnet_conditioning_scale=0.75, **common,
-                )
-            else:
-                pipe = _load(
-                    diffusers.ZImageControlNetInpaintPipeline.from_pretrained,
-                    folder, controlnet=controlnet, torch_dtype=dtype, local_files_only=True,
-                )
-                _place_and_bind(pipe, tier, lora, lora_strength)
-                result = _timed(
-                    pipe,
-                    image=_pil(_frame(screened, "init")),
-                    mask_image=_pil(_frame(screened, "mask")),
-                    control_image=_pil(_frame(screened, _control_role(screened))),
-                    controlnet_conditioning_scale=0.75,
-                    **common,
-                )
+        elif pipeline_name == PIPELINE_CONTROL:
+            role = _control_role(screened)
+            result = _timed(
+                pipe, control_image=_pil(_frame(screened, role)), controlnet_conditioning_scale=0.75, **common,
+            )
+        elif pipeline_name == PIPELINE_CONTROL_INPAINT:
+            result = _timed(
+                pipe,
+                image=_pil(_frame(screened, "init")),
+                mask_image=_pil(_frame(screened, "mask")),
+                control_image=_pil(_frame(screened, _control_role(screened))),
+                controlnet_conditioning_scale=0.75,
+                **common,
+            )
         else:
             raise InferenceUnavailable(f"unknown pipeline {pipeline_name}")
         image = result.images[0].convert("RGB")
         return RawImage(image.width, image.height, image.tobytes())
+    except Exception:
+        failed = True
+        raise
     finally:
-        _release_lora(pipe)
-        _release_inference(torch, pipe, controlnet)
+        if failed or not _should_retain():
+            release_pipeline()
 
 
 def _timed(pipe: Any, **kwargs: Any) -> Any:

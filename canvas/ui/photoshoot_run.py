@@ -110,6 +110,8 @@ def run_photoshoot(window: ShellWindow) -> None:
         except RunStopped as exc:
             if exc.unavailable:
                 raise _Halt(exc.message, unavailable=True) from exc
+            if exc.code == "prompt":
+                raise
             return None
         return raw
 

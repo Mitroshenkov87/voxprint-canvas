@@ -13,6 +13,7 @@ from typing import Any, Protocol, assert_never
 from canvas.app.i18n import text
 from canvas.models.modes import Tier
 from canvas.models.registry import Catalog, ModelSpec
+from canvas.models.runtime import release_pipeline
 from canvas.models.snapshots import SnapshotError, download_snapshot, snapshot_ready
 from canvas.safety.gate import SafetyError
 
@@ -287,6 +288,7 @@ class QwenRewriter:
     def _load(self) -> None:
         if self._model is not None:
             return
+        release_pipeline()
         torch, transformers = _generation_libs()
         config_path = self.encoder_dir / "config.json"
         index_path = self.encoder_dir / "model.safetensors.index.json"

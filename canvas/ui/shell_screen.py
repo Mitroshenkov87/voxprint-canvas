@@ -5,12 +5,13 @@ import shutil
 import subprocess
 import uuid
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import assert_never
 
 from PIL import Image
 from PySide6.QtCore import QUrl
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QCloseEvent, QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -35,6 +36,7 @@ from canvas.core.formats import extension, save_image
 from canvas.infra.enlarge import EnlargeClient
 from canvas.infra.vram import set_vram_cap_gb
 from canvas.models.mdl_registry import selectable
+from canvas.models.runtime import pipeline_scope
 from canvas.models.user_lora import discover, resolve_selected
 from canvas.models.modes import Mode, Tier
 from canvas.models.sizes import closest_aspect
@@ -153,6 +155,22 @@ class ShellWindow(QMainWindow):
         self.photoshoot = PhotoshootBar(self)
         self._chrome_ready = True
         polish(self)
+        scope = pipeline_scope()
+        self._pipeline_scope: AbstractContextManager[None] | None = scope
+        scope.__enter__()
+
+    def _end_pipeline_scope(self) -> None:
+        """Release the window's pipeline when the window closes."""
+        scope = getattr(self, "_pipeline_scope", None)
+        if scope is None:
+            return
+        self._pipeline_scope = None
+        scope.__exit__(None, None, None)
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        """Close the window and drop the pipeline kept for this session."""
+        self._end_pipeline_scope()
+        super().closeEvent(event)
 
     def set_expert(self, enabled: bool) -> None:
         """Store Expert mode and show or hide the side panel.
@@ -375,6 +393,10 @@ class ShellWindow(QMainWindow):
         self._apply_vram()
         total = max(1, job.copies)
         base_seed = layout.seed
+        with pipeline_scope():
+            self._draw_copies(layout, job, total, base_seed)
+
+    def _draw_copies(self, layout, job: PictureJob, total: int, base_seed: int) -> None:
         for index in range(total):
             if index:
                 layout.seed = base_seed + index

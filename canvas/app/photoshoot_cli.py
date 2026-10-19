@@ -109,7 +109,7 @@ def model_generate(
         try:
             return runner(job, fresh)
         except RunStopped as exc:
-            if exc.unavailable:
+            if exc.unavailable or exc.code == "prompt":
                 raise
             return None
 
@@ -175,7 +175,7 @@ def run_command(
         container=DEFAULT_FORMAT,
     )
     scenario = held.get("scenario")
-    if result.stopped in {"idea", "scenario"} or scenario is None or result.folder is None:
+    if (result.stopped in {"idea", "scenario"} and not result.kept) or scenario is None or result.folder is None:
         error = result.stopped if result.stopped in {"idea", "scenario"} else "scenario"
         return _body(
             False, error, _series_message(result.code), (), None, frames, 0, (),
@@ -192,6 +192,12 @@ def run_command(
             False, "error", _english_stop_message(result.code or "internal"),
             frame_paths, str(scenario_path), frames, made, tuple(shots),
             result.code or "internal", result.source,
+        ), 1
+    if result.stopped == "scenario":
+        return _body(
+            False, "scenario", _series_message(result.code),
+            frame_paths, str(scenario_path), frames, made, tuple(shots),
+            result.code, result.source,
         ), 1
     if made == 0:
         return _body(

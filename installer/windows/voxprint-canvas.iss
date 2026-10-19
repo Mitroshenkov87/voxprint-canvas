@@ -26,6 +26,12 @@
 #if CscExit != 0
   #error vxsigcheck.cs did not compile
 #endif
+; The Start menu target: a small launcher that carries the app icon and runs pythonw -I -m canvas.app.main.
+#define Launcher AddBackslash(SourcePath) + "voxprint-canvas.exe"
+#define LauncherExit Exec(Csc, '/nologo /optimize+ /target:winexe /win32icon:"' + AddBackslash(SourcePath) + '..\..\assets\voxprint-canvas.ico" /out:"' + Launcher + '" "' + AddBackslash(SourcePath) + 'launcher.cs"', SourcePath, 1, 0)
+#if LauncherExit != 0
+  #error launcher.cs did not compile
+#endif
 
 [Setup]
 AppId={{8F3C1A2E-6B44-4C1A-9E2D-7A0C5B1E4D33}
@@ -46,6 +52,9 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.26100
 ShowLanguageDialog=auto
+SetupIconFile=..\..\assets\voxprint-canvas.ico
+UninstallDisplayName={#MyAppName}
+UninstallDisplayIcon={app}\assets\voxprint-canvas.ico
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -62,21 +71,22 @@ english.PwshFallback=Setup will continue with Windows PowerShell 5.1. Please ins
 english.SetupScripts=Installing the program libraries and models. This can take a while; progress is written to the setup log.
 russian.SetupScripts=Установка библиотек программы и моделей. Это может занять продолжительное время; ход установки записывается в журнал установки.
 russian.PwshFallback=Установка продолжится с Windows PowerShell 5.1. По возможности установите PowerShell 7: https://aka.ms/powershell-release?tag=stable
-english.GuideEnglish=VOXPrint AI Canvas Guide (English)
-russian.GuideEnglish=VOXPrint AI Canvas Guide (English)
-english.GuideRussian=Руководство VOXPrint AI Canvas (русский)
-russian.GuideRussian=Руководство VOXPrint AI Canvas (русский)
 
 [Files]
 ; staging\docs\VOXPrint-AI-Canvas-Guide-en.pdf and -ru.pdf land in {app}\docs.
 Source: "staging\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "vxsigcheck.exe"; DestDir: "{tmp}"; Flags: dontcopy
+Source: "voxprint-canvas.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\assets\voxprint-canvas.ico"; DestDir: "{app}\assets"; Flags: ignoreversion
+
+[InstallDelete]
+; Shortcuts from older builds. The guides open from the Help menu.
+Type: files; Name: "{group}\Uninstall {#MyAppName}.lnk"
+Type: files; Name: "{group}\VOXPrint AI Canvas Guide (English).lnk"
+Type: files; Name: "{group}\Руководство VOXPrint AI Canvas (русский).lnk"
 
 [Icons]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\venv\Scripts\voxprint-canvas.exe"; WorkingDir: "{app}"
-Name: "{group}\{cm:GuideEnglish}"; Filename: "{app}\docs\VOXPrint-AI-Canvas-Guide-en.pdf"
-Name: "{group}\{cm:GuideRussian}"; Filename: "{app}\docs\VOXPrint-AI-Canvas-Guide-ru.pdf"
-Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
+Name: "{group}\{#MyAppName}"; Filename: "{app}\voxprint-canvas.exe"; WorkingDir: "{app}"; IconFilename: "{app}\assets\voxprint-canvas.ico"; AppUserModelID: "VOXPrint.AISuite.Canvas"
 
 [Code]
 const

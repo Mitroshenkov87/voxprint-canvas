@@ -27,13 +27,26 @@ def test_icon_has_every_frame_size() -> None:
 
 def test_start_menu_has_one_entry_on_the_launcher() -> None:
     icons = _section("Icons")
-    assert len(icons) == 1
-    line = icons[0]
+    start = [line for line in icons if line.startswith('Name: "{group}')]
+    assert len(start) == 1
+    assert all(line.startswith(('Name: "{group}', 'Name: "{autodesktop}')) for line in icons)
+    line = start[0]
     assert 'Name: "{group}\\{#MyAppName}"' in line
     assert 'Filename: "{app}\\voxprint-canvas.exe"' in line
     assert 'IconFilename: "{app}\\assets\\voxprint-canvas.ico"' in line
     assert f'AppUserModelID: "{APP_USER_MODEL_ID}"' in line
     assert "venv\\Scripts" not in line
+
+
+def test_desktop_shortcut_is_an_optional_task_off_by_default() -> None:
+    tasks = _section("Tasks")
+    assert tasks == ['Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; '
+                     'GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked']
+    desktop = [line for line in _section("Icons") if line.startswith('Name: "{autodesktop}')]
+    assert len(desktop) == 1
+    assert desktop[0].endswith("Tasks: desktopicon")
+    assert 'Filename: "{app}\\voxprint-canvas.exe"' in desktop[0]
+    assert f'AppUserModelID: "{APP_USER_MODEL_ID}"' in desktop[0]
 
 
 def test_old_shortcuts_are_removed_and_the_group_is_left_to_inno() -> None:
@@ -75,5 +88,10 @@ def test_make_icon_redraws_the_committed_files(tmp_path: Path) -> None:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     module.main(tmp_path)
-    for name in ("voxprint-canvas.png", "voxprint-canvas.ico"):
-        assert (tmp_path / name).read_bytes() == (ROOT / "assets" / name).read_bytes()
+    with Image.open(tmp_path / "voxprint-canvas.png") as drawn, Image.open(ROOT / "assets" / "voxprint-canvas.png") as kept:
+        assert drawn.tobytes() == kept.tobytes()
+    for size in (16, 24, 32, 48, 64, 128, 256):
+        with Image.open(tmp_path / "voxprint-canvas.ico") as drawn, Image.open(ROOT / "assets" / "voxprint-canvas.ico") as kept:
+            drawn.size = (size, size)
+            kept.size = (size, size)
+            assert drawn.convert("RGBA").tobytes() == kept.convert("RGBA").tobytes()

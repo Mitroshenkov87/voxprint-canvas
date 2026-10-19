@@ -85,8 +85,12 @@ Type: files; Name: "{group}\Uninstall {#MyAppName}.lnk"
 Type: files; Name: "{group}\VOXPrint AI Canvas Guide (English).lnk"
 Type: files; Name: "{group}\Руководство VOXPrint AI Canvas (русский).lnk"
 
+[Tasks]
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\voxprint-canvas.exe"; WorkingDir: "{app}"; IconFilename: "{app}\assets\voxprint-canvas.ico"; AppUserModelID: "VOXPrint.AISuite.Canvas"
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\voxprint-canvas.exe"; WorkingDir: "{app}"; IconFilename: "{app}\assets\voxprint-canvas.ico"; AppUserModelID: "VOXPrint.AISuite.Canvas"; Tasks: desktopicon
 
 [Code]
 const

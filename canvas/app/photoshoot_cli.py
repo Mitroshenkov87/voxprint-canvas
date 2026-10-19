@@ -191,7 +191,10 @@ def run_command(
             False, "not_produced", _series_message(result.code or "not_produced"),
             frame_paths, str(scenario_path), frames, made, tuple(shots), result.code or "not_produced",
         ), 1
-    return _body(True, "", "", frame_paths, str(scenario_path), frames, made, tuple(shots)), 0
+    body = _body(True, "", "", frame_paths, str(scenario_path), frames, made, tuple(shots))
+    if result.source:
+        body["scenario_source"] = result.source
+    return body, 0
 
 
 def _shot_rows(scenario: Scenario, statuses: dict[int, str], kept: tuple[Path, ...]) -> list[dict[str, object]]:

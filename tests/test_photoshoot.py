@@ -5,11 +5,13 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
+from canvas.pipeline.enhance import stated_ages
 from canvas.pipeline.photoshoot import (
-    JSON_REMINDER,
+    FORMAT_REMINDER,
     Shot,
     _object,
     assemble_line,
+    planned_shots,
     scenario_request,
     validate_scenario,
 )
@@ -277,22 +279,21 @@ def test_the_gate_is_called_by_name_on_every_text_and_frame(tmp_path: Path, monk
     assert len(frames) == 6
 
 
-def test_a_shot_that_drops_the_age_is_regenerated(tmp_path: Path) -> None:
+def test_a_shot_that_drops_the_age_is_replaced_by_a_planned_shot(tmp_path: Path) -> None:
     calls: list[str] = []
 
     def rewrite(prompt: str) -> str:
         calls.append(prompt)
-        if "write one different shot" in prompt:
-            return json.dumps({"scene": "on the porch", "pose": "still", "camera": "50 mm", "place": "kitchen table"})
         return _payload(AGED, scene_age="now 12 years old")
 
     result = _run(tmp_path, idea=AGED, rewrite=rewrite)
     document = json.loads((tmp_path / "series.json").read_text(encoding="utf-8"))
     assert result.stopped == ""
+    assert result.source == "mixed"
     assert len(result.kept) == 6
     assert len(calls) == 2
     assert all("12 years" not in line for line in document["lines"])
-    assert any("on the porch" in line for line in document["lines"])
+    assert all(line.startswith(AGED) for line in document["lines"])
 
 
 def test_cancel_keeps_finished_frames(tmp_path: Path) -> None:
@@ -341,7 +342,7 @@ def test_retry_sends_a_different_request(tmp_path: Path) -> None:
     result = _run(tmp_path, count=1, rewrite=rewrite)
     assert result.stopped == ""
     assert result.code == ""
-    assert calls[1] == f"{calls[0]}\n{JSON_REMINDER}"
+    assert calls[1] == f"{calls[0]}\n{FORMAT_REMINDER}"
     assert calls[0] != calls[1]
 
 
@@ -356,21 +357,24 @@ def test_each_reason_code(tmp_path: Path, monkeypatch) -> None:
 
     bad_place = _run(tmp_path / "place", place_mode="beside")
     assert bad_place.stopped == "scenario" and bad_place.code == "scenario.format"
+    empty_idea = _run(tmp_path / "empty-idea", idea="   ")
+    assert empty_idea.stopped == "scenario" and empty_idea.code == "scenario.format"
     prose = _run(tmp_path / "prose", rewrite=lambda _prompt: "The table is empty. " * 30)
-    assert prose.code == "scenario.format"
+    assert prose.stopped == "" and prose.code == "" and prose.source == "planned"
+    assert len(prose.kept) == 6
 
     declined = _run(tmp_path / "declined", rewrite=lambda _prompt: "Sorry, I cannot write that.")
-    assert declined.code == "scenario.declined"
+    assert declined.stopped == "" and declined.source == "planned"
 
     def short(prompt: str) -> str:
-        if "write one different shot" in prompt or JSON_REMINDER in prompt:
+        if FORMAT_REMINDER in prompt:
             return "No object here."
         raw = json.loads(_payload(IDEA, 6))
         raw["shots"][1]["scene"] = raw["shots"][0]["scene"]
         return json.dumps(raw)
 
     counted = _run(tmp_path / "count", rewrite=short)
-    assert counted.code == "scenario.count"
+    assert counted.stopped == "" and counted.source == "mixed" and len(counted.kept) == 6
 
     blocked = _run(tmp_path / "lines", age_gate=_refuse_lines())
     assert blocked.code == "scenario.policy"
@@ -399,14 +403,26 @@ def test_each_reason_code(tmp_path: Path, monkeypatch) -> None:
     assert empty.stopped == "" and empty.code == "not_produced" and empty.kept == ()
 
 
-def test_a_declined_scenario_logs_only_the_code(tmp_path: Path, monkeypatch) -> None:
+def test_a_declined_scenario_logs_only_the_code_by_default(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path / "home"))
-    result = _run(tmp_path / "series", rewrite=lambda _prompt: "Sorry, I cannot write that.")
-    assert result.code == "scenario.declined"
+    monkeypatch.delenv("VOXPRINT_DEBUG", raising=False)
+    result = _run(tmp_path / "series", idea=AGED, rewrite=lambda _prompt: "Sorry, I cannot write 34 lines.")
+    assert result.stopped == "" and result.source == "planned"
     log = (tmp_path / "home" / "logs" / "voxprint.log").read_text(encoding="utf-8")
     assert "scenario.declined" in log
-    assert "teapot" not in log
+    assert "scenario.raw" not in log and "cannot write" not in log
     assert "34" not in log
+    assert "red coat" not in log
+
+
+def test_the_debug_switch_adds_the_masked_reply(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("VOXPRINT_DEBUG", "1")
+    _run(tmp_path / "series", idea=AGED, rewrite=lambda _prompt: "Sorry, I cannot write 34 lines.")
+    log = (tmp_path / "home" / "logs" / "voxprint.log").read_text(encoding="utf-8")
+    assert "debug scenario.raw" in log and "cannot write" in log
+    assert "34" not in log
+    assert "red coat" not in log
 
 
 def _guard_error():
@@ -480,3 +496,130 @@ def _run(folder: Path, **overrides: object):
         folder=folder,
         line_for=overrides.pop("line_for", None),
     )
+
+
+def _lines(count: int, *, start: int = 0, place: str = "kitchen table", different: bool = False) -> str:
+    rows = []
+    for offset in range(count):
+        number = start + offset
+        where = f"room {number}" if different else place
+        rows.append(f"{offset + 1}. view {number}, soft light | still | 50 mm, eye level | {where}")
+    return "Here is the plan.\n" + "\n".join(rows) + "\nDone."
+
+
+def test_numbered_lines_are_read_as_shots(tmp_path: Path) -> None:
+    result = _run(tmp_path, rewrite=lambda prompt: _lines(int(json.loads(prompt)["count"])))
+    document = json.loads((tmp_path / "series.json").read_text(encoding="utf-8"))
+    assert result.stopped == "" and result.source == "writer"
+    assert len(result.kept) == 6
+    assert document["lines"][0] == f"{IDEA}, kitchen table, view 0, soft light, still"
+
+
+def test_lines_without_a_place_use_the_series_place(tmp_path: Path) -> None:
+    def rewrite(prompt: str) -> str:
+        count = int(json.loads(prompt)["count"])
+        rows = [f"{index + 1}. view {index} | still | 50 mm" for index in range(count)]
+        rows[0] += " | kitchen table"
+        return "\n".join(rows)
+
+    result = _run(tmp_path, rewrite=rewrite)
+    document = json.loads((tmp_path / "series.json").read_text(encoding="utf-8"))
+    assert result.source == "writer"
+    assert all(", kitchen table, " in line for line in document["lines"])
+
+
+def test_json_shots_without_a_place_use_the_shared_place(tmp_path: Path) -> None:
+    def rewrite(prompt: str) -> str:
+        raw = json.loads(_payload(IDEA, int(json.loads(prompt)["count"])))
+        for shot in raw["shots"]:
+            del shot["place"]
+        return json.dumps(raw)
+
+    result = _run(tmp_path, rewrite=rewrite)
+    assert result.stopped == "" and result.source == "writer" and len(result.kept) == 6
+
+
+def test_different_places_stay_distinct_with_planned_shots(tmp_path: Path) -> None:
+    def rewrite(prompt: str) -> str:
+        body = json.loads(prompt)
+        return _lines(2, start=len(body.get("previous", [])), different=True)
+
+    result = _run(tmp_path, count=14, place_mode="different", rewrite=rewrite)
+    document = json.loads((tmp_path / "series.json").read_text(encoding="utf-8"))
+    assert result.stopped == "" and len(result.kept) == 14
+    assert len(set(document["lines"])) == 14
+
+
+def test_planned_shots_cover_fifty_frames_in_either_place_mode() -> None:
+    for mode in ("same", "different"):
+        for adult in (False, True):
+            shots = planned_shots(AGED, 50, mode, place="", taken=(), adult=adult)
+            assert len(shots) == 50
+            assert len({shot.scene for shot in shots}) == 50
+            if mode == "different":
+                assert len({shot.place for shot in shots}) == 50
+            for shot in shots:
+                line = assemble_line(AGED, shot, include_camera=True)
+                assert line.startswith(AGED)
+                assert sorted(stated_ages(line)) == [34]
+    assert planned_shots(IDEA, 6, "same", place="", taken=()) == planned_shots(IDEA, 6, "same", place="", taken=())
+
+
+def test_planned_lines_go_through_the_same_prompt_review(tmp_path: Path) -> None:
+    prompts: list[str] = []
+    gate = World().gate()
+    real = gate.review_prompt
+
+    def review(prompt: str) -> None:
+        prompts.append(prompt)
+        real(prompt)
+
+    gate.review_prompt = review
+    result = _run(tmp_path, age_gate=gate, rewrite=lambda _prompt: "no lines here")
+    assert result.source == "planned"
+    assert len(prompts) == 13
+    assert all(item.startswith(IDEA + "\n") for item in prompts[1:])
+
+
+def test_a_refused_line_still_stops_the_series_and_is_not_replaced(tmp_path: Path) -> None:
+    calls: list[str] = []
+
+    def rewrite(prompt: str) -> str:
+        calls.append(prompt)
+        rows = _lines(int(json.loads(prompt)["count"])).splitlines()
+        rows[1] = rows[1].replace("view 0", "loli")
+        return "\n".join(rows)
+
+    result = _run(tmp_path, rewrite=rewrite)
+    assert result.stopped == "scenario"
+    assert len(calls) == 1
+    assert result.kept == ()
+
+
+def test_the_retry_is_sent_only_when_no_line_can_be_read(tmp_path: Path) -> None:
+    calls: list[str] = []
+
+    def rewrite(prompt: str) -> str:
+        calls.append(prompt)
+        return "1. only | one line"
+
+    result = _run(tmp_path, count=2, rewrite=rewrite)
+    assert result.source == "planned"
+    assert len(calls) == 2
+    assert calls[1] == f"{calls[0]}\n{FORMAT_REMINDER}"
+
+
+def test_a_three_part_line_is_read_by_its_last_part(tmp_path: Path) -> None:
+    def rewrite(prompt: str) -> str:
+        count = int(json.loads(prompt)["count"])
+        start = len(json.loads(prompt).get("previous", []))
+        return "\n".join(f"{index + 1}. view {start + index}, seated | 50 mm lens, eye level | room {start + index}"
+                         for index in range(count))
+
+    result = _run(tmp_path, place_mode="different", rewrite=rewrite)
+    document = json.loads((tmp_path / "series.json").read_text(encoding="utf-8"))
+    assert result.source == "writer"
+    assert len({line.split(", ")[1] for line in document["lines"]}) == 6
+    still = _run(tmp_path / "same", rewrite=lambda _prompt: "\n".join(
+        f"{index + 1}. view {index} | still | 85 mm lens" for index in range(6)))
+    assert still.source == "writer"

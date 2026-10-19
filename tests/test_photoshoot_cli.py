@@ -175,10 +175,25 @@ def test_json_reports_the_reason_code(tmp_path: Path) -> None:
         rewrite=lambda _prompt: "Sorry, I cannot write that.",
         generate=lambda *_args: _frame(),
     )
-    assert code == 1
-    assert payload["error"] == "scenario"
-    assert payload["code"] == "scenario.declined"
-    assert payload["message"] == "The scenario was not written."
+    assert code == 0
+    assert payload["scenario_source"] == "planned"
+    assert payload["made"] == 1
+    stopped, stop_code = run_command(
+        idea="   ",
+        folder=tmp_path / "empty",
+        frames=1,
+        seed=1,
+        style="photo",
+        places="same",
+        adult=False,
+        age_gate=World().gate(),
+        rewrite=lambda _prompt: "",
+        generate=lambda *_args: _frame(),
+    )
+    assert stop_code == 1
+    assert stopped["error"] == "scenario"
+    assert stopped["code"] == "scenario.format"
+    assert stopped["message"] == "The scenario cannot be used."
 
 
 def test_run_command_uses_the_injected_writer(tmp_path: Path) -> None:

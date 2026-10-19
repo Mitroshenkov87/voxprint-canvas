@@ -498,7 +498,7 @@ The `photoshoot` command writes the same series into a folder you name:
 voxprint-canvas-cli photoshoot --prompt "A yellow kettle with a blue handle" --frames 6 --out ./kettle
 ```
 
-`--frames` sets the number of shots, from 1 to 50. The default is 6. `--style` takes the same style ids as the **Style** row (`photo` by default). `--places` is `same` or `different` (`same` by default). `--seed` starts at 1. Each frame is an AVIF file. The folder also contains `scenario.txt`, with one scenario line per shot. Add `--json` for the frame paths, the path of `scenario.txt`, and how many frames were made of those requested. `--adult` follows the Expert **Adult content (18+)** switch.
+`--frames` sets the number of shots, from 1 to 50. The default is 6. `--style` takes the same style ids as the **Style** row (`photo` by default). `--places` is `same` or `different` (`same` by default). `--seed` starts at 1. Each frame is an AVIF file. The folder also contains `scenario.txt`, with one scenario line per shot. Add `--json` for the frame paths, the path of `scenario.txt`, and how many frames were made of those requested. `scenario_source` is `writer` when the text model wrote every line, `planned` when the lines were built from the idea, and `mixed` for both. `--adult` follows the Expert **Adult content (18+)** switch.
 
 # LoRAs from Model Forge
 

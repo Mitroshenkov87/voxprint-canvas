@@ -15,7 +15,8 @@ from canvas.models.modes import Mode, Tier
 from canvas.pipeline.adult_direction import ADULT_ANCHOR
 from canvas.pipeline.photoshoot import SYSTEM_PROMPT
 from canvas.pipeline.series import SeriesResult
-from canvas.safety.gate import GenerationBlocked
+from canvas.safety.constants import IMAGE_MINOR_SEXUAL
+from canvas.safety.gate import StylisedBlocked
 from canvas.safety.image import RawImage
 from canvas.ui.shell_layout import PictureJob
 from tests.fakes import World, avif_file, rgb
@@ -303,19 +304,14 @@ def test_a_frame_refusal_continues_without_an_internal_code(monkeypatch, tmp_pat
     gate = World().gate()
     seen = {"frames": 0}
     original = gate.release_request
-    score = gate._stack.nsfw.sexual_score
 
     def release_request(prompt: str, mode: str, inputs: tuple[object, ...] = (), *, explicit: bool = False):
         seen["frames"] += 1
+        if seen["frames"] == 3:
+            raise StylisedBlocked("prompt")
         return original(prompt, mode, inputs, explicit=explicit)
 
-    def sexual_score(image: RawImage) -> float:
-        if seen["frames"] == 3:
-            raise GenerationBlocked("image")
-        return score(image)
-
     gate.release_request = release_request
-    gate._stack.nsfw.sexual_score = sexual_score
     payload, code = run_command(
         idea=IDEA,
         folder=tmp_path / "series",
@@ -337,6 +333,64 @@ def test_a_frame_refusal_continues_without_an_internal_code(monkeypatch, tmp_pat
     log = tmp_path / "home" / "logs" / "voxprint.log"
     assert not log.exists() or "crash " not in log.read_text(encoding="utf-8")
     assert "internal" not in str(payload["code"])
+
+
+def _picture_verdict(world: World) -> None:
+    world.nsfw = 0.9
+    world.image_scores[IMAGE_MINOR_SEXUAL] = 0.9
+
+
+def _prompt_verdict(world: World) -> None:
+    world.safety = "unsafe"
+    world.categories = ("Minors",)
+
+
+@pytest.mark.parametrize(
+    ("stage", "arm"),
+    [("output", _picture_verdict), ("input", _picture_verdict), ("prompt", _prompt_verdict)],
+)
+def test_a_real_frame_verdict_stops_the_series(monkeypatch, tmp_path: Path, stage: str, arm) -> None:
+    """The real gate verdict on frame 3 ends the series with scenario.minor. Frames 1 and 2 stay."""
+    _arm_runner(monkeypatch, tmp_path)
+    world = World()
+    gate = world.gate()
+    inner = model_generate(gate, Tier.GB16, "photo", False)
+    calls = {"n": 0}
+
+    def generate(line: str, seed: int, hero: object | None, strength: float) -> object | None:
+        calls["n"] += 1
+        if calls["n"] == 3 and stage != "output":
+            arm(world)
+        image = inner(line, seed, hero, strength)
+        if calls["n"] == 3 and stage == "output":
+            arm(world)
+        return image
+
+    folder = tmp_path / "series"
+    payload, code = run_command(
+        idea=IDEA,
+        folder=folder,
+        frames=5,
+        seed=1,
+        style="photo",
+        places="same",
+        adult=False,
+        age_gate=gate,
+        rewrite=_rewrite,
+        generate=generate,
+    )
+    assert code == 1
+    assert payload["ok"] is False
+    assert payload["code"] == "scenario.minor"
+    assert payload["made"] == 2
+    assert calls["n"] == 3
+    assert [shot["code"] for shot in payload["shots"][:2]] == ["ok", "ok"]
+    for path in payload["frames"]:
+        assert Path(str(path)).is_file()
+    numbered = sorted(path.name for path in next(folder.rglob("scenario.txt")).parent.iterdir() if path.stem.isdigit())
+    assert len(numbered) == 2
+    log = tmp_path / "home" / "logs" / "voxprint.log"
+    assert not log.exists() or "crash " not in log.read_text(encoding="utf-8")
 
 
 def test_an_unexpected_runner_error_is_internal(monkeypatch, tmp_path: Path) -> None:

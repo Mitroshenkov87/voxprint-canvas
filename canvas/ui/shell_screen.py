@@ -35,6 +35,7 @@ from canvas.core.formats import extension, save_image
 from canvas.infra.enlarge import EnlargeClient
 from canvas.infra.vram import set_vram_cap_gb
 from canvas.models.mdl_registry import selectable
+from canvas.models.runtime import pipeline_scope
 from canvas.models.user_lora import discover, resolve_selected
 from canvas.models.modes import Mode, Tier
 from canvas.models.sizes import closest_aspect
@@ -375,6 +376,10 @@ class ShellWindow(QMainWindow):
         self._apply_vram()
         total = max(1, job.copies)
         base_seed = layout.seed
+        with pipeline_scope():
+            self._draw_copies(layout, job, total, base_seed)
+
+    def _draw_copies(self, layout, job: PictureJob, total: int, base_seed: int) -> None:
         for index in range(total):
             if index:
                 layout.seed = base_seed + index

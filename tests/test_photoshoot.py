@@ -17,7 +17,7 @@ from canvas.pipeline.photoshoot import (
 )
 from canvas.pipeline.series import ages_allowed, run_series
 from canvas.safety.denylist import scan
-from canvas.safety.gate import AgeGate, GenerationBlocked
+from canvas.safety.gate import AgeGate, GenerationBlocked, SafetyUnavailable, StylisedBlocked
 from tests.fakes import World
 
 
@@ -196,7 +196,7 @@ def test_blocked_shot_line_is_dropped_without_a_rewrite(tmp_path: Path) -> None:
 
     def line_for(index: int) -> str:
         if index == 1:
-            return f"{IDEA}, kitchen table, three-quarter view, still loli"
+            return f"{IDEA}, kitchen table, three-quarter view, still hentai"
         return f"{IDEA}, kitchen table, view {index}, still"
 
     result = _run(tmp_path, rewrite=lambda prompt: calls.append(prompt) or _payload(IDEA), line_for=line_for)
@@ -204,6 +204,33 @@ def test_blocked_shot_line_is_dropped_without_a_rewrite(tmp_path: Path) -> None:
     assert result.stopped == ""
     assert len(calls) == 1
     assert len(result.kept) == 5
+    assert document["blocked"] == [1]
+    assert all("hentai" not in line for line in document["lines"])
+
+
+def test_a_scenario_minor_frame_stops_the_series(tmp_path: Path) -> None:
+    """A frame refused with code scenario.minor stops the series. Later frames are not saved."""
+    drawn: list[int] = []
+
+    def line_for(index: int) -> str:
+        if index == 1:
+            return f"{IDEA}, kitchen table, three-quarter view, still loli"
+        return f"{IDEA}, kitchen table, view {index}, still"
+
+    def generate(line: str, seed: int, hero: object | None, strength: float) -> object:
+        del line, hero, strength
+        drawn.append(seed)
+        return _frame()
+
+    result = _run(tmp_path, line_for=line_for, generate=generate)
+    document = json.loads((tmp_path / "series.json").read_text(encoding="utf-8"))
+    assert result.stopped == "scenario"
+    assert result.code == "scenario.minor"
+    assert result.folder == tmp_path
+    assert len(result.kept) == 1
+    assert len(drawn) == 1
+    assert (tmp_path / "01.png").is_file()
+    assert not (tmp_path / "02.png").exists()
     assert document["blocked"] == [1]
     assert all("loli" not in line for line in document["lines"])
 
@@ -216,7 +243,7 @@ def test_blocked_frame_is_dropped_without_a_rewrite(tmp_path: Path) -> None:
 
     def review_image(raw: object, prompt: str = "") -> object:
         if "three-quarter" in prompt:
-            raise GenerationBlocked("image")
+            raise SafetyUnavailable("classifier_error")
         return real(raw, prompt)
 
     gate.review_image = review_image
@@ -437,7 +464,7 @@ def _refuse_lines():
 
     def review(prompt: str) -> None:
         if "\n" in prompt:
-            raise GenerationBlocked("prompt")
+            raise StylisedBlocked("prompt")
         real(prompt)
 
     gate.review_prompt = review

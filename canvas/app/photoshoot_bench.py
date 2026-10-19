@@ -47,7 +47,7 @@ def measure_series(
         folder: Series directory.
         seed: Hero seed.
         rewrite: Scenario writer.
-        age_gate: The minors gate.
+        age_gate: Passed through to the series.
         generate: One frame. Receives the series strength.
         style: Everyday look id.
         place_mode: ``same`` or ``different``.
@@ -130,7 +130,7 @@ def run_bench(
     tier: Tier,
     age_gate: AgeGate,
     rewrite: Callable[[str], str],
-    generate: Callable[[str, int, SeriesFrame | None, float], SeriesFrame | None],
+    generate: Callable[[str, int, SeriesFrame | None, float | None], SeriesFrame | None],
 ) -> dict[str, object]:
     """Measure a 6-frame series with the callbacks the caller built.
 
@@ -139,7 +139,7 @@ def run_bench(
         folder: Series directory.
         seed: Hero seed.
         tier: Recorded on the report. The caller already chose the machine.
-        age_gate: The minors gate.
+        age_gate: Passed through to the series.
         rewrite: Scenario writer.
         generate: Frame generator, including the hero frame.
     """

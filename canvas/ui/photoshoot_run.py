@@ -175,6 +175,8 @@ def _finish(window: ShellWindow, result: SeriesResult, idea: str) -> None:
     if result.stopped == "cancelled":
         if not _record_series(window, result, idea) and layout.phase is Phase.BUSY:
             layout.cancel()
+    elif result.stopped == "error":
+        layout.unavailable(result.reason or tr("photoshoot.code.internal"))
     elif result.code:
         layout.block(tr(f"photoshoot.code.{result.code}"))
     elif result.stopped == "idea" or result.stopped == "scenario":

@@ -168,6 +168,10 @@
       "en": "Image generation is unavailable.",
       "ru": "Генерация изображений недоступна."
     },
+    "photoshoot.code.internal": {
+      "en": "Something went wrong. The series stopped.",
+      "ru": "Что-то пошло не так. Серия остановлена."
+    },
     "error.job": {
       "en": "This mode needs another image.",
       "ru": "Для этого режима нужно другое изображение."

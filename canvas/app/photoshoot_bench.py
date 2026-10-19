@@ -109,7 +109,7 @@ def live_generate(age_gate: AgeGate, tier: Tier) -> Callable[[str, int, SeriesFr
         runner.img2img_strength = None if hero is None else strength
         fresh: tuple[PendingInput, ...] = ()
         if hero is not None:
-            raw = hero if isinstance(hero, RawImage) else RawImage(hero.width, hero.height, hero.to_bytes())
+            raw = RawImage(hero.width, hero.height, hero.to_bytes())
             fresh = (PendingInput(ImageRole.INIT, raw),)
         try:
             return runner(job, fresh)

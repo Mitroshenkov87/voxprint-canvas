@@ -8,6 +8,8 @@ from pathlib import Path
 from voxprint_common.i18n import add_catalogs, tr_lang
 from voxprint_common.ui.safety import adult_prompt_policy
 
+from canvas.app.i18n import text
+from canvas.app.info import ENLARGE_NAME
 from canvas.app.shell_run import RunStopped, ShellRunner
 from canvas.core.formats import DEFAULT_FORMAT, extension
 from canvas.infra.enlarge import EnlargeClient
@@ -102,7 +104,7 @@ def model_generate(
         runner.img2img_strength = None if hero is None else strength
         fresh: tuple[PendingInput, ...] = ()
         if hero is not None:
-            raw = hero if isinstance(hero, RawImage) else RawImage(hero.width, hero.height, hero.to_bytes())
+            raw = RawImage(hero.width, hero.height, hero.to_bytes())
             fresh = (PendingInput(ImageRole.INIT, raw),)
         try:
             return runner(job, fresh)
@@ -154,47 +156,52 @@ def run_command(
     def on_status(index: int, status: str) -> None:
         statuses[index] = status
 
-    try:
-        result = run_series(
-            idea=idea,
-            count=frames,
-            style=scenario_style,
-            place_mode=places,
-            seed=seed,
-            strength=_STRENGTH,
-            include_camera=lambda: False,
-            rewrite=rewrite,
-            age_gate=age_gate,
-            draw_frame=generate,
-            cancelled=lambda: False,
-            folder=folder,
-            on_scenario=on_scenario,
-            on_status=on_status,
-            adult=adult,
-            container=DEFAULT_FORMAT,
-        )
-    except RunStopped as exc:
-        code = "unavailable" if exc.unavailable else "stopped"
-        return _body(False, code, exc.message, (), None, frames, 0, ()), 1
+    result = run_series(
+        idea=idea,
+        count=frames,
+        style=scenario_style,
+        place_mode=places,
+        seed=seed,
+        strength=_STRENGTH,
+        include_camera=lambda: False,
+        rewrite=rewrite,
+        age_gate=age_gate,
+        draw_frame=generate,
+        cancelled=lambda: False,
+        folder=folder,
+        on_scenario=on_scenario,
+        on_status=on_status,
+        adult=adult,
+        container=DEFAULT_FORMAT,
+    )
     scenario = held.get("scenario")
     if result.stopped in {"idea", "scenario"} or scenario is None or result.folder is None:
         error = result.stopped if result.stopped in {"idea", "scenario"} else "scenario"
-        return _body(False, error, _series_message(result.code), (), None, frames, 0, (), result.code), 1
+        return _body(
+            False, error, _series_message(result.code), (), None, frames, 0, (),
+            result.code, result.source,
+        ), 1
     lines = [assemble_line(scenario.subject_block, shot, include_camera=False) for shot in scenario.shots]
     scenario_path = result.folder / "scenario.txt"
     scenario_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     shots = _shot_rows(scenario, statuses, result.kept)
     frame_paths = tuple(str(shot["path"]) for shot in shots if shot["code"] == "ok")
     made = len(frame_paths)
+    if result.stopped == "error":
+        return _body(
+            False, "error", _english_stop_message(result.code or "internal"),
+            frame_paths, str(scenario_path), frames, made, tuple(shots),
+            result.code or "internal", result.source,
+        ), 1
     if made == 0:
         return _body(
             False, "not_produced", _series_message(result.code or "not_produced"),
-            frame_paths, str(scenario_path), frames, made, tuple(shots), result.code or "not_produced",
+            frame_paths, str(scenario_path), frames, made, tuple(shots),
+            result.code or "not_produced", result.source,
         ), 1
-    body = _body(True, "", "", frame_paths, str(scenario_path), frames, made, tuple(shots))
-    if result.source:
-        body["scenario_source"] = result.source
-    return body, 0
+    return _body(
+        True, "", "", frame_paths, str(scenario_path), frames, made, tuple(shots), "", result.source,
+    ), 0
 
 
 def _shot_rows(scenario: Scenario, statuses: dict[int, str], kept: tuple[Path, ...]) -> list[dict[str, object]]:
@@ -217,6 +224,19 @@ def _series_message(code: str) -> str:
     return tr_lang("photoshoot.scenario.stopped", "en")
 
 
+def _english_stop_message(code: str) -> str:
+    """English sentence for a series stop code. ``--json`` stays in English."""
+    if code == "internal":
+        return text("photoshoot.code.internal", "en")
+    if code.startswith("check."):
+        return text("gate.unavailable", "en")
+    if code == "gpu_busy":
+        return text("startup.lock", "en")
+    if code == "enlarge_unavailable":
+        return text("enlarge.hint", "en", name=ENLARGE_NAME)
+    return _series_message(code)
+
+
 def _body(
     ok: bool,
     error: str,
@@ -227,6 +247,7 @@ def _body(
     made: int,
     shots: tuple[dict[str, object], ...],
     code: str = "",
+    scenario_source: str = "",
 ) -> dict[str, object]:
     body: dict[str, object] = {
         "ok": ok,
@@ -235,10 +256,10 @@ def _body(
         "requested": requested,
         "made": made,
         "shots": list(shots),
+        "code": code,
+        "scenario_source": scenario_source,
     }
     if error:
         body["error"] = error
         body["message"] = message
-    if code:
-        body["code"] = code
     return body

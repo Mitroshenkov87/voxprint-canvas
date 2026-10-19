@@ -5,12 +5,13 @@ import json
 from pathlib import Path
 
 from canvas.app.main import _parser, main
-from canvas.app.photoshoot_bench import HERO_STRENGTH, SERIES_FRAMES, measure_series
+from canvas.app.photoshoot_bench import HERO_STRENGTH, SERIES_FRAMES, live_generate, measure_series
 from canvas.app.platform import GpuCheck, OsCheck
 from canvas.infra.gpu import GpuInfo
 from canvas.models.modes import Tier
 from tests.fakes import World
 from tests.test_photoshoot import IDEA, _frame, _payload
+from tests.test_photoshoot_cli import _arm_runner, _rewrite
 
 
 def test_measure_series_times_six_frames_with_the_hero_strength(tmp_path: Path) -> None:
@@ -41,6 +42,44 @@ def test_measure_series_times_six_frames_with_the_hero_strength(tmp_path: Path) 
     assert heroes[0] is None
     assert heroes[1] is not None
     assert all(hero is heroes[1] for hero in heroes[1:])
+
+
+def test_live_generate_copies_the_reused_hero(monkeypatch, tmp_path: Path) -> None:
+    _arm_runner(monkeypatch, tmp_path)
+    gate = World().gate()
+    heroes: list[object | None] = []
+    screened: list[tuple[int, int, int]] = []
+    original = gate.release_request
+
+    def release_request(prompt: str, mode: str, inputs: tuple[object, ...] = (), *, explicit: bool = False):
+        hero = heroes[-1] if heroes else None
+        for item in inputs:
+            image = item.image
+            screened.append((id(image), image.width, id(hero) if hero is not None else 0))
+        return original(prompt, mode, inputs, explicit=explicit)
+
+    gate.release_request = release_request
+    inner = live_generate(gate, Tier.GB16)
+
+    def generate(line: str, seed: int, hero: object | None, strength: float) -> object | None:
+        heroes.append(hero)
+        return inner(line, seed, hero, strength)
+
+    report = measure_series(
+        idea=IDEA,
+        folder=tmp_path / "series",
+        seed=1,
+        rewrite=_rewrite,
+        age_gate=gate,
+        generate=generate,
+    )
+    assert report["ok"] is True
+    assert report["kept"] == SERIES_FRAMES
+    assert heroes[0] is None
+    assert len(screened) == SERIES_FRAMES - 1
+    assert screened[1][1] > 0
+    assert screened[1][0] != screened[1][2]
+    assert getattr(heroes[2], "width") > 0
 
 
 def test_photoshoot_bench_command_asks_for_six_frames(monkeypatch, capsys, tmp_path: Path) -> None:

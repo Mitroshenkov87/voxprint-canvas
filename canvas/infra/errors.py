@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import traceback
 
 from voxprint_common.paths import logs_dir
 
@@ -22,6 +23,25 @@ def note_error(code: str) -> None:
         folder.mkdir(parents=True, exist_ok=True)
         with (folder / "voxprint.log").open("a", encoding="utf-8") as handle:
             handle.write(f"{code}\n")
+    except OSError:
+        return
+
+
+def note_crash(code: str, exc: BaseException) -> None:
+    """Append one crash line: a code, the exception type, and the traceback.
+
+    The line is written whether or not debug logging is on. It carries no picture
+    text and no request text, only the code, the type name, and the traceback.
+    """
+    label = code or "internal"
+    type_name = type(exc).__name__
+    flat = " ".join("".join(traceback.format_exception(exc)).split())
+    _LOG.error("%s %s", label, type_name)
+    try:
+        folder = logs_dir()
+        folder.mkdir(parents=True, exist_ok=True)
+        with (folder / "voxprint.log").open("a", encoding="utf-8") as handle:
+            handle.write(f"crash {label} {type_name} {flat}\n")
     except OSError:
         return
 

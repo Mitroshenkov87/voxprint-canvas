@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Literal, Protocol
 
 from canvas.app.i18n import text
+from canvas.app.shell_run import RunStopped
 from canvas.core.formats import OutputFormat, extension, save_image
 from canvas.infra.errors import note_debug, note_error
 from canvas.pipeline.enhance import mask_numbers
@@ -32,7 +33,7 @@ from canvas.safety.denylist import scan
 from canvas.safety.gate import AgeGate, SafetyError
 from canvas.safety.image import RawImage, SafeImage
 
-StopCode = Literal["", "idea", "scenario", "cancelled"]
+StopCode = Literal["", "idea", "scenario", "cancelled", "error"]
 Source = Literal["", "writer", "mixed", "planned"]
 _RAW_LIMIT = 6000
 
@@ -143,7 +144,22 @@ def run_series(
         if cancelled():
             _write_meta(folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept)
             return SeriesResult("cancelled", "", tuple(kept), folder, "", source)
-        image = draw_frame(line, seed + index, hero, strength)
+        try:
+            image = draw_frame(line, seed + index, hero, strength)
+        except RunStopped as exc:
+            blocked.append(index)
+            _status(on_status, index, "blocked")
+            if not exc.unavailable:
+                continue
+            _write_meta(folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept)
+            return SeriesResult(
+                "error",
+                exc.message,
+                tuple(kept),
+                folder,
+                exc.code or "internal",
+                source,
+            )
         released = None if image is None else _released_frame(age_gate, image, line)
         if released is None:
             blocked.append(index)

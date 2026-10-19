@@ -15,7 +15,7 @@ from voxprint_common.i18n import tr
 from canvas.app.branding import icon_path, set_app_user_model_id
 from canvas.app.identity import version_label
 from canvas.app.i18n import text
-from canvas.app.info import APP_NAME, APP_VERSION
+from canvas.app.info import APP_NAME, APP_VERSION, ENLARGE_NAME
 from canvas.app.platform import GpuCheck, check_gpu, current_os_check
 from canvas.app.selftest import selftest_report
 from canvas.app.updates import check_for_update
@@ -500,6 +500,14 @@ def _emit_photoshoot(payload: dict[str, object], as_json: bool, code: int) -> in
 
 def _photoshoot_console(payload: dict[str, object]) -> str:
     code = str(payload.get("code") or "")
+    if code == "internal":
+        return tr("photoshoot.code.internal")
+    if code.startswith("check."):
+        return text("gate.unavailable")
+    if code == "gpu_busy":
+        return text("startup.lock")
+    if code == "enlarge_unavailable":
+        return text("enlarge.hint", name=ENLARGE_NAME)
     if code:
         return tr(f"photoshoot.code.{code}")
     error = str(payload.get("error") or "")

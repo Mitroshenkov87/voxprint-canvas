@@ -3,11 +3,13 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import NoReturn
 
 from PIL import Image
 
 from canvas.app.i18n import text
 from canvas.infra.enlarge import EnlargeError
+from canvas.infra.errors import note_crash
 from canvas.infra.gpu_lock import GpuLockTimeout, lock_path, release
 from canvas.infra.paths import models_dir
 from canvas.models.loader import ModelNotReady, ZImageGenerator
@@ -32,10 +34,11 @@ from canvas.ui.shell_layout import PictureJob
 class RunStopped(Exception):
     """The picture stopped with a sentence the window can show."""
 
-    def __init__(self, message: str, *, unavailable: bool = False) -> None:
+    def __init__(self, message: str, *, unavailable: bool = False, code: str = "") -> None:
         super().__init__(message)
         self.message = message
         self.unavailable = unavailable
+        self.code = code
 
 
 class ShellRunner:
@@ -90,25 +93,34 @@ class ShellRunner:
                 safe = pipeline.generate(job.prompt, job.mode, inputs, aspect=job.aspect, output=job.output,
                                          explicit=job.adult_content)
             except SafetyUnavailable as exc:
-                raise RunStopped(exc.user_message, unavailable=True) from exc
+                _halt(exc.user_message, exc, f"check.{exc.code}", unavailable=True)
             except GpuLockTimeout as exc:
-                raise RunStopped(text("startup.lock"), unavailable=True) from exc
+                _halt(text("startup.lock"), exc, "gpu_busy", unavailable=True)
             except SafetyError as exc:
-                raise RunStopped(exc.user_message) from exc
+                _halt(exc.user_message, exc, exc.code, unavailable=False)
             except EnlargeMissing as exc:
-                raise RunStopped(str(exc), unavailable=True) from exc
-            except (JobError, ModeUnavailable, CoolingDown, BaseNotSelected) as exc:
-                raise RunStopped(str(exc)) from exc
+                _halt(str(exc), exc, "enlarge_unavailable", unavailable=True)
+            except JobError as exc:
+                _halt(str(exc), exc, "job", unavailable=False)
+            except ModeUnavailable as exc:
+                _halt(str(exc), exc, "mode", unavailable=False)
+            except CoolingDown as exc:
+                _halt(str(exc), exc, "cooling", unavailable=False)
+            except BaseNotSelected as exc:
+                _halt(str(exc), exc, "base", unavailable=False)
+            except EnlargeError as exc:
+                _halt(str(exc), exc, "enlarge_unavailable", unavailable=True)
             except (
                 ModelNotReady,
                 InferenceUnavailable,
                 SnapshotError,
                 DownloadDeclined,
                 VramRefused,
-                EnlargeError,
                 OSError,
             ) as exc:
-                raise RunStopped(str(exc), unavailable=True) from exc
+                _halt(str(exc), exc, "internal", unavailable=True)
+            except Exception as exc:
+                _halt(text("gate.unavailable"), exc, "internal", unavailable=True)
             return RawImage(safe.width, safe.height, safe.data)
         finally:
             release(lock_path())
@@ -159,6 +171,13 @@ def load_rgb(path: Path) -> RawImage:
             return RawImage(rgb.width, rgb.height, rgb.tobytes())
     except (OSError, ValueError) as exc:
         raise OSError(str(exc)) from exc
+
+
+def _halt(message: str, exc: BaseException, code: str, *, unavailable: bool) -> NoReturn:
+    """Stop one picture. An unavailable stop is written to the crash log once."""
+    if unavailable:
+        note_crash(code or "internal", exc)
+    raise RunStopped(message, unavailable=unavailable, code=code) from exc
 
 
 def _offer(generator: object, name: str, value: object) -> None:

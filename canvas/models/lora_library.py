@@ -46,8 +46,7 @@ STRENGTH_LIMITS = (0.0, 2.0)
 DEFAULT_RANGE = (0.0, 1.2)
 
 # The kinds the library takes. One constant, set by the owner's decision.
-ACCEPTED_KINDS = frozenset({"object", "style"})
-KNOWN_KINDS = frozenset({"object", "style", "subject"})
+ACCEPTED_KINDS = frozenset({"object", "style", "subject"})
 
 CODE_KIND = "lora.kind"
 CODE_PREVIEW = "lora.preview"
@@ -406,7 +405,7 @@ def _manifest(raw: dict[str, object]) -> Manifest:
         if not isinstance(value, str):
             raise LoraRejected(CODE_INVALID)
         texts[key] = value.strip()
-    if not texts["name"] or not texts["base"] or texts["kind"] not in KNOWN_KINDS:
+    if not texts["name"] or not texts["base"] or not texts["kind"]:
         raise LoraRejected(CODE_INVALID)
     default = _number(raw.get("scale_default"))
     low = _number(raw.get("scale_min", DEFAULT_RANGE[0]))

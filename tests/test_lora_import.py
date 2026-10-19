@@ -63,8 +63,8 @@ def _code(path: Path, gate=None, **options) -> str:
     return caught.value.code
 
 
-def test_the_library_takes_objects_and_styles():
-    assert ACCEPTED_KINDS == frozenset({"object", "style"})
+def test_the_library_takes_objects_styles_and_subjects():
+    assert ACCEPTED_KINDS == frozenset({"object", "style", "subject"})
 
 
 def test_a_valid_package_is_copied_with_name_trigger_and_previews(home: Path):
@@ -167,11 +167,18 @@ def test_a_preview_that_is_not_webp_or_too_large_is_refused(home: Path):
     assert _code(write_voxlora(home / "b", preview=big.getvalue())) == "lora.preview"
 
 
-def test_a_subject_lora_is_refused_with_the_kind_code(home: Path):
-    package = write_voxlora(home / "in", record=manifest(kind="subject"))
+def test_a_subject_lora_is_accepted_and_its_previews_are_checked(home: Path):
+    gate = _Counting()
+    entry = _import(write_voxlora(home / "in", record=manifest(kind="subject")), gate)
+    assert entry.manifest.kind == "subject" and gate.calls == 3
+    assert _code(write_voxlora(home / "r", record=manifest(kind="subject")), _Refusing()) == "lora.preview"
+
+
+def test_an_unknown_kind_is_refused_with_the_kind_code(home: Path):
+    package = write_voxlora(home / "in", record=manifest(kind="vehicle"))
     gate = _Counting()
     assert _code(package, gate) == "lora.kind"
-    assert gate.calls == 0 and list_library() == ()
+    assert gate.calls == 0 and [item.manifest.kind for item in list_library()] == []
 
 
 def test_a_compressed_or_unexpected_entry_is_invalid(home: Path):
@@ -214,9 +221,9 @@ def test_the_cli_takes_a_package_or_a_library_name(home: Path):
     entry = _import(package)
     named = prepare_cli_lora(entry.id)
     assert named.name == "Brass Lamp"
-    subject = write_voxlora(home / "s", record=manifest(kind="subject"))
+    unknown = write_voxlora(home / "s", record=manifest(kind="vehicle"))
     with pytest.raises(LoraRejected) as caught:
-        prepare_cli_lora(subject)
+        prepare_cli_lora(unknown)
     assert caught.value.code == "lora.kind"
 
 

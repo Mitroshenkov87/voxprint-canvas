@@ -54,7 +54,7 @@ def test_the_library_lists_previews_and_removes(app, home: Path):
 
 
 def test_a_refused_import_shows_the_catalog_line(app, home: Path):
-    package = write_voxlora(home / "in", record=manifest(kind="subject"))
+    package = write_voxlora(home / "in", record=manifest(kind="vehicle"))
     dialog = LibraryDialog(None, World().gate(), base_ready=lambda: True)
     assert dialog.run_import(package) == "lora.kind"
     assert dialog.findChild(QLabel, "loraStatus").text() == text("lora.kind")

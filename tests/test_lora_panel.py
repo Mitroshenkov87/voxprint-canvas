@@ -7,7 +7,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtCore import Qt
+import shiboken6
 from PySide6.QtWidgets import QApplication, QComboBox, QLabel, QPushButton, QSlider
 
 from canvas.app.i18n import text
@@ -44,13 +44,13 @@ def test_the_library_lists_previews_and_removes(app, home: Path):
     entry = _entry(home)
     changed: list[int] = []
     dialog = LibraryDialog(None, World().gate(), lambda: changed.append(1))
-    dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
     card = dialog.findChild(QLabel, "loraName")
     assert card is not None and card.text() == "Brass Lamp"
     assert dialog.findChild(QLabel, "loraPreview-0") is not None
     dialog.findChild(QPushButton, "loraRemove").click()
     assert list_library() == () and changed == [1]
     assert entry.id not in [item.id for item in list_library()]
+    shiboken6.delete(dialog)
 
 
 def test_a_refused_import_shows_the_catalog_line(app, home: Path):
@@ -59,6 +59,7 @@ def test_a_refused_import_shows_the_catalog_line(app, home: Path):
     assert dialog.run_import(package) == "lora.kind"
     assert dialog.findChild(QLabel, "loraStatus").text() == text("lora.kind")
     assert list_library() == ()
+    shiboken6.delete(dialog)
 
 
 def test_the_pick_follows_the_library_and_the_strength_range(app, home: Path, monkeypatch):

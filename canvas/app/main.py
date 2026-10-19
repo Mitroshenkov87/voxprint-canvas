@@ -8,9 +8,11 @@ from collections.abc import Callable
 from pathlib import Path
 
 from PIL import Image
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QMessageBox
 from voxprint_common.i18n import tr
 
+from canvas.app.branding import icon_path, set_app_user_model_id
 from canvas.app.identity import version_label
 from canvas.app.i18n import text
 from canvas.app.info import APP_NAME, APP_VERSION
@@ -219,7 +221,12 @@ def _application() -> QApplication:
     current = QApplication.instance()
     if isinstance(current, QApplication):
         return current
-    return QApplication(sys.argv)
+    set_app_user_model_id()
+    app = QApplication(sys.argv)
+    icon = icon_path()
+    if icon.is_file():
+        app.setWindowIcon(QIcon(str(icon)))
+    return app
 
 
 def _prepare_gate(gate: AgeGate) -> None:

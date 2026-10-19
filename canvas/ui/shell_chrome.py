@@ -38,6 +38,7 @@ from voxprint_common.ui.theme import (
 )
 
 from canvas.app.i18n import text
+from canvas.ui.help_menu import add_help_menu
 
 PANEL_WIDTH = 320
 SHOT_WIDTH = 1280
@@ -122,6 +123,7 @@ def mount(window):
     split.setStretchFactor(0, 1)
     split.setStretchFactor(1, 0)
     _menu(window, view._overflow.menu())
+    window.help_menu = add_help_menu(view._overflow.menu())
     _tighten(window)
     scroll = view.root.findChild(QWidget, "expertScroll")
     if scroll is not None:

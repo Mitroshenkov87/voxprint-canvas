@@ -89,7 +89,7 @@ The setup file is not code-signed. Windows SmartScreen may say that it prevented
 2. On an English Windows, Setup uses English and does not ask. On a Russian Windows, Setup uses Russian and does not ask. When Windows uses another language, Setup asks which language to use.
 3. Setup installs the program into `C:\Program Files\VOXPrint AI Suite\Canvas\`. There is no folder page: the location is fixed.
 4. Setup then runs its install steps. The wizard shows *Installing the program libraries and models. This can take a while; progress is written to the setup log.* There is no separate console window. This takes a while, mostly because of the model download.
-5. When Setup finishes, the Start menu has a **VOXPrint AI Suite** folder with **VOXPrint AI Canvas**, **VOXPrint AI Canvas Guide (English)**, **Руководство VOXPrint AI Canvas (русский)** and **Uninstall VOXPrint AI Canvas**.
+5. When Setup finishes, the Start menu has a **VOXPrint AI Suite** folder with **VOXPrint AI Canvas**. Setup can also add a desktop shortcut; that box is off by default. The guides open from **More → Help** in the Canvas window.
 
 ## PowerShell 7
 
@@ -579,7 +579,7 @@ A newer `install.sh` installs into the same `/opt/voxprint-ai-suite/canvas`. It 
 
 ## Uninstall on Windows
 
-Use **Start → VOXPrint AI Suite → Uninstall VOXPrint AI Canvas**, or **Settings → Apps → Installed apps** in Windows. The uninstaller removes the program and unregisters Canvas from the shared model list.
+Use **Settings → Apps → Installed apps** in Windows and choose **VOXPrint AI Canvas**. The uninstaller removes the program and unregisters Canvas from the shared model list.
 
 Your pictures and the shared models stay in `%LOCALAPPDATA%\VOXPrint AI Suite`, because other VOXPrint apps may use the models. To free the space:
 

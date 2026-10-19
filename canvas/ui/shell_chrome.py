@@ -47,6 +47,7 @@ SHOT_HEIGHT = 800
 
 
 from canvas.ui.prompt_row import arrange as arrange_prompt  # noqa: E402
+from canvas.ui.action_row import sync as sync_actions  # noqa: E402
 
 
 def shell_style() -> str:
@@ -190,6 +191,7 @@ def polish(window):
     _fit_controls(window)
     _wrap_rows(window)
     _sync_lora_chip(window)
+    sync_actions(window)
 
 
 def _sync_lora_chip(window):
@@ -867,6 +869,10 @@ class _Flow(QLayout):
         for index, (row, row_height) in enumerate(lines):
             x = 0
             for item, item_width, item_height in row:
+                widget = item.widget()
+                if widget is not None and widget.property("flowFill"):
+                    # The main action takes the rest of its line.
+                    item_width = max(item_width, inner - x)
                 if rect is not None:
                     offset = (row_height - item_height) // 2
                     item.setGeometry(QRect(origin_x + x, origin_y + y + offset, item_width, item_height))

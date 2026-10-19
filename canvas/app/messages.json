@@ -432,6 +432,22 @@
       "en": "{current} of {total}",
       "ru": "{current} из {total}"
     },
+    "canvas.revert.symbol": {
+      "en": "↶",
+      "ru": "↶"
+    },
+    "canvas.menu.value": {
+      "en": "{name}: {value}  ▾",
+      "ru": "{name}: {value}  ▾"
+    },
+    "canvas.proportions": {
+      "en": "Proportions",
+      "ru": "Пропорции"
+    },
+    "canvas.image_size": {
+      "en": "Image size",
+      "ru": "Размер изображения"
+    },
     "canvas.action.picture": {
       "en": "Use a picture",
       "ru": "Использовать картинку"

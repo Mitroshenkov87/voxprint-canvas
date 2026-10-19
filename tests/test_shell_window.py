@@ -122,8 +122,11 @@ def test_simple_mode_hides_expert_words_and_keeps_picture_tools(app, home: Path)
     assert window.findChild(QAction, "actionSetup") is not None
     help_menu = window.findChild(QMenu, "menuHelp")
     assert help_menu is not None and len(help_menu.actions()) == 2
-    ratio = window.findChild(QComboBox, "sizeRatio")
-    assert ratio is not None and ratio.isVisible()
+    proportions = window.findChild(QPushButton, "proportionsMenu")
+    assert proportions is not None and proportions.isVisible() and proportions.text().startswith("Proportions:")
+    image_size = window.findChild(QPushButton, "imageSizeMenu")
+    assert image_size is not None and image_size.isVisible() and image_size.text().startswith("Image size:")
+    assert window.findChild(QPushButton, "revertPrompt").isHidden()
     square = window.findChild(QPushButton, "chip-size-1-1")
     assert square is not None and not square.isVisible()
     detail = window.findChild(QPushButton, "chip-detail-light")
@@ -184,14 +187,30 @@ def test_improve_and_revert_stay_in_the_same_field(app, home: Path) -> None:
     window = _window(home, improver=lambda prompt: prompt + " in warm light")
     window.view.set_prompt_text("a red bicycle")
     improve = window.findChild(QPushButton, "improvePrompt")
-    revert = window.findChild(QPushButton, "revertPrompt")
-    assert improve is not None and revert is not None
-    assert revert.text() == "Revert to my prompt"
+    back = window.findChild(QPushButton, "revertSegment")
+    assert improve is not None and back is not None
+    assert back.toolTip() == back.accessibleName() == "Revert to my prompt"
+    assert back.isHidden()
     improve.click()
     box = window.findChild(QPlainTextEdit, "promptBox")
     assert "warm light" in box.toPlainText()
-    revert.click()
+    assert not back.isHidden()
+    back.click()
     assert box.toPlainText() == "a red bicycle"
+    assert back.isHidden()
+
+
+def test_a_manual_edit_hides_the_back_segment(app, home: Path) -> None:
+    del app
+    window = _window(home, improver=lambda prompt: prompt + " in warm light")
+    window.view.set_prompt_text("a red bicycle")
+    window.findChild(QPushButton, "improvePrompt").click()
+    back = window.findChild(QPushButton, "revertSegment")
+    assert not back.isHidden()
+    box = window.findChild(QPlainTextEdit, "promptBox")
+    box.setPlainText(box.toPlainText() + ", at dusk")
+    assert back.isHidden()
+    assert not window.findChild(QPushButton, "revertPrompt").isEnabled()
 
 
 def test_generate_without_models_says_they_are_not_ready(app, home: Path) -> None:
@@ -340,8 +359,10 @@ def test_russian_buttons_keep_their_full_labels(app, home: Path, monkeypatch) ->
     assert setup.findChild(QPushButton, "setup-source-picture").text() == "С картинки"
     assert setup.findChild(QPushButton, "setup-variation-quick").text() == "Обычно"
     assert setup.findChild(QPushButton, "setup-variation-varied").text() == "Смелее"
-    revert = window.findChild(QPushButton, "revertPrompt")
-    assert revert is not None and revert.text() == "Вернуть мой запрос"
+    back = window.findChild(QPushButton, "revertSegment")
+    assert back is not None and back.toolTip() == "Вернуть мой запрос"
+    assert window.findChild(QPushButton, "proportionsMenu").text().startswith("Пропорции:")
+    assert window.findChild(QPushButton, "imageSizeMenu").text().startswith("Размер изображения:")
     fourk = window.findChild(QPushButton, "chip-output-4k")
     assert fourk is not None and fourk.isEnabled() and fourk.text() == "4K (нужен Enlarge)"
     install = window.findChild(QPushButton, "unavailable-output-4k")
@@ -616,3 +637,24 @@ def test_generate_keeps_the_picture_through_the_gate(app, home: Path, monkeypatc
     assert layout.phase is Phase.READY, layout.reason
     assert len(layout.history) == 1
     assert Path(window._pictures[layout.history[0].item_id]).is_file()
+
+
+def test_proportions_and_image_size_menus_choose_presets(app, home: Path) -> None:
+    window = _window(home)
+    window.show()
+    app.processEvents()
+    proportions = window.findChild(QPushButton, "proportionsMenu")
+    proportions.menu().aboutToShow.emit()
+    names = [action.objectName() for action in proportions.menu().actions() if action.objectName()]
+    assert names == [
+        "proportion-16-9", "proportion-21-9", "proportion-3-2", "proportion-4-3",
+        "proportion-1-1", "proportion-9-16", "proportion-2-3", "proportion-3-4",
+    ]
+    next(a for a in proportions.menu().actions() if a.objectName() == "proportion-16-9").trigger()
+    app.processEvents()
+    assert window.shell.layout.presets["size"] == "16:9"
+    assert proportions.text() == "Proportions: 16:9  ▾"
+    image_size = window.findChild(QPushButton, "imageSizeMenu")
+    image_size.menu().aboutToShow.emit()
+    labels = [action.text() for action in image_size.menu().actions()]
+    assert labels == ["Standard", "4K (needs Enlarge)"]

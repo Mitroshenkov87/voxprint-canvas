@@ -36,10 +36,10 @@ These two dialogs are Inno Setup message boxes. The pictures in `screens/<lang>/
 | `first-image-prompt` | Simple mode, Expert off, the chapter 5 example prompt in `promptBox`, chips at default, phase EMPTY, focus on Generate. |
 | `first-image-progress` | Same prompt, `layout.generate()` then `layout.progress(1, 1, text("canvas.stage.draw"))`, so the busy view shows "Creating the picture...", the stage, the percentage and Cancel. |
 | `first-image-result` | Same prompt, a finished synthetic landscape picture selected (phase READY), action bar visible (More like this, Save, Open folder, Use prompt again, Use as input picture, Delete). Same as the harness shot `simple-result`. |
-| `size-ratio-menu` | Simple mode with **Landscape** chosen and the ratio combo (`QComboBox#sizeRatio`) popup open, listing 16:9, 21:9, 3:2, 4:3. |
+| `size-ratio-menu` | Simple mode with 16:9 chosen and the **Proportions** menu (`QPushButton#proportionsMenu`) open, listing the landscape, square and portrait ratios. |
 | `expert-panel` | Expert on (`window.set_expert(True)`), default values, no picture. Same as the harness shot `expert`. |
 | `expert-custom` | Expert on, a finished picture shown, **Steps** changed to 33 so the Quality chip reads "Balanced + changes" and the panel shows "Reset to Balanced". Same as the harness shot `expert-custom`. |
-| `output-4k-detail` | Simple mode with an Enlarge stub that reports `ready()` true, **4K** selected in Output size, so the Detail row (Light / Medium / Strong) is visible. |
+| `output-4k-detail` | Simple mode with an Enlarge stub that reports `ready()` true, **4K** selected in Image size, so the Detail row (Light / Medium / Strong) is visible. |
 | `picture-setup` | `window.setup_wizard()` with default values (From text, Usual, Restyle, AVIF). Grab the dialog over the window. Same as the harness shot `setup`. |
 | `use-picture` | `window.picture_wizard()` with `load_path(<sample landscape>)`, so the preview shows the picture. Same as the harness shot `picture`. |
 | `mask-editor` | `window.use_picture(<sample interior photo>)`, then `window.mask_wizard()`; paint one area (for example where an armchair stands) on the mask board before grabbing. |

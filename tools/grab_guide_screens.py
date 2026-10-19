@@ -18,7 +18,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PIL import Image, ImageDraw, ImageFont
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QColor, QPainter
-from PySide6.QtWidgets import QApplication, QComboBox, QPushButton, QRadioButton
+from PySide6.QtWidgets import QApplication, QPushButton, QRadioButton
 
 from canvas.app.i18n import text
 from canvas.models.modes import Tier
@@ -194,24 +194,20 @@ def _progress(app: QApplication, window: ShellWindow, path: Path) -> None:
 
 
 def _landscape(app: QApplication, window: ShellWindow, path: Path) -> None:
-    button = window.findChild(QPushButton, "orient-landscape")
-    if button is None:
-        raise SystemExit("missing landscape orientation")
-    button.click()
+    window.shell.layout.choose("size", "16:9")
     window.view.refresh()
     app.processEvents()
-    combo = window.findChild(QComboBox, "sizeRatio")
-    if combo is None or combo.count() < 2:
-        raise SystemExit("missing size ratio list")
+    button = window.findChild(QPushButton, "proportionsMenu")
+    if button is None or button.menu() is None:
+        raise SystemExit("missing proportions menu")
     window.setFixedSize(SHOT)
     window.show()
     app.processEvents()
-    combo.showPopup()
-    app.processEvents()
+    menu = button.menu()
+    menu.aboutToShow.emit()
+    menu.adjustSize()
     base = window.grab().toImage()
-    popup = combo.view().window()
-    _paint_popup(base, window, combo, popup.grab())
-    combo.hidePopup()
+    _paint_popup(base, window, button, menu.grab())
     base.save(str(path))
 
 

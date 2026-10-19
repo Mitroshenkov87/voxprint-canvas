@@ -48,6 +48,7 @@ SHOT_HEIGHT = 800
 
 from canvas.ui.prompt_row import arrange as arrange_prompt  # noqa: E402
 from canvas.ui.action_row import sync as sync_actions  # noqa: E402
+from canvas.ui.result_bar import wrap as wrap_result  # noqa: E402
 
 
 def shell_style() -> str:
@@ -412,6 +413,7 @@ def _result(window):
         return
     row = bar.layout()
     if row is None or bar.findChild(QPushButton, "useInput") is not None:
+        wrap_result(bar)
         return
     use = QPushButton(tr("simple.history.use_input"))
     use.setObjectName("useInput")
@@ -422,6 +424,7 @@ def _result(window):
     at = _stretch_index(row)
     row.insertWidget(at, use)
     row.insertWidget(at + 1, delete)
+    wrap_result(bar)
 
 
 def _history_action(window, action):

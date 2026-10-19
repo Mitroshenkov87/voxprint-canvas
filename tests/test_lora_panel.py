@@ -98,3 +98,30 @@ def test_the_window_import_adds_to_the_pick(app, home: Path, monkeypatch):
     assert not isinstance(result, str) and shown == ["shown"]
     assert window._lora_picker.combo.count() == 2
     window.close()
+
+
+def test_an_import_from_add_ons_replaces_the_empty_line(app, home: Path):
+    from canvas.models.user_lora import LoraIndex
+    from canvas.ui.wizards import AddonsWizard
+
+    entry = _entry(home)
+    wizard = AddonsWizard(None, LoraIndex((), ()), "", 0.7, lambda _key, _strength: None, entry.as_lora)
+    assert wizard.findChild(QLabel, "addonsEmpty") is not None
+    wizard.findChild(QPushButton, "addonsImport").click()
+    app.processEvents()
+    assert wizard._empty is None
+    shiboken6.delete(wizard)
+
+
+def test_a_strength_step_does_not_redraw_the_window(app, home: Path, monkeypatch):
+    entry = _entry(home)
+    window = ShellWindow(open_layout(home / "state", gate=World().gate()), tier=Tier.GB16, enlarge=object())
+    window.show()
+    app.processEvents()
+    window.findChild(QComboBox, "loraPick").setCurrentIndex(1)
+    assert window.shell.layout.get("shell.addons") == entry.id
+    calls: list[int] = []
+    monkeypatch.setattr(window.view, "refresh", lambda: calls.append(1))
+    window.findChild(QSlider, "loraStrength").setValue(50)
+    assert calls == [] and window.shell.layout.get("shell.lora_weight") == pytest.approx(0.5)
+    window.close()

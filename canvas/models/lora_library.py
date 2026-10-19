@@ -91,7 +91,7 @@ class LibraryEntry:
 
     def as_lora(self) -> UserLora:
         """The entry as a selectable LoRA. The weight keys are normalised for the loader."""
-        _meta, loader_weights = _opened_weights(self.weights)
+        loader_weights = _loader_path(self.weights)
         low, high = _clamped_range(self.manifest)
         return UserLora(
             self.id,
@@ -218,12 +218,28 @@ def read_entry(folder: Path) -> LibraryEntry | None:
 
 
 _DIGESTS: dict[tuple[str, int, int], str] = {}
+_LOADER: dict[tuple[str, int, int], Path] = {}
+
+
+def _stat_key(path: Path) -> tuple[str, int, int]:
+    stat = path.stat()
+    return str(path.resolve()), stat.st_mtime_ns, stat.st_size
+
+
+def _loader_path(path: Path) -> Path:
+    """The file the loader opens, read once while the stored file stays the same."""
+    key = _stat_key(path)
+    cached = _LOADER.get(key)
+    if cached is not None and cached.is_file():
+        return cached
+    _meta, loader = _opened_weights(path)
+    _LOADER[key] = loader
+    return loader
 
 
 def _file_digest(path: Path) -> str:
     """SHA-256 of a stored file, kept while its size and time stay the same."""
-    stat = path.stat()
-    key = (str(path.resolve()), stat.st_mtime_ns, stat.st_size)
+    key = _stat_key(path)
     cached = _DIGESTS.get(key)
     if cached is not None:
         return cached
@@ -323,7 +339,8 @@ def _read_package(source: Path) -> dict[str, bytes]:
                 if name in files:
                     raise LoraRejected(CODE_INVALID)
                 files[name] = archive.read(info)
-    except (OSError, zipfile.BadZipFile, zipfile.LargeZipFile, KeyError, ValueError) as exc:
+    except (OSError, RuntimeError, NotImplementedError, EOFError, zipfile.BadZipFile, zipfile.LargeZipFile,
+            KeyError, ValueError) as exc:
         raise LoraRejected(CODE_INVALID) from exc
     return files
 

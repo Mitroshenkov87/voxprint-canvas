@@ -331,11 +331,13 @@ class AddonsWizard(QDialog):
         self._items[none] = None
         none.toggled.connect(lambda checked: self._on_toggle(checked, None))
         rows.addWidget(none)
+        self._empty: QLabel | None = None
         if not index.available:
             empty = QLabel(text("canvas.addons.empty"))
             empty.setObjectName("addonsEmpty")
             empty.setWordWrap(True)
             rows.addWidget(empty)
+            self._empty = empty
         chosen: UserLora | None = None
         for item in index.available:
             button = QRadioButton(_lora_label(item))
@@ -396,6 +398,10 @@ class AddonsWizard(QDialog):
         self._group.addButton(button)
         self._items[button] = lora
         button.toggled.connect(lambda checked, item=lora: self._on_toggle(checked, item))
+        if self._empty is not None:
+            self._rows.removeWidget(self._empty)
+            self._empty.deleteLater()
+            self._empty = None
         self._rows.insertWidget(1, button)
         button.setChecked(True)
 

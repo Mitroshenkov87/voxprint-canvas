@@ -273,9 +273,12 @@ class ShellWindow(QMainWindow):
         return result.as_lora()
 
     def _pick_lora(self, key: str, strength: float) -> None:
-        self.shell.layout.set_value("shell.addons", key)
+        changed = str(self.shell.layout.get("shell.addons") or "") != key
         self.shell.layout.set_value("shell.lora_weight", strength)
-        self.view.refresh()
+        if changed:
+            # Only a new pick changes the trigger chip; a strength step does not redraw.
+            self.shell.layout.set_value("shell.addons", key)
+            self.view.refresh()
 
     def lora_trigger(self) -> str:
         """The trigger word of the selected LoRA, or empty when nothing is selected."""

@@ -223,3 +223,15 @@ def test_the_cli_takes_a_package_or_a_library_name(home: Path):
 def test_a_name_without_latin_letters_gets_a_stable_id(home: Path):
     entry = _import(write_voxlora(home / "in", record=manifest(name="Акварель", kind="style")))
     assert entry.id.startswith("lora-") and len(entry.id) == 13
+
+
+def test_an_encrypted_or_damaged_member_is_invalid(home: Path, monkeypatch):
+    package = write_voxlora(home / "in")
+
+    def broken(self, *args, **kwargs):
+        raise RuntimeError("File is encrypted, password required for extraction")
+
+    import zipfile
+
+    monkeypatch.setattr(zipfile.ZipFile, "read", broken)
+    assert _code(package) == "lora.invalid"

@@ -10,7 +10,7 @@ from voxprint_common.ui.safety import adult_prompt_policy
 
 from canvas.app.i18n import text
 from canvas.app.info import ENLARGE_NAME
-from canvas.app.shell_run import RunStopped, ShellRunner
+from canvas.app.shell_run import ShellRunner
 from canvas.core.formats import DEFAULT_FORMAT, extension
 from canvas.infra.enlarge import EnlargeClient
 from canvas.infra.paths import models_dir
@@ -106,12 +106,7 @@ def model_generate(
         if hero is not None:
             raw = RawImage(hero.width, hero.height, hero.to_bytes())
             fresh = (PendingInput(ImageRole.INIT, raw),)
-        try:
-            return runner(job, fresh)
-        except RunStopped as exc:
-            if exc.unavailable:
-                raise
-            return None
+        return runner(job, fresh)
 
     return generate
 
@@ -175,7 +170,7 @@ def run_command(
         container=DEFAULT_FORMAT,
     )
     scenario = held.get("scenario")
-    if result.stopped in {"idea", "scenario"} or scenario is None or result.folder is None:
+    if (result.stopped in {"idea", "scenario"} and not result.kept) or scenario is None or result.folder is None:
         error = result.stopped if result.stopped in {"idea", "scenario"} else "scenario"
         return _body(
             False, error, _series_message(result.code), (), None, frames, 0, (),
@@ -192,6 +187,12 @@ def run_command(
             False, "error", _english_stop_message(result.code or "internal"),
             frame_paths, str(scenario_path), frames, made, tuple(shots),
             result.code or "internal", result.source,
+        ), 1
+    if result.stopped == "scenario":
+        return _body(
+            False, "scenario", _series_message(result.code),
+            frame_paths, str(scenario_path), frames, made, tuple(shots),
+            result.code, result.source,
         ), 1
     if made == 0:
         return _body(

@@ -45,6 +45,9 @@ SHOT_WIDTH = 1280
 SHOT_HEIGHT = 800
 
 
+from canvas.ui.prompt_row import arrange as arrange_prompt  # noqa: E402
+
+
 def shell_style() -> str:
     """The shared shell stylesheet, with the window and labels kept on the dark ground."""
     return build_shell_style(False) + f"""
@@ -165,6 +168,7 @@ def polish(window):
     """
     _adopt_rows(window)
     _source_drop(window)
+    arrange_prompt(window)
     _size_menu(window)
     _output(window)
     _detail(window)
@@ -730,11 +734,13 @@ def _flow_heights(window, enabled):
     if not hosts:
         return
     width = _preset_width(window, enabled)
+    custom = getattr(window, "_flow_width", None)
     for host in hosts:
         flow = host.layout()
         if flow is None:
             continue
-        host.setMinimumHeight(flow.heightForWidth(width))
+        own = custom(host, enabled) if custom is not None else None
+        host.setMinimumHeight(flow.heightForWidth(own or width))
         host.updateGeometry()
     window.view._preset_host.updateGeometry()
 
@@ -751,6 +757,9 @@ class _Flow(QLayout):
         super().__init__()
         self._items = []
         self.setContentsMargins(0, 0, 0, 0)
+        # A narrow side panel lets every row wrap, with the row name on its own line.
+        self.may_wrap = False
+        self.label_above = False
 
     def addItem(self, item):  # noqa: N802
         self._items.append(item)
@@ -811,8 +820,19 @@ class _Flow(QLayout):
         inner = max(0, width - margins.left() - margins.right())
         origin_x = margins.left() if rect is None else rect.x() + margins.left()
         origin_y = margins.top() if rect is None else rect.y() + margins.top()
-        one_row = _fit_style_font(self._items, inner, spacing, warn=rect is not None)
-        squeeze = _squeeze(self._items, inner, spacing)
+        if self.may_wrap:
+            for item in self._items:
+                widget = item.widget()
+                if widget is not None and widget.property("tightWidth"):
+                    _scale_chip_font(widget, 100)
+            one_row = False
+            squeeze = {}
+        else:
+            items = self._items
+            if self.label_above and items and _is_row_label(items[0]):
+                items = items[1:]
+            one_row = _fit_style_font(items, inner, spacing, warn=rect is not None)
+            squeeze = _squeeze(items, inner, spacing)
         lines = []
         current = []
         x = 0
@@ -822,6 +842,11 @@ class _Flow(QLayout):
                 continue
             item_width, item_height = _flow_size(item)
             item_width -= squeeze.get(id(item), 0)
+            if self.label_above and current and _is_row_label(current[0][0]) and len(current) == 1:
+                lines.append((current, line_height))
+                current = []
+                x = 0
+                line_height = 0
             if x and x + item_width > inner and not one_row:
                 lines.append((current, line_height))
                 current = []
@@ -844,6 +869,11 @@ class _Flow(QLayout):
             if index + 1 < len(lines):
                 y += spacing
         return margins.top() + y + margins.bottom()
+
+
+def _is_row_label(item):
+    widget = item.widget()
+    return isinstance(widget, QLabel) and str(widget.objectName()).startswith("preset-")
 
 
 def _row_fits(items, inner, spacing):
@@ -951,7 +981,8 @@ def _fit_text(button):
         font.setPixelSize(16)
         pad = 22
     elif button.property("chip"):
-        pad = 14
+        # Padding plus the border, so a checked (weight 600) label is not cut.
+        pad = 18
     elif button.objectName() in {"expertToggle", "useInput", "deletePicture"}:
         pad = 18
     elif _in_action_bar(button):

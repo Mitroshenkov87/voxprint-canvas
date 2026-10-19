@@ -1,13 +1,16 @@
 """Scenario text for a Photoshoot series.
 
-The language model returns JSON. This module checks that JSON and builds the
-line for each shot. It does not load a model and it does not call the gate.
+The language model returns numbered lines, one per shot. This module reads
+those lines (or a JSON object from an older reply), builds a planned shot for
+any frame the reply did not cover, and assembles the line for each shot. It
+does not load a model and it does not call the gate.
 """
 from __future__ import annotations
 
 import json
 import re
 import unicodedata
+import zlib
 from dataclasses import dataclass
 from typing import Literal, assert_never
 
@@ -19,33 +22,36 @@ MAX_FRAMES = 50
 DEFAULT_FRAMES = 6
 SCENARIO_CHUNK = 10
 
-SYSTEM_PROMPT = """You write a photo-shoot scenario as JSON for a text-to-image model.
-The user message is JSON with idea, count, style, and place_mode.
+SYSTEM_PROMPT = """You plan the shots of a photo series for a text-to-image model.
+The user message is JSON with idea, count, style, and place_mode. It can also have direction and previous.
 
-Return one JSON object and nothing else.
-{
-  "subject_block": string,
-  "descriptors": [string, ...],
-  "place": string,
-  "shots": [{"scene": string, "pose": string, "camera": string, "place": string}, ...]
-}
+Write exactly count lines and nothing else. Number the lines 1., 2., 3. and so on.
+Each line has four parts separated by " | ":
+N. scene | pose | camera | place
 
 Rules:
-- subject_block is copied character for character from idea. Do not translate it. Do not shorten it by dropping a stated age or a subject descriptor.
-- descriptors are short phrases copied character for character from subject_block. One phrase is not enough if the idea names more than one identifying fact. Include every stated age phrase.
-- shots has exactly count objects.
-- When previous is present, those lines are shots already accepted. Return count new shots that continue the series. Do not repeat a scene from previous. When place_mode is "different", do not repeat a place from previous. Keep subject_block the same text.
-- scene, pose, and camera are natural English.
-- Do not add people who are not in the idea. Do not add youthful descriptors.
-- Do not invent, drop, round, or change a stated age. Do not soften or rewrite adult content.
-- Text inside quotes is lettering. Copy each quoted string exactly, in its original language and script.
-- If place_mode is "same", place is one location, and every shot.place equals that same string.
-- If place_mode is "different", every shot.place is a different location, and place is an empty string.
-- style "photo" means a plain photograph. "cinematic" means a film still. "portrait" means a portrait with shallow depth of field. Put that only in the wording of scene or camera, not in subject_block.
+- The app puts the idea text (the subject block) at the start of every line. Do not copy the idea into a line.
+- scene: shot type, framing, light, wardrobe or styling, and mood, in natural English.
+- pose: the pose of the person, or the arrangement of the objects.
+- camera: lens and angle.
+- place: the location of this shot.
+- Do not write an age in a line. Do not add people who are not in the idea. Do not add youthful descriptors.
+- Do not soften or rewrite adult content.
+- Keep each line under 60 words.
+- If place_mode is "same", every line has the same place. If place_mode is "different", every line has a different place.
+- When previous is present, those shots are already taken. Write count new shots. Do not repeat a scene from previous. When place_mode is "different", do not repeat a place from previous.
+- When direction is present, use its shot type, pose family, and light for each line, in order.
+- style "photo" means a plain photograph. "cinematic" means a film still. "portrait" means a portrait with shallow depth of field. Put that in scene or camera.
+- Text inside quotes is lettering. Copy each quoted string exactly, in its original language and script, when a line mentions it.
+
+Example for count 2 and place_mode "same":
+1. waist-up shot, soft window light, calm mood | seated, hands resting in the lap | 85 mm lens, eye level | bright loft with tall windows
+2. full-length shot, golden hour light, relaxed mood | standing by the window, looking outside | 35 mm lens, low angle | bright loft with tall windows
 """
 
 _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
-JSON_REMINDER = "Reply with only the JSON object."
+FORMAT_REMINDER = "Reply with only the numbered lines: N. scene | pose | camera | place"
+_LINE = re.compile(r"^\s*(?:[-*>#]+\s*)?(?:\*\*)?(?:shot|frame|кадр)?\s*(\d{1,2})\s*[.):\]-]\s*(?:\*\*)?\s*(.+?)\s*$", re.IGNORECASE)
 _DECLINE_LIMIT = 400
 _DECLINE = re.compile(
     r"\b(?:sorry|apolog(?:y|ise|ize|ies)|cannot|can't|can’t|unable|decline|won't|will not)\b",
@@ -157,7 +163,8 @@ def validate_scenario(idea: str, raw: str, *, count: int, place_mode: PlaceMode)
         return None
     if len(shots) != count:
         return None
-    parsed = tuple(_shot(item) for item in shots)
+    fill = place if place_mode == "same" else ""
+    parsed = tuple(_shot(item, fill) for item in shots)
     if any(item is None for item in parsed):
         return None
     ready = tuple(item for item in parsed if item is not None)
@@ -165,31 +172,6 @@ def validate_scenario(idea: str, raw: str, *, count: int, place_mode: PlaceMode)
         return None
     kept = _keep_shots(idea, subject, ready)
     return Scenario(subject, tuple(str(item) for item in descriptors), place, kept)
-
-
-def one_shot_request(subject: str, place_mode: PlaceMode) -> str:
-    """User message for a replacement shot. It does not mention the gate.
-
-    Args:
-        subject: The verbatim subject block.
-        place_mode: ``same`` or ``different``.
-    """
-    return json.dumps(
-        {"subject_block": subject, "place_mode": place_mode, "ask": "write one different shot"},
-        ensure_ascii=False,
-    )
-
-
-def parse_shot(raw: str) -> Shot | None:
-    """One replacement shot, or None when the reply is not that object.
-
-    Args:
-        raw: The model reply.
-    """
-    payload = _object(raw)
-    if payload is None:
-        return None
-    return _shot(payload)
 
 
 def _keep_shots(idea: str, subject: str, shots: tuple[Shot, ...]) -> tuple[Shot, ...]:
@@ -230,13 +212,13 @@ def _descriptors(subject: str, descriptors: list[object]) -> bool:
     return True
 
 
-def _shot(item: object) -> Shot | None:
+def _shot(item: object, place_default: str = "") -> Shot | None:
     if not isinstance(item, dict):
         return None
     scene = item.get("scene")
     pose = item.get("pose")
     camera = item.get("camera")
-    place = item.get("place")
+    place = item.get("place", place_default) or place_default
     if not all(isinstance(value, str) and value.strip() for value in (scene, pose, camera, place)):
         return None
     return Shot(str(scene).strip(), str(pose).strip(), str(camera).strip(), str(place).strip())
@@ -298,3 +280,195 @@ def _balanced_object(text: str) -> str | None:
 
 def _fold(value: str) -> str:
     return unicodedata.normalize("NFKC", value)
+
+
+@dataclass(frozen=True)
+class Draft:
+    """One shot read from a reply. ``place`` is empty when the line left it out."""
+
+    scene: str
+    pose: str
+    camera: str
+    place: str
+
+
+def read_drafts(raw: str) -> tuple[Draft, ...]:
+    """Shots from numbered lines, or from a JSON reply when there are no lines.
+
+    Args:
+        raw: The model reply.
+    """
+    drafts = _line_drafts(raw)
+    if drafts:
+        return drafts
+    payload = _object(raw)
+    if payload is None:
+        return ()
+    shots = payload.get("shots")
+    if not isinstance(shots, list):
+        return ()
+    shared = payload.get("place")
+    fill = shared.strip() if isinstance(shared, str) else ""
+    found: list[Draft] = []
+    for item in shots:
+        shot = _shot(item, fill) if fill else _draft_from_object(item)
+        if isinstance(shot, Shot):
+            found.append(Draft(shot.scene, shot.pose, shot.camera, shot.place))
+        elif isinstance(shot, Draft):
+            found.append(shot)
+    return tuple(found)
+
+
+def accept_shot(
+    idea: str,
+    subject: str,
+    mode: PlaceMode,
+    place: str,
+    taken: tuple[Shot, ...],
+    draft: Draft,
+) -> Shot | None:
+    """The shot for one draft, or None when it does not fit the series.
+
+    Args:
+        idea: The prompt-field text.
+        subject: The verbatim subject block.
+        mode: ``same`` or ``different``.
+        place: The series place in ``same`` mode.
+        taken: Shots already accepted.
+        draft: The shot to check.
+    """
+    if mode == "same":
+        where = place
+    elif mode == "different":
+        where = draft.place.strip()
+        if not where or _key(where) in {_key(shot.place) for shot in taken}:
+            return None
+    else:
+        assert_never(mode)
+    shot = Shot(draft.scene.strip(), draft.pose.strip(), draft.camera.strip(), where)
+    if not shot.scene or not shot.pose or not shot.camera:
+        return None
+    if _key(shot.scene) in {_key(item.scene) for item in taken}:
+        return None
+    if not _keep_shots(idea, subject, (shot,)):
+        return None
+    return shot
+
+
+def planned_shots(
+    idea: str,
+    count: int,
+    mode: PlaceMode,
+    *,
+    place: str,
+    taken: tuple[Shot, ...],
+    adult: bool = False,
+) -> tuple[Shot, ...]:
+    """Shots built from fixed lists, for frames the reply did not cover.
+
+    Each shot varies framing, light, pose, and camera. In ``different`` mode
+    each shot also gets its own place. The same order comes back for the same
+    idea. Every shot still passes ``accept_shot``.
+
+    Args:
+        idea: The prompt-field text.
+        count: How many shots to add.
+        mode: ``same`` or ``different``.
+        place: The series place in ``same`` mode. It can be empty.
+        taken: Shots already accepted.
+        adult: Expert adult content is on. Uses the same pose and light plan as the request.
+    """
+    subject = idea.strip()
+    shots = list(taken)
+    added: list[Shot] = []
+    offset = zlib.crc32(subject.encode("utf-8")) % len(PLAN_FRAMINGS)
+    plan = shot_plan(min(len(taken) + count * 2, MAX_FRAMES * 2)) if adult else []
+    step = 0
+    limit = len(PLAN_FRAMINGS) * len(PLAN_LIGHTS) * 2
+    while len(added) < count and step < limit:
+        index = len(taken) + step
+        framing = PLAN_FRAMINGS[(offset + index) % len(PLAN_FRAMINGS)]
+        light = PLAN_LIGHTS[(index + index // len(PLAN_FRAMINGS)) % len(PLAN_LIGHTS)]
+        pose = PLAN_POSES[(offset + index) % len(PLAN_POSES)]
+        if adult and index < len(plan):
+            framing = plan[index]["shot_type"]
+            light = plan[index]["light"]
+            pose = plan[index]["pose_family"]
+        camera = PLAN_CAMERAS[index % len(PLAN_CAMERAS)]
+        where = place if mode == "same" else _planned_place(index)
+        draft = Draft(f"{framing}, {light}", pose, camera, where)
+        step += 1
+        shot = accept_shot(idea, subject, mode, place, tuple(shots), draft)
+        if shot is None:
+            continue
+        shots.append(shot)
+        added.append(shot)
+    return tuple(added)
+
+
+PLAN_FRAMINGS = (
+    "wide shot", "medium shot", "close-up", "detail shot", "full-length shot", "three-quarter view",
+    "overhead view", "profile view", "waist-up shot", "low-angle shot", "high-angle shot",
+    "centred symmetrical composition",
+)
+PLAN_LIGHTS = (
+    "soft window light from the side", "golden hour sunlight", "overcast daylight, even and soft",
+    "large softbox key with a gentle fill", "warm rim light against a dark background", "cool blue hour light",
+    "hard spotlight with a crisp shadow", "warm light from practical lamps",
+)
+PLAN_POSES = (
+    "subject centred in the frame", "subject on the left third of the frame", "subject on the right third of the frame",
+    "subject turned three-quarters to the camera", "subject framed through a soft foreground",
+    "subject against a plain background", "subject filling the frame", "subject seen at a slight angle",
+)
+PLAN_CAMERAS = (
+    "35 mm lens, eye level", "50 mm lens, slightly above eye level", "85 mm lens, eye level",
+    "24 mm lens, low angle", "100 mm lens, close focus", "35 mm lens, high angle",
+    "50 mm lens, three-quarter angle", "70 mm lens, side angle",
+)
+PLAN_PLACES = (
+    "minimal white studio", "loft with tall windows", "outdoors in open shade", "rooftop at dusk",
+    "sunlit room with linen curtains", "against a dark textured wall", "quiet courtyard", "beside a large window",
+    "wooden terrace", "softly lit hallway", "garden with greenery", "against a concrete wall",
+)
+_PLACE_TIMES = ("", "in the morning", "in the evening", "at night", "in warm afternoon light")
+
+
+def _planned_place(index: int) -> str:
+    base = PLAN_PLACES[index % len(PLAN_PLACES)]
+    when = _PLACE_TIMES[(index // len(PLAN_PLACES)) % len(_PLACE_TIMES)]
+    return f"{base}, {when}" if when else base
+
+
+def _line_drafts(raw: str) -> tuple[Draft, ...]:
+    found: list[Draft] = []
+    seen: set[int] = set()
+    for row in _FENCE.sub("", raw.strip()).splitlines():
+        match = _LINE.match(row)
+        if match is None:
+            continue
+        number = int(match.group(1))
+        parts = [part.strip(" *\t") for part in match.group(2).split("|")]
+        parts = [part for part in parts if part]
+        if number in seen or len(parts) < 3:
+            continue
+        seen.add(number)
+        if len(parts) == 3:
+            found.append(Draft(parts[0], parts[1], parts[2], ""))
+        else:
+            found.append(Draft(parts[0], parts[1], ", ".join(parts[2:-1]), parts[-1]))
+    return tuple(found)
+
+
+def _draft_from_object(item: object) -> Draft | None:
+    if not isinstance(item, dict):
+        return None
+    values = [item.get(key) for key in ("scene", "pose", "camera")]
+    if not all(isinstance(value, str) and value.strip() for value in values):
+        return None
+    where = item.get("place")
+    return Draft(str(values[0]), str(values[1]), str(values[2]), where if isinstance(where, str) else "")
+
+
+def _key(value: str) -> str:
+    return " ".join(_fold(value).casefold().split())

@@ -137,6 +137,13 @@ def stated_ages(text: str) -> tuple[int, ...]:
     return _keep_spans(spans)
 
 
+def mask_numbers(text: str) -> str:
+    """The text with every digit and every English or Russian number word replaced by ``#``."""
+    folded = unicodedata.normalize("NFKC", text)
+    masked = re.sub(r"\d", "#", folded)
+    return _NUMBER_WORDS.sub("#", masked)
+
+
 def quoted_spans(text: str) -> tuple[str, ...]:
     """Quoted strings that must stay in their original script."""
     found: list[str] = []
@@ -460,4 +467,13 @@ _DECADE_RE = re.compile(
 )
 _RU_COMPACT = re.compile(
     "(" + _alt(_RU_TENS) + ")(" + _alt(_RU_UNITS) + ")летн",
+)
+
+_NUMBER_WORDS = re.compile(
+    r"(?<![\w])(?:" + "|".join(
+        re.escape(word) for word in sorted(
+            {*_EN_UNITS, *_EN_TENS, *_DECADE_WORD, *_RU_UNITS, *_RU_TENS}, key=len, reverse=True,
+        )
+    ) + r")(?![\w])",
+    re.IGNORECASE,
 )

@@ -8,31 +8,33 @@ import zlib
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, Protocol, assert_never
+from typing import Literal, Protocol
 
 from canvas.app.i18n import text
 from canvas.core.formats import OutputFormat, extension, save_image
-from canvas.infra.errors import note_error
-from canvas.pipeline.enhance import stated_ages
+from canvas.infra.errors import note_debug, note_error
+from canvas.pipeline.enhance import mask_numbers
 from canvas.pipeline.adult_direction import ages_allowed, with_adult_anchor, youth_cues
 from canvas.pipeline.photoshoot import (
-    JSON_REMINDER,
+    FORMAT_REMINDER,
     SCENARIO_CHUNK,
     PlaceMode,
     Scenario,
     Shot,
+    accept_shot,
     assemble_line,
-    one_shot_request,
-    parse_shot,
+    planned_shots,
+    read_drafts,
     reply_declined,
     scenario_request,
-    validate_scenario,
 )
 from canvas.safety.denylist import scan
 from canvas.safety.gate import AgeGate, SafetyError
 from canvas.safety.image import RawImage, SafeImage
 
 StopCode = Literal["", "idea", "scenario", "cancelled"]
+Source = Literal["", "writer", "mixed", "planned"]
+_RAW_LIMIT = 6000
 
 
 class SeriesFrame(Protocol):
@@ -54,6 +56,7 @@ class SeriesResult:
     kept: tuple[Path, ...]
     folder: Path | None
     code: str = ""
+    source: Source = ""
 
 
 def run_series(
@@ -91,7 +94,7 @@ def run_series(
         return _stop("idea", reason, "idea.policy")
     if adult and not ages_allowed(idea):
         return _stop("idea", "", "idea.minor")
-    scenario, fail_code = _scenario(idea, count, style, mode, rewrite, adult=adult)
+    scenario, fail_code, source = _scenario(idea, count, style, mode, rewrite, adult=adult)
     if scenario is None or len(scenario.shots) < count:
         return _stop("scenario", "", fail_code if scenario is None else "scenario.count")
     lines = [assemble_line(scenario.subject_block, shot, include_camera=True) for shot in scenario.shots]
@@ -99,9 +102,9 @@ def run_series(
     hard = [reason for line, reason in zip(lines, refused, strict=True) if reason and scan(line).minor]
     if hard or all(refused):
         code = "scenario.minor" if hard else "scenario.policy"
-        return _stop("scenario", (hard or refused)[0] or "", code)
+        return _stop("scenario", (hard or refused)[0] or "", code, source)
     if adult and not ages_allowed("\n".join(lines)):
-        return _stop("scenario", "", "scenario.minor")
+        return _stop("scenario", "", "scenario.minor", source)
     if on_scenario is not None:
         on_scenario(scenario)
     folder.mkdir(parents=True, exist_ok=True)
@@ -113,7 +116,7 @@ def run_series(
     for index, shot in enumerate(scenario.shots):
         if cancelled():
             _write_meta(folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept)
-            return SeriesResult("cancelled", "", tuple(kept), folder)
+            return SeriesResult("cancelled", "", tuple(kept), folder, "", source)
         line = (
             assemble_line(scenario.subject_block, shot, include_camera=include_camera())
             if line_for is None
@@ -139,7 +142,7 @@ def run_series(
         _status(on_status, index, "drawing")
         if cancelled():
             _write_meta(folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept)
-            return SeriesResult("cancelled", "", tuple(kept), folder)
+            return SeriesResult("cancelled", "", tuple(kept), folder, "", source)
         image = draw_frame(line, seed + index, hero, strength)
         released = None if image is None else _released_frame(age_gate, image, line)
         if released is None:
@@ -157,13 +160,13 @@ def run_series(
     _write_meta(folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept)
     if not kept:
         note_error("not_produced")
-        return SeriesResult("", "", (), folder, "not_produced")
-    return SeriesResult("", "", tuple(kept), folder)
+        return SeriesResult("", "", (), folder, "not_produced", source)
+    return SeriesResult("", "", tuple(kept), folder, "", source)
 
 
-def _stop(stopped: StopCode, reason: str, code: str) -> SeriesResult:
+def _stop(stopped: StopCode, reason: str, code: str, source: Source = "") -> SeriesResult:
     note_error(code)
-    return SeriesResult(stopped, reason, (), None, code)
+    return SeriesResult(stopped, reason, (), None, code, source)
 
 
 def _with_idea(idea: str, line: str) -> str:
@@ -226,100 +229,85 @@ def _scenario(
     rewrite: Callable[[str], str],
     *,
     adult: bool,
-) -> tuple[Scenario | None, str]:
+) -> tuple[Scenario | None, str, Source]:
+    """Shots from the writer, then planned shots for any frame it did not cover."""
+    subject = idea.strip()
+    if not subject:
+        return None, "scenario.format", ""
     collected: list[Shot] = []
-    subject = ""
-    descriptors: tuple[str, ...] = ()
     place = ""
-    ready = False
-    parsed = False
     replies: list[str] = []
     while len(collected) < count:
-        before = len(collected)
         ask = min(SCENARIO_CHUNK, count - len(collected))
-        previous = tuple(assemble_line(subject, shot, include_camera=True) for shot in collected) if ready else ()
+        previous = tuple(assemble_line(subject, shot, include_camera=True) for shot in collected)
         request = scenario_request(idea, ask, style, mode, adult=adult, previous=previous)
         if request is None:
-            return None, "scenario.format"
-        scenario, chunk_replies = _read_chunk(idea, ask, mode, request, rewrite)
+            return None, "scenario.format", ""
+        fresh, place, chunk_replies = _read_chunk(idea, subject, ask, mode, place, tuple(collected), request, rewrite)
         replies.extend(chunk_replies)
-        if scenario is None:
+        collected.extend(fresh)
+        if not fresh:
             break
-        parsed = True
-        if not ready:
-            subject = scenario.subject_block
-            descriptors = scenario.descriptors
-            place = scenario.place
-            ready = True
-            fresh = list(scenario.shots)
-        else:
-            fresh = []
-            for shot in scenario.shots:
-                accepted = _accept_extra(idea, subject, mode, place, collected + fresh, shot)
-                if accepted is not None:
-                    fresh.append(accepted)
-        collected.extend(fresh[: count - len(collected)])
-        if len(fresh) < ask:
-            attempts = 0
-            while len(collected) < count and attempts < 2:
-                attempts += 1
-                extra = parse_shot(rewrite(one_shot_request(subject, mode)))
-                if extra is None:
-                    continue
-                candidate = _accept_extra(idea, subject, mode, place, collected, extra)
-                if candidate is not None:
-                    collected.append(candidate)
-        if len(collected) == before:
-            break
-    if ready and len(collected) >= count:
-        return Scenario(subject, descriptors, place, tuple(collected)), ""
-    if parsed:
-        return None, "scenario.count"
-    return None, _reply_code(tuple(replies))
+    written = len(collected)
+    if written < count:
+        note_error(_reply_code(tuple(replies)) if written == 0 else "scenario.count")
+        collected.extend(planned_shots(idea, count - written, mode, place=place, taken=tuple(collected), adult=adult))
+    if len(collected) < count:
+        return None, "scenario.count", ""
+    source: Source = "writer" if written >= count else ("planned" if written == 0 else "mixed")
+    return Scenario(subject, (subject,), place, tuple(collected[:count])), "", source
 
 
 def _read_chunk(
     idea: str,
+    subject: str,
     ask: int,
     mode: PlaceMode,
+    place: str,
+    taken: tuple[Shot, ...],
     request: str,
     rewrite: Callable[[str], str],
-) -> tuple[Scenario | None, tuple[str, ...]]:
-    first = rewrite(request)
-    scenario = validate_scenario(idea, first, count=ask, place_mode=mode)
-    if scenario is not None:
-        return scenario, (first,)
-    follow = f"{request}\n{JSON_REMINDER}"
-    second = rewrite(follow)
-    return validate_scenario(idea, second, count=ask, place_mode=mode), (first, second)
+) -> tuple[list[Shot], str, tuple[str, ...]]:
+    """Accepted shots for one chunk, the series place, and the raw replies."""
+    replies: list[str] = []
+    fresh: list[Shot] = []
+    for prompt in (request, f"{request}\n{FORMAT_REMINDER}"):
+        raw = rewrite(prompt)
+        replies.append(raw)
+        fresh, place = _accept_reply(idea, subject, ask, mode, place, taken, raw)
+        if len(fresh) < ask:
+            note_debug("scenario.raw", mask_numbers(raw)[:_RAW_LIMIT])
+        if fresh or read_drafts(raw):
+            break
+    return fresh, place, tuple(replies)
+
+
+def _accept_reply(
+    idea: str,
+    subject: str,
+    ask: int,
+    mode: PlaceMode,
+    place: str,
+    taken: tuple[Shot, ...],
+    raw: str,
+) -> tuple[list[Shot], str]:
+    drafts = read_drafts(raw)
+    if mode == "same" and not place:
+        place = next((draft.place.strip() for draft in drafts if draft.place.strip()), "")
+    fresh: list[Shot] = []
+    for draft in drafts:
+        if len(fresh) >= ask:
+            break
+        shot = accept_shot(idea, subject, mode, place, taken + tuple(fresh), draft)
+        if shot is not None:
+            fresh.append(shot)
+    return fresh, place
 
 
 def _reply_code(replies: tuple[str, ...]) -> str:
     if replies and all("{" not in reply for reply in replies) and any(reply_declined(reply) for reply in replies):
         return "scenario.declined"
     return "scenario.format"
-
-
-def _accept_extra(
-    idea: str,
-    subject: str,
-    mode: PlaceMode,
-    place: str,
-    shots: list[Shot],
-    extra: Shot,
-) -> Shot | None:
-    line = assemble_line(subject, extra, include_camera=True)
-    if subject not in line or sorted(stated_ages(line)) != sorted(stated_ages(idea)):
-        return None
-    if extra.scene in {shot.scene for shot in shots}:
-        return None
-    if mode == "same":
-        return extra if extra.place == place else None
-    if mode == "different":
-        if not extra.place.strip() or extra.place in {shot.place for shot in shots}:
-            return None
-        return extra
-    assert_never(mode)
 
 
 def _write_meta(

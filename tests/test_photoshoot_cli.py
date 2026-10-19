@@ -257,7 +257,7 @@ def test_a_check_failure_stops_with_partial_frames(monkeypatch, tmp_path: Path) 
 
     def score_image_later(image: RawImage, labels: object) -> dict[str, float]:
         if seen["frames"] >= 3:
-            raise RuntimeError("image scores failed")
+            raise RuntimeError(f"image scores failed {IDEA}")
         return score_image(image, labels)
 
     gate.release_request = release_request
@@ -356,7 +356,7 @@ def test_an_unexpected_runner_error_is_internal(monkeypatch, tmp_path: Path) -> 
             del screened, width, height
             type(self).calls += 1
             if type(self).calls == 3:
-                raise RuntimeError("boom")
+                raise RuntimeError(f"boom {IDEA}")
             return rgb()
 
     monkeypatch.setattr("canvas.app.shell_run.ZImageGenerator", _Boom)

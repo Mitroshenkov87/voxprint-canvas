@@ -35,7 +35,7 @@ def note_crash(code: str, exc: BaseException) -> None:
     """
     label = code or "internal"
     type_name = type(exc).__name__
-    flat = " ".join("".join(traceback.format_exception(exc)).split())
+    flat = " ".join(_stack_only(exc).split())
     _LOG.error("%s %s", label, type_name)
     try:
         folder = logs_dir()
@@ -44,6 +44,28 @@ def note_crash(code: str, exc: BaseException) -> None:
             handle.write(f"crash {label} {type_name} {flat}\n")
     except OSError:
         return
+
+
+def _stack_only(exc: BaseException) -> str:
+    """The traceback frames and type names of an error chain, without the error text."""
+    chain: list[BaseException] = []
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        chain.append(current)
+        if current.__cause__ is not None:
+            current = current.__cause__
+        elif current.__suppress_context__:
+            current = None
+        else:
+            current = current.__context__
+    parts: list[str] = []
+    for item in reversed(chain):
+        parts.append("Traceback (most recent call last):")
+        parts.extend(traceback.format_tb(item.__traceback__))
+        parts.append(type(item).__name__)
+    return "\n".join(parts)
 
 
 def debug_enabled() -> bool:

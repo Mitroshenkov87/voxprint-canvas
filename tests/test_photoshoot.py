@@ -2,15 +2,19 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 from canvas.pipeline.photoshoot import (
+    JSON_REMINDER,
     Shot,
+    _object,
     assemble_line,
     scenario_request,
     validate_scenario,
 )
-from canvas.pipeline.series import run_series
+from canvas.pipeline.series import ages_allowed, run_series
+from canvas.safety.denylist import scan
 from canvas.safety.gate import AgeGate, GenerationBlocked
 from tests.fakes import World
 
@@ -307,6 +311,136 @@ def test_cancel_keeps_finished_frames(tmp_path: Path) -> None:
     assert not (tmp_path / "02.png").exists()
 
 
+def test_object_reads_prose_around_json_and_rejects_a_refusal() -> None:
+    body = _payload(IDEA, 1)
+    before = _object("The shoot is below.\n" + body)
+    after = _object(body + "\nThat is the shoot.")
+    assert before is not None and before["subject_block"] == IDEA
+    assert after is not None and after["place"] == "kitchen table"
+    braced = (
+        'prefix {"scene": "a } brace", "pose": "still", "camera": "50 mm", "place": "kitchen {table}"} tail'
+    )
+    shot = _object(braced)
+    assert shot is not None
+    assert shot["scene"] == "a } brace"
+    assert shot["place"] == "kitchen {table}"
+    assert _object("Sorry, I cannot write that.") is None
+    parsed = validate_scenario(IDEA, "Notes.\n" + _payload(IDEA) + "\nEnd.", count=6, place_mode="same")
+    assert parsed is not None and len(parsed.shots) == 6
+
+
+def test_retry_sends_a_different_request(tmp_path: Path) -> None:
+    calls: list[str] = []
+
+    def rewrite(prompt: str) -> str:
+        calls.append(prompt)
+        if len(calls) == 1:
+            return "Sorry, I cannot write that."
+        return _payload(IDEA, 1)
+
+    result = _run(tmp_path, count=1, rewrite=rewrite)
+    assert result.stopped == ""
+    assert result.code == ""
+    assert calls[1] == f"{calls[0]}\n{JSON_REMINDER}"
+    assert calls[0] != calls[1]
+
+
+def test_each_reason_code(tmp_path: Path, monkeypatch) -> None:
+    refused = _run(tmp_path / "policy", age_gate=_guard_error(), rewrite=lambda _prompt: _payload(IDEA))
+    assert refused.stopped == "idea" and refused.code == "idea.policy"
+
+    monkeypatch.setattr("canvas.pipeline.series.ages_allowed", lambda _text: False)
+    minor_idea = _run(tmp_path / "idea-minor", adult=True)
+    assert minor_idea.stopped == "idea" and minor_idea.code == "idea.minor"
+    monkeypatch.setattr("canvas.pipeline.series.ages_allowed", ages_allowed)
+
+    bad_place = _run(tmp_path / "place", place_mode="beside")
+    assert bad_place.stopped == "scenario" and bad_place.code == "scenario.format"
+    prose = _run(tmp_path / "prose", rewrite=lambda _prompt: "The table is empty. " * 30)
+    assert prose.code == "scenario.format"
+
+    declined = _run(tmp_path / "declined", rewrite=lambda _prompt: "Sorry, I cannot write that.")
+    assert declined.code == "scenario.declined"
+
+    def short(prompt: str) -> str:
+        if "write one different shot" in prompt or JSON_REMINDER in prompt:
+            return "No object here."
+        raw = json.loads(_payload(IDEA, 6))
+        raw["shots"][1]["scene"] = raw["shots"][0]["scene"]
+        return json.dumps(raw)
+
+    counted = _run(tmp_path / "count", rewrite=short)
+    assert counted.code == "scenario.count"
+
+    blocked = _run(tmp_path / "lines", age_gate=_refuse_lines())
+    assert blocked.code == "scenario.policy"
+
+    base = scan(IDEA)
+
+    def fake_scan(text: str):
+        if "close view" in text:
+            return replace(base, minor=True)
+        return base
+
+    monkeypatch.setattr("canvas.pipeline.series.scan", fake_scan)
+    hard = _run(tmp_path / "hard", age_gate=_refuse_close())
+    assert hard.code == "scenario.minor"
+    monkeypatch.setattr("canvas.pipeline.series.scan", scan)
+
+    def joined(text: str) -> bool:
+        return "\n" not in text
+
+    monkeypatch.setattr("canvas.pipeline.series.ages_allowed", joined)
+    joined_stop = _run(tmp_path / "joined", adult=True)
+    assert joined_stop.code == "scenario.minor"
+    monkeypatch.setattr("canvas.pipeline.series.ages_allowed", ages_allowed)
+
+    empty = _run(tmp_path / "empty", generate=lambda *_args: None)
+    assert empty.stopped == "" and empty.code == "not_produced" and empty.kept == ()
+
+
+def test_a_declined_scenario_logs_only_the_code(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path / "home"))
+    result = _run(tmp_path / "series", rewrite=lambda _prompt: "Sorry, I cannot write that.")
+    assert result.code == "scenario.declined"
+    log = (tmp_path / "home" / "logs" / "voxprint.log").read_text(encoding="utf-8")
+    assert "scenario.declined" in log
+    assert "teapot" not in log
+    assert "34" not in log
+
+
+def _guard_error():
+    world = World()
+    world.error = "guard"
+    return world.gate()
+
+
+def _refuse_lines():
+    gate = World().gate()
+    real = gate.review_prompt
+
+    def review(prompt: str) -> None:
+        if "\n" in prompt:
+            raise GenerationBlocked("prompt")
+        real(prompt)
+
+    gate.review_prompt = review
+    return gate
+
+
+def _refuse_close():
+    gate = World().gate()
+    real = gate.review_prompt
+
+    def review(prompt: str) -> None:
+        if "close view" in prompt:
+            raise GenerationBlocked("prompt")
+        real(prompt)
+
+    gate.review_prompt = review
+    return gate
+
+
 class _Frame:
     def __init__(self, data: bytes) -> None:
         self.width = 2
@@ -328,11 +462,14 @@ def _run(folder: Path, **overrides: object):
     generate = overrides.pop("generate", None)
     cancelled = overrides.pop("cancelled", None)
     count = overrides.pop("count", 6)
+    adult = overrides.pop("adult", False)
+    place_mode = overrides.pop("place_mode", "same")
     return run_series(
         idea=idea,
         count=int(count) if isinstance(count, int) else 6,
         style="photo",
-        place_mode="same",
+        place_mode=str(place_mode),
+        adult=bool(adult),
         seed=3,
         strength=0.45,
         include_camera=lambda: False,

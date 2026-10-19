@@ -1,4 +1,4 @@
-"""Rewrite a prompt into English with the Qwen3-4B text encoder."""
+"""Rewrite a prompt into English with the scenario writer."""
 from __future__ import annotations
 
 import gc
@@ -13,7 +13,7 @@ from typing import Any, Protocol, assert_never
 from canvas.app.i18n import text
 from canvas.models.modes import Tier
 from canvas.models.registry import Catalog, ModelSpec
-from canvas.models.snapshots import SnapshotError, download_files
+from canvas.models.snapshots import SnapshotError, download_snapshot, snapshot_ready
 from canvas.safety.gate import SafetyError
 
 SYSTEM_PROMPT = """You rewrite image prompts for a text-to-image model that follows natural English best.
@@ -188,12 +188,20 @@ def encoder_names(spec: ModelSpec) -> tuple[str, ...]:
 
 
 def turbo_spec(catalog: Catalog, tier: Tier) -> ModelSpec:
-    """The Z-Image-Turbo pack for this card. Its text encoder is the rewriter."""
+    """The Z-Image-Turbo pack for this card. Its text encoder stays the generator's encoder."""
     if tier is Tier.GB16:
         return catalog.by_id("z-image-turbo-bf16-16gb")
     if tier is Tier.GB24:
         return catalog.by_id("z-image-turbo-bf16")
     assert_never(tier)
+
+
+WRITER_ID = "qwen3-4b-writer"
+
+
+def writer_spec(catalog: Catalog) -> ModelSpec:
+    """The text model that writes a Photoshoot scenario and an improved prompt."""
+    return catalog.by_id(WRITER_ID)
 
 
 def open_rewriter(
@@ -205,20 +213,29 @@ def open_rewriter(
     max_new_tokens: int = 320,
     device: str | None = None,
 ) -> QwenRewriter:
-    """Open the shipped text encoder. Missing encoder files are downloaded first."""
-    spec = turbo_spec(catalog, tier)
-    names = encoder_names(spec)
-    folder = download_files(spec, root, names, progress)
+    """Open the scenario writer. Missing files are downloaded on first use.
+
+    The caller closes the writer before diffusion. ``tier`` names the picture
+    card and does not change this model.
+    """
+    if tier is not Tier.GB16 and tier is not Tier.GB24:
+        assert_never(tier)
+    spec = writer_spec(catalog)
+    folder = snapshot_ready(spec, root)
+    if folder is None:
+        if progress is not None:
+            progress(text("writer.download"))
+        folder = download_snapshot(spec, root, progress)
     return QwenRewriter(
-        folder / "text_encoder",
-        folder / "tokenizer",
+        folder,
+        folder,
         max_new_tokens=max_new_tokens,
         device=device,
     )
 
 
 class QwenRewriter:
-    """Causal generation from the Z-Image text-encoder directory."""
+    """Causal generation from a local text-model directory."""
 
     def __init__(
         self,

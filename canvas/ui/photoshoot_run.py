@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import random
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, assert_never
 
@@ -171,9 +172,14 @@ def run_photoshoot(window: ShellWindow) -> None:
 def _finish(window: ShellWindow, result: SeriesResult, idea: str) -> None:
     layout = window.shell.layout
     layout.set_prompt(idea)
-    if result.stopped == "idea" or result.stopped == "scenario":
+    if result.stopped == "cancelled":
+        if not _record_series(window, result, idea) and layout.phase is Phase.BUSY:
+            layout.cancel()
+    elif result.code:
+        layout.block(tr(f"photoshoot.code.{result.code}"))
+    elif result.stopped == "idea" or result.stopped == "scenario":
         layout.block(result.reason or tr("photoshoot.scenario.stopped"))
-    elif result.stopped == "cancelled" or result.stopped == "":
+    elif result.stopped == "":
         if not _record_series(window, result, idea) and layout.phase is Phase.BUSY:
             layout.cancel()
     else:
@@ -298,6 +304,21 @@ def _strength(name: str) -> float:
     raise ValueError(name)
 
 
+def busy_progress(window: ShellWindow) -> Callable[[str], None]:
+    """Show download text on the window thread while a job is running."""
+
+    def report(message: str) -> None:
+        def show() -> None:
+            if window.shell.layout.phase is Phase.BUSY:
+                window._advance(0, 1, message)
+            else:
+                window.view.set_note(message)
+
+        on_ui(show)
+
+    return report
+
+
 def adult_content(layout: SimpleLayout) -> bool:
     """True when the Expert «Для взрослых (18+)» prompt policy is on."""
     try:
@@ -308,7 +329,9 @@ def adult_content(layout: SimpleLayout) -> bool:
 
 def _model_reply(window: ShellWindow, prompt: str, adult: bool = False) -> str:
     try:
-        rewriter = open_rewriter(load_catalog(), window.tier, models_dir(), max_new_tokens=3072)
+        rewriter = open_rewriter(
+            load_catalog(), window.tier, models_dir(), busy_progress(window), max_new_tokens=3072,
+        )
     except (SnapshotError, OSError) as exc:
         raise _Halt(str(exc), unavailable=True) from exc
     try:

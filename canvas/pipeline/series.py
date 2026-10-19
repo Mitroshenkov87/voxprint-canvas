@@ -12,9 +12,11 @@ from typing import Literal, Protocol, assert_never
 
 from canvas.app.i18n import text
 from canvas.core.formats import OutputFormat, extension, save_image
+from canvas.infra.errors import note_error
 from canvas.pipeline.enhance import stated_ages
 from canvas.pipeline.adult_direction import ages_allowed, with_adult_anchor, youth_cues
 from canvas.pipeline.photoshoot import (
+    JSON_REMINDER,
     SCENARIO_CHUNK,
     PlaceMode,
     Scenario,
@@ -22,6 +24,7 @@ from canvas.pipeline.photoshoot import (
     assemble_line,
     one_shot_request,
     parse_shot,
+    reply_declined,
     scenario_request,
     validate_scenario,
 )
@@ -50,6 +53,7 @@ class SeriesResult:
     reason: str
     kept: tuple[Path, ...]
     folder: Path | None
+    code: str = ""
 
 
 def run_series(
@@ -78,25 +82,26 @@ def run_series(
     elif place_mode == "different":
         mode = "different"
     else:
-        return SeriesResult("scenario", "", (), None)
+        return _stop("scenario", "", "scenario.format")
     request = scenario_request(idea, count, style, mode, adult=adult)
     if request is None:
-        return SeriesResult("scenario", "", (), None)
+        return _stop("scenario", "", "scenario.format")
     reason = _refuse_prompt(age_gate, idea)
     if reason:
-        return SeriesResult("idea", reason, (), None)
+        return _stop("idea", reason, "idea.policy")
     if adult and not ages_allowed(idea):
-        return SeriesResult("idea", "", (), None)
-    scenario = _scenario(idea, count, style, mode, rewrite, adult=adult)
+        return _stop("idea", "", "idea.minor")
+    scenario, fail_code = _scenario(idea, count, style, mode, rewrite, adult=adult)
     if scenario is None or len(scenario.shots) < count:
-        return SeriesResult("scenario", "", (), None)
+        return _stop("scenario", "", fail_code if scenario is None else "scenario.count")
     lines = [assemble_line(scenario.subject_block, shot, include_camera=True) for shot in scenario.shots]
     refused = [_refuse_prompt(age_gate, _with_idea(idea, line)) for line in lines]
     hard = [reason for line, reason in zip(lines, refused, strict=True) if reason and scan(line).minor]
     if hard or all(refused):
-        return SeriesResult("scenario", (hard or refused)[0] or "", (), None)
+        code = "scenario.minor" if hard else "scenario.policy"
+        return _stop("scenario", (hard or refused)[0] or "", code)
     if adult and not ages_allowed("\n".join(lines)):
-        return SeriesResult("scenario", "", (), None)
+        return _stop("scenario", "", "scenario.minor")
     if on_scenario is not None:
         on_scenario(scenario)
     folder.mkdir(parents=True, exist_ok=True)
@@ -150,7 +155,15 @@ def run_series(
         _status(on_status, index, "kept")
         _write_meta(folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept)
     _write_meta(folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept)
+    if not kept:
+        note_error("not_produced")
+        return SeriesResult("", "", (), folder, "not_produced")
     return SeriesResult("", "", tuple(kept), folder)
+
+
+def _stop(stopped: StopCode, reason: str, code: str) -> SeriesResult:
+    note_error(code)
+    return SeriesResult(stopped, reason, (), None, code)
 
 
 def _with_idea(idea: str, line: str) -> str:
@@ -213,22 +226,26 @@ def _scenario(
     rewrite: Callable[[str], str],
     *,
     adult: bool,
-) -> Scenario | None:
+) -> tuple[Scenario | None, str]:
     collected: list[Shot] = []
     subject = ""
     descriptors: tuple[str, ...] = ()
     place = ""
     ready = False
+    parsed = False
+    replies: list[str] = []
     while len(collected) < count:
         before = len(collected)
         ask = min(SCENARIO_CHUNK, count - len(collected))
         previous = tuple(assemble_line(subject, shot, include_camera=True) for shot in collected) if ready else ()
         request = scenario_request(idea, ask, style, mode, adult=adult, previous=previous)
         if request is None:
-            return None
-        scenario = _read_chunk(idea, ask, mode, request, rewrite)
+            return None, "scenario.format"
+        scenario, chunk_replies = _read_chunk(idea, ask, mode, request, rewrite)
+        replies.extend(chunk_replies)
         if scenario is None:
             break
+        parsed = True
         if not ready:
             subject = scenario.subject_block
             descriptors = scenario.descriptors
@@ -254,9 +271,11 @@ def _scenario(
                     collected.append(candidate)
         if len(collected) == before:
             break
-    if not ready or len(collected) < count:
-        return None
-    return Scenario(subject, descriptors, place, tuple(collected))
+    if ready and len(collected) >= count:
+        return Scenario(subject, descriptors, place, tuple(collected)), ""
+    if parsed:
+        return None, "scenario.count"
+    return None, _reply_code(tuple(replies))
 
 
 def _read_chunk(
@@ -265,11 +284,20 @@ def _read_chunk(
     mode: PlaceMode,
     request: str,
     rewrite: Callable[[str], str],
-) -> Scenario | None:
-    scenario = validate_scenario(idea, rewrite(request), count=ask, place_mode=mode)
-    if scenario is None:
-        scenario = validate_scenario(idea, rewrite(request), count=ask, place_mode=mode)
-    return scenario
+) -> tuple[Scenario | None, tuple[str, ...]]:
+    first = rewrite(request)
+    scenario = validate_scenario(idea, first, count=ask, place_mode=mode)
+    if scenario is not None:
+        return scenario, (first,)
+    follow = f"{request}\n{JSON_REMINDER}"
+    second = rewrite(follow)
+    return validate_scenario(idea, second, count=ask, place_mode=mode), (first, second)
+
+
+def _reply_code(replies: tuple[str, ...]) -> str:
+    if replies and all("{" not in reply for reply in replies) and any(reply_declined(reply) for reply in replies):
+        return "scenario.declined"
+    return "scenario.format"
 
 
 def _accept_extra(

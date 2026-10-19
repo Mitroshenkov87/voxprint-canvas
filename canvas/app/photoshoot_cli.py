@@ -1,6 +1,7 @@
 """Write one Photoshoot series from the command line."""
 from __future__ import annotations
 
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
@@ -62,7 +63,11 @@ def model_rewrite(tier: Tier, adult: bool) -> Callable[[str], str]:
     catalog = load_catalog()
 
     def rewrite(prompt: str) -> str:
-        rewriter = open_rewriter(catalog, tier, models_dir(), max_new_tokens=3072)
+        rewriter = open_rewriter(
+            catalog, tier, models_dir(),
+            lambda message: print(message, file=sys.stderr),
+            max_new_tokens=3072,
+        )
         try:
             return rewriter.complete(prompt, system=scenario_system(SYSTEM_PROMPT, adult))
         finally:
@@ -173,9 +178,8 @@ def run_command(
         return _body(False, code, exc.message, (), None, frames, 0, ()), 1
     scenario = held.get("scenario")
     if result.stopped in {"idea", "scenario"} or scenario is None or result.folder is None:
-        message = result.reason or tr_lang("photoshoot.scenario.stopped", "en")
         error = result.stopped if result.stopped in {"idea", "scenario"} else "scenario"
-        return _body(False, error, message, (), None, frames, 0, ()), 1
+        return _body(False, error, _series_message(result.code), (), None, frames, 0, (), result.code), 1
     lines = [assemble_line(scenario.subject_block, shot, include_camera=False) for shot in scenario.shots]
     scenario_path = result.folder / "scenario.txt"
     scenario_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -184,8 +188,8 @@ def run_command(
     made = len(frame_paths)
     if made == 0:
         return _body(
-            False, "not_produced", tr_lang("photoshoot.frame.blocked", "en"),
-            frame_paths, str(scenario_path), frames, made, tuple(shots),
+            False, "not_produced", _series_message(result.code or "not_produced"),
+            frame_paths, str(scenario_path), frames, made, tuple(shots), result.code or "not_produced",
         ), 1
     return _body(True, "", "", frame_paths, str(scenario_path), frames, made, tuple(shots)), 0
 
@@ -204,6 +208,12 @@ def _shot_rows(scenario: Scenario, statuses: dict[int, str], kept: tuple[Path, .
     return rows
 
 
+def _series_message(code: str) -> str:
+    if code:
+        return tr_lang(f"photoshoot.code.{code}", "en")
+    return tr_lang("photoshoot.scenario.stopped", "en")
+
+
 def _body(
     ok: bool,
     error: str,
@@ -213,6 +223,7 @@ def _body(
     requested: int,
     made: int,
     shots: tuple[dict[str, object], ...],
+    code: str = "",
 ) -> dict[str, object]:
     body: dict[str, object] = {
         "ok": ok,
@@ -225,4 +236,6 @@ def _body(
     if error:
         body["error"] = error
         body["message"] = message
+    if code:
+        body["code"] = code
     return body

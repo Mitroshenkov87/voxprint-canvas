@@ -45,6 +45,12 @@ Rules:
 """
 
 _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
+JSON_REMINDER = "Reply with only the JSON object."
+_DECLINE_LIMIT = 400
+_DECLINE = re.compile(
+    r"\b(?:sorry|apolog(?:y|ise|ize|ies)|cannot|can't|can’t|unable|decline|won't|will not)\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -236,15 +242,58 @@ def _shot(item: object) -> Shot | None:
     return Shot(str(scene).strip(), str(pose).strip(), str(camera).strip(), str(place).strip())
 
 
+def reply_declined(raw: str) -> bool:
+    """True when a reply has no JSON object and is a short decline."""
+    text = _FENCE.sub("", raw.strip())
+    if "{" in text or len(text) > _DECLINE_LIMIT:
+        return False
+    return _DECLINE.search(text) is not None
+
+
 def _object(raw: str) -> dict[str, object] | None:
     text = _FENCE.sub("", raw.strip())
     try:
         payload = json.loads(text)
     except json.JSONDecodeError:
-        return None
+        span = _balanced_object(text)
+        if span is None:
+            return None
+        try:
+            payload = json.loads(span)
+        except json.JSONDecodeError:
+            return None
     if not isinstance(payload, dict):
         return None
     return payload
+
+
+def _balanced_object(text: str) -> str | None:
+    """The first top-level ``{...}`` span, ignoring braces inside JSON strings."""
+    start = text.find("{")
+    if start < 0:
+        return None
+    depth = 0
+    in_string = False
+    escape = False
+    for index in range(start, len(text)):
+        char = text[index]
+        if in_string:
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start:index + 1]
+    return None
 
 
 def _fold(value: str) -> str:

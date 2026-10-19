@@ -14,3 +14,7 @@ canvas/safety/estimator_net.py is adapted from MiVOLO
 Tolstykh and Maxim Kuprashevich, and uses timm
 (https://github.com/huggingface/pytorch-image-models), Apache-2.0. The MiVOLO v2
 weights (https://huggingface.co/iitolstykh/mivolo_v2) are Apache-2.0.
+
+The scenario writer
+(https://huggingface.co/huihui-ai/Huihui-Qwen3-4B-Instruct-2507-abliterated)
+is Apache-2.0. Its tokenizer follows Qwen/Qwen3-4B-Instruct-2507, also Apache-2.0.

@@ -492,6 +492,9 @@ def _emit_photoshoot(payload: dict[str, object], as_json: bool, code: int) -> in
 
 
 def _photoshoot_console(payload: dict[str, object]) -> str:
+    code = str(payload.get("code") or "")
+    if code:
+        return tr(f"photoshoot.code.{code}")
     error = str(payload.get("error") or "")
     if error == "bad_frames":
         return tr("photoshoot.frames.invalid", limit=MAX_FRAMES)

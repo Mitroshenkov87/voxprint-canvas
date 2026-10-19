@@ -63,6 +63,7 @@ The setup file is small. It does not contain the graphics libraries or the model
 | ControlNet lite (structure guidance, 16 GB tier) | When you choose it | about 2 GB |
 | ControlNet (structure guidance, 24 GB tier) | When you choose it | about 6.7 GB |
 | Creative Z-Image (**Bolder**, 24 GB tier) | When you choose it | about 20.5 GB |
+| Scenario writer | On first use | about 8 GB |
 
 Models are kept in the shared VOXPrint models folder, so other VOXPrint apps can use the same files without downloading them again.
 
@@ -674,7 +675,7 @@ The **Manage models** window (VOXPrint MDL) shows what is installed (**Installed
 
 **VOXPrint AI Canvas** is free software under the Apache License 2.0. © 2026 Aleksandr Mitroshenkov. The licence text (`LICENSE`) and the notices (`NOTICE`) are in the program folder.
 
-The models that Canvas downloads keep their own licences. Z-Image-Turbo, Creative Z-Image and the ControlNet packs are published under Apache-2.0 by their authors. The **Manage models** window shows each model and where it comes from.
+The models that Canvas downloads keep their own licences. Z-Image-Turbo, Creative Z-Image, the ControlNet packs, and the scenario writer are published under Apache-2.0 by their authors. The **Manage models** window shows each model and where it comes from.
 
 The libraries that Setup installs (for example PyTorch and Qt for Python) keep their own licences.
 

@@ -106,6 +106,7 @@
   "canvas.output_size.4k": "4K",
   "photoshoot.button": "Фотосессия",
   "photoshoot.tooltip": "Серия кадров одного предмета",
+  "canvas.progress.count": "{current} из {total}",
   "photoshoot.frames": "Кадров",
   "photoshoot.frames.invalid": "Укажите от 1 до {limit} кадров.",
   "photoshoot.count": "Сколько кадров",

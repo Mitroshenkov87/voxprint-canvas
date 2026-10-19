@@ -18,7 +18,7 @@ from canvas.models.modes import Mode, Tier
 from canvas.models.registry import load_catalog
 from canvas.pipeline.adult_direction import scenario_system
 from canvas.pipeline.enhance import open_rewriter
-from canvas.pipeline.photoshoot import MAX_FRAMES, SYSTEM_PROMPT, Scenario, assemble_line
+from canvas.pipeline.photoshoot import MAX_FRAMES, SCENARIO_TOKENS, SYSTEM_PROMPT, Scenario, assemble_line
 from canvas.pipeline.series import SeriesFrame, run_series
 from canvas.safety.gate import AgeGate
 from canvas.safety.image import RawImage
@@ -67,7 +67,7 @@ def model_rewrite(tier: Tier, adult: bool) -> Callable[[str], str]:
         rewriter = open_rewriter(
             catalog, tier, models_dir(),
             lambda message: print(message, file=sys.stderr),
-            max_new_tokens=3072,
+            max_new_tokens=SCENARIO_TOKENS,
         )
         try:
             return rewriter.complete(prompt, system=scenario_system(SYSTEM_PROMPT, adult))

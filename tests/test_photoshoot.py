@@ -107,17 +107,17 @@ def test_place_mode_accepts_one_place_or_distinct_places() -> None:
     assert validate_scenario(IDEA, json.dumps(parsed), count=6, place_mode="different") is None
 
 
-def test_frame_count_bounds_are_one_to_fifty() -> None:
+def test_frame_count_bounds_are_one_to_ninety_nine() -> None:
     assert scenario_request(IDEA, 0, "photo", "same") is None
-    assert scenario_request(IDEA, 51, "photo", "same") is None
+    assert scenario_request(IDEA, 100, "photo", "same") is None
     assert scenario_request(IDEA, 1, "photo", "same") is not None
-    assert scenario_request(IDEA, 50, "photo", "same") is not None
+    assert scenario_request(IDEA, 99, "photo", "same") is not None
     one = validate_scenario(IDEA, _payload(IDEA, 1), count=1, place_mode="same")
-    fifty = validate_scenario(IDEA, _payload(IDEA, 50), count=50, place_mode="same")
+    full = validate_scenario(IDEA, _payload(IDEA, 99), count=99, place_mode="same")
     assert one is not None and len(one.shots) == 1
-    assert fifty is not None and len(fifty.shots) == 50
+    assert full is not None and len(full.shots) == 99
     assert validate_scenario(IDEA, _payload(IDEA, 1), count=0, place_mode="same") is None
-    assert validate_scenario(IDEA, _payload(IDEA, 1), count=51, place_mode="same") is None
+    assert validate_scenario(IDEA, _payload(IDEA, 1), count=100, place_mode="same") is None
 
 
 def test_one_frame_series_is_kept(tmp_path: Path) -> None:
@@ -592,14 +592,14 @@ def test_different_places_stay_distinct_with_planned_shots(tmp_path: Path) -> No
     assert len(set(document["lines"])) == 14
 
 
-def test_planned_shots_cover_fifty_frames_in_either_place_mode() -> None:
+def test_planned_shots_cover_ninety_nine_frames_in_either_place_mode() -> None:
     for mode in ("same", "different"):
         for adult in (False, True):
-            shots = planned_shots(AGED, 50, mode, place="", taken=(), adult=adult)
-            assert len(shots) == 50
-            assert len({shot.scene for shot in shots}) == 50
+            shots = planned_shots(AGED, 99, mode, place="", taken=(), adult=adult)
+            assert len(shots) == 99
+            assert len({shot.scene for shot in shots}) == 99
             if mode == "different":
-                assert len({shot.place for shot in shots}) == 50
+                assert len({shot.place for shot in shots}) == 99
             for shot in shots:
                 line = assemble_line(AGED, shot, include_camera=True)
                 assert line.startswith(shot.pose)

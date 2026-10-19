@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import (
+    QAbstractSpinBox,
     QBoxLayout,
     QFrame,
     QHBoxLayout,
@@ -146,6 +147,8 @@ class PhotoshootBar:
         self.frames.setObjectName("photoshootFrames")
         self.frames.setRange(1, MAX_FRAMES)
         self.frames.setValue(DEFAULT_FRAMES)
+        self.frames.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+        self.frames.setCorrectionMode(QAbstractSpinBox.CorrectionMode.CorrectToNearestValue)
         self.frames.setAccelerated(True)
         self.frames_label.setBuddy(self.frames)
         if improve is not None:

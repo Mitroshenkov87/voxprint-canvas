@@ -386,7 +386,8 @@ class ShellWindow(QMainWindow):
                 if not layout.generate():
                     self.view.refresh()
                     return
-            if not self._advance(index, total, text("canvas.stage.prepare")):
+            count_label = text("canvas.progress.count", current=index + 1, total=total)
+            if not self._advance(index, total, count_label):
                 return
             try:
                 fresh = self._fresh_inputs(job.mode)
@@ -406,7 +407,7 @@ class ShellWindow(QMainWindow):
                     layout.block(exc.message)
                 self.view.refresh()
                 return
-            if not self._advance(index + 1, total, text("canvas.stage.draw")):
+            if not self._advance(index + 1, total, count_label):
                 return
             if not self._keep(raw, job):
                 return

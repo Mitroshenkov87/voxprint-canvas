@@ -428,6 +428,10 @@
       "en": "Drawing",
       "ru": "Рисуем"
     },
+    "canvas.progress.count": {
+      "en": "{current} of {total}",
+      "ru": "{current} из {total}"
+    },
     "canvas.action.picture": {
       "en": "Use a picture",
       "ru": "Использовать картинку"

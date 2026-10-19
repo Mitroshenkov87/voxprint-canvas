@@ -10,7 +10,7 @@ import pytest
 pytest.importorskip("PySide6")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QPushButton, QSpinBox
+from PySide6.QtWidgets import QAbstractSpinBox, QApplication, QLabel, QLineEdit, QPushButton, QSpinBox
 
 from canvas.models.modes import Mode, Tier
 from canvas.safety.gate import SafetyUnavailable
@@ -49,7 +49,8 @@ def test_the_frame_count_starts_at_six(app, home: Path) -> None:
     assert frames is not None and label is not None
     assert frames.value() == 6
     assert frames.minimum() == 1
-    assert frames.maximum() == 50
+    assert frames.maximum() == 99
+    assert frames.buttonSymbols() == QAbstractSpinBox.ButtonSymbols.NoButtons
     assert label.text() == "Frames"
     assert window.photoshoot.count == 6
     window.findChild(QPushButton, "photoshootMode").click()

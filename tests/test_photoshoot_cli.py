@@ -58,12 +58,12 @@ def _writers(monkeypatch, generate) -> None:
     monkeypatch.setattr("canvas.app.main.model_generate", lambda *_args: generate)
 
 
-def test_parser_accepts_one_and_fifty_frames(tmp_path: Path) -> None:
+def test_parser_accepts_one_and_ninety_nine_frames(tmp_path: Path) -> None:
     one = _parser().parse_args(["photoshoot", "--prompt", IDEA, "--frames", "1", "--out", str(tmp_path)])
-    fifty = _parser().parse_args(["photoshoot", "--prompt", IDEA, "--frames", "50", "--out", str(tmp_path)])
+    full = _parser().parse_args(["photoshoot", "--prompt", IDEA, "--frames", "99", "--out", str(tmp_path)])
     default = _parser().parse_args(["photoshoot", "--prompt", IDEA, "--out", str(tmp_path)])
     assert one.frames == 1
-    assert fifty.frames == 50
+    assert full.frames == 99
     assert default.frames == 6
     assert default.style == "photo"
     assert default.places == "same"
@@ -72,8 +72,8 @@ def test_parser_accepts_one_and_fifty_frames(tmp_path: Path) -> None:
     assert default.command == "photoshoot"
 
 
-@pytest.mark.parametrize("frames", ["0", "51"])
-def test_frames_outside_one_to_fifty_are_rejected(capsys, tmp_path: Path, frames: str) -> None:
+@pytest.mark.parametrize("frames", ["0", "100"])
+def test_frames_outside_one_to_ninety_nine_are_rejected(capsys, tmp_path: Path, frames: str) -> None:
     code = main(["photoshoot", "--prompt", IDEA, "--frames", frames, "--out", str(tmp_path), "--json"])
     body = json.loads(capsys.readouterr().out)
     assert code == 2

@@ -23,7 +23,7 @@ from canvas.models.registry import load_catalog
 from canvas.models.snapshots import SnapshotError
 from canvas.pipeline.adult_direction import scenario_system
 from canvas.pipeline.enhance import open_rewriter
-from canvas.pipeline.photoshoot import SYSTEM_PROMPT, Scenario
+from canvas.pipeline.photoshoot import SCENARIO_TOKENS, SYSTEM_PROMPT, Scenario
 from canvas.pipeline.series import REFERENCE_STRENGTH, SeriesFrame, SeriesResult, run_series
 
 if TYPE_CHECKING:
@@ -330,7 +330,7 @@ def adult_content(layout: SimpleLayout) -> bool:
 def _model_reply(window: ShellWindow, prompt: str, adult: bool = False) -> str:
     try:
         rewriter = open_rewriter(
-            load_catalog(), window.tier, models_dir(), busy_progress(window), max_new_tokens=3072,
+            load_catalog(), window.tier, models_dir(), busy_progress(window), max_new_tokens=SCENARIO_TOKENS,
         )
     except (SnapshotError, OSError) as exc:
         raise _Halt(str(exc), unavailable=True) from exc

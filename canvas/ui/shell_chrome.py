@@ -192,6 +192,7 @@ def polish(window):
     _fit_controls(window)
     _wrap_rows(window)
     _sync_lora_chip(window)
+    _sync_lora_picker(window)
     sync_actions(window)
 
 
@@ -216,6 +217,26 @@ def _sync_lora_chip(window):
     button.setVisible(bool(word))
 
 
+def _sync_lora_picker(window):
+    """Put the LoRA pick and strength under the presets, once."""
+    if getattr(window, "_lora_picker", None) is not None:
+        return
+    panel = window.view.root.findChild(QWidget, "promptPanel")
+    column = None if panel is None else panel.layout()
+    if column is None:
+        return
+    from canvas.ui.lora_panel import LoraPicker
+
+    picker = LoraPicker(window._pick_lora)
+    window._lora_picker = picker
+    at = column.count()
+    for index in range(column.count()):
+        if column.itemAt(index).spacerItem() is not None:
+            at = index
+    column.insertWidget(at, picker)
+    window.refresh_loras()
+
+
 def _toolbar(window, row):
     picture = QPushButton(text("canvas.action.picture"))
     picture.setObjectName("actionPicture")
@@ -234,6 +255,8 @@ def _menu(window, menu):
     specs = (
         ("actionSetup", "canvas.action.setup", window._open_setup),
         ("actionAddons", "canvas.action.addons", window._open_addons),
+        ("actionLoraImport", "canvas.lora.import", window._open_lora_import),
+        ("actionLoraLibrary", "canvas.lora.library", window._open_lora_library),
         ("actionCheck", "canvas.action.check", window._open_check),
     )
     existing = menu.actions()

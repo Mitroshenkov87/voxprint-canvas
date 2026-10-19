@@ -39,3 +39,10 @@ def models_dir() -> Path:
     path = _common_paths.models_dir()
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def lora_library_dir() -> Path:
+    """Imported LoRAs: ``<data home>/canvas/lora-library``."""
+    path = voxprint_home() / "canvas" / "lora-library"
+    path.mkdir(parents=True, exist_ok=True)
+    return path

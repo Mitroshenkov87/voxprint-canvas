@@ -1,0 +1,337 @@
+"""LoRA import, the LoRA library, and the pick and strength control.
+
+Import takes a Model Forge ``.voxlora`` package or a ``.safetensors`` with its
+``voxprint-model.json``. Every refusal is shown with its catalog line.
+"""
+from __future__ import annotations
+
+from collections.abc import Callable
+from pathlib import Path
+
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QIcon, QPixmap
+from PySide6.QtWidgets import (
+    QComboBox,
+    QDialog,
+    QFileDialog,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QScrollArea,
+    QSlider,
+    QVBoxLayout,
+    QWidget,
+)
+
+from voxprint_common.ui.theme import CONTROL_BORDER
+
+from canvas.app.i18n import text
+from canvas.models.lora_library import LibraryEntry, import_lora, list_library, remove_entry
+from canvas.models.user_lora import LoraRejected, UserLora, discover
+from canvas.ui.theme import BUTTON_RADIUS
+
+THUMB = 72
+PICK_ICON = 28
+SLIDER_STEPS = 100
+
+
+def import_with_dialog(parent: QWidget, gate: object, path: Path | None = None, **options) -> LibraryEntry | str | None:
+    """Ask for a file, import it, and return the entry, a refusal code, or None when cancelled.
+
+    Args:
+        parent: The window that owns the dialogs.
+        gate: The app's check stack.
+        path: The file to import. A file dialog asks when omitted.
+        options: Passed to :func:`canvas.models.lora_library.import_lora`.
+    """
+    if path is None:
+        chosen, _filter = QFileDialog.getOpenFileName(
+            parent, text("canvas.lora.import"), "", text("canvas.lora.import_filter"),
+        )
+        if not chosen:
+            return None
+        path = Path(chosen)
+    try:
+        return import_lora(Path(path), gate, **options)
+    except LoraRejected as exc:
+        return exc.code
+
+
+def _kind_text(kind: str) -> str:
+    return text(f"canvas.lora.kind.{kind}")
+
+
+def _thumb(path: Path, size: int) -> QPixmap:
+    pixmap = QPixmap(str(path))
+    if pixmap.isNull():
+        return pixmap
+    return pixmap.scaled(size, size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+
+
+def _preview_strip(previews: tuple[Path, ...], size: int = THUMB) -> QWidget:
+    strip = QWidget()
+    strip.setObjectName("loraPreviews")
+    row = QHBoxLayout(strip)
+    row.setContentsMargins(0, 0, 0, 0)
+    row.setSpacing(6)
+    for index, path in enumerate(previews):
+        label = QLabel()
+        label.setObjectName(f"loraPreview-{index}")
+        label.setFixedSize(size, size)
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label.setPixmap(_thumb(path, size))
+        row.addWidget(label)
+    row.addStretch(1)
+    return strip
+
+
+def _details(entry: LibraryEntry) -> QLabel:
+    lines = [text("canvas.lora.kind_line", kind=_kind_text(entry.manifest.kind))]
+    if entry.manifest.trigger:
+        lines.append(text("canvas.lora.trigger_line", trigger=entry.manifest.trigger))
+    label = QLabel("\n".join(lines))
+    label.setObjectName("loraDetails")
+    label.setWordWrap(True)
+    return label
+
+
+class ImportedDialog(QDialog):
+    """Shown after an import: the name, the trigger and the previews."""
+
+    def __init__(self, parent: QWidget | None, entry: LibraryEntry) -> None:
+        super().__init__(parent)
+        from canvas.ui.shell_chrome import shell_style
+
+        self.setObjectName("loraImported")
+        self.setWindowTitle(text("canvas.lora.import"))
+        self.setStyleSheet(shell_style())
+        title = QLabel(text("canvas.lora.imported", name=entry.manifest.name))
+        title.setObjectName("loraImportedTitle")
+        title.setWordWrap(True)
+        title.setStyleSheet("font-size: 16px; font-weight: 600;")
+        done = QPushButton(text("canvas.lora.done"))
+        done.setObjectName("loraImportedDone")
+        done.clicked.connect(self.accept)
+        layout = QVBoxLayout(self)
+        layout.addWidget(title)
+        layout.addWidget(_details(entry))
+        layout.addWidget(_preview_strip(entry.previews, 120))
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        buttons.addWidget(done)
+        layout.addLayout(buttons)
+        self.setMinimumWidth(560)
+
+
+class LibraryDialog(QDialog):
+    """The LoRA library: import, previews and remove."""
+
+    def __init__(self, parent: QWidget | None, gate: object, on_change: Callable[[], None] | None = None,
+                 root: Path | None = None, **options) -> None:
+        super().__init__(parent)
+        from canvas.ui.shell_chrome import shell_style
+
+        self.setObjectName("loraLibrary")
+        self.setWindowTitle(text("canvas.lora.library"))
+        self.setStyleSheet(shell_style())
+        self._gate = gate
+        self._root = root
+        self._options = options
+        self._on_change = on_change or (lambda: None)
+        self._import = QPushButton(text("canvas.lora.import"))
+        self._import.setObjectName("loraImport")
+        self._import.clicked.connect(lambda: self.run_import())
+        self._status = QLabel("")
+        self._status.setObjectName("loraStatus")
+        self._status.setWordWrap(True)
+        self._host = QWidget()
+        self._rows = QVBoxLayout(self._host)
+        self._rows.setContentsMargins(0, 0, 0, 0)
+        self._rows.setSpacing(10)
+        scroll = QScrollArea()
+        scroll.setObjectName("loraLibraryList")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidget(self._host)
+        top = QHBoxLayout()
+        top.addWidget(self._import)
+        top.addStretch(1)
+        layout = QVBoxLayout(self)
+        layout.addLayout(top)
+        layout.addWidget(self._status)
+        layout.addWidget(scroll, 1)
+        self.setMinimumSize(640, 480)
+        self.refresh()
+
+    def refresh(self) -> None:
+        """Rebuild the list from the library folder."""
+        while self._rows.count():
+            item = self._rows.takeAt(0)
+            widget = None if item is None else item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        entries = list_library(self._root)
+        if not entries:
+            empty = QLabel(text("canvas.lora.library_empty"))
+            empty.setObjectName("loraLibraryEmpty")
+            empty.setWordWrap(True)
+            self._rows.addWidget(empty)
+        for entry in entries:
+            self._rows.addWidget(self._row(entry))
+        self._rows.addStretch(1)
+
+    def run_import(self, path: Path | None = None) -> LibraryEntry | str | None:
+        """Import one file and show the result here."""
+        self._status.setText(text("canvas.lora.checking"))
+        result = import_with_dialog(self, self._gate, path, root=self._root,
+                                    progress=self._status.setText, **self._options)
+        if result is None:
+            self._status.setText("")
+        elif isinstance(result, str):
+            self._status.setText(text(result))
+        else:
+            self._status.setText(text("canvas.lora.imported", name=result.manifest.name))
+            self.refresh()
+            self._on_change()
+        return result
+
+    def _row(self, entry: LibraryEntry) -> QWidget:
+        card = QFrame()
+        card.setObjectName(f"loraEntry-{entry.id}")
+        card.setStyleSheet(f"QFrame#loraEntry-{entry.id} {{ border: 1px solid {CONTROL_BORDER}; border-radius: {BUTTON_RADIUS}px; }}")
+        column = QVBoxLayout(card)
+        head = QHBoxLayout()
+        name = QLabel(entry.manifest.name)
+        name.setObjectName("loraName")
+        name.setStyleSheet("font-weight: 600; border: none;")
+        remove = QPushButton(text("canvas.lora.remove"))
+        remove.setObjectName("loraRemove")
+        remove.clicked.connect(lambda _checked=False, entry_id=entry.id: self._remove(entry_id))
+        head.addWidget(name)
+        head.addStretch(1)
+        head.addWidget(remove)
+        column.addLayout(head)
+        details = _details(entry)
+        details.setStyleSheet("border: none;")
+        column.addWidget(details)
+        column.addWidget(_preview_strip(entry.previews))
+        return card
+
+    def _remove(self, entry_id: str) -> None:
+        remove_entry(entry_id, self._root)
+        self.refresh()
+        self._on_change()
+
+
+def library_loras(root: Path | None = None) -> list[UserLora]:
+    """Imported LoRAs, by name."""
+    items: list[UserLora] = []
+    for entry in list_library(root):
+        try:
+            items.append(entry.as_lora())
+        except LoraRejected:
+            continue
+    return items
+
+
+def available_loras(root: Path | None = None) -> list[UserLora]:
+    """Imported LoRAs first, then the listed add-on folders."""
+    return [*library_loras(root), *discover().available]
+
+
+class LoraPicker(QWidget):
+    """A LoRA pick with thumbnails and a strength slider that follows the LoRA's range."""
+
+    def __init__(self, on_change: Callable[[str, float], None], root: Path | None = None) -> None:
+        super().__init__()
+        self.setObjectName("loraPicker")
+        self._on_change = on_change
+        self._root = root
+        self._items: list[UserLora | None] = []
+        self._loading = False
+        label = QLabel(text("canvas.lora.pick"))
+        label.setObjectName("loraPickLabel")
+        self.combo = QComboBox()
+        self.combo.setObjectName("loraPick")
+        self.combo.setIconSize(QSize(PICK_ICON, PICK_ICON))
+        self.combo.setMinimumHeight(36)
+        self.combo.currentIndexChanged.connect(self._picked)
+        strength = QLabel(text("canvas.lora.strength"))
+        strength.setObjectName("loraStrengthLabel")
+        self.slider = QSlider(Qt.Orientation.Horizontal)
+        self.slider.setObjectName("loraStrength")
+        self.slider.valueChanged.connect(self._moved)
+        self.value = QLabel("")
+        self.value.setObjectName("loraStrengthValue")
+        self.value.setMinimumWidth(36)
+        top = QVBoxLayout(self)
+        top.setContentsMargins(0, 0, 0, 0)
+        top.setSpacing(6)
+        top.addWidget(label)
+        top.addWidget(self.combo)
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        row.addWidget(strength)
+        row.addWidget(self.slider, 1)
+        row.addWidget(self.value)
+        self._strength_row = QWidget()
+        self._strength_row.setLayout(row)
+        row.setContentsMargins(0, 0, 0, 0)
+        top.addWidget(self._strength_row)
+
+    def reload(self, selected: str, strength: float) -> None:
+        """Fill the pick and set the slider from the shared state."""
+        self._loading = True
+        self.combo.clear()
+        self._items = [None]
+        self.combo.addItem(text("canvas.lora.none"))
+        chosen = 0
+        for lora in available_loras(self._root):
+            icon = QIcon(_thumb(lora.previews[0], PICK_ICON * 2)) if lora.previews else QIcon()
+            self.combo.addItem(icon, lora.name or lora.trigger or lora.id)
+            self._items.append(lora)
+            if selected and (selected == lora.id or selected == str(lora.folder)):
+                chosen = len(self._items) - 1
+        self.combo.setCurrentIndex(chosen)
+        self._apply(self._items[chosen], strength)
+        self._loading = False
+        self.setVisible(len(self._items) > 1)
+
+    def current(self) -> UserLora | None:
+        index = self.combo.currentIndex()
+        return self._items[index] if 0 <= index < len(self._items) else None
+
+    def strength(self) -> float:
+        return self.slider.value() / SLIDER_STEPS
+
+    def _apply(self, lora: UserLora | None, strength: float | None) -> None:
+        self._strength_row.setVisible(lora is not None)
+        if lora is None:
+            return
+        low, high = lora.strength_range
+        low, high = max(0.0, low), min(2.0, high)
+        self.slider.setRange(round(low * SLIDER_STEPS), round(high * SLIDER_STEPS))
+        value = lora.default_strength if strength is None else strength
+        self.slider.setValue(round(min(max(float(value), low), high) * SLIDER_STEPS))
+        self.value.setText(f"{self.strength():.2f}")
+
+    def _picked(self, _index: int) -> None:
+        if self._loading:
+            return
+        lora = self.current()
+        self._apply(lora, None)
+        self._emit()
+
+    def _moved(self, _value: int) -> None:
+        self.value.setText(f"{self.strength():.2f}")
+        if not self._loading:
+            self._emit()
+
+    def _emit(self) -> None:
+        lora = self.current()
+        if lora is None:
+            self._on_change("", self.strength())
+            return
+        key = lora.id if lora.previews or lora.name else str(lora.folder)
+        self._on_change(key, self.strength())

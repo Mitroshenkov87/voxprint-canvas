@@ -644,6 +644,86 @@
       "en": "LoRA scale must be from 0 to 2.",
       "ru": "Сила LoRA должна быть от 0 до 2."
     },
+    "lora.kind": {
+      "en": "This kind of LoRA cannot be imported yet.",
+      "ru": "Этот вид LoRA пока нельзя импортировать."
+    },
+    "lora.preview": {
+      "en": "This LoRA package cannot be imported.",
+      "ru": "Этот пакет LoRA нельзя импортировать."
+    },
+    "lora.base_missing": {
+      "en": "The base model for this LoRA could not be requested from VOXPrint MDL.",
+      "ru": "Не удалось запросить базовую модель для этой LoRA в VOXPrint MDL."
+    },
+    "canvas.lora.base_queued": {
+      "en": "VOXPrint MDL is downloading the base model for this LoRA.",
+      "ru": "VOXPrint MDL загружает базовую модель для этой LoRA."
+    },
+    "canvas.lora.import": {
+      "en": "Import LoRA",
+      "ru": "Импорт LoRA"
+    },
+    "canvas.lora.import_filter": {
+      "en": "Model Forge LoRA (*.voxlora *.safetensors)",
+      "ru": "LoRA из Model Forge (*.voxlora *.safetensors)"
+    },
+    "canvas.lora.imported": {
+      "en": "{name} is in the LoRA library.",
+      "ru": "{name} добавлена в библиотеку LoRA."
+    },
+    "canvas.lora.checking": {
+      "en": "Checking the file…",
+      "ru": "Проверяем файл…"
+    },
+    "canvas.lora.done": {
+      "en": "Done",
+      "ru": "Готово"
+    },
+    "canvas.lora.library": {
+      "en": "LoRA library",
+      "ru": "Библиотека LoRA"
+    },
+    "canvas.lora.library_empty": {
+      "en": "The library is empty. Import a LoRA from Model Forge.",
+      "ru": "Библиотека пуста. Импортируйте LoRA из Model Forge."
+    },
+    "canvas.lora.remove": {
+      "en": "Remove",
+      "ru": "Удалить"
+    },
+    "canvas.lora.kind_line": {
+      "en": "Kind: {kind}",
+      "ru": "Вид: {kind}"
+    },
+    "canvas.lora.trigger_line": {
+      "en": "Trigger word: {trigger}",
+      "ru": "Слово-триггер: {trigger}"
+    },
+    "canvas.lora.kind.object": {
+      "en": "object",
+      "ru": "объект"
+    },
+    "canvas.lora.kind.style": {
+      "en": "style",
+      "ru": "стиль"
+    },
+    "canvas.lora.kind.subject": {
+      "en": "subject",
+      "ru": "персонаж"
+    },
+    "canvas.lora.pick": {
+      "en": "LoRA",
+      "ru": "LoRA"
+    },
+    "canvas.lora.none": {
+      "en": "No LoRA",
+      "ru": "Без LoRA"
+    },
+    "canvas.lora.strength": {
+      "en": "Strength",
+      "ru": "Сила"
+    },
     "canvas.check.title": {
       "en": "Check this PC",
       "ru": "Проверить компьютер"

@@ -39,6 +39,7 @@ from voxprint_common.ui.theme import (
 
 from canvas.app.i18n import text
 from canvas.ui.help_menu import add_help_menu
+from canvas.ui.theme import BUTTON_RADIUS
 
 PANEL_WIDTH = 320
 SHOT_WIDTH = 1280
@@ -90,6 +91,11 @@ QSpinBox, QDoubleSpinBox, QComboBox, QLineEdit, QPlainTextEdit {{
 }}
 QPushButton[chip="true"]:disabled {{
     color: {TEXT}; background: {CONTROL_BG}; border-color: {CONTROL_BORDER};
+}}
+QPushButton, QPushButton[chip="true"], QPushButton#generate, QPushButton#overflow,
+QPushButton#expertToggle, QToolButton, QSpinBox, QDoubleSpinBox, QComboBox,
+QLineEdit, QPlainTextEdit {{
+    border-radius: {BUTTON_RADIUS}px;
 }}
 """
 

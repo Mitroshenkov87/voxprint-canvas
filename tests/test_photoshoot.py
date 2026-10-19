@@ -73,13 +73,15 @@ def _payload(
     return json.dumps(body)
 
 
-def test_simple_line_omits_the_camera() -> None:
+def test_assemble_line_leads_with_pose_and_keeps_the_subject() -> None:
     shot = Shot("close view", "still", "50 mm", "kitchen table")
     plain = assemble_line(IDEA, shot, include_camera=False)
     detailed = assemble_line(IDEA, shot, include_camera=True)
+    assert plain == f"still, close view, {IDEA}, kitchen table"
     assert "50 mm" not in plain
-    assert plain == f"{IDEA}, kitchen table, close view, still"
-    assert detailed.endswith("50 mm")
+    assert detailed == f"still, 50 mm, close view, {IDEA}, kitchen table"
+    assert IDEA in detailed
+    assert detailed.index(IDEA) > detailed.index("50 mm")
 
 
 def test_changed_age_discards_the_scenario() -> None:
@@ -251,18 +253,16 @@ def test_blocked_frame_is_dropped_without_a_rewrite(tmp_path: Path) -> None:
     def generate(line: str, seed: int, hero: object | None, strength: float) -> object:
         del seed
         heroes.append(hero)
-        assert strength == 0.45
-        assert "50 mm" not in line
+        assert strength is None
+        assert line.startswith("still, 50 mm, ")
+        assert IDEA in line
         return _frame(b"\x10\x20\x30")
 
     result = _run(tmp_path, age_gate=gate, rewrite=lambda prompt: calls.append(prompt) or _payload(IDEA), generate=generate)
     assert result.stopped == ""
     assert len(calls) == 1
     assert len(result.kept) == 5
-    assert heroes[0] is None
-    first = heroes[1]
-    assert first is not None
-    assert all(hero is first for hero in heroes[2:])
+    assert all(hero is None for hero in heroes)
     assert all(path.suffix == ".png" for path in result.kept)
     assert (tmp_path / "series.json").is_file()
     assert (tmp_path / "overview.png").is_file()
@@ -300,9 +300,9 @@ def test_the_gate_is_called_by_name_on_every_text_and_frame(tmp_path: Path, monk
     assert result.stopped == ""
     assert prompts[0] == IDEA
     assert any("\n" in item for item in prompts)
-    assert len(prompts) == 13
+    assert len(prompts) == 7
     assert all(item.startswith(IDEA + "\n") for item in prompts[1:])
-    assert frames == [item.split("\n", 1)[1] for item in prompts[7:]]
+    assert frames == [item.split("\n", 1)[1] for item in prompts[1:]]
     assert len(frames) == 6
 
 
@@ -320,7 +320,7 @@ def test_a_shot_that_drops_the_age_is_replaced_by_a_planned_shot(tmp_path: Path)
     assert len(result.kept) == 6
     assert len(calls) == 2
     assert all("12 years" not in line for line in document["lines"])
-    assert all(line.startswith(AGED) for line in document["lines"])
+    assert all(AGED in line and not line.startswith(AGED) for line in document["lines"])
 
 
 def test_cancel_keeps_finished_frames(tmp_path: Path) -> None:
@@ -514,8 +514,8 @@ def _run(folder: Path, **overrides: object):
         place_mode=str(place_mode),
         adult=bool(adult),
         seed=3,
-        strength=0.45,
-        include_camera=lambda: False,
+        strength=None,
+        include_camera=lambda: True,
         rewrite=rewrite if rewrite is not None else (lambda _prompt: _payload(idea)),
         age_gate=age_gate if isinstance(age_gate, AgeGate) else World().gate(),
         draw_frame=generate if generate is not None else (lambda line, seed, hero, strength: _frame()),
@@ -539,7 +539,7 @@ def test_numbered_lines_are_read_as_shots(tmp_path: Path) -> None:
     document = json.loads((tmp_path / "series.json").read_text(encoding="utf-8"))
     assert result.stopped == "" and result.source == "writer"
     assert len(result.kept) == 6
-    assert document["lines"][0] == f"{IDEA}, kitchen table, view 0, soft light, still"
+    assert document["lines"][0] == f"still, 50 mm, eye level, view 0, soft light, {IDEA}, kitchen table"
 
 
 def test_lines_without_a_place_use_the_series_place(tmp_path: Path) -> None:
@@ -552,7 +552,7 @@ def test_lines_without_a_place_use_the_series_place(tmp_path: Path) -> None:
     result = _run(tmp_path, rewrite=rewrite)
     document = json.loads((tmp_path / "series.json").read_text(encoding="utf-8"))
     assert result.source == "writer"
-    assert all(", kitchen table, " in line for line in document["lines"])
+    assert all(line.endswith(", kitchen table") for line in document["lines"])
 
 
 def test_json_shots_without_a_place_use_the_shared_place(tmp_path: Path) -> None:
@@ -564,6 +564,21 @@ def test_json_shots_without_a_place_use_the_shared_place(tmp_path: Path) -> None
 
     result = _run(tmp_path, rewrite=rewrite)
     assert result.stopped == "" and result.source == "writer" and len(result.kept) == 6
+
+
+def test_planned_fallback_prompts_differ(tmp_path: Path) -> None:
+    prompts: list[str] = []
+
+    def generate(line: str, seed: int, hero: object | None, strength: float | None) -> object:
+        del seed, hero, strength
+        prompts.append(line)
+        return _frame()
+
+    result = _run(tmp_path, rewrite=lambda _prompt: "no lines here", generate=generate)
+    assert result.source == "planned"
+    assert len(prompts) == 6
+    assert len(set(prompts)) == 6
+    assert all(IDEA in line and not line.startswith(IDEA) for line in prompts)
 
 
 def test_different_places_stay_distinct_with_planned_shots(tmp_path: Path) -> None:
@@ -587,7 +602,8 @@ def test_planned_shots_cover_fifty_frames_in_either_place_mode() -> None:
                 assert len({shot.place for shot in shots}) == 50
             for shot in shots:
                 line = assemble_line(AGED, shot, include_camera=True)
-                assert line.startswith(AGED)
+                assert line.startswith(shot.pose)
+                assert AGED in line
                 assert sorted(stated_ages(line)) == [34]
     assert planned_shots(IDEA, 6, "same", place="", taken=()) == planned_shots(IDEA, 6, "same", place="", taken=())
 
@@ -604,7 +620,7 @@ def test_planned_lines_go_through_the_same_prompt_review(tmp_path: Path) -> None
     gate.review_prompt = review
     result = _run(tmp_path, age_gate=gate, rewrite=lambda _prompt: "no lines here")
     assert result.source == "planned"
-    assert len(prompts) == 13
+    assert len(prompts) == 7
     assert all(item.startswith(IDEA + "\n") for item in prompts[1:])
 
 
@@ -646,7 +662,7 @@ def test_a_three_part_line_is_read_by_its_last_part(tmp_path: Path) -> None:
     result = _run(tmp_path, place_mode="different", rewrite=rewrite)
     document = json.loads((tmp_path / "series.json").read_text(encoding="utf-8"))
     assert result.source == "writer"
-    assert len({line.split(", ")[1] for line in document["lines"]}) == 6
+    assert len({line.rsplit(", ", 1)[-1] for line in document["lines"]}) == 6
     still = _run(tmp_path / "same", rewrite=lambda _prompt: "\n".join(
         f"{index + 1}. view {index} | still | 85 mm lens" for index in range(6)))
     assert still.source == "writer"

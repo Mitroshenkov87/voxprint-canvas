@@ -40,6 +40,7 @@ class ShotRow:
     """One read-only shot line."""
 
     plain: str
+    full: str
     status: str
     label: QLabel
 
@@ -79,7 +80,7 @@ class PhotoshootBar:
         Args:
             index: Row index in the current list.
         """
-        return self.rows[index].plain
+        return self.rows[index].full
 
     def show_scenario(self, subject: str, shots: tuple[Shot, ...]) -> None:
         """Fill the read-only list before the first frame.
@@ -91,7 +92,10 @@ class PhotoshootBar:
         self.subject = subject
         self._clear_rows()
         for shot in shots:
-            self._add_row(assemble_line(subject, shot, include_camera=False))
+            self._add_row(
+                assemble_line(subject, shot, include_camera=False),
+                assemble_line(subject, shot, include_camera=True),
+            )
         self.frame.setText("")
         self._showing = True
         self.sync()
@@ -198,7 +202,7 @@ class PhotoshootBar:
         board.hide()
         return board
 
-    def _add_row(self, plain: str) -> None:
+    def _add_row(self, plain: str, full: str) -> None:
         label = QLabel(plain)
         label.setObjectName("photoshootLine")
         label.setWordWrap(True)
@@ -206,7 +210,7 @@ class PhotoshootBar:
         label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         layout = _column(self._list_host)
         layout.insertWidget(max(0, layout.count() - 1), label)
-        self.rows.append(ShotRow(plain, "waiting", label))
+        self.rows.append(ShotRow(plain, full, "waiting", label))
 
     def _clear_rows(self) -> None:
         for row in self.rows:

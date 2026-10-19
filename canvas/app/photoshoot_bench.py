@@ -26,7 +26,6 @@ from canvas.ui.shell_layout import PictureJob
 from canvas.ui.styles import look_for
 
 SERIES_FRAMES = 6
-HERO_STRENGTH = 0.45
 
 
 def measure_series(
@@ -36,9 +35,10 @@ def measure_series(
     seed: int,
     rewrite: Callable[[str], str],
     age_gate: AgeGate,
-    generate: Callable[[str, int, SeriesFrame | None, float], SeriesFrame | None],
+    generate: Callable[[str, int, SeriesFrame | None, float | None], SeriesFrame | None],
     style: str = "photo",
     place_mode: str = "same",
+    strength: float | None = None,
 ) -> dict[str, object]:
     """Time one 6-frame series and return the measured seconds.
 
@@ -48,9 +48,10 @@ def measure_series(
         seed: Hero seed.
         rewrite: Scenario writer.
         age_gate: The minors gate.
-        generate: One frame. Receives the hero strength.
+        generate: One frame. Receives the series strength.
         style: Everyday look id.
         place_mode: ``same`` or ``different``.
+        strength: Loose style reference. None draws every frame from text.
     """
     started = time.perf_counter()
     result = run_series(
@@ -59,8 +60,8 @@ def measure_series(
         style=style,
         place_mode=place_mode,
         seed=seed,
-        strength=HERO_STRENGTH,
-        include_camera=lambda: False,
+        strength=strength,
+        include_camera=lambda: True,
         rewrite=rewrite,
         age_gate=age_gate,
         draw_frame=generate,
@@ -92,8 +93,8 @@ def live_rewrite(tier: Tier) -> Callable[[str], str]:
     return rewrite
 
 
-def live_generate(age_gate: AgeGate, tier: Tier) -> Callable[[str, int, SeriesFrame | None, float], SeriesFrame | None]:
-    """One frame. Later shots use the first kept frame at the given strength.
+def live_generate(age_gate: AgeGate, tier: Tier) -> Callable[[str, int, SeriesFrame | None, float | None], SeriesFrame | None]:
+    """One frame. A style reference, when set, uses the first kept frame.
 
     Args:
         age_gate: The same gate the series calls by name.
@@ -102,7 +103,7 @@ def live_generate(age_gate: AgeGate, tier: Tier) -> Callable[[str, int, SeriesFr
     runner = ShellRunner(gate=age_gate, tier=tier, enlarge=EnlargeClient())
     look = look_for("photo")
 
-    def generate(line: str, seed: int, hero: SeriesFrame | None, strength: float) -> RawImage | None:
+    def generate(line: str, seed: int, hero: SeriesFrame | None, strength: float | None) -> RawImage | None:
         prompt = " ".join(part for part in (line.strip(), look.suffix) if part)
         mode = Mode.TEXT if hero is None else Mode.RESTYLE
         job = PictureJob(prompt, look.negative, mode, "1:1", "native", DEFAULT_FORMAT, seed, 8, 0.0, "euler", 1)

@@ -30,7 +30,7 @@ Each line has four parts separated by " | ":
 N. scene | pose | camera | place
 
 Rules:
-- The app puts the idea text (the subject block) at the start of every line. Do not copy the idea into a line.
+- The app places the idea text (the subject block) in every line. Do not copy the idea into a line.
 - scene: shot type, framing, light, wardrobe or styling, and mood, in natural English.
 - pose: the pose of the person, or the arrangement of the objects.
 - camera: lens and angle.
@@ -120,16 +120,20 @@ def scenario_request(
 
 
 def assemble_line(subject: str, shot: Shot, *, include_camera: bool) -> str:
-    """The line sent for one shot. Simple mode leaves the camera clause out.
+    """The line sent for one shot.
+
+    Order is pose, camera when included, scene, the subject block, then place.
+    The subject block stays verbatim.
 
     Args:
         subject: The verbatim subject block.
         shot: Scene, pose, camera, and place.
-        include_camera: True in Expert, where the lens and angle stay on the line.
+        include_camera: When true, the lens and angle stay on the line.
     """
-    parts = [subject.strip(), shot.place.strip(), shot.scene.strip(), shot.pose.strip()]
+    parts = [shot.pose.strip()]
     if include_camera and shot.camera.strip():
         parts.append(shot.camera.strip())
+    parts.extend((shot.scene.strip(), subject.strip(), shot.place.strip()))
     return ", ".join(part for part in parts if part)
 
 

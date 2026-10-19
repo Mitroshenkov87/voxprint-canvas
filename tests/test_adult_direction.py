@@ -66,7 +66,7 @@ def _series(tmp_path: Path, rewrite, lines: list[str], statuses: list[tuple[int,
         return _Frame()
 
     return run_series(
-        idea=IDEA, count=6, style="photo", place_mode="same", seed=1, strength=0.45,
+        idea=IDEA, count=6, style="photo", place_mode="same", seed=1, strength=None,
         include_camera=lambda: True, rewrite=rewrite, age_gate=gate or _adult_world_gate(),
         draw_frame=draw, cancelled=lambda: False, folder=tmp_path / "series",
         on_status=lambda index, status: statuses.append((index, status)), adult=True,

@@ -36,6 +36,8 @@ from canvas.safety.image import RawImage, SafeImage
 
 StopCode = Literal["", "idea", "scenario", "cancelled", "error"]
 Source = Literal["", "writer", "mixed", "planned"]
+REFERENCE_STRENGTH = 0.80
+REFERENCE_MIN = 0.75
 _RAW_LIMIT = 6000
 _PICTURE_CODES = frozenset({"image", "input"})
 
@@ -69,11 +71,11 @@ def run_series(
     style: str,
     place_mode: str,
     seed: int,
-    strength: float,
+    strength: float | None,
     include_camera: Callable[[], bool],
     rewrite: Callable[[str], str],
     age_gate: AgeGate,
-    draw_frame: Callable[[str, int, SeriesFrame | None, float], SeriesFrame | None],
+    draw_frame: Callable[[str, int, SeriesFrame | None, float | None], SeriesFrame | None],
     cancelled: Callable[[], bool],
     folder: Path,
     on_scenario: Callable[[Scenario], None] | None = None,
@@ -156,7 +158,8 @@ def run_series(
                 _write_meta(folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept)
                 return SeriesResult("cancelled", "", tuple(kept), folder, "", source)
             try:
-                image = draw_frame(line, seed + index, hero, strength)
+                active = style_reference(strength)
+                image = draw_frame(line, seed + index, hero if active is not None else None, active)
             except RunStopped as exc:
                 blocked.append(index)
                 _status(on_status, index, "blocked")
@@ -199,6 +202,20 @@ def run_series(
             note_error("not_produced")
             return SeriesResult("", "", (), folder, "not_produced", source)
         return SeriesResult("", "", tuple(kept), folder, "", source)
+
+
+def style_reference(strength: float | None) -> float | None:
+    """Loose style strength, or None when the frame is drawn from text.
+
+    Args:
+        strength: Requested series strength. Below ``REFERENCE_MIN`` draws from text.
+    """
+    if isinstance(strength, bool) or not isinstance(strength, (int, float)):
+        return None
+    value = float(strength)
+    if value < REFERENCE_MIN:
+        return None
+    return value
 
 
 def _stop(stopped: StopCode, reason: str, code: str, source: Source = "") -> SeriesResult:

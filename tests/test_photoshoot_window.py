@@ -123,7 +123,7 @@ def test_generate_writes_a_read_only_series(app, home: Path, monkeypatch) -> Non
     window.findChild(QPushButton, "generate").click()
     app.processEvents()
     assert len(prompts) == 6
-    assert all("50 mm" not in prompt for prompt in prompts)
+    assert all("still, 50 mm, " in prompt and prompt.index("still, 50 mm, ") < prompt.index(IDEA) for prompt in prompts)
     assert all(IDEA in prompt for prompt in prompts)
     lines = window.findChildren(QLabel, "photoshootLine")
     assert len(lines) == 6
@@ -156,7 +156,7 @@ def test_expert_does_not_add_a_camera_control(app, home: Path, monkeypatch) -> N
     window.findChild(QPushButton, "photoshootMode").click()
     window.findChild(QPushButton, "generate").click()
     app.processEvents()
-    assert prompts and all("50 mm" not in prompt for prompt in prompts)
+    assert prompts and all("50 mm" in prompt for prompt in prompts)
     assert window.findChild(QLineEdit, "photoshootCamera") is None
     assert window.findChild(QPushButton, "photoshootMenu") is None
 
@@ -189,7 +189,7 @@ def test_a_blocked_frame_is_labelled_and_is_not_the_hero(app, home: Path, monkey
     labels = [label.text() for label in window.findChildren(QLabel, "photoshootLine")]
     assert any("Shot blocked" in text for text in labels)
     assert modes[0] is Mode.TEXT
-    assert modes[1] is Mode.RESTYLE
+    assert all(mode is Mode.TEXT for mode in modes)
     folder = next(path for path in (home / "state" / "pictures" / "series").iterdir() if path.is_dir())
     assert not (folder / "02.png").exists()
     assert (folder / "01.png").is_file()

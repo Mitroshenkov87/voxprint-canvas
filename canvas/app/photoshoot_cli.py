@@ -28,7 +28,6 @@ from canvas.ui.styles import look_for
 
 _LOCALES = Path(__file__).resolve().parents[1] / "ui" / "locales"
 _SCENARIO_STYLES = frozenset({"photo", "cinematic", "portrait"})
-_STRENGTH = 0.45
 
 
 def catalogs() -> None:
@@ -80,7 +79,7 @@ def model_rewrite(tier: Tier, adult: bool) -> Callable[[str], str]:
 
 def model_generate(
     age_gate: AgeGate, tier: Tier, style: str, adult: bool,
-) -> Callable[[str, int, SeriesFrame | None, float], SeriesFrame | None]:
+) -> Callable[[str, int, SeriesFrame | None, float | None], SeriesFrame | None]:
     """One frame through the same runner the window uses.
 
     Args:
@@ -93,7 +92,7 @@ def model_generate(
     look = look_for(style)
     policy = adult_prompt_policy(allowed=adult)
 
-    def generate(line: str, seed: int, hero: SeriesFrame | None, strength: float) -> RawImage | None:
+    def generate(line: str, seed: int, hero: SeriesFrame | None, strength: float | None) -> RawImage | None:
         prompt = " ".join(part for part in (policy.template, line.strip(), look.suffix) if part)
         negative = ", ".join(part for part in (look.negative, policy.negatives) if part)
         mode = Mode.TEXT if hero is None else Mode.RESTYLE
@@ -122,7 +121,8 @@ def run_command(
     adult: bool,
     age_gate: AgeGate,
     rewrite: Callable[[str], str],
-    generate: Callable[[str, int, SeriesFrame | None, float], SeriesFrame | None],
+    generate: Callable[[str, int, SeriesFrame | None, float | None], SeriesFrame | None],
+    strength: float | None = None,
 ) -> tuple[dict[str, object], int]:
     """Run one series into ``folder`` and describe what was written.
 
@@ -137,6 +137,7 @@ def run_command(
         age_gate: Passed through to the series.
         rewrite: Scenario writer.
         generate: One frame. A stopped frame returns None.
+        strength: Loose style reference. None draws every frame from text.
     """
     catalogs()
     if frames < 1 or frames > MAX_FRAMES:
@@ -157,8 +158,8 @@ def run_command(
         style=scenario_style,
         place_mode=places,
         seed=seed,
-        strength=_STRENGTH,
-        include_camera=lambda: False,
+        strength=strength,
+        include_camera=lambda: True,
         rewrite=rewrite,
         age_gate=age_gate,
         draw_frame=generate,
@@ -176,7 +177,7 @@ def run_command(
             False, error, _series_message(result.code), (), None, frames, 0, (),
             result.code, result.source,
         ), 1
-    lines = [assemble_line(scenario.subject_block, shot, include_camera=False) for shot in scenario.shots]
+    lines = [assemble_line(scenario.subject_block, shot, include_camera=True) for shot in scenario.shots]
     scenario_path = result.folder / "scenario.txt"
     scenario_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     shots = _shot_rows(scenario, statuses, result.kept)

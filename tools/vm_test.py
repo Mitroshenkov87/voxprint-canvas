@@ -27,7 +27,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if args.vram_cap_gb is not None:
         args.mode = "vram-cap"
-    tag = args.tag or os.environ.get("VOXPRINT_TAG", "").strip() or "v0.1.0-rc.15"
+    tag = args.tag or os.environ.get("VOXPRINT_TAG", "").strip() or "v0.1.0-rc.16"
     folder = results_dir(tag)
     if not _gpu_present():
         return _finish(folder, args, tag, 3, [{"name": "gpu", "ok": False, "detail": "no GPU"}])

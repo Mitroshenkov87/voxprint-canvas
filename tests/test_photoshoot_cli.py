@@ -453,12 +453,19 @@ def test_a_real_frame_verdict_stops_the_series(monkeypatch, tmp_path: Path, stag
     gate = world.gate()
     inner = model_generate(gate, Tier.GB16, "photo", False)
     calls = {"n": 0}
+    third: dict[str, object] = {}
 
-    def generate(line: str, seed: int, hero: object | None, strength: float) -> object | None:
+    def generate(line: str, seed: int, hero: object | None, strength: float | None) -> object | None:
         calls["n"] += 1
-        if calls["n"] == 3 and stage != "output":
-            arm(world)
-        image = inner(line, seed, hero, strength)
+        if calls["n"] == 3:
+            third["hero"] = hero
+            if stage != "output":
+                arm(world)
+        try:
+            image = inner(line, seed, hero, strength)
+        except RunStopped as exc:
+            third["stopped"] = exc.code
+            raise
         if calls["n"] == 3 and stage == "output":
             arm(world)
         return image
@@ -475,12 +482,20 @@ def test_a_real_frame_verdict_stops_the_series(monkeypatch, tmp_path: Path, stag
         age_gate=gate,
         rewrite=_rewrite,
         generate=generate,
+        strength=REFERENCE_STRENGTH if stage == "input" else None,
     )
     assert code == 1
     assert payload["ok"] is False
     assert payload["code"] == "scenario.minor"
     assert payload["made"] == 2
     assert calls["n"] == 3
+    if stage == "input":
+        assert third["hero"] is not None
+        assert third["stopped"] == "input"
+    elif stage == "prompt":
+        assert third["stopped"] == "prompt"
+    else:
+        assert "stopped" not in third
     assert [shot["code"] for shot in payload["shots"][:2]] == ["ok", "ok"]
     for path in payload["frames"]:
         assert Path(str(path)).is_file()

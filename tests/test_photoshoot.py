@@ -403,12 +403,23 @@ def test_each_reason_code(tmp_path: Path, monkeypatch) -> None:
     assert empty.stopped == "" and empty.code == "not_produced" and empty.kept == ()
 
 
-def test_a_declined_scenario_logs_the_code_and_the_masked_reply(tmp_path: Path, monkeypatch) -> None:
+def test_a_declined_scenario_logs_only_the_code_by_default(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("VOXPRINT_DEBUG", raising=False)
     result = _run(tmp_path / "series", idea=AGED, rewrite=lambda _prompt: "Sorry, I cannot write 34 lines.")
     assert result.stopped == "" and result.source == "planned"
     log = (tmp_path / "home" / "logs" / "voxprint.log").read_text(encoding="utf-8")
     assert "scenario.declined" in log
+    assert "scenario.raw" not in log and "cannot write" not in log
+    assert "34" not in log
+    assert "red coat" not in log
+
+
+def test_the_debug_switch_adds_the_masked_reply(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("VOXPRINT_DEBUG", "1")
+    _run(tmp_path / "series", idea=AGED, rewrite=lambda _prompt: "Sorry, I cannot write 34 lines.")
+    log = (tmp_path / "home" / "logs" / "voxprint.log").read_text(encoding="utf-8")
     assert "debug scenario.raw" in log and "cannot write" in log
     assert "34" not in log
     assert "red coat" not in log

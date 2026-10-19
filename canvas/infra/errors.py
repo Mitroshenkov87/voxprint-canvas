@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 
 from voxprint_common.paths import logs_dir
 
@@ -25,9 +26,14 @@ def note_error(code: str) -> None:
         return
 
 
+def debug_enabled() -> bool:
+    """True when ``VOXPRINT_DEBUG=1`` is set."""
+    return os.environ.get("VOXPRINT_DEBUG", "").strip() == "1"
+
+
 def note_debug(code: str, detail: str) -> None:
-    """Append one debug entry: a code and a short text with numbers masked by the caller."""
-    if not code:
+    """Append one debug entry when debug logging is on. The caller masks numbers in ``detail``."""
+    if not code or not debug_enabled():
         return
     _LOG.debug("%s %s", code, detail)
     try:

@@ -43,6 +43,9 @@ from canvas.ui.help_menu import add_help_menu
 PANEL_WIDTH = 320
 SHOT_WIDTH = 1280
 SHOT_HEIGHT = 800
+# Corner radius for buttons, chips and fields (Model Forge uses 8 px for its
+# segmented buttons and tiles). Replace with the shared theme token once it exists.
+BUTTON_RADIUS = 8
 
 
 from canvas.ui.prompt_row import arrange as arrange_prompt  # noqa: E402
@@ -90,6 +93,11 @@ QSpinBox, QDoubleSpinBox, QComboBox, QLineEdit, QPlainTextEdit {{
 }}
 QPushButton[chip="true"]:disabled {{
     color: {TEXT}; background: {CONTROL_BG}; border-color: {CONTROL_BORDER};
+}}
+QPushButton, QPushButton[chip="true"], QPushButton#generate, QPushButton#overflow,
+QPushButton#expertToggle, QToolButton, QSpinBox, QDoubleSpinBox, QComboBox,
+QLineEdit, QPlainTextEdit {{
+    border-radius: {BUTTON_RADIUS}px;
 }}
 """
 

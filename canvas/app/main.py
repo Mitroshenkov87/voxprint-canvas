@@ -33,6 +33,7 @@ from canvas.models.loader import ModelNotReady, ZImageGenerator, load_catalog_st
 from canvas.models.views import remove_views
 from canvas.models.provision import DownloadDeclined, ensure_plan, install_defaults, install_supporting, repair
 from canvas.models.runtime import InferenceUnavailable
+from canvas.models.user_lora import LoraRejected, UserLora, cli_scale, prepare_cli_lora
 from canvas.models.modes import Mode, Tier
 from canvas.models.plan import BaseNotSelected, ModeUnavailable, build_plan
 from canvas.models.registry import load_catalog
@@ -106,6 +107,8 @@ def _parser() -> argparse.ArgumentParser:
         default=argparse.SUPPRESS,
         help="plan as if the GPU had this many GB (CANVAS_VRAM_CAP_GB)",
     )
+    generate.add_argument("--lora", default="", help="LoRA .safetensors file or add-on folder")
+    generate.add_argument("--lora-scale", type=float, default=0.7, help="LoRA strength, from 0 to 2")
     generate.add_argument("--json", action="store_true")
     bench = commands.add_parser(
         "photoshoot-bench",
@@ -155,6 +158,8 @@ def _parser() -> argparse.ArgumentParser:
         default=argparse.SUPPRESS,
         help="plan as if the GPU had this many GB (CANVAS_VRAM_CAP_GB)",
     )
+    photoshoot.add_argument("--lora", default="", help="LoRA .safetensors file or add-on folder")
+    photoshoot.add_argument("--lora-scale", type=float, default=0.7, help="LoRA strength, from 0 to 2")
     photoshoot.add_argument("--json", action="store_true")
     return parser
 
@@ -331,6 +336,10 @@ def _generate(args: argparse.Namespace) -> int:
     as_json = bool(args.json)
     if str(args.edit_instruction or ""):
         return _instruction_removed(as_json)
+    try:
+        chosen = _chosen_lora(args)
+    except LoraRejected as exc:
+        return _emit_lora(exc.code, as_json)
     os_result = current_os_check()
     if not os_result.ok:
         return _emit({"ok": False, "error": os_result.message}, as_json, 2)
@@ -384,6 +393,10 @@ def _generate(args: argparse.Namespace) -> int:
         generator = ZImageGenerator(catalog, gpu.tier)
         generator.seed = args.seed
         generator.models = root
+        if chosen is not None:
+            generator.lora_path = str(chosen[0].weights)
+            generator.lora_strength = chosen[1]
+            generator.bound_lora = chosen[0]
         pipeline = Pipeline(gate, generator, gpu.tier, use_gpu_lock=True, catalog=catalog, enlarge=EnlargeClient())
         fresh = _inputs(args, mode)
         pipeline.export(active, mode, fresh, path, fmt, aspect=args.aspect, output=output)
@@ -396,7 +409,7 @@ def _generate(args: argparse.Namespace) -> int:
     if outcome is not None and outcome.fallback and not as_json:
         print(fallback_message(outcome), file=sys.stderr)
     return _emit(
-        _generate_payload(path, active_prompt, outcome, time.perf_counter() - started),
+        _with_lora(_generate_payload(path, active_prompt, outcome, time.perf_counter() - started), chosen),
         as_json,
         0,
     )
@@ -441,6 +454,10 @@ def _photoshoot(args: argparse.Namespace) -> int:
     frames = int(args.frames)
     if frames < 1 or frames > MAX_FRAMES:
         return _emit_photoshoot(reject_frames(frames), as_json, 2)
+    try:
+        chosen = _chosen_lora(args)
+    except LoraRejected as exc:
+        return _emit_lora(exc.code, as_json)
     os_result = current_os_check()
     if not os_result.ok:
         return _emit({"ok": False, "error": os_result.message}, as_json, 2)
@@ -465,7 +482,11 @@ def _photoshoot(args: argparse.Namespace) -> int:
             adult=adult,
             age_gate=gate,
             rewrite=model_rewrite(gpu.tier, adult),
-            generate=model_generate(gate, gpu.tier, style, adult),
+            generate=model_generate(
+                gate, gpu.tier, style, adult,
+                None if chosen is None else chosen[0],
+                0.7 if chosen is None else chosen[1],
+            ),
         )
     except (
         SafetyError, SnapshotError, DownloadDeclined, InferenceUnavailable, ModelNotReady,
@@ -473,7 +494,7 @@ def _photoshoot(args: argparse.Namespace) -> int:
         OSError,
     ) as exc:
         return _emit({"ok": False, "error": str(exc)}, as_json, 1)
-    return _emit_photoshoot(payload, as_json, code)
+    return _emit_photoshoot(_with_lora(payload, chosen), as_json, code)
 
 
 def _emit_photoshoot(payload: dict[str, object], as_json: bool, code: int) -> int:
@@ -581,6 +602,36 @@ def main(argv: list[str] | None = None) -> int:
     if code is None:
         return 0
     return int(code)
+
+
+def _chosen_lora(args: argparse.Namespace) -> tuple[UserLora, float] | None:
+    """The LoRA named by ``--lora``, checked before any model is opened."""
+    raw = str(getattr(args, "lora", "") or "").strip()
+    if not raw:
+        return None
+    scale = cli_scale(getattr(args, "lora_scale", 0.7))
+    return prepare_cli_lora(Path(raw)), scale
+
+
+def _emit_lora(code: str, as_json: bool) -> int:
+    """Exit 2. ``--json`` prints the stable code and the English sentence."""
+    message = text(code, "en")
+    if as_json:
+        print(json.dumps({"ok": False, "error": code, "message": message}))
+    else:
+        print(message, file=sys.stderr)
+    return 2
+
+
+def _with_lora(payload: dict[str, object], chosen: tuple[UserLora, float] | None) -> dict[str, object]:
+    """Add the LoRA name, scale, and trigger when a command asked for one."""
+    if chosen is None:
+        return payload
+    lora, scale = chosen
+    payload["lora"] = lora.id
+    payload["lora_scale"] = scale
+    payload["lora_trigger"] = lora.trigger
+    return payload
 
 
 def _generate_payload(

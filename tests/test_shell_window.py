@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QLabel,
+    QLineEdit,
     QMenu,
     QPlainTextEdit,
     QPushButton,
@@ -541,6 +542,66 @@ def test_yitro_slots_and_live_settings_reach_the_job(app, home: Path, tmp_path: 
     assert job.steps == 7
     assert job.sampler == "euler"
     assert window.shell.gate.age_gate is not None
+
+
+def test_picture_count_is_typed_and_cancel_keeps_finished_pictures(app, home: Path, monkeypatch) -> None:
+    from tests.fakes import rgb
+
+    from canvas.ui.shell_screen import ShellWindow
+
+    monkeypatch.setattr("canvas.ui.shell_screen.selectable", lambda: (object(),))
+    drawn = {"n": 0}
+    labels: list[str] = []
+
+    def runner(job, inputs):
+        del job, inputs
+        drawn["n"] += 1
+        return rgb(8, 8)
+
+    window = _window(home, runner=runner)
+    window.resize(1280, 800)
+    window.show()
+    app.processEvents()
+    field = window.findChild(QLineEdit, "pictureCount")
+    assert field is not None and field.isVisible() and field.text() == "1"
+    for name in ("chip-count-1", "chip-count-2", "chip-count-4"):
+        chip = window.findChild(QPushButton, name)
+        assert chip is not None and not chip.isVisible()
+    field.setText("12")
+    field.editingFinished.emit()
+    assert field.text() == "12"
+    assert window.shell.layout.batch_size() == 12
+    field.clear()
+    field.editingFinished.emit()
+    assert field.text() == "12"
+    assert window.shell.layout.batch_size() == 12
+    field.setText("12")
+    assert not field.insert("abc")
+    assert field.text() == "12"
+    field.setText("3")
+    field.editingFinished.emit()
+    assert window.shell.layout.batch_size() == 3
+    original = ShellWindow._advance
+
+    def wrapped(self, step, total, label):
+        labels.append(label)
+        if self is window and drawn["n"] and self.shell.layout.history:
+            self.shell.layout.cancel()
+        return original(self, step, total, label)
+
+    monkeypatch.setattr(ShellWindow, "_advance", wrapped)
+    window.view.set_prompt_text("a red bicycle")
+    window.findChild(QPushButton, "generate").click()
+    app.processEvents()
+    assert drawn["n"] == 1
+    assert labels[0] == text("canvas.progress.count", current=1, total=3)
+    assert len(window.shell.layout.history) == 1
+    saved = Path(window._pictures[window.shell.layout.history[0].item_id])
+    assert saved.is_file()
+    stage = window.findChild(QWidget, "stage")
+    history = window.findChild(QWidget, "historyStrip")
+    assert stage is not None and stage.height() >= 300
+    assert history is not None and history.height() >= 88
 
 
 def test_generate_keeps_the_picture_through_the_gate(app, home: Path, monkeypatch) -> None:

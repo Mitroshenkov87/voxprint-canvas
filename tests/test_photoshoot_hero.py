@@ -1,4 +1,4 @@
-"""Photoshoot hero frame: img2img at strength 0.45 through the render path, one series history entry."""
+"""Photoshoot style reference: restyle at the shared strength, one series history entry."""
 from __future__ import annotations
 
 import json
@@ -13,6 +13,7 @@ from PIL import Image
 from PySide6.QtWidgets import QApplication, QPushButton
 
 from canvas.models import runtime
+from canvas.pipeline.series import REFERENCE_MIN, REFERENCE_STRENGTH
 from canvas.models.modes import Tier
 from canvas.models.plan import PIPELINE_IMG2IMG, PIPELINE_TEXT, CallPlan
 from canvas.ui.shell_layout import open_layout
@@ -99,6 +100,7 @@ def test_hero_frame_feeds_img2img_at_045_and_the_series_is_one_history_entry(app
     runner = _RenderRunner(gate, tmp_path)
     window = ShellWindow(shell, tier=Tier.GB16, enlarge=object(), runner=runner)
     window.photoshoot.writer = lambda _prompt: _payload(IDEA)
+    window.photoshoot.strength = "high"
     window.view.set_prompt_text(IDEA)
     window.show()
     window.findChild(QPushButton, "photoshootMode").click()
@@ -110,7 +112,8 @@ def test_hero_frame_feeds_img2img_at_045_and_the_series_is_one_history_entry(app
     assert len(names) == 6 and set(names[1:]) == {"img2img"}
     hero_pixels = Image.open(next((home / "state" / "pictures" / "series").iterdir()) / "01.png").convert("RGB")
     for _name, kwargs in _Pipe.calls[1:]:
-        assert kwargs["strength"] == pytest.approx(0.45)
+        assert kwargs["strength"] == pytest.approx(REFERENCE_STRENGTH)
+        assert kwargs["strength"] >= REFERENCE_MIN
         assert kwargs["image"].tobytes() == hero_pixels.tobytes()
     window.close()
 

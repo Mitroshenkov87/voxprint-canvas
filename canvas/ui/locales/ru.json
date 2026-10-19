@@ -106,6 +106,7 @@
   "canvas.output_size.4k": "4K",
   "photoshoot.button": "Фотосессия",
   "photoshoot.tooltip": "Серия кадров одного предмета",
+  "canvas.progress.count": "{current} из {total}",
   "photoshoot.frames": "Кадров",
   "photoshoot.frames.invalid": "Укажите от 1 до {limit} кадров.",
   "photoshoot.count": "Сколько кадров",
@@ -152,5 +153,8 @@
   "photoshoot.expert.strength.medium": "Обычно",
   "photoshoot.expert.strength.high": "Ближе",
   "photoshoot.expert.aspect": "Формат кадра",
-  "photoshoot.expert.style_override": "Свой стиль кадра"
+  "photoshoot.expert.style_override": "Свой стиль кадра",
+  "lora.base_mismatch": "Эта LoRA для другой базовой модели.",
+  "lora.invalid": "Этот файл LoRA не читается.",
+  "lora.scale": "Сила LoRA должна быть от 0 до 2."
 }

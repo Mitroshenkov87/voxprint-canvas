@@ -5,7 +5,8 @@ import json
 from pathlib import Path
 
 from canvas.app.main import _parser, main
-from canvas.app.photoshoot_bench import HERO_STRENGTH, SERIES_FRAMES, live_generate, measure_series
+from canvas.app.photoshoot_bench import SERIES_FRAMES, live_generate, measure_series
+from canvas.pipeline.series import REFERENCE_STRENGTH
 from canvas.app.platform import GpuCheck, OsCheck
 from canvas.infra.gpu import GpuInfo
 from canvas.models.modes import Tier
@@ -14,9 +15,9 @@ from tests.test_photoshoot import IDEA, _frame, _payload
 from tests.test_photoshoot_cli import _arm_runner, _rewrite
 
 
-def test_measure_series_times_six_frames_with_the_hero_strength(tmp_path: Path) -> None:
+def test_measure_series_times_six_frames_from_text(tmp_path: Path) -> None:
     heroes: list[object | None] = []
-    strengths: list[float] = []
+    strengths: list[float | None] = []
 
     def generate(line: str, seed: int, hero: object | None, strength: float) -> object:
         del line, seed
@@ -38,10 +39,8 @@ def test_measure_series_times_six_frames_with_the_hero_strength(tmp_path: Path) 
     assert report["ok"] is True
     assert isinstance(report["seconds"], float)
     assert report["seconds"] >= 0
-    assert strengths == [HERO_STRENGTH] * 6
-    assert heroes[0] is None
-    assert heroes[1] is not None
-    assert all(hero is heroes[1] for hero in heroes[1:])
+    assert strengths == [None] * 6
+    assert all(hero is None for hero in heroes)
 
 
 def test_live_generate_copies_the_reused_hero(monkeypatch, tmp_path: Path) -> None:
@@ -72,6 +71,7 @@ def test_live_generate_copies_the_reused_hero(monkeypatch, tmp_path: Path) -> No
         rewrite=_rewrite,
         age_gate=gate,
         generate=generate,
+        strength=REFERENCE_STRENGTH,
     )
     assert report["ok"] is True
     assert report["kept"] == SERIES_FRAMES

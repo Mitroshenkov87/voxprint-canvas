@@ -14,13 +14,14 @@ import zlib
 from dataclasses import dataclass
 from typing import Literal, assert_never
 
-from canvas.pipeline.adult_direction import shot_plan
+from canvas.pipeline.adult_direction import LIGHT_SETUPS, POSE_FAMILIES, shot_plan
 from canvas.pipeline.enhance import quoted_spans, stated_ages
 
 PlaceMode = Literal["same", "different"]
-MAX_FRAMES = 50
+MAX_FRAMES = 99
 DEFAULT_FRAMES = 6
 SCENARIO_CHUNK = 10
+SCENARIO_TOKENS = 8192
 
 SYSTEM_PROMPT = """You plan the shots of a photo series for a text-to-image model.
 The user message is JSON with idea, count, style, and place_mode. It can also have direction and previous.
@@ -30,7 +31,7 @@ Each line has four parts separated by " | ":
 N. scene | pose | camera | place
 
 Rules:
-- The app puts the idea text (the subject block) at the start of every line. Do not copy the idea into a line.
+- The app places the idea text (the subject block) in every line. Do not copy the idea into a line.
 - scene: shot type, framing, light, wardrobe or styling, and mood, in natural English.
 - pose: the pose of the person, or the arrangement of the objects.
 - camera: lens and angle.
@@ -120,16 +121,20 @@ def scenario_request(
 
 
 def assemble_line(subject: str, shot: Shot, *, include_camera: bool) -> str:
-    """The line sent for one shot. Simple mode leaves the camera clause out.
+    """The line sent for one shot.
+
+    Order is pose, camera when included, scene, the subject block, then place.
+    The subject block stays verbatim.
 
     Args:
         subject: The verbatim subject block.
         shot: Scene, pose, camera, and place.
-        include_camera: True in Expert, where the lens and angle stay on the line.
+        include_camera: When true, the lens and angle stay on the line.
     """
-    parts = [subject.strip(), shot.place.strip(), shot.scene.strip(), shot.pose.strip()]
+    parts = [shot.pose.strip()]
     if include_camera and shot.camera.strip():
         parts.append(shot.camera.strip())
+    parts.extend((shot.scene.strip(), subject.strip(), shot.place.strip()))
     return ", ".join(part for part in parts if part)
 
 
@@ -383,18 +388,22 @@ def planned_shots(
     shots = list(taken)
     added: list[Shot] = []
     offset = zlib.crc32(subject.encode("utf-8")) % len(PLAN_FRAMINGS)
-    plan = shot_plan(min(len(taken) + count * 2, MAX_FRAMES * 2)) if adult else []
+    pairs = len(POSE_FAMILIES) * len(LIGHT_SETUPS)
+    plan = shot_plan(min(len(taken) + count * 2, pairs)) if adult else []
     step = 0
-    limit = len(PLAN_FRAMINGS) * len(PLAN_LIGHTS) * 2
+    limit = len(PLAN_FRAMINGS) * len(PLAN_LIGHTS) * len(PLAN_POSES)
     while len(added) < count and step < limit:
         index = len(taken) + step
         framing = PLAN_FRAMINGS[(offset + index) % len(PLAN_FRAMINGS)]
-        light = PLAN_LIGHTS[(index + index // len(PLAN_FRAMINGS)) % len(PLAN_LIGHTS)]
+        light = PLAN_LIGHTS[(index // len(PLAN_FRAMINGS)) % len(PLAN_LIGHTS)]
         pose = PLAN_POSES[(offset + index) % len(PLAN_POSES)]
         if adult and index < len(plan):
             framing = plan[index]["shot_type"]
             light = plan[index]["light"]
             pose = plan[index]["pose_family"]
+        turn = index // (len(PLAN_FRAMINGS) * len(PLAN_LIGHTS))
+        if turn:
+            light = f"{light}, variation {turn + 1}"
         camera = PLAN_CAMERAS[index % len(PLAN_CAMERAS)]
         where = place if mode == "same" else _planned_place(index)
         draft = Draft(f"{framing}, {light}", pose, camera, where)
@@ -432,7 +441,17 @@ PLAN_PLACES = (
     "sunlit room with linen curtains", "against a dark textured wall", "quiet courtyard", "beside a large window",
     "wooden terrace", "softly lit hallway", "garden with greenery", "against a concrete wall",
 )
-_PLACE_TIMES = ("", "in the morning", "in the evening", "at night", "in warm afternoon light")
+_PLACE_TIMES = (
+    "",
+    "in the morning",
+    "in the evening",
+    "at night",
+    "in warm afternoon light",
+    "at dawn",
+    "at noon",
+    "in late afternoon",
+    "under moonlight",
+)
 
 
 def _planned_place(index: int) -> str:

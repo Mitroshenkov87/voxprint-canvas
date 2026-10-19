@@ -17,7 +17,7 @@ from canvas.infra.paths import models_dir
 from canvas.models.modes import Mode, Tier
 from canvas.models.registry import load_catalog
 from canvas.pipeline.enhance import open_rewriter
-from canvas.pipeline.photoshoot import SYSTEM_PROMPT
+from canvas.pipeline.photoshoot import SCENARIO_TOKENS, SYSTEM_PROMPT
 from canvas.pipeline.series import SeriesFrame, SeriesResult, run_series
 from canvas.safety.gate import AgeGate
 from canvas.safety.image import RawImage
@@ -26,7 +26,6 @@ from canvas.ui.shell_layout import PictureJob
 from canvas.ui.styles import look_for
 
 SERIES_FRAMES = 6
-HERO_STRENGTH = 0.45
 
 
 def measure_series(
@@ -36,9 +35,10 @@ def measure_series(
     seed: int,
     rewrite: Callable[[str], str],
     age_gate: AgeGate,
-    generate: Callable[[str, int, SeriesFrame | None, float], SeriesFrame | None],
+    generate: Callable[[str, int, SeriesFrame | None, float | None], SeriesFrame | None],
     style: str = "photo",
     place_mode: str = "same",
+    strength: float | None = None,
 ) -> dict[str, object]:
     """Time one 6-frame series and return the measured seconds.
 
@@ -47,10 +47,11 @@ def measure_series(
         folder: Series directory.
         seed: Hero seed.
         rewrite: Scenario writer.
-        age_gate: The minors gate.
-        generate: One frame. Receives the hero strength.
+        age_gate: Passed through to the series.
+        generate: One frame. Receives the series strength.
         style: Everyday look id.
         place_mode: ``same`` or ``different``.
+        strength: Loose style reference. None draws every frame from text.
     """
     started = time.perf_counter()
     result = run_series(
@@ -59,8 +60,8 @@ def measure_series(
         style=style,
         place_mode=place_mode,
         seed=seed,
-        strength=HERO_STRENGTH,
-        include_camera=lambda: False,
+        strength=strength,
+        include_camera=lambda: True,
         rewrite=rewrite,
         age_gate=age_gate,
         draw_frame=generate,
@@ -82,7 +83,7 @@ def live_rewrite(tier: Tier) -> Callable[[str], str]:
         rewriter = open_rewriter(
             catalog, tier, models_dir(),
             lambda message: print(message, file=sys.stderr),
-            max_new_tokens=3072,
+            max_new_tokens=SCENARIO_TOKENS,
         )
         try:
             return rewriter.complete(prompt, system=SYSTEM_PROMPT)
@@ -92,8 +93,8 @@ def live_rewrite(tier: Tier) -> Callable[[str], str]:
     return rewrite
 
 
-def live_generate(age_gate: AgeGate, tier: Tier) -> Callable[[str, int, SeriesFrame | None, float], SeriesFrame | None]:
-    """One frame. Later shots use the first kept frame at the given strength.
+def live_generate(age_gate: AgeGate, tier: Tier) -> Callable[[str, int, SeriesFrame | None, float | None], SeriesFrame | None]:
+    """One frame. A style reference, when set, uses the first kept frame.
 
     Args:
         age_gate: The same gate the series calls by name.
@@ -102,7 +103,7 @@ def live_generate(age_gate: AgeGate, tier: Tier) -> Callable[[str, int, SeriesFr
     runner = ShellRunner(gate=age_gate, tier=tier, enlarge=EnlargeClient())
     look = look_for("photo")
 
-    def generate(line: str, seed: int, hero: SeriesFrame | None, strength: float) -> RawImage | None:
+    def generate(line: str, seed: int, hero: SeriesFrame | None, strength: float | None) -> RawImage | None:
         prompt = " ".join(part for part in (line.strip(), look.suffix) if part)
         mode = Mode.TEXT if hero is None else Mode.RESTYLE
         job = PictureJob(prompt, look.negative, mode, "1:1", "native", DEFAULT_FORMAT, seed, 8, 0.0, "euler", 1)
@@ -129,7 +130,7 @@ def run_bench(
     tier: Tier,
     age_gate: AgeGate,
     rewrite: Callable[[str], str],
-    generate: Callable[[str, int, SeriesFrame | None, float], SeriesFrame | None],
+    generate: Callable[[str, int, SeriesFrame | None, float | None], SeriesFrame | None],
 ) -> dict[str, object]:
     """Measure a 6-frame series with the callbacks the caller built.
 
@@ -138,7 +139,7 @@ def run_bench(
         folder: Series directory.
         seed: Hero seed.
         tier: Recorded on the report. The caller already chose the machine.
-        age_gate: The minors gate.
+        age_gate: Passed through to the series.
         rewrite: Scenario writer.
         generate: Frame generator, including the hero frame.
     """

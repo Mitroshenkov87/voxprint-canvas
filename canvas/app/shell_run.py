@@ -13,6 +13,7 @@ from canvas.infra.errors import note_crash
 from canvas.infra.gpu_lock import GpuLockTimeout, lock_path, release
 from canvas.infra.paths import models_dir
 from canvas.models.loader import ModelNotReady, ZImageGenerator
+from canvas.models.user_lora import UserLora
 from canvas.models.mdl_registry import selectable
 from canvas.models.modes import Tier
 from canvas.models.plan import BaseNotSelected, ModeUnavailable
@@ -58,6 +59,7 @@ class ShellRunner:
         self.tier = tier
         self.enlarge = enlarge
         self.img2img_strength: float | None = None
+        self.bound_lora: UserLora | None = None
 
     def __call__(self, job: PictureJob, inputs: tuple[PendingInput, ...]) -> RawImage:
         """Generate one picture and return unreviewed pixels.
@@ -74,6 +76,7 @@ class ShellRunner:
         generator.seed = job.seed
         generator.lora_path = job.lora_path
         generator.lora_strength = job.lora_weight
+        generator.bound_lora = self.bound_lora
         if self.img2img_strength is not None:
             generator.img2img_strength = self.img2img_strength
         generator.models = models_dir()

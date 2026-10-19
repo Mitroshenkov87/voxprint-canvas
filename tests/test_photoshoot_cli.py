@@ -14,13 +14,22 @@ from canvas.infra.gpu import GpuInfo
 from canvas.models.modes import Mode, Tier
 from canvas.pipeline.adult_direction import ADULT_ANCHOR
 from canvas.pipeline.photoshoot import SYSTEM_PROMPT
-from canvas.pipeline.series import SeriesResult
+from canvas.pipeline.series import REFERENCE_STRENGTH, SeriesResult
 from canvas.safety.constants import IMAGE_MINOR_SEXUAL
 from canvas.safety.gate import StylisedBlocked
 from canvas.safety.image import RawImage
+from canvas.safety.inputs import ImageRole
 from canvas.ui.shell_layout import PictureJob
 from tests.fakes import World, avif_file, rgb
 from tests.test_photoshoot import IDEA, _frame, _payload
+
+
+def _series_line(prompt: str) -> str:
+    prefix = "Suitable for a general audience. "
+    suffix = " photorealistic photograph"
+    assert prompt.startswith(prefix)
+    assert prompt.endswith(suffix)
+    return prompt[len(prefix):-len(suffix)]
 
 
 def _ready(monkeypatch) -> None:
@@ -49,12 +58,12 @@ def _writers(monkeypatch, generate) -> None:
     monkeypatch.setattr("canvas.app.main.model_generate", lambda *_args: generate)
 
 
-def test_parser_accepts_one_and_fifty_frames(tmp_path: Path) -> None:
+def test_parser_accepts_one_and_ninety_nine_frames(tmp_path: Path) -> None:
     one = _parser().parse_args(["photoshoot", "--prompt", IDEA, "--frames", "1", "--out", str(tmp_path)])
-    fifty = _parser().parse_args(["photoshoot", "--prompt", IDEA, "--frames", "50", "--out", str(tmp_path)])
+    full = _parser().parse_args(["photoshoot", "--prompt", IDEA, "--frames", "99", "--out", str(tmp_path)])
     default = _parser().parse_args(["photoshoot", "--prompt", IDEA, "--out", str(tmp_path)])
     assert one.frames == 1
-    assert fifty.frames == 50
+    assert full.frames == 99
     assert default.frames == 6
     assert default.style == "photo"
     assert default.places == "same"
@@ -63,8 +72,8 @@ def test_parser_accepts_one_and_fifty_frames(tmp_path: Path) -> None:
     assert default.command == "photoshoot"
 
 
-@pytest.mark.parametrize("frames", ["0", "51"])
-def test_frames_outside_one_to_fifty_are_rejected(capsys, tmp_path: Path, frames: str) -> None:
+@pytest.mark.parametrize("frames", ["0", "100"])
+def test_frames_outside_one_to_ninety_nine_are_rejected(capsys, tmp_path: Path, frames: str) -> None:
     code = main(["photoshoot", "--prompt", IDEA, "--frames", frames, "--out", str(tmp_path), "--json"])
     body = json.loads(capsys.readouterr().out)
     assert code == 2
@@ -79,8 +88,9 @@ def test_command_writes_scenario_and_frame_files(monkeypatch, capsys, tmp_path: 
     _ready(monkeypatch)
 
     def generate(line: str, seed: int, hero: object | None, strength: float) -> object:
-        del line, seed, hero
-        assert strength == 0.45
+        del line, seed
+        assert strength is None
+        assert hero is None
         return _frame()
 
     _writers(monkeypatch, generate)
@@ -104,7 +114,93 @@ def test_command_writes_scenario_and_frame_files(monkeypatch, capsys, tmp_path: 
     assert scenario == tmp_path / "scenario.txt"
     lines = scenario.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 4
-    assert all(line.startswith(IDEA) for line in lines)
+    assert all(line.startswith("still, 50 mm, ") and IDEA in line for line in lines)
+
+
+def test_ten_frames_vary_pose_camera_and_seed(monkeypatch, tmp_path: Path) -> None:
+    """Default frames are text. High consistency restyles at the shared strength."""
+    calls: list[tuple[str, Mode, int, float | None, tuple[ImageRole, ...]]] = []
+
+    class _Runner:
+        def __init__(self, *, gate: object, tier: object, enlarge: object) -> None:
+            del gate, tier, enlarge
+            self.img2img_strength: float | None = None
+
+        def __call__(self, job: PictureJob, inputs: tuple[object, ...]) -> object:
+            roles = tuple(item.role for item in inputs if isinstance(item.role, ImageRole))
+            calls.append((job.prompt, job.mode, job.seed, self.img2img_strength, roles))
+            return _frame()
+
+    monkeypatch.setattr("canvas.app.photoshoot_cli.ShellRunner", _Runner)
+
+    def rewrite(prompt: str) -> str:
+        body = json.loads(prompt)
+        count = int(body["count"])
+        start = len(body.get("previous", []))
+        shots = []
+        for offset in range(count):
+            number = start + offset
+            shots.append({
+                "scene": f"scene {number}",
+                "pose": f"pose {number}",
+                "camera": f"{30 + number} mm lens",
+                "place": "kitchen table",
+            })
+        return json.dumps({
+            "subject_block": str(body["idea"]),
+            "descriptors": ["teapot"],
+            "place": "kitchen table",
+            "shots": shots,
+        })
+
+    gate = World().gate()
+    payload, code = run_command(
+        idea=IDEA,
+        folder=tmp_path / "text",
+        frames=10,
+        seed=1,
+        style="photo",
+        places="same",
+        adult=False,
+        age_gate=gate,
+        rewrite=rewrite,
+        generate=model_generate(gate, Tier.GB16, "photo", False),
+    )
+    assert code == 0 and payload["made"] == 10
+    lines = [_series_line(prompt) for prompt, _mode, _seed, _strength, _roles in calls]
+    assert len(lines) == 10
+    assert len(set(lines)) == 10
+    assert [seed for _prompt, _mode, seed, _strength, _roles in calls] == list(range(1, 11))
+    for index, (line, (_prompt, mode, _seed, strength, roles)) in enumerate(zip(lines, calls, strict=True)):
+        assert line.startswith(f"pose {index}, {30 + index} mm lens, ")
+        assert line.endswith("kitchen table")
+        assert IDEA in line
+        assert mode is Mode.TEXT
+        assert strength is None
+        assert roles == ()
+
+    calls.clear()
+    high, high_code = run_command(
+        idea=IDEA,
+        folder=tmp_path / "high",
+        frames=10,
+        seed=1,
+        style="photo",
+        places="same",
+        adult=False,
+        age_gate=gate,
+        rewrite=rewrite,
+        generate=model_generate(gate, Tier.GB16, "photo", False),
+        strength=REFERENCE_STRENGTH,
+    )
+    assert high_code == 0 and high["made"] == 10
+    assert REFERENCE_STRENGTH >= 0.75
+    assert calls[0][1] is Mode.TEXT and calls[0][3] is None and calls[0][4] == ()
+    for prompt, mode, _seed, strength, roles in calls[1:]:
+        assert _series_line(prompt).startswith("pose ")
+        assert mode is Mode.RESTYLE
+        assert strength == REFERENCE_STRENGTH
+        assert roles == (ImageRole.INIT,)
 
 
 def test_a_stopped_frame_is_not_produced(monkeypatch, capsys, tmp_path: Path) -> None:
@@ -224,6 +320,7 @@ def test_series_copies_the_hero_before_the_next_shot(monkeypatch, tmp_path: Path
         age_gate=gate,
         rewrite=_rewrite,
         generate=generate,
+        strength=REFERENCE_STRENGTH,
     )
     assert code == 0
     assert payload["ok"] is True
@@ -356,12 +453,19 @@ def test_a_real_frame_verdict_stops_the_series(monkeypatch, tmp_path: Path, stag
     gate = world.gate()
     inner = model_generate(gate, Tier.GB16, "photo", False)
     calls = {"n": 0}
+    third: dict[str, object] = {}
 
-    def generate(line: str, seed: int, hero: object | None, strength: float) -> object | None:
+    def generate(line: str, seed: int, hero: object | None, strength: float | None) -> object | None:
         calls["n"] += 1
-        if calls["n"] == 3 and stage != "output":
-            arm(world)
-        image = inner(line, seed, hero, strength)
+        if calls["n"] == 3:
+            third["hero"] = hero
+            if stage != "output":
+                arm(world)
+        try:
+            image = inner(line, seed, hero, strength)
+        except RunStopped as exc:
+            third["stopped"] = exc.code
+            raise
         if calls["n"] == 3 and stage == "output":
             arm(world)
         return image
@@ -378,12 +482,20 @@ def test_a_real_frame_verdict_stops_the_series(monkeypatch, tmp_path: Path, stag
         age_gate=gate,
         rewrite=_rewrite,
         generate=generate,
+        strength=REFERENCE_STRENGTH if stage == "input" else None,
     )
     assert code == 1
     assert payload["ok"] is False
     assert payload["code"] == "scenario.minor"
     assert payload["made"] == 2
     assert calls["n"] == 3
+    if stage == "input":
+        assert third["hero"] is not None
+        assert third["stopped"] == "input"
+    elif stage == "prompt":
+        assert third["stopped"] == "prompt"
+    else:
+        assert "stopped" not in third
     assert [shot["code"] for shot in payload["shots"][:2]] == ["ok", "ok"]
     for path in payload["frames"]:
         assert Path(str(path)).is_file()

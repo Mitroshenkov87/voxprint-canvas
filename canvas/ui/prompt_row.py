@@ -2,16 +2,22 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QEvent, QObject, Qt
+from PySide6.QtGui import QIntValidator
 from PySide6.QtWidgets import (
     QFrame,
-    QScrollArea,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
+
+COUNT_MIN = 1
+COUNT_MAX = 99
+_COUNT_CHIPS = ("chip-count-1", "chip-count-2", "chip-count-4", "chip-count-custom", "reset-count")
 
 PANEL_SHARE = 0.43
 PANEL_MIN = 540
@@ -26,6 +32,8 @@ def panel_width(window_width: int) -> int:
 
 def arrange(window) -> None:
     """Rebuild the prompt area once, after the photoshoot controls exist."""
+    hide_count_chips(window)
+    ensure_count_field(window)
     if getattr(window, "_prompt_arranged", False):
         return
     view = window.view
@@ -95,6 +103,56 @@ def _small(button) -> None:
     button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
     button.style().unpolish(button)
     button.style().polish(button)
+
+
+def hide_count_chips(window) -> None:
+    """The picture count is a typed field. The old chips stay off the row."""
+    for name in _COUNT_CHIPS:
+        widget = window.findChild(QWidget, name)
+        if widget is not None:
+            widget.hide()
+
+
+def ensure_count_field(window) -> None:
+    """A digits-only picture count, from 1 to 99, starting at the preset default."""
+    if getattr(window, "_count_field", None) is not None:
+        return
+    label = window.findChild(QLabel, "preset-count")
+    if label is None or label.parentWidget() is None or label.parentWidget().layout() is None:
+        return
+    current = window.shell.layout.batch_size()
+    if current < COUNT_MIN or current > COUNT_MAX:
+        current = COUNT_MIN
+    field = QLineEdit()
+    field.setObjectName("pictureCount")
+    field.setValidator(QIntValidator(COUNT_MIN, COUNT_MAX, field))
+    field.setMaxLength(len(str(COUNT_MAX)))
+    field.setFixedWidth(72)
+    field.setText(str(current))
+    field.editingFinished.connect(lambda: _commit_count(window, field))
+    layout = label.parentWidget().layout()
+    layout.insertWidget(layout.indexOf(label) + 1, field)
+    window._count_field = field
+    window._count_last = current
+
+
+def _commit_count(window, field: QLineEdit) -> None:
+    raw = field.text().strip()
+    if raw.isdigit():
+        number = int(raw)
+        if COUNT_MIN <= number <= COUNT_MAX:
+            field.setText(str(number))
+            window._count_last = number
+            window.shell.layout.set_value("shell.count", number)
+            hide_count_chips(window)
+            return
+        number = min(COUNT_MAX, max(COUNT_MIN, number))
+        field.setText(str(number))
+        window._count_last = number
+        window.shell.layout.set_value("shell.count", number)
+        hide_count_chips(window)
+        return
+    field.setText(str(window._count_last))
 
 
 def _frames_line(parts) -> QHBoxLayout:

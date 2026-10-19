@@ -122,7 +122,7 @@ def test_discovery_lists_matching_kinds_and_skips_bad_records(tmp_path: Path) ->
     write_lora(tmp_path, "ink-bbbbbbbb", kind="style", adult_content=True, trigger="styletag")
     _person(tmp_path, "ada-cccccccc")
     write_lora(tmp_path, "late-dddddddd", kind="object")
-    write_lora(tmp_path, "base-eeeeeeee", extra={"base": {"mdl_id": "z-image", "revision": "abc"}})
+    write_lora(tmp_path, "base-eeeeeeee", extra={"base": {"mdl_id": "moss-image-base", "revision": "abc"}})
     write_lora(tmp_path, "hash-ffffffff", file_hash="0" * 64)
     write_lora(tmp_path, "size-11111111", file_size=1)
     write_lora(tmp_path, "schema-22222222", extra={"schema": "voxprint-model/2"})

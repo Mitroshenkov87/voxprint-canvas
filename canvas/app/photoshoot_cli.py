@@ -18,17 +18,17 @@ from canvas.models.modes import Mode, Tier
 from canvas.models.registry import load_catalog
 from canvas.pipeline.adult_direction import scenario_system
 from canvas.pipeline.enhance import open_rewriter
-from canvas.pipeline.photoshoot import MAX_FRAMES, SYSTEM_PROMPT, Scenario, assemble_line
+from canvas.pipeline.photoshoot import MAX_FRAMES, SCENARIO_TOKENS, SYSTEM_PROMPT, Scenario, assemble_line
 from canvas.pipeline.series import SeriesFrame, run_series
 from canvas.safety.gate import AgeGate
 from canvas.safety.image import RawImage
 from canvas.safety.inputs import ImageRole, PendingInput
+from canvas.models.user_lora import UserLora
 from canvas.ui.shell_layout import PictureJob
 from canvas.ui.styles import look_for
 
 _LOCALES = Path(__file__).resolve().parents[1] / "ui" / "locales"
 _SCENARIO_STYLES = frozenset({"photo", "cinematic", "portrait"})
-_STRENGTH = 0.45
 
 
 def catalogs() -> None:
@@ -68,7 +68,7 @@ def model_rewrite(tier: Tier, adult: bool) -> Callable[[str], str]:
         rewriter = open_rewriter(
             catalog, tier, models_dir(),
             lambda message: print(message, file=sys.stderr),
-            max_new_tokens=3072,
+            max_new_tokens=SCENARIO_TOKENS,
         )
         try:
             return rewriter.complete(prompt, system=scenario_system(SYSTEM_PROMPT, adult))
@@ -80,7 +80,8 @@ def model_rewrite(tier: Tier, adult: bool) -> Callable[[str], str]:
 
 def model_generate(
     age_gate: AgeGate, tier: Tier, style: str, adult: bool,
-) -> Callable[[str, int, SeriesFrame | None, float], SeriesFrame | None]:
+    lora: UserLora | None = None, lora_scale: float = 0.7,
+) -> Callable[[str, int, SeriesFrame | None, float | None], SeriesFrame | None]:
     """One frame through the same runner the window uses.
 
     Args:
@@ -88,18 +89,23 @@ def model_generate(
         tier: The tier chosen for this machine.
         style: Look id from the app style row.
         adult: Use the Expert adult-content prompt policy.
+        lora: The LoRA for every frame of this series. None uses the base model.
+        lora_scale: Strength for that LoRA.
     """
     runner = ShellRunner(gate=age_gate, tier=tier, enlarge=EnlargeClient())
+    runner.bound_lora = lora
     look = look_for(style)
     policy = adult_prompt_policy(allowed=adult)
 
-    def generate(line: str, seed: int, hero: SeriesFrame | None, strength: float) -> RawImage | None:
+    def generate(line: str, seed: int, hero: SeriesFrame | None, strength: float | None) -> RawImage | None:
         prompt = " ".join(part for part in (policy.template, line.strip(), look.suffix) if part)
         negative = ", ".join(part for part in (look.negative, policy.negatives) if part)
         mode = Mode.TEXT if hero is None else Mode.RESTYLE
         job = PictureJob(
             prompt, negative, mode, "1:1", "native", DEFAULT_FORMAT, seed, 8, 0.0, "euler", 1,
             adult_content=adult,
+            lora_path="" if lora is None else str(lora.weights),
+            lora_weight=lora_scale,
         )
         runner.img2img_strength = None if hero is None else strength
         fresh: tuple[PendingInput, ...] = ()
@@ -122,7 +128,8 @@ def run_command(
     adult: bool,
     age_gate: AgeGate,
     rewrite: Callable[[str], str],
-    generate: Callable[[str, int, SeriesFrame | None, float], SeriesFrame | None],
+    generate: Callable[[str, int, SeriesFrame | None, float | None], SeriesFrame | None],
+    strength: float | None = None,
 ) -> tuple[dict[str, object], int]:
     """Run one series into ``folder`` and describe what was written.
 
@@ -137,6 +144,7 @@ def run_command(
         age_gate: Passed through to the series.
         rewrite: Scenario writer.
         generate: One frame. A stopped frame returns None.
+        strength: Loose style reference. None draws every frame from text.
     """
     catalogs()
     if frames < 1 or frames > MAX_FRAMES:
@@ -157,8 +165,8 @@ def run_command(
         style=scenario_style,
         place_mode=places,
         seed=seed,
-        strength=_STRENGTH,
-        include_camera=lambda: False,
+        strength=strength,
+        include_camera=lambda: True,
         rewrite=rewrite,
         age_gate=age_gate,
         draw_frame=generate,
@@ -176,7 +184,7 @@ def run_command(
             False, error, _series_message(result.code), (), None, frames, 0, (),
             result.code, result.source,
         ), 1
-    lines = [assemble_line(scenario.subject_block, shot, include_camera=False) for shot in scenario.shots]
+    lines = [assemble_line(scenario.subject_block, shot, include_camera=True) for shot in scenario.shots]
     scenario_path = result.folder / "scenario.txt"
     scenario_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     shots = _shot_rows(scenario, statuses, result.kept)

@@ -23,8 +23,8 @@ from canvas.models.registry import load_catalog
 from canvas.models.snapshots import SnapshotError
 from canvas.pipeline.adult_direction import scenario_system
 from canvas.pipeline.enhance import open_rewriter
-from canvas.pipeline.photoshoot import SYSTEM_PROMPT, Scenario
-from canvas.pipeline.series import SeriesFrame, SeriesResult, run_series
+from canvas.pipeline.photoshoot import SCENARIO_TOKENS, SYSTEM_PROMPT, Scenario
+from canvas.pipeline.series import REFERENCE_STRENGTH, SeriesFrame, SeriesResult, run_series
 
 if TYPE_CHECKING:
     from canvas.ui.shell_screen import ShellWindow
@@ -84,10 +84,10 @@ def run_photoshoot(window: ShellWindow) -> None:
             return bar.writer(prompt)
         return _model_reply(window, prompt, adult)
 
-    def generate(line: str, seed: int, hero: SeriesFrame | None, strength: float) -> RawImage | None:
+    def generate(line: str, seed: int, hero: SeriesFrame | None, strength: float | None) -> RawImage | None:
         used = _seed(bar.seed_mode, base_seed, seed)
         prompt = _compose(layout, line, style)
-        # The first kept frame is the init image. Simple mode uses strength 0.45.
+        # High consistency may pass the first kept frame as a loose style reference.
         picture = job._replace(
             prompt=prompt,
             seed=used,
@@ -144,7 +144,7 @@ def run_photoshoot(window: ShellWindow) -> None:
                 place_mode=bar.place,
                 seed=base_seed,
                 strength=_strength(bar.strength),
-                include_camera=lambda: False,
+                include_camera=lambda: True,
                 rewrite=rewrite,
                 age_gate=window.shell.gate.age_gate,
                 draw_frame=generate,
@@ -296,13 +296,11 @@ def _seed(mode: str, base: int, series_seed: int) -> int:
     raise ValueError(mode)
 
 
-def _strength(name: str) -> float:
-    if name == "low":
-        return 0.65
-    if name == "medium":
-        return 0.45
+def _strength(name: str) -> float | None:
+    if name == "low" or name == "medium":
+        return None
     if name == "high":
-        return 0.30
+        return REFERENCE_STRENGTH
     raise ValueError(name)
 
 
@@ -332,7 +330,7 @@ def adult_content(layout: SimpleLayout) -> bool:
 def _model_reply(window: ShellWindow, prompt: str, adult: bool = False) -> str:
     try:
         rewriter = open_rewriter(
-            load_catalog(), window.tier, models_dir(), busy_progress(window), max_new_tokens=3072,
+            load_catalog(), window.tier, models_dir(), busy_progress(window), max_new_tokens=SCENARIO_TOKENS,
         )
     except (SnapshotError, OSError) as exc:
         raise _Halt(str(exc), unavailable=True) from exc

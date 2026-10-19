@@ -259,7 +259,7 @@ The preset rows set the most important values with one click. The highlighted ch
 
 ## Number of pictures
 
-**1**, **2** or **4** pictures per click on **Generate**. With more than one, each picture starts from the next seed, so they differ from one another.
+Type a number from 1 to 99. The field starts at 1. With more than one, each picture starts from the next seed, so they differ. Canvas draws them one at a time and shows the count, for example *3 of 12*. Cancel keeps the pictures already finished.
 
 ## Improve prompt and Revert to my prompt
 
@@ -472,11 +472,11 @@ Choose **4K** in the **Output size** row (or **Exact size: 4K** in Expert mode) 
 
 ![Photoshoot is switched on.](screens/photoshoot-on.png)
 
-Canvas first writes a short scenario: one line per shot, with the subject and the framing. The list appears in the picture area and cannot be edited. Then the shots are drawn one by one; the list shows which shot is being drawn, and the line under it reads the shot number and the total, for example *Shot 2 of 6* when **Frames** is 6. The first finished shot becomes the reference for the others, so the subject stays the same across the series.
+Canvas first writes a short scenario: one line per shot, with the subject and the framing. The list appears in the picture area and cannot be edited. Then the shots are drawn one by one; the list shows which shot is being drawn, and the line under it reads the shot number and the total, for example *Shot 2 of 6* when **Frames** is 6. Each shot is drawn from its own line. The shared description keeps the look consistent.
 
 ![A series in progress.](screens/photoshoot-running.png)
 
-Set **Frames** next to **Photoshoot** before you click **Generate**. A series can have from 1 to 50 shots and starts at 6. The shots stay in one place (**Same place**), with **Seed** set to **In order** and **How close** set to **Usual**. The catalog also names **Place** (**Different places**), **Same seed**, **Random**, **Looser** and **Closer**. Those controls are not on the screen. The shot list cannot be edited.
+Set **Frames** next to **Photoshoot** before you click **Generate**. A series can have from 1 to 99 shots and starts at 6. The shots stay in one place (**Same place**), with **Seed** set to **In order** and **How close** set to **Usual**. The catalog also names **Place** (**Different places**), **Same seed**, **Random**, **Looser** and **Closer**. Those controls are not on the screen. The shot list cannot be edited.
 
 ## Stop a series
 
@@ -498,7 +498,7 @@ The `photoshoot` command writes the same series into a folder you name:
 voxprint-canvas-cli photoshoot --prompt "A yellow kettle with a blue handle" --frames 6 --out ./kettle
 ```
 
-`--frames` sets the number of shots, from 1 to 50. The default is 6. `--style` takes the same style ids as the **Style** row (`photo` by default). `--places` is `same` or `different` (`same` by default). `--seed` starts at 1. Each frame is an AVIF file. The folder also contains `scenario.txt`, with one scenario line per shot. Add `--json` for the frame paths, the path of `scenario.txt`, and how many frames were made of those requested. `scenario_source` is `writer` when the text model wrote every line, `planned` when the lines were built from the idea, and `mixed` for both. `--adult` follows the Expert **Adult content (18+)** switch.
+`--frames` sets the number of shots, from 1 to 99. The default is 6. `--style` takes the same style ids as the **Style** row (`photo` by default). `--places` is `same` or `different` (`same` by default). `--seed` starts at 1. Each frame is an AVIF file. The folder also contains `scenario.txt`, with one scenario line per shot. Add `--json` for the frame paths, the path of `scenario.txt`, and how many frames were made of those requested. `scenario_source` is `writer` when the text model wrote every line, `planned` when the lines were built from the idea, and `mixed` for both. `--adult` follows the Expert **Adult content (18+)** switch.
 
 # LoRAs from Model Forge
 
@@ -523,7 +523,7 @@ The folder name is the add-on's id. Model Forge writes each add-on into that fol
 
 To use another models folder, set `VOXPRINT_MODELS_DIR` to an absolute path, or set `models_dir` to an absolute path in the suite settings file (`suite.json`, see chapter 2). `VOXPRINT_MODELS_DIR` wins when both are set. Canvas does not name a Model Forge screen or button for this export.
 
-Only add-ons made for Z-Image-Turbo are listed.
+Add-ons trained for Z-Image or Z-Image-Turbo are listed.
 
 ## Choose an add-on
 
@@ -547,6 +547,17 @@ When the selected add-on has a trigger word, a chip with that word appears next 
 Example with a style add-on whose trigger word is `inkwash`: *a lighthouse on a rocky coast at dusk, inkwash*.
 
 To stop using the add-on, open **More → Add-ons**, choose **None** and click **Save**.
+
+## From the command line
+
+`generate` and `photoshoot` each take one `--lora` path. Use the `.safetensors` file Model Forge writes, by default `project/export/<id>.safetensors`, or an add-on folder under the shared models folder. `--lora-scale` sets the strength from 0 to 2. The default is 0.7. With `--json`, the result includes the LoRA name, the scale, and the trigger word. The trigger word is the same one the chip inserts. The command does not write it into the prompt on its own.
+
+```text
+voxprint-canvas-cli generate --prompt "A yellow kettle with a blue handle" --out picture.avif --lora project/export/<id>.safetensors --lora-scale 0.7 --json
+voxprint-canvas-cli photoshoot --prompt "A yellow kettle with a blue handle" --frames 6 --out ./kettle --lora project/export/<id>.safetensors --lora-scale 0.7 --json
+```
+
+The same LoRA stays on for every frame of the series and is released when the run ends. A file that cannot be read reports `lora.invalid`. A file for another base reports `lora.base_mismatch`. A scale outside 0 to 2 reports `lora.scale`. Those messages are English.
 
 # Where files are saved
 

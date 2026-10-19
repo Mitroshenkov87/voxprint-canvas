@@ -263,18 +263,21 @@ def applied_strength(requested: float | None) -> float:
     """Img2img strength. None keeps the restyle default of 0.6.
 
     Args:
-        requested: A Photoshoot strength, or None for the existing restyle path.
+        requested: A series style-reference strength, or None for the restyle path.
 
     Raises:
-        ValueError: The value is not between 0 and 1.
+        ValueError: The value is not a series strength.
     """
+    # series imports pipeline_scope from this module.
+    from canvas.pipeline.series import REFERENCE_MIN
+
     if requested is None:
         return 0.6
     if isinstance(requested, bool) or not isinstance(requested, (int, float)):
         raise ValueError("strength must be a number")
     value = float(requested)
-    if not 0.0 < value <= 1.0:
-        raise ValueError("strength must be between 0 and 1")
+    if value < REFERENCE_MIN or value > 1.0:
+        raise ValueError("strength must be at least 0.75 and at most 1")
     return value
 
 

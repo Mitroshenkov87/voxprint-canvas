@@ -16,7 +16,7 @@ from canvas.ui.shell_screen import ShellWindow
 from canvas.models.plan import PIPELINE_IMG2IMG, PIPELINE_TEXT, CallPlan
 from canvas.models.snapshots import SnapshotError
 from canvas.pipeline.enhance import QwenRewriter
-from canvas.pipeline.series import run_series
+from canvas.pipeline.series import REFERENCE_MIN, REFERENCE_STRENGTH, run_series
 from canvas.safety.image import RawImage
 from canvas.safety.inputs import ImageRole, PendingInput
 from tests.fakes import World
@@ -99,10 +99,19 @@ def _render(gate, folder: Path, line: str, hero: RawImage | None, tier: Tier = T
         raw = RawImage(hero.width, hero.height, hero.to_bytes())
         screened = gate.release_request(line, "restyle", (PendingInput(ImageRole.INIT, raw),))
         pipeline = PIPELINE_IMG2IMG
-        strength = 0.45
+        strength = None
     return runtime.render(
         _plan(pipeline), folder, screened, 32, 32, tier, seed=1, strength=strength,
     )
+
+
+def test_series_strength_stays_at_least_the_reference_floor() -> None:
+    assert REFERENCE_STRENGTH >= REFERENCE_MIN
+    assert runtime.applied_strength(None) == 0.6
+    assert runtime.applied_strength(REFERENCE_STRENGTH) == REFERENCE_STRENGTH
+    assert runtime.applied_strength(REFERENCE_MIN) == REFERENCE_MIN
+    with pytest.raises(ValueError):
+        runtime.applied_strength(0.45)
 
 
 def test_a_ten_frame_series_loads_the_pipeline_once(tmp_path: Path, monkeypatch) -> None:
@@ -120,8 +129,8 @@ def test_a_ten_frame_series_loads_the_pipeline_once(tmp_path: Path, monkeypatch)
         style="photo",
         place_mode="same",
         seed=3,
-        strength=0.45,
-        include_camera=lambda: False,
+        strength=None,
+        include_camera=lambda: True,
         rewrite=lambda _prompt: _payload(IDEA, 10),
         age_gate=gate,
         draw_frame=draw,

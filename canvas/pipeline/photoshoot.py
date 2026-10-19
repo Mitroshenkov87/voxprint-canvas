@@ -51,6 +51,7 @@ Example for count 2 and place_mode "same":
 
 _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
 FORMAT_REMINDER = "Reply with only the numbered lines: N. scene | pose | camera | place"
+_CAMERA = re.compile(r"\b(?:\d+\s*mm|lens|angle|eye level|overhead|close focus)\b", re.IGNORECASE)
 _LINE = re.compile(r"^\s*(?:[-*>#]+\s*)?(?:\*\*)?(?:shot|frame|кадр)?\s*(\d{1,2})\s*[.):\]-]\s*(?:\*\*)?\s*(.+?)\s*$", re.IGNORECASE)
 _DECLINE_LIMIT = 400
 _DECLINE = re.compile(
@@ -346,7 +347,7 @@ def accept_shot(
     else:
         assert_never(mode)
     shot = Shot(draft.scene.strip(), draft.pose.strip(), draft.camera.strip(), where)
-    if not shot.scene or not shot.pose or not shot.camera:
+    if not shot.scene:
         return None
     if _key(shot.scene) in {_key(item.scene) for item in taken}:
         return None
@@ -453,8 +454,10 @@ def _line_drafts(raw: str) -> tuple[Draft, ...]:
         if number in seen or len(parts) < 3:
             continue
         seen.add(number)
-        if len(parts) == 3:
+        if len(parts) == 3 and _CAMERA.search(parts[2]):
             found.append(Draft(parts[0], parts[1], parts[2], ""))
+        elif len(parts) == 3:
+            found.append(Draft(parts[0], "", parts[1], parts[2]))
         else:
             found.append(Draft(parts[0], parts[1], ", ".join(parts[2:-1]), parts[-1]))
     return tuple(found)

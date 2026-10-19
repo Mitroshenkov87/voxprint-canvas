@@ -596,3 +596,19 @@ def test_the_retry_is_sent_only_when_no_line_can_be_read(tmp_path: Path) -> None
     assert result.source == "planned"
     assert len(calls) == 2
     assert calls[1] == f"{calls[0]}\n{FORMAT_REMINDER}"
+
+
+def test_a_three_part_line_is_read_by_its_last_part(tmp_path: Path) -> None:
+    def rewrite(prompt: str) -> str:
+        count = int(json.loads(prompt)["count"])
+        start = len(json.loads(prompt).get("previous", []))
+        return "\n".join(f"{index + 1}. view {start + index}, seated | 50 mm lens, eye level | room {start + index}"
+                         for index in range(count))
+
+    result = _run(tmp_path, place_mode="different", rewrite=rewrite)
+    document = json.loads((tmp_path / "series.json").read_text(encoding="utf-8"))
+    assert result.source == "writer"
+    assert len({line.split(", ")[1] for line in document["lines"]}) == 6
+    still = _run(tmp_path / "same", rewrite=lambda _prompt: "\n".join(
+        f"{index + 1}. view {index} | still | 85 mm lens" for index in range(6)))
+    assert still.source == "writer"

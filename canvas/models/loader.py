@@ -142,6 +142,7 @@ class ZImageGenerator:
         self.models: Path | None = None
         self.lora_path = ""
         self.lora_strength = 0.7
+        self.bound_lora: UserLora | None = None
 
     def attach_probe(self, probe: PeakVramProbe | None) -> None:
         """Stage marks land on this probe. The pipeline calls it before ``generate``."""
@@ -194,6 +195,8 @@ class ZImageGenerator:
 
     def _selected_lora(self) -> tuple[UserLora | None, float | None]:
         """The listed LoRA for the expert field, and the strength to apply."""
+        if self.bound_lora is not None:
+            return self.bound_lora, self.lora_strength
         if not self.lora_path:
             return None, None
         selected = resolve_selected(self.lora_path, self.models)

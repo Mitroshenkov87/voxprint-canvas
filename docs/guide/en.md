@@ -523,7 +523,7 @@ The folder name is the add-on's id. Model Forge writes each add-on into that fol
 
 To use another models folder, set `VOXPRINT_MODELS_DIR` to an absolute path, or set `models_dir` to an absolute path in the suite settings file (`suite.json`, see chapter 2). `VOXPRINT_MODELS_DIR` wins when both are set. Canvas does not name a Model Forge screen or button for this export.
 
-Only add-ons made for Z-Image-Turbo are listed.
+Add-ons trained for Z-Image or Z-Image-Turbo are listed.
 
 ## Choose an add-on
 
@@ -547,6 +547,17 @@ When the selected add-on has a trigger word, a chip with that word appears next 
 Example with a style add-on whose trigger word is `inkwash`: *a lighthouse on a rocky coast at dusk, inkwash*.
 
 To stop using the add-on, open **More → Add-ons**, choose **None** and click **Save**.
+
+## From the command line
+
+`generate` and `photoshoot` each take one `--lora` path. Use the `.safetensors` file Model Forge writes, by default `project/export/<id>.safetensors`, or an add-on folder under the shared models folder. `--lora-scale` sets the strength from 0 to 2. The default is 0.7. With `--json`, the result includes the LoRA name, the scale, and the trigger word. The trigger word is the same one the chip inserts. The command does not write it into the prompt on its own.
+
+```text
+voxprint-canvas-cli generate --prompt "A yellow kettle with a blue handle" --out picture.avif --lora project/export/<id>.safetensors --lora-scale 0.7 --json
+voxprint-canvas-cli photoshoot --prompt "A yellow kettle with a blue handle" --frames 6 --out ./kettle --lora project/export/<id>.safetensors --lora-scale 0.7 --json
+```
+
+The same LoRA stays on for every frame of the series and is released when the run ends. A file that cannot be read reports `lora.invalid`. A file for another base reports `lora.base_mismatch`. A scale outside 0 to 2 reports `lora.scale`. Those messages are English.
 
 # Where files are saved
 

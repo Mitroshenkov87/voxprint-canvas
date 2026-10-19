@@ -7,7 +7,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+import tempfile
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from canvas.infra.paths import models_dir
@@ -15,13 +16,31 @@ from canvas.models.registry import load_catalog
 
 SCHEMA = "voxprint-model/1"
 ZIMAGE_TURBO_MDL_ID = "z-image-turbo"
+FORGE_BASE_ID = "z-image"
+CLI_DEFAULT_STRENGTH = 0.7
+CLI_STRENGTH_RANGE = (0.0, 2.0)
+CODE_BASE_MISMATCH = "lora.base_mismatch"
+CODE_INVALID = "lora.invalid"
+CODE_SCALE = "lora.scale"
 _KINDS = frozenset({"person", "object", "style"})
 _ADAPTER = "canvas-lora"
+_A_WEIGHT = ".lora_A.weight"
+_B_WEIGHT = ".lora_B.weight"
 _HEADER_TRIGGER = "voxprint.subject.trigger"
 _HEADER_KIND = "voxprint.lora.kind"
+_HEADER_BASE = "voxprint.lora.base"
 _HEADER_CONSENT = "voxprint.subject.consent_obtained"
 _HEADER_CONFIRMED = "voxprint.subject.adult_confirmed"
 _ADULT_LABEL = "voxprint.lora.adult_content"
+_HEADER_KEYS = (
+    _HEADER_TRIGGER,
+    _HEADER_KIND,
+    _HEADER_BASE,
+    _HEADER_CONSENT,
+    _HEADER_CONFIRMED,
+    _ADULT_LABEL,
+)
+_SIDECAR = "voxprint-model.json"
 
 REASON_RECORD = "canvas.addons.reason.record"
 REASON_SCHEMA = "canvas.addons.reason.schema"
@@ -61,6 +80,14 @@ class LoraIndex:
 
     available: tuple[UserLora, ...]
     skipped: tuple[SkippedLora, ...]
+
+
+class LoraRejected(Exception):
+    """A LoRA file cannot be loaded. ``code`` is a stable catalog key."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
 
 
 def discover(root: Path | None = None) -> LoraIndex:
@@ -115,7 +142,8 @@ def inspect_folder(folder: Path, *, expected_base: str | None = None) -> tuple[U
     if not _inside(folder, weights) or not _inside(folder, folder / "LICENSE") or not _inside(folder, folder / "NOTICE"):
         return None, REASON_INCOMPLETE
     base = document.get("base")
-    if not isinstance(base, dict) or str(base.get("mdl_id") or "") != expected_base or not expected_base:
+    mdl_id = str(base.get("mdl_id") or "") if isinstance(base, dict) else ""
+    if not isinstance(base, dict) or not base_matches(mdl_id, expected_base):
         return None, REASON_BASE
     file_reason = _file_reason(document, weights)
     if file_reason is not None:
@@ -136,6 +164,9 @@ def inspect_folder(folder: Path, *, expected_base: str | None = None) -> tuple[U
     header_kind = header.get(_HEADER_KIND)
     if header_kind is not None and header_kind != kind:
         return None, REASON_RECORD
+    header_base = header.get(_HEADER_BASE)
+    if header_base is not None and not base_matches(header_base, expected_base):
+        return None, REASON_BASE
     if kind == "person" and not _person_flags(header):
         return None, REASON_PERSON
     licence = document.get("licence")
@@ -166,10 +197,135 @@ def resolve_selected(path: str | Path, root: Path | None = None) -> UserLora | N
     candidate = Path(text)
     if not candidate.is_absolute():
         candidate = _lora_root(root) / text
+    if candidate.is_file() and candidate.suffix == ".safetensors":
+        found, _reason = inspect_folder(candidate.parent)
+        if found is not None and _same_file(found.weights, candidate):
+            return found
+        try:
+            return open_weights(candidate)
+        except LoraRejected:
+            return None
     if candidate.is_file():
         candidate = candidate.parent
     found, _reason = inspect_folder(candidate)
     return found
+
+
+def base_matches(mdl_id: str, expected: str | None = None) -> bool:
+    """True when ``mdl_id`` is the base this app runs.
+
+    Model Forge records a Z-Image LoRA as ``z-image``. That id matches the
+    Z-Image-Turbo base this app runs.
+
+    Args:
+        mdl_id: ``base.mdl_id`` or the ``voxprint.lora.base`` header value.
+        expected: Base id to accept. The running base is used when omitted.
+    """
+    if expected is None:
+        expected = running_base_id()
+    if not expected or not mdl_id:
+        return False
+    if mdl_id == expected:
+        return True
+    return expected == ZIMAGE_TURBO_MDL_ID and mdl_id == FORGE_BASE_ID
+
+
+def cli_scale(value: object) -> float:
+    """Command-line LoRA strength. Values stay inside 0..2.
+
+    Args:
+        value: The ``--lora-scale`` number.
+
+    Raises:
+        LoraRejected: The value is outside 0..2. ``code`` is ``lora.scale``.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise LoraRejected(CODE_SCALE)
+    scale = float(value)
+    if scale < 0 or scale > 2:
+        raise LoraRejected(CODE_SCALE)
+    return scale
+
+
+def prepare_cli_lora(path: str | Path) -> UserLora:
+    """Open one LoRA for a command. Strength stays inside 0..2.
+
+    Args:
+        path: A ``.safetensors`` file or an add-on folder.
+
+    Raises:
+        LoraRejected: The file is unreadable or its base does not match.
+    """
+    candidate = Path(path)
+    if candidate.is_dir():
+        found, reason = inspect_folder(candidate)
+        if found is None:
+            if reason == REASON_BASE:
+                raise LoraRejected(CODE_BASE_MISMATCH)
+            raise LoraRejected(CODE_INVALID)
+        weights = _loader_weights(found.weights)
+        return replace(
+            found,
+            weights=weights,
+            default_strength=CLI_DEFAULT_STRENGTH,
+            strength_range=CLI_STRENGTH_RANGE,
+        )
+    if not candidate.is_file():
+        raise LoraRejected(CODE_INVALID)
+    opened = open_weights(candidate)
+    return replace(
+        opened,
+        default_strength=CLI_DEFAULT_STRENGTH,
+        strength_range=CLI_STRENGTH_RANGE,
+    )
+
+
+def open_weights(path: Path) -> UserLora:
+    """Read one Forge ``.safetensors`` file and the sidecar beside it, when present.
+
+    Args:
+        path: The weight file. The default Forge path is ``project/export/<id>.safetensors``.
+
+    Raises:
+        LoraRejected: The file is unreadable or its base does not match.
+    """
+    meta, weights = _opened_weights(path)
+    base = meta.get(_HEADER_BASE, "")
+    if not base:
+        raise LoraRejected(CODE_INVALID)
+    if not base_matches(base):
+        raise LoraRejected(CODE_BASE_MISMATCH)
+    sidecar = _matching_sidecar(path)
+    kind = meta.get(_HEADER_KIND, "")
+    lora_id = path.stem
+    default_strength = CLI_DEFAULT_STRENGTH
+    low, high = CLI_STRENGTH_RANGE
+    adult = meta.get(_ADULT_LABEL) == "true"
+    if sidecar is not None:
+        kind = str(sidecar.get("kind") or kind)
+        recorded = sidecar.get("id")
+        if isinstance(recorded, str) and recorded.strip() and not _bad_id(recorded):
+            lora_id = recorded
+        strength = _strength(sidecar)
+        if strength is None:
+            raise LoraRejected(CODE_INVALID)
+        default_strength, low, high = strength
+        labelled = _adult_label(sidecar)
+        if labelled is None:
+            raise LoraRejected(CODE_INVALID)
+        adult = labelled
+    if kind not in _KINDS or _bad_id(lora_id):
+        raise LoraRejected(CODE_INVALID)
+    return UserLora(
+        lora_id,
+        kind,
+        path.parent,
+        weights,
+        meta.get(_HEADER_TRIGGER, ""),
+        default_strength,
+        (low, high),
+        adult,
+    )
 
 
 def running_base_id() -> str:
@@ -333,6 +489,65 @@ def _person_flags(header: dict[str, str]) -> bool:
 
 
 def _header(path: Path) -> dict[str, str] | None:
+    opened = _safetensors(path)
+    if opened is None:
+        return None
+    raw = opened[0].get("__metadata__") or {}
+    if not isinstance(raw, dict):
+        return None
+    picked: dict[str, str] = {}
+    for key in _HEADER_KEYS:
+        value = raw.get(key)
+        if isinstance(value, str):
+            picked[key] = value
+    return picked
+
+
+def _opened_weights(path: Path) -> tuple[dict[str, str], Path]:
+    """Header strings and the file the loader should open."""
+    opened = _safetensors(path)
+    if opened is None:
+        raise LoraRejected(CODE_INVALID)
+    header, blob = opened
+    raw = header.get("__metadata__") or {}
+    if not isinstance(raw, dict):
+        raise LoraRejected(CODE_INVALID)
+    meta = {str(key): value for key, value in raw.items() if isinstance(key, str) and isinstance(value, str)}
+    names = [str(key) for key in header if key != "__metadata__" and isinstance(key, str)]
+    renamed = {name: _peft_key(name) for name in names}
+    if len(set(renamed.values())) != len(renamed) or not _paired(list(renamed.values())):
+        raise LoraRejected(CODE_INVALID)
+    if not _offsets_fit(header, blob):
+        raise LoraRejected(CODE_INVALID)
+    if list(renamed.values()) == names:
+        return meta, path
+    return meta, _write_renamed(path, header, blob, renamed)
+
+
+def _matching_sidecar(path: Path) -> dict[str, object] | None:
+    """The sidecar that names this file, or None when that file is absent or names another."""
+    sidecar = path.parent / _SIDECAR
+    if not sidecar.is_file():
+        return None
+    document = _document(sidecar)
+    if document is None:
+        raise LoraRejected(CODE_INVALID)
+    if document.get("file") != path.name:
+        return None
+    if _schema_reason(document) is not None or document.get("type") != "lora":
+        raise LoraRejected(CODE_INVALID)
+    if _file_reason(document, path) is not None:
+        raise LoraRejected(CODE_INVALID)
+    base = document.get("base")
+    mdl_id = str(base.get("mdl_id") or "") if isinstance(base, dict) else ""
+    if not isinstance(base, dict) or not mdl_id:
+        raise LoraRejected(CODE_INVALID)
+    if not base_matches(mdl_id):
+        raise LoraRejected(CODE_BASE_MISMATCH)
+    return document
+
+
+def _safetensors(path: Path) -> tuple[dict[str, object], bytes] | None:
     try:
         data = path.read_bytes()
     except OSError:
@@ -348,15 +563,69 @@ def _header(path: Path) -> dict[str, str] | None:
         return None
     if not isinstance(loaded, dict):
         return None
-    raw = loaded.get("__metadata__") or {}
-    if not isinstance(raw, dict):
-        return None
-    picked: dict[str, str] = {}
-    for key in (_HEADER_TRIGGER, _HEADER_KIND, _HEADER_CONSENT, _HEADER_CONFIRMED):
-        value = raw.get(key)
-        if isinstance(value, str):
-            picked[key] = value
-    return picked
+    return loaded, data[8 + size:]
+
+
+def _peft_key(key: str) -> str:
+    """A transformer-relative ``lora_A`` / ``lora_B`` name."""
+    name = key
+    for prefix in ("transformer.", "diffusion_model."):
+        if name.startswith(prefix):
+            name = name[len(prefix):]
+    return name.replace(".lora_down.weight", _A_WEIGHT).replace(".lora_up.weight", _B_WEIGHT)
+
+
+def _paired(keys: list[str]) -> bool:
+    if not keys or any(not key.endswith((_A_WEIGHT, _B_WEIGHT)) for key in keys):
+        return False
+    stems_a = {key[: -len(_A_WEIGHT)] for key in keys if key.endswith(_A_WEIGHT)}
+    stems_b = {key[: -len(_B_WEIGHT)] for key in keys if key.endswith(_B_WEIGHT)}
+    return bool(stems_a) and stems_a == stems_b
+
+
+def _offsets_fit(header: dict[str, object], blob: bytes) -> bool:
+    for key, value in header.items():
+        if key == "__metadata__":
+            continue
+        if not isinstance(value, dict):
+            return False
+        offsets = value.get("data_offsets")
+        if not isinstance(offsets, list) or len(offsets) != 2:
+            return False
+        start, stop = offsets
+        if isinstance(start, bool) or isinstance(stop, bool):
+            return False
+        if not isinstance(start, int) or not isinstance(stop, int):
+            return False
+        if start < 0 or stop < start or stop > len(blob):
+            return False
+    return True
+
+
+def _write_renamed(path: Path, header: dict[str, object], blob: bytes, renamed: dict[str, str]) -> Path:
+    new_header: dict[str, object] = {}
+    for key, value in header.items():
+        if key == "__metadata__":
+            new_header[key] = value
+        else:
+            new_header[renamed[str(key)]] = value
+    payload = json.dumps(new_header, separators=(",", ":")).encode("utf-8")
+    target = Path(tempfile.gettempdir()) / "canvas-lora" / _sha256(path)[:16] / path.name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(len(payload).to_bytes(8, "little") + payload + blob)
+    return target
+
+
+def _loader_weights(path: Path) -> Path:
+    _meta, weights = _opened_weights(path)
+    return weights
+
+
+def _same_file(left: Path, right: Path) -> bool:
+    try:
+        return left.resolve() == right.resolve()
+    except OSError:
+        return False
 
 
 def _sha256(path: Path) -> str:

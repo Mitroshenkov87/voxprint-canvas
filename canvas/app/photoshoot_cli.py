@@ -23,6 +23,7 @@ from canvas.pipeline.series import SeriesFrame, run_series
 from canvas.safety.gate import AgeGate
 from canvas.safety.image import RawImage
 from canvas.safety.inputs import ImageRole, PendingInput
+from canvas.models.user_lora import UserLora
 from canvas.ui.shell_layout import PictureJob
 from canvas.ui.styles import look_for
 
@@ -79,6 +80,7 @@ def model_rewrite(tier: Tier, adult: bool) -> Callable[[str], str]:
 
 def model_generate(
     age_gate: AgeGate, tier: Tier, style: str, adult: bool,
+    lora: UserLora | None = None, lora_scale: float = 0.7,
 ) -> Callable[[str, int, SeriesFrame | None, float | None], SeriesFrame | None]:
     """One frame through the same runner the window uses.
 
@@ -87,8 +89,11 @@ def model_generate(
         tier: The tier chosen for this machine.
         style: Look id from the app style row.
         adult: Use the Expert adult-content prompt policy.
+        lora: The LoRA for every frame of this series. None uses the base model.
+        lora_scale: Strength for that LoRA.
     """
     runner = ShellRunner(gate=age_gate, tier=tier, enlarge=EnlargeClient())
+    runner.bound_lora = lora
     look = look_for(style)
     policy = adult_prompt_policy(allowed=adult)
 
@@ -99,6 +104,8 @@ def model_generate(
         job = PictureJob(
             prompt, negative, mode, "1:1", "native", DEFAULT_FORMAT, seed, 8, 0.0, "euler", 1,
             adult_content=adult,
+            lora_path="" if lora is None else str(lora.weights),
+            lora_weight=lora_scale,
         )
         runner.img2img_strength = None if hero is None else strength
         fresh: tuple[PendingInput, ...] = ()

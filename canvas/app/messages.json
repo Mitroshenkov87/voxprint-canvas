@@ -616,6 +616,18 @@
       "en": "The preview file does not match its record.",
       "ru": "Файл предпросмотра не совпадает с записью."
     },
+    "lora.base_mismatch": {
+      "en": "This LoRA is for a different base model.",
+      "ru": "Эта LoRA для другой базовой модели."
+    },
+    "lora.invalid": {
+      "en": "This LoRA file cannot be read.",
+      "ru": "Этот файл LoRA не читается."
+    },
+    "lora.scale": {
+      "en": "LoRA scale must be from 0 to 2.",
+      "ru": "Сила LoRA должна быть от 0 до 2."
+    },
     "canvas.check.title": {
       "en": "Check this PC",
       "ru": "Проверить компьютер"

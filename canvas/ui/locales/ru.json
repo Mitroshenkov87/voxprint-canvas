@@ -153,5 +153,8 @@
   "photoshoot.expert.strength.medium": "Обычно",
   "photoshoot.expert.strength.high": "Ближе",
   "photoshoot.expert.aspect": "Формат кадра",
-  "photoshoot.expert.style_override": "Свой стиль кадра"
+  "photoshoot.expert.style_override": "Свой стиль кадра",
+  "lora.base_mismatch": "Эта LoRA для другой базовой модели.",
+  "lora.invalid": "Этот файл LoRA не читается.",
+  "lora.scale": "Сила LoRA должна быть от 0 до 2."
 }

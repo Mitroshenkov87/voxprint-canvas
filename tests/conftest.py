@@ -4,7 +4,6 @@ import os
 import pytest
 
 from canvas.infra.vram import set_vram_cap_gb
-from canvas.models.runtime import reset_pipeline_cache
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -17,9 +16,26 @@ def _clear_vram_cap():
     set_vram_cap_gb(None)
 
 
+def _pipeline_reset():
+    """Load the pipeline reset.
+
+    Imported inside the function because the PDF guide job loads this file
+    without the runtime dependencies.
+    """
+    try:
+        from canvas.models.runtime import reset_pipeline_cache
+    except ImportError:
+        return None
+    return reset_pipeline_cache
+
+
 @pytest.fixture(autouse=True)
 def _reset_pipeline_cache():
     """Drop a pipeline left open by a window or a parked run."""
-    reset_pipeline_cache()
+    reset = _pipeline_reset()
+    if reset is not None:
+        reset()
     yield
-    reset_pipeline_cache()
+    reset = _pipeline_reset()
+    if reset is not None:
+        reset()

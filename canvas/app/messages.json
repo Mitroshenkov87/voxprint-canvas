@@ -791,6 +791,10 @@
     "canvas.output_size.4k": {
       "en": "4K",
       "ru": "4K"
+    },
+    "writer.download": {
+      "en": "Downloading the text model",
+      "ru": "Загрузка текстовой модели"
     }
   }
 }

@@ -162,6 +162,25 @@ def test_adult_flag_reaches_run_series_and_scenario_system(monkeypatch, tmp_path
     assert (ADULT_ANCHOR in system) is adult
 
 
+def test_json_reports_the_reason_code(tmp_path: Path) -> None:
+    payload, code = run_command(
+        idea=IDEA,
+        folder=tmp_path,
+        frames=1,
+        seed=1,
+        style="photo",
+        places="same",
+        adult=False,
+        age_gate=World().gate(),
+        rewrite=lambda _prompt: "Sorry, I cannot write that.",
+        generate=lambda *_args: _frame(),
+    )
+    assert code == 1
+    assert payload["error"] == "scenario"
+    assert payload["code"] == "scenario.declined"
+    assert payload["message"] == "The scenario was not written."
+
+
 def test_run_command_uses_the_injected_writer(tmp_path: Path) -> None:
     calls: list[bool] = []
 

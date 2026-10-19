@@ -10,7 +10,7 @@ A rewrite that drops or changes a stated age is discarded. The field keeps the t
 
 The same content check runs on the original prompt and on the rewrite. If either one is refused, nothing is generated.
 
-The rewriter is the Qwen3-4B text encoder that already ships inside Z-Image-Turbo. Those weights are a causal language model with tied input and output embeddings, so there is no second download and no separate language-model pack. The encoder is loaded for the rewrite and unloaded before the picture is generated. On a 16 GB card that leaves the GPU free for the diffusion pipeline.
+The scenario writer is a separate text model of about 8 GB. It is downloaded the first time a scenario or an improved prompt needs it, then unloaded before the picture is generated. The Z-Image text encoder stays the picture model's encoder. On a 16 GB card the writer is gone before diffusion starts.
 
 From the command line:
 

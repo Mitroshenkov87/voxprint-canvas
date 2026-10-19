@@ -5,6 +5,7 @@ rent a GPU and it does not fill in a duration that was not measured.
 """
 from __future__ import annotations
 
+import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -70,7 +71,7 @@ def measure_series(
 
 
 def live_rewrite(tier: Tier) -> Callable[[str], str]:
-    """The local Qwen3-4B scenario writer. The model stays closed between calls.
+    """The local scenario writer. The model stays closed between calls.
 
     Args:
         tier: The tier chosen for this machine.
@@ -78,7 +79,11 @@ def live_rewrite(tier: Tier) -> Callable[[str], str]:
     catalog = load_catalog()
 
     def rewrite(prompt: str) -> str:
-        rewriter = open_rewriter(catalog, tier, models_dir(), max_new_tokens=3072)
+        rewriter = open_rewriter(
+            catalog, tier, models_dir(),
+            lambda message: print(message, file=sys.stderr),
+            max_new_tokens=3072,
+        )
         try:
             return rewriter.complete(prompt, system=SYSTEM_PROMPT)
         finally:

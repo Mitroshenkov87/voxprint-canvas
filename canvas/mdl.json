@@ -134,6 +134,17 @@
       "display_name": "z-image-turbo-svdquant-int4-r256",
       "on_demand": true,
       "optional": true
+    },
+    {
+      "id": "qwen3-4b-writer",
+      "version": "placeholder",
+      "vram_tier": "any",
+      "status": "unavailable",
+      "reason": "placeholder",
+      "files": [],
+      "display_name": "qwen3-4b-writer",
+      "on_demand": true,
+      "optional": true
     }
   ]
 }

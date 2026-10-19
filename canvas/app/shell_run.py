@@ -1,6 +1,7 @@
 """Run one shell job through the existing pipeline and the same content gate."""
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 from PIL import Image
@@ -113,7 +114,14 @@ class ShellRunner:
             release(lock_path())
 
 
-def improve_prompt(*, gate: AgeGate, prompt: str, tier: Tier, adult: bool = False) -> str:
+def improve_prompt(
+    *,
+    gate: AgeGate,
+    prompt: str,
+    tier: Tier,
+    adult: bool = False,
+    progress: Callable[[str], None] | None = None,
+) -> str:
     """Rewrite ``prompt`` with the same gate. Missing models leave the words as they are.
 
     Args:
@@ -128,7 +136,7 @@ def improve_prompt(*, gate: AgeGate, prompt: str, tier: Tier, adult: bool = Fals
     if not selectable():
         return prompt
     catalog = load_catalog()
-    rewriter = open_rewriter(catalog, tier, models_dir(), _silent)
+    rewriter = open_rewriter(catalog, tier, models_dir(), progress or _silent)
     if adult:
         rewritten = improve_adult(rewriter, prompt, ENHANCE_SYSTEM)
     else:

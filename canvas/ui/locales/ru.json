@@ -156,5 +156,10 @@
   "photoshoot.expert.style_override": "Свой стиль кадра",
   "lora.base_mismatch": "Эта LoRA для другой базовой модели.",
   "lora.invalid": "Этот файл LoRA не читается.",
-  "lora.scale": "Сила LoRA должна быть от 0 до 2."
+  "lora.scale": "Сила LoRA должна быть от 0 до 2.",
+  "canvas.proportions": "Пропорции",
+  "canvas.image_size": "Размер изображения",
+  "simple.size": "Пропорции",
+  "simple.output": "Размер изображения",
+  "setting.shell.output": "Размер изображения"
 }

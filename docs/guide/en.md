@@ -168,8 +168,8 @@ From top to bottom:
 | Area | What it holds |
 |---|---|
 | Top bar | **Use a picture** (and **Edit the mask** once a picture is chosen) on the left; **More** and **Expert mode** on the right |
-| Prompt row | The description field (**Describe the picture**), **Improve prompt**, **Photoshoot**, **Revert to my prompt** and **Generate** |
-| Preset rows | **Quality**, **Style**, **Size**, **Output size** and **Number of pictures** |
+| Action row | The description field (**Describe the picture**), then **Improve prompt** (with the ↶ back segment after a rewrite), **Photoshoot**, **Proportions**, **Image size** and **Generate** |
+| Preset rows | **Quality**, **Style** and **Number of pictures** |
 | Picture area | The finished picture, or *The picture will show up here.* while it is empty; the progress while a picture is being made |
 | Action bar | Under a finished picture: **More like this**, **Save**, **Open folder**, **Use prompt again**, **Use as input picture**, **Delete** |
 | History strip | Small previews of your earlier pictures |
@@ -202,7 +202,7 @@ Every finished picture is added to the strip under the picture area. Click a pre
     > A red bicycle leaning against a brick wall on a quiet street, morning sun, soft shadows
 
 2. Leave **Quality** on **Balanced** and **Style** on **Photo** for now.
-3. Choose the shape under **Size**: **Landscape**, **Square** or **Portrait**.
+3. Choose the shape in the **Proportions** menu: a **Landscape**, **Square** or **Portrait** ratio.
 4. Click **Generate**.
 
 ![A description in the prompt field, ready to generate.](screens/first-image-prompt.png)
@@ -247,23 +247,23 @@ The preset rows set the most important values with one click. The highlighted ch
 
 **Style** adds a look to your description: **Photo**, **Cinematic**, **Portrait**, **Illustration**, **Anime**, **3D render**, **Painting** or **Sketch**. You don't need to write the style into the description yourself.
 
-## Size
+## Proportions
 
-**Landscape**, **Square** and **Portrait** choose the orientation. The list next to them chooses the exact aspect ratio within that orientation (chapter 8).
+The **Proportions** button opens one list of aspect ratios grouped by orientation: **Landscape** (16:9, 21:9, 3:2, 4:3), **Square** (1:1) and **Portrait** (9:16, 2:3, 3:4) (chapter 8).
 
-![The aspect ratio list for Landscape.](screens/size-ratio-menu.png)
+![The Proportions list.](screens/size-ratio-menu.png)
 
-## Output size
+## Image size
 
-**Standard** is the normal size of the model. **4K** makes a picture whose long side is 3840 pixels, using VOXPrint Enlarge. Until Enlarge is installed, the chip reads **4K (needs Enlarge)** (chapter 10).
+The **Image size** button, to the right of **Proportions**, offers **Standard** and **4K**. **Standard** is the normal size of the model. **4K** makes a picture whose long side is 3840 pixels, using VOXPrint Enlarge. Until Enlarge is installed, the item reads **4K (needs Enlarge)** (chapter 10).
 
 ## Number of pictures
 
 Type a number from 1 to 99. The field starts at 1. With more than one, each picture starts from the next seed, so they differ. Canvas draws them one at a time and shows the count, for example *3 of 12*. Cancel keeps the pictures already finished.
 
-## Improve prompt and Revert to my prompt
+## Improve prompt and the back segment
 
-**Improve prompt** rewrites your description in the same field, adding detail the picture model understands well. An English description stays in English; a description in another language is improved and written in English. **Revert to my prompt** brings back the text you had before the last rewrite.
+**Improve prompt** rewrites your description in the same field, adding detail the picture model understands well. An English description stays in English; a description in another language is improved and written in English. After a rewrite, a small **↶** segment appears on the left of **Improve prompt**. It brings back the text you had before the rewrite (its tooltip reads *Revert to my prompt*). It hides again once used or when you edit the text yourself.
 
 # Expert mode
 
@@ -286,7 +286,7 @@ The panel has two groups.
 | **Seed** | A number that repeats the same picture |
 | **Sampler** | How each picture is drawn: **Euler**, **DPM** or **Heun** |
 | **Picture size** | Width and height of the picture |
-| **Output size** | How large the finished picture is |
+| **Image size** | How large the finished picture is |
 | **Negative prompt** | What to leave out of the picture |
 | **Add-ons (LoRA)** | The folder of the add-on in use (chapter 12) |
 | **LoRA strength** | How strongly the add-on changes the picture |
@@ -301,7 +301,7 @@ The panel has two groups.
 
 **Seed** starts at 0, and 0 is a real seed, not a new number each time. The same **Seed** repeats the picture. Change **Seed** for a different picture. When **Number of pictures** is greater than 1, Canvas uses that seed and then the next integers. **Use prompt again** restores that picture's seed. **More like this** copies the history seed and generates again, so the seed stays the same.
 
-**Picture size** shows the preset text (for example `1344x768` for 16:9). The generator uses the aspect ratio from the **Size** row: 16:9 is 1280×720 (chapter 8). Typing a size in this field does not change the picture.
+**Picture size** shows the preset text (for example `1344x768` for 16:9). The generator uses the aspect ratio from the **Proportions** menu: 16:9 is 1280×720 (chapter 8). Typing a size in this field does not change the picture.
 
 ## Your own values and the presets
 
@@ -326,15 +326,15 @@ When you change a value yourself, the chip shows that it was changed, for exampl
 
 When you start from a picture, Canvas picks the ratio closest to that picture's shape.
 
-## Output sizes
+## Image sizes
 
 | Choice | Where | Result |
 |---|---|---|
-| **Standard** | **Output size** row, or **Exact size** | The standard size from the table |
+| **Standard** | **Image size** menu, or **Exact size** | The standard size from the table |
 | **2K** | Expert: **Exact size** | The 2K size from the table |
-| **4K** | **Output size** row, or **Exact size** | The 2K frame enlarged by VOXPrint Enlarge so that the long side is 3840 pixels |
+| **4K** | **Image size** menu, or **Exact size** | The 2K frame enlarged by VOXPrint Enlarge so that the long side is 3840 pixels |
 
-**Exact size** wins over the **Output size** row until it is set back to **Match the choice**.
+**Exact size** wins over the **Image size** menu until it is set back to **Match the choice**.
 
 When **4K** is selected, a **Detail** row appears with **Light**, **Medium** and **Strong**.
 
@@ -379,7 +379,7 @@ Click **Done** to close the window. Your choices stay until you change them.
 
 ![Use a picture, with a picture loaded.](screens/use-picture.png)
 
-Canvas switches **Start from** to **From a picture**, sets **Size** to the ratio closest to the picture, and shows the **Edit the mask** button next to **Use a picture**. You can also click **Use as input picture** under any finished picture.
+Canvas switches **Start from** to **From a picture**, sets **Proportions** to the ratio closest to the picture, and shows the **Edit the mask** button next to **Use a picture**. You can also click **Use as input picture** under any finished picture.
 
 ## Restyle (image to image)
 
@@ -437,7 +437,7 @@ Canvas makes 4K pictures with VOXPrint Enlarge, a separate suite program. It dra
 
 ## Install Enlarge
 
-1. Click **4K (needs Enlarge)** in the **Output size** row.
+1. Click **4K (needs Enlarge)** in the **Image size** menu.
 2. Canvas asks *4K needs VOXPrint Enlarge (≈ size). Install it?* Click **Install**, or **Cancel** to leave it.
 3. A window shows *Installing VOXPrint Enlarge…* with the progress and **Cancel**.
 4. When the installation is done, Canvas selects **4K** for you.
@@ -450,7 +450,7 @@ If the installation fails, Canvas says *VOXPrint Enlarge could not be installed.
 
 ## Make a 4K picture
 
-Choose **4K** in the **Output size** row (or **Exact size: 4K** in Expert mode) and click **Generate**. The picture takes longer, because Canvas frees the graphics card for Enlarge after drawing.
+Choose **4K** in the **Image size** menu (or **Exact size: 4K** in Expert mode) and click **Generate**. The picture takes longer, because Canvas frees the graphics card for Enlarge after drawing.
 
 # Photoshoot
 

@@ -96,15 +96,6 @@ def _prompt_box(prompt, lines: int, cap: int) -> None:
     prompt.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
 
-def _small(button) -> None:
-    button.setProperty("chip", False)
-    button.setMinimumHeight(32)
-    button.setMinimumWidth(0)
-    button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-    button.style().unpolish(button)
-    button.style().polish(button)
-
-
 def hide_count_chips(window) -> None:
     """The picture count is a typed field. The old chips stay off the row."""
     for name in _COUNT_CHIPS:
@@ -155,17 +146,6 @@ def _commit_count(window, field: QLineEdit) -> None:
     field.setText(str(window._count_last))
 
 
-def _frames_line(parts) -> QHBoxLayout:
-    line = QHBoxLayout()
-    line.setContentsMargins(0, 0, 0, 0)
-    line.setSpacing(6)
-    for key in ("frames_label", "frames"):
-        if parts[key] is not None:
-            line.addWidget(parts[key])
-    line.addStretch(1)
-    return line
-
-
 def _empty_row(outer, row) -> int:
     """Take the old row out of the root column. Leftover widgets stay hidden."""
     index = outer.indexOf(row)
@@ -196,19 +176,9 @@ def _left_panel(window, outer, row, parts) -> None:
     _prompt_box(prompt, 5, 9)
     prompt.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
     column.addWidget(prompt)
-    generate = parts["generate"]
-    generate.setMinimumSize(0, 48)
-    generate.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-    column.addWidget(generate)
-    tools = QHBoxLayout()
-    tools.setContentsMargins(0, 0, 0, 0)
-    tools.setSpacing(6)
-    for key in ("improve", "revert", "mode"):
-        if parts[key] is not None:
-            _small(parts[key])
-            tools.addWidget(parts[key], 1)
-    column.addLayout(tools)
-    column.addLayout(_frames_line(parts))
+    from canvas.ui.action_row import build
+
+    column.addWidget(build(window, parts))
     outer.removeWidget(view._preset_host)
     column.addSpacing(4)
     view._preset_rows.setSpacing(10)

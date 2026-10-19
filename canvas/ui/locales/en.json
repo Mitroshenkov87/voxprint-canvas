@@ -151,5 +151,10 @@
   "photoshoot.expert.style_override": "Style for this shot",
   "lora.base_mismatch": "This LoRA is for a different base model.",
   "lora.invalid": "This LoRA file cannot be read.",
-  "lora.scale": "LoRA scale must be from 0 to 2."
+  "lora.scale": "LoRA scale must be from 0 to 2.",
+  "canvas.proportions": "Proportions",
+  "canvas.image_size": "Image size",
+  "simple.size": "Proportions",
+  "simple.output": "Image size",
+  "setting.shell.output": "Image size"
 }

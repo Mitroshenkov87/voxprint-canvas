@@ -18,3 +18,11 @@ weights (https://huggingface.co/iitolstykh/mivolo_v2) are Apache-2.0.
 The scenario writer
 (https://huggingface.co/huihui-ai/Huihui-Qwen3-4B-Instruct-2507-abliterated)
 is Apache-2.0. Its tokenizer follows Qwen/Qwen3-4B-Instruct-2507, also Apache-2.0.
+
+The UI font, Noto Sans (canvas/ui/fonts/NotoSans-Regular.ttf, -SemiBold.ttf,
+-Bold.ttf, v2.015 from https://github.com/notofonts/latin-greek-cyrillic), is
+Copyright 2022 The Noto Project Authors and licensed under the SIL Open Font
+License, Version 1.1; the full licence is in canvas/ui/fonts/OFL.txt.
+
+Qt's own translations (qtbase_*.qm) are loaded from the PySide6 package
+(LGPL-3.0, The Qt Company); they are not modified.

@@ -20,6 +20,7 @@ from canvas.ui.theme import BUTTON_RADIUS
 HEIGHT = 36
 GENERATE_HEIGHT = 40
 GENERATE_MIN = 180
+GENERATE_COMPACT = 96
 
 
 def build(window, parts) -> QWidget:
@@ -49,6 +50,8 @@ def build(window, parts) -> QWidget:
     generate = parts["generate"]
     generate.setMinimumSize(GENERATE_MIN, GENERATE_HEIGHT)
     generate.setProperty("flowFill", True)
+    # The flow may trim Generate down to this floor so the row keeps one line.
+    generate.setProperty("flowFloor", GENERATE_COMPACT)
     flow.addWidget(generate)
     window._action_row = host
     return host
@@ -226,16 +229,86 @@ def sync(window) -> None:
     size = next(item for item in layout.rows if item.row_id == "size")
     chosen = str(layout.presets.get("size", size.default))
     choice = next((item for item in size.choices if item.value == chosen), size.choices[0])
-    window._proportions_button.setText(
-        text("canvas.menu.value", name=text("canvas.proportions"), value=tr(choice.label_key))
-    )
     standard = root.findChild(QPushButton, "chip-output-standard")
     fourk = root.findChild(QPushButton, "chip-output-4k")
     current = fourk if fourk is not None and fourk.isChecked() else standard
     words = "" if current is None else current.text()
-    window._image_size_button.setText(text("canvas.menu.value", name=text("canvas.image_size"), value=words))
-    for button in (window._proportions_button, window._image_size_button):
-        advance = button.fontMetrics().horizontalAdvance(button.text())
-        button.setMinimumWidth(advance + 36)
+    menus = (
+        (window._proportions_button, text("canvas.proportions"), tr(choice.label_key)),
+        (window._image_size_button, text("canvas.image_size"), words),
+    )
     width = window._flow_width(host, False) if hasattr(window, "_flow_width") else host.width()
+    for compact in (False, True):
+        for button, name, value in menus:
+            if compact:
+                button.setText(text("canvas.menu.compact", value=value))
+            else:
+                button.setText(text("canvas.menu.value", name=name, value=value))
+            # The name stays in the tooltip and for screen readers when only the value shows.
+            button.setToolTip(text("canvas.menu.value_tip", name=name, value=value))
+            button.setAccessibleName(name)
+            advance = button.fontMetrics().horizontalAdvance(button.text())
+            button.setMinimumWidth(advance + 36)
+        generate = host.findChild(QPushButton, "generate")
+        if generate is not None:
+            generate.ensurePolished()
+            floor = max(GENERATE_COMPACT, generate.fontMetrics().horizontalAdvance(generate.text()) + 32)
+            floor = floor if compact else GENERATE_MIN
+            generate.setProperty("flowFloor", floor)
+            generate.setMinimumWidth(floor)
+        _allow_trim(host, compact)
+        if one_line(host, width):
+            break
     host.setMinimumHeight(host.layout().heightForWidth(width))
+
+
+TRIM_PAD = 12
+
+
+def _allow_trim(host: QWidget, allowed: bool) -> None:
+    """Let the row's buttons give up side padding, down to TRIM_PAD a side, before it wraps.
+
+    With ``allowed`` False the floors are cleared, so the full labels are measured whole.
+    """
+    flow = host.layout()
+    if flow is None:
+        return
+    for index in range(flow.count()):
+        item = flow.itemAt(index)
+        widget = item.widget() if item is not None else None
+        if widget is None or widget.isHidden() or widget.objectName() == "generate":
+            continue
+        if not allowed:
+            widget.setProperty("flowFloor", None)
+            continue
+        buttons = [widget] if isinstance(widget, QPushButton) else widget.findChildren(QPushButton)
+        floor = 0
+        for button in buttons:
+            if button.isHidden():
+                continue
+            if button.objectName() == "revertSegment":
+                floor += button.width()
+                continue
+            need = button.fontMetrics().horizontalAdvance(button.text()) + 2 * TRIM_PAD
+            button.setMinimumWidth(need)
+            floor += need
+        if floor:
+            widget.setProperty("flowFloor", floor)
+
+
+def one_line(host: QWidget, width: int) -> bool:
+    """True when every shown item of the row fits on one line of ``width``."""
+    flow = host.layout()
+    if flow is None:
+        return True
+    total = 0
+    count = 0
+    for index in range(flow.count()):
+        item = flow.itemAt(index)
+        widget = item.widget() if item is not None else None
+        if widget is None or widget.isHidden():
+            continue
+        floor = widget.property("flowFloor")
+        total += int(floor) if floor else max(widget.minimumWidth(), widget.sizeHint().width())
+        count += 1
+    return total + flow.spacing() * max(0, count - 1) <= width

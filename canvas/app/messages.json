@@ -756,6 +756,34 @@
       "en": "unknown",
       "ru": "не указан"
     },
+    "canvas.lora.third_party.short": {
+      "en": "It may work less well than a Model Forge LoRA.",
+      "ru": "Она может работать хуже, чем LoRA из Model Forge."
+    },
+    "canvas.lora.more": {
+      "en": "Details",
+      "ru": "Подробнее"
+    },
+    "canvas.lora.trigger_tip": {
+      "en": "Insert «{trigger}» into the prompt",
+      "ru": "Вставить «{trigger}» в запрос"
+    },
+    "canvas.lora.pick_tip": {
+      "en": "LoRA for this picture. Import more under More → Import LoRA.",
+      "ru": "LoRA для этой картинки. Новые — в «Ещё» → «Импорт LoRA»."
+    },
+    "canvas.lora.strength_tip": {
+      "en": "LoRA strength",
+      "ru": "Сила LoRA"
+    },
+    "canvas.menu.compact": {
+      "en": "{value}  ▾",
+      "ru": "{value}  ▾"
+    },
+    "canvas.menu.value_tip": {
+      "en": "{name}: {value}",
+      "ru": "{name}: {value}"
+    },
     "canvas.lora.strength": {
       "en": "Strength",
       "ru": "Сила"
@@ -959,6 +987,30 @@
     "menu.help.guide_ru": {
       "en": "VOXPrint AI Canvas Guide (Russian)",
       "ru": "Руководство VOXPrint AI Canvas (русский)"
+    },
+    "canvas.file.look_in": {
+      "en": "Look in:",
+      "ru": "Папка:"
+    },
+    "canvas.file.name": {
+      "en": "File name:",
+      "ru": "Имя файла:"
+    },
+    "canvas.file.type": {
+      "en": "Files of type:",
+      "ru": "Тип файлов:"
+    },
+    "canvas.file.open": {
+      "en": "Open",
+      "ru": "Открыть"
+    },
+    "canvas.file.cancel": {
+      "en": "Cancel",
+      "ru": "Отмена"
+    },
+    "canvas.file.folder": {
+      "en": "Folder",
+      "ru": "Папка"
     }
   }
 }

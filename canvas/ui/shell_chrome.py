@@ -53,7 +53,13 @@ from canvas.ui.result_bar import wrap as wrap_result  # noqa: E402
 
 def shell_style() -> str:
     """The shared shell stylesheet, with the window and labels kept on the dark ground."""
+    from canvas.ui.fonts import register_fonts
+    from canvas.ui.theme import UI_FONT
+
+    register_fonts()
+    family = ", ".join(f'"{name}"' for name in UI_FONT)
     return build_shell_style(False) + f"""
+* {{ font-family: {family}, sans-serif; }}
 QMainWindow#shell, QWidget#shellColumn, QWidget#simpleRoot, QDialog {{
     background: {ROOT_PLAIN}; color: {TEXT};
 }}
@@ -191,8 +197,8 @@ def polish(window):
     _labels(window)
     _fit_controls(window)
     _wrap_rows(window)
-    _sync_lora_chip(window)
     _sync_lora_picker(window)
+    _sync_lora_chip(window)
     sync_actions(window)
 
 
@@ -205,16 +211,17 @@ def _sync_lora_chip(window):
         button.setProperty("chip", True)
         button.clicked.connect(window.insert_trigger)
         window._lora_chip = button
-    if button.parentWidget() is None:
-        generate = window.view.root.findChild(QPushButton, "generate")
-        parent = None if generate is None else generate.parentWidget()
-        layout = None if parent is None else parent.layout()
-        if layout is not None:
-            layout.insertWidget(layout.indexOf(generate), button)
+    picker = getattr(window, "_lora_picker", None)
+    if picker is not None and button.parentWidget() is not picker:
+        # The trigger sits in the LoRA row, so the action row keeps one line.
+        picker.set_chip(button)
     word = window.lora_trigger()
     button.setText(word)
-    button.setToolTip(text("canvas.addons.trigger"))
-    button.setVisible(bool(word))
+    button.setToolTip(text("canvas.lora.trigger_tip", trigger=word) if word else "")
+    if picker is not None:
+        picker.show_chip(button, word)
+    else:
+        button.setVisible(False)
 
 
 def _sync_lora_picker(window):
@@ -973,10 +980,10 @@ def _squeeze(items, inner, spacing):
     shown = [item for item in items if not _flow_hidden(item)]
     total = sum(_flow_size(item)[0] for item in shown) + spacing * max(0, len(shown) - 1)
     over = total - inner
-    tight = [item for item in shown if item.widget() is not None and item.widget().property("tightWidth")]
+    tight = [item for item in shown if _floor(item) is not None]
     if over <= 0 or not tight:
         return {}
-    room = {id(item): max(0, _flow_size(item)[0] - int(item.widget().property("tightWidth"))) for item in tight}
+    room = {id(item): max(0, _flow_size(item)[0] - int(_floor(item))) for item in tight}
     if sum(room.values()) < over:
         return room
     share = {}
@@ -987,6 +994,14 @@ def _squeeze(items, inner, spacing):
         share[id(item)] = take
         left -= take
     return share
+
+
+def _floor(item):
+    """The narrowest width an item may be trimmed to: a style chip's, or a fill button's floor."""
+    widget = item.widget()
+    if widget is None:
+        return None
+    return widget.property("tightWidth") or widget.property("flowFloor") or None
 
 
 def _flow_hidden(item):

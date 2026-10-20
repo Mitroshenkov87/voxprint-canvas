@@ -230,6 +230,10 @@ def _application() -> QApplication:
         return current
     set_app_user_model_id()
     app = QApplication(sys.argv)
+    from canvas.ui.fonts import qt_translations, register_fonts
+
+    register_fonts()
+    qt_translations()
     icon = icon_path()
     if icon.is_file():
         app.setWindowIcon(QIcon(str(icon)))

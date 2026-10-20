@@ -39,7 +39,7 @@ from canvas.models.mdl_registry import selectable
 from canvas.models.runtime import pipeline_scope
 from canvas.models.lora_library import LibraryEntry
 from canvas.models.user_lora import LoraIndex, discover, resolve_selected
-from canvas.ui.lora_panel import ImportedDialog, LibraryDialog, import_with_dialog, library_loras
+from canvas.ui.lora_panel import ImportedDialog, LibraryDialog, dark, import_with_dialog, library_loras
 from canvas.models.modes import Mode, Tier
 from canvas.models.sizes import closest_aspect
 from canvas.safety.image import RawImage
@@ -254,7 +254,11 @@ class ShellWindow(QMainWindow):
         """
         result = import_with_dialog(self, self.shell.gate.age_gate, path)
         if isinstance(result, str):
-            QMessageBox.warning(self, text("canvas.lora.import"), text(result))
+            box = QMessageBox(QMessageBox.Icon.Warning, text("canvas.lora.import"), text(result),
+                              QMessageBox.StandardButton.Ok, self)
+            box.setObjectName("loraRefused")
+            dark(box)
+            box.exec()
         elif result is not None:
             self.refresh_loras()
             ImportedDialog(self, result).exec()

@@ -20,7 +20,7 @@ COUNT_MAX = 99
 _COUNT_CHIPS = ("chip-count-1", "chip-count-2", "chip-count-4", "chip-count-custom", "reset-count")
 
 PANEL_SHARE = 0.43
-PANEL_MIN = 540
+PANEL_MIN = 600
 PANEL_MAX = 640
 SCROLL_ROOM = 14
 

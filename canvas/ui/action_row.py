@@ -20,6 +20,7 @@ from canvas.ui.theme import BUTTON_RADIUS
 HEIGHT = 36
 GENERATE_HEIGHT = 40
 GENERATE_MIN = 180
+GENERATE_COMPACT = 120
 
 
 def build(window, parts) -> QWidget:
@@ -226,16 +227,46 @@ def sync(window) -> None:
     size = next(item for item in layout.rows if item.row_id == "size")
     chosen = str(layout.presets.get("size", size.default))
     choice = next((item for item in size.choices if item.value == chosen), size.choices[0])
-    window._proportions_button.setText(
-        text("canvas.menu.value", name=text("canvas.proportions"), value=tr(choice.label_key))
-    )
     standard = root.findChild(QPushButton, "chip-output-standard")
     fourk = root.findChild(QPushButton, "chip-output-4k")
     current = fourk if fourk is not None and fourk.isChecked() else standard
     words = "" if current is None else current.text()
-    window._image_size_button.setText(text("canvas.menu.value", name=text("canvas.image_size"), value=words))
-    for button in (window._proportions_button, window._image_size_button):
-        advance = button.fontMetrics().horizontalAdvance(button.text())
-        button.setMinimumWidth(advance + 36)
+    menus = (
+        (window._proportions_button, text("canvas.proportions"), tr(choice.label_key)),
+        (window._image_size_button, text("canvas.image_size"), words),
+    )
     width = window._flow_width(host, False) if hasattr(window, "_flow_width") else host.width()
+    for compact in (False, True):
+        for button, name, value in menus:
+            if compact:
+                button.setText(text("canvas.menu.compact", value=value))
+            else:
+                button.setText(text("canvas.menu.value", name=name, value=value))
+            # The name stays in the tooltip and for screen readers when only the value shows.
+            button.setToolTip(text("canvas.menu.value_tip", name=name, value=value))
+            button.setAccessibleName(name)
+            advance = button.fontMetrics().horizontalAdvance(button.text())
+            button.setMinimumWidth(advance + 36)
+        generate = host.findChild(QPushButton, "generate")
+        if generate is not None:
+            generate.setMinimumWidth(GENERATE_COMPACT if compact else GENERATE_MIN)
+        if one_line(host, width):
+            break
     host.setMinimumHeight(host.layout().heightForWidth(width))
+
+
+def one_line(host: QWidget, width: int) -> bool:
+    """True when every shown item of the row fits on one line of ``width``."""
+    flow = host.layout()
+    if flow is None:
+        return True
+    total = 0
+    count = 0
+    for index in range(flow.count()):
+        item = flow.itemAt(index)
+        widget = item.widget() if item is not None else None
+        if widget is None or widget.isHidden():
+            continue
+        total += max(widget.minimumWidth(), widget.sizeHint().width())
+        count += 1
+    return total + flow.spacing() * max(0, count - 1) <= width

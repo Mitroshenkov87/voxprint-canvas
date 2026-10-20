@@ -123,9 +123,9 @@ def test_simple_mode_hides_expert_words_and_keeps_picture_tools(app, home: Path)
     help_menu = window.findChild(QMenu, "menuHelp")
     assert help_menu is not None and len(help_menu.actions()) == 2
     proportions = window.findChild(QPushButton, "proportionsMenu")
-    assert proportions is not None and proportions.isVisible() and proportions.text().startswith("Proportions:")
+    assert proportions is not None and proportions.isVisible() and proportions.toolTip().startswith("Proportions:")
     image_size = window.findChild(QPushButton, "imageSizeMenu")
-    assert image_size is not None and image_size.isVisible() and image_size.text().startswith("Image size:")
+    assert image_size is not None and image_size.isVisible() and image_size.toolTip().startswith("Image size:")
     assert window.findChild(QPushButton, "revertPrompt").isHidden()
     square = window.findChild(QPushButton, "chip-size-1-1")
     assert square is not None and not square.isVisible()
@@ -361,8 +361,8 @@ def test_russian_buttons_keep_their_full_labels(app, home: Path, monkeypatch) ->
     assert setup.findChild(QPushButton, "setup-variation-varied").text() == "Смелее"
     back = window.findChild(QPushButton, "revertSegment")
     assert back is not None and back.toolTip() == "Вернуть мой запрос"
-    assert window.findChild(QPushButton, "proportionsMenu").text().startswith("Пропорции:")
-    assert window.findChild(QPushButton, "imageSizeMenu").text().startswith("Размер изображения:")
+    assert window.findChild(QPushButton, "proportionsMenu").toolTip().startswith("Пропорции:")
+    assert window.findChild(QPushButton, "imageSizeMenu").toolTip().startswith("Размер изображения:")
     fourk = window.findChild(QPushButton, "chip-output-4k")
     assert fourk is not None and fourk.isEnabled() and fourk.text() == "4K (нужен Enlarge)"
     install = window.findChild(QPushButton, "unavailable-output-4k")
@@ -653,7 +653,7 @@ def test_proportions_and_image_size_menus_choose_presets(app, home: Path) -> Non
     next(a for a in proportions.menu().actions() if a.objectName() == "proportion-16-9").trigger()
     app.processEvents()
     assert window.shell.layout.presets["size"] == "16:9"
-    assert proportions.text() == "Proportions: 16:9  ▾"
+    assert proportions.toolTip() == "Proportions: 16:9" and "16:9" in proportions.text()
     image_size = window.findChild(QPushButton, "imageSizeMenu")
     image_size.menu().aboutToShow.emit()
     labels = [action.text() for action in image_size.menu().actions()]

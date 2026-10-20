@@ -191,8 +191,8 @@ def polish(window):
     _labels(window)
     _fit_controls(window)
     _wrap_rows(window)
-    _sync_lora_chip(window)
     _sync_lora_picker(window)
+    _sync_lora_chip(window)
     sync_actions(window)
 
 
@@ -205,16 +205,17 @@ def _sync_lora_chip(window):
         button.setProperty("chip", True)
         button.clicked.connect(window.insert_trigger)
         window._lora_chip = button
-    if button.parentWidget() is None:
-        generate = window.view.root.findChild(QPushButton, "generate")
-        parent = None if generate is None else generate.parentWidget()
-        layout = None if parent is None else parent.layout()
-        if layout is not None:
-            layout.insertWidget(layout.indexOf(generate), button)
+    picker = getattr(window, "_lora_picker", None)
+    if picker is not None and button.parentWidget() is not picker:
+        # The trigger sits in the LoRA row, so the action row keeps one line.
+        picker.set_chip(button)
     word = window.lora_trigger()
     button.setText(word)
-    button.setToolTip(text("canvas.addons.trigger"))
-    button.setVisible(bool(word))
+    button.setToolTip(text("canvas.lora.trigger_tip", trigger=word) if word else "")
+    if picker is not None:
+        picker.show_chip(button, word)
+    else:
+        button.setVisible(False)
 
 
 def _sync_lora_picker(window):

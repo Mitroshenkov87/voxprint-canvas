@@ -17,17 +17,20 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QProgressDialog,
+    QTreeView,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QSlider,
     QVBoxLayout,
     QWidget,
 )
 
-from voxprint_common.ui.theme import CONTROL_BORDER
+from voxprint_common.ui.theme import CONTROL_BG, CONTROL_BORDER
 
 from canvas.app.i18n import text
 from canvas.models.lora_library import (
@@ -43,8 +46,41 @@ from canvas.models.user_lora import LoraRejected, UserLora, discover
 from canvas.ui.theme import BUTTON_RADIUS
 
 THUMB = 72
+ROW_HEIGHT = 36
+VALUE_WIDTH = 52
 PICK_ICON = 28
 SLIDER_STEPS = 100
+
+
+def dark(widget: QWidget) -> QWidget:
+    """Give a dialog the shell's dark style, whatever its parent."""
+    from canvas.ui.shell_chrome import shell_style
+
+    widget.setStyleSheet(shell_style())
+    return widget
+
+
+def file_dialog(parent: QWidget | None) -> QFileDialog:
+    """The Qt file dialog in the dark style. A native dialog would follow the system theme."""
+    dialog = QFileDialog(parent, text("canvas.lora.import"), "", text("canvas.lora.import_filter"))
+    dialog.setObjectName("loraFileDialog")
+    dialog.setOption(QFileDialog.Option.DontUseNativeDialog, True)
+    dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
+    dark(dialog)
+    for view in dialog.findChildren(QTreeView):
+        view.header().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+    side = dialog.findChild(QWidget, "sidebar")
+    if side is not None:
+        side.setMinimumWidth(140)
+    return dialog
+
+
+def pick_file(parent: QWidget | None) -> str:
+    """Ask for one file. Empty when cancelled."""
+    dialog = file_dialog(parent)
+    if dialog.exec() != QDialog.DialogCode.Accepted or not dialog.selectedFiles():
+        return ""
+    return dialog.selectedFiles()[0]
 
 
 def import_with_dialog(parent: QWidget, gate: object, path: Path | None = None, **options) -> LibraryEntry | str | None:
@@ -57,9 +93,7 @@ def import_with_dialog(parent: QWidget, gate: object, path: Path | None = None, 
         options: Passed to :func:`canvas.models.lora_library.import_lora`.
     """
     if path is None:
-        chosen, _filter = QFileDialog.getOpenFileName(
-            parent, text("canvas.lora.import"), "", text("canvas.lora.import_filter"),
-        )
+        chosen = pick_file(parent)
         if not chosen:
             return None
         path = Path(chosen)
@@ -108,6 +142,7 @@ def run_in_background(
 
     busy = QProgressDialog(text("canvas.lora.checking"), "", 0, 0, parent)
     busy.setObjectName("loraBusy")
+    dark(busy)
     busy.setWindowTitle(text("canvas.lora.import"))
     busy.setCancelButton(None)
     busy.setWindowModality(Qt.WindowModality.WindowModal)
@@ -161,9 +196,19 @@ class ThirdPartyDialog(QDialog):
         title.setObjectName("loraThirdPartyTitle")
         title.setWordWrap(True)
         title.setStyleSheet("font-size: 16px; font-weight: 600;")
-        body = QLabel(text("canvas.lora.third_party.body"))
+        body = QLabel(text("canvas.lora.third_party.short"))
         body.setObjectName("loraThirdPartyBody")
-        body.setWordWrap(True)
+        body.setToolTip(text("canvas.lora.third_party.body"))
+        more = QPushButton(text("canvas.lora.more"))
+        more.setObjectName("loraThirdPartyMore")
+        more.setCheckable(True)
+        more.setToolTip(text("canvas.lora.third_party.body"))
+        details = QLabel(text("canvas.lora.third_party.body"))
+        details.setObjectName("loraThirdPartyDetails")
+        details.setWordWrap(True)
+        details.hide()
+        self._details = details
+        more.toggled.connect(self._show_details)
         cancel = QPushButton(text("canvas.lora.cancel"))
         cancel.setObjectName("loraThirdPartyCancel")
         cancel.clicked.connect(self.reject)
@@ -174,12 +219,18 @@ class ThirdPartyDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.addWidget(title)
         layout.addWidget(body)
+        layout.addWidget(details)
         buttons = QHBoxLayout()
+        buttons.addWidget(more)
         buttons.addStretch(1)
         buttons.addWidget(cancel)
         buttons.addWidget(go)
         layout.addLayout(buttons)
         self.setMinimumWidth(520)
+
+    def _show_details(self, shown: bool) -> None:
+        self._details.setVisible(shown)
+        self.adjustSize()
 
 
 def _kind_text(kind: str) -> str:
@@ -399,35 +450,55 @@ class LoraPicker(QWidget):
         self._root = root
         self._items: list[UserLora | None] = []
         self._loading = False
-        label = QLabel(text("canvas.lora.pick"))
-        label.setObjectName("loraPickLabel")
+        self.setToolTip(text("canvas.lora.pick_tip"))
+        policy = self.sizePolicy()
+        policy.setHorizontalPolicy(QSizePolicy.Policy.Expanding)
+        self.setSizePolicy(policy)
         self.combo = QComboBox()
         self.combo.setObjectName("loraPick")
-        self.combo.setIconSize(QSize(PICK_ICON, PICK_ICON))
-        self.combo.setMinimumHeight(36)
+        self.combo.setAccessibleName(text("canvas.lora.pick"))
+        self.combo.setToolTip(text("canvas.lora.pick_tip"))
+        self.combo.setIconSize(QSize(PICK_ICON - 8, PICK_ICON - 8))
+        self.combo.setFixedHeight(ROW_HEIGHT)
+        self.combo.setMinimumWidth(120)
+        self.combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.combo.setMinimumContentsLength(8)
+        # A list that opens under the field, not over it.
+        self.combo.setStyleSheet("QComboBox { combobox-popup: 0; }")
         self.combo.currentIndexChanged.connect(self._picked)
-        strength = QLabel(text("canvas.lora.strength"))
-        strength.setObjectName("loraStrengthLabel")
         self.slider = QSlider(Qt.Orientation.Horizontal)
         self.slider.setObjectName("loraStrength")
+        self.slider.setAccessibleName(text("canvas.lora.strength"))
+        self.slider.setToolTip(text("canvas.lora.strength_tip"))
+        self.slider.setFixedHeight(ROW_HEIGHT)
+        self.slider.setMinimumWidth(80)
         self.slider.valueChanged.connect(self._moved)
         self.value = QLabel("")
         self.value.setObjectName("loraStrengthValue")
-        self.value.setMinimumWidth(36)
-        top = QVBoxLayout(self)
-        top.setContentsMargins(0, 0, 0, 0)
-        top.setSpacing(6)
-        top.addWidget(label)
-        top.addWidget(self.combo)
-        row = QHBoxLayout()
-        row.setSpacing(8)
-        row.addWidget(strength)
-        row.addWidget(self.slider, 1)
-        row.addWidget(self.value)
+        self.value.setToolTip(text("canvas.lora.strength_tip"))
+        self.value.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.value.setFixedSize(VALUE_WIDTH, ROW_HEIGHT)
+        self.value.setStyleSheet(
+            f"QLabel#loraStrengthValue {{ background: {CONTROL_BG}; border: 1px solid {CONTROL_BORDER};"
+            f" border-radius: {BUTTON_RADIUS}px; }}"
+        )
+        self._row = QHBoxLayout(self)
+        self._row.setContentsMargins(0, 0, 0, 0)
+        self._row.setSpacing(8)
+        self._row.addWidget(self.combo, 3)
+        self._chip_at = 1
         self._strength_row = QWidget()
-        self._strength_row.setLayout(row)
-        row.setContentsMargins(0, 0, 0, 0)
-        top.addWidget(self._strength_row)
+        strength = QHBoxLayout(self._strength_row)
+        strength.setContentsMargins(0, 0, 0, 0)
+        strength.setSpacing(8)
+        strength.addWidget(self.slider, 1)
+        strength.addWidget(self.value)
+        self._row.addWidget(self._strength_row, 2)
+
+    def set_chip(self, chip: QWidget) -> None:
+        """Show the trigger chip beside the LoRA name."""
+        chip.setFixedHeight(ROW_HEIGHT)
+        self._row.insertWidget(self._chip_at, chip)
 
     def reload(self, selected: str, strength: float) -> None:
         """Fill the pick and set the slider from the shared state."""
@@ -445,7 +516,20 @@ class LoraPicker(QWidget):
         self.combo.setCurrentIndex(chosen)
         self._apply(self._items[chosen], strength)
         self._loading = False
-        self.setVisible(len(self._items) > 1)
+        self._fit_shown()
+
+    def show_chip(self, chip: QWidget, word: str) -> None:
+        """Show the trigger chip when there is a word; the row stays up for it alone."""
+        chip.setVisible(bool(word))
+        self._word = word
+        self._fit_shown()
+
+    def _fit_shown(self) -> None:
+        listed = len(self._items) > 1
+        self.combo.setVisible(listed)
+        if not listed:
+            self._strength_row.setVisible(False)
+        self.setVisible(listed or bool(getattr(self, "_word", "")))
 
     def current(self) -> UserLora | None:
         index = self.combo.currentIndex()

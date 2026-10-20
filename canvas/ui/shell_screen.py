@@ -240,7 +240,11 @@ class ShellWindow(QMainWindow):
 
     def lora_library(self) -> LibraryDialog:
         """The LoRA library: «Import LoRA», previews and remove."""
-        return LibraryDialog(self, self.shell.gate.age_gate, self.refresh_loras)
+        return LibraryDialog(self, self.shell.gate.age_gate, self._library_changed)
+
+    def _library_changed(self) -> None:
+        self.refresh_loras()
+        self.view.refresh()
 
     def import_lora(self, path: Path | None = None) -> LibraryEntry | str | None:
         """Import one Model Forge export into the library and show what was added.

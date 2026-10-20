@@ -147,3 +147,24 @@ def test_the_third_party_dialog_asks_before_storing(app, home: Path, monkeypatch
     edit.editingFinished.emit()
     assert list_library()[0].manifest.trigger == "mylora"
     shiboken6.delete(dialog)
+
+
+def test_a_library_trigger_edit_updates_the_chip(app, home: Path, monkeypatch):
+    from tests.lora_files import write_safetensors
+
+    path = home / "x.safetensors"
+    write_safetensors(path, {"layers.0.attention.to_q.lora_A.weight": b"\x01", "layers.0.attention.to_q.lora_B.weight": b"\x02"}, {})
+    entry = import_lora(path, World().gate(), base_ready=lambda: True, confirm=lambda _manifest: True)
+    window = ShellWindow(open_layout(home / "state", gate=World().gate()), tier=Tier.GB16, enlarge=object())
+    window.show()
+    app.processEvents()
+    window._pick_lora(entry.id, 0.8)
+    library = window.lora_library()
+    from PySide6.QtWidgets import QLineEdit
+
+    edit = library.findChild(QLineEdit, "loraTriggerEdit")
+    edit.setText("mylora")
+    edit.editingFinished.emit()
+    app.processEvents()
+    assert window._lora_chip.text() == "mylora"
+    window.close()

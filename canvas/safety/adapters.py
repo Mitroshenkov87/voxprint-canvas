@@ -11,6 +11,118 @@ from canvas.safety.classifiers import Face, GuardVerdict
 from canvas.safety.gate import SafetyUnavailable
 from canvas.safety.image import RawImage
 
+# Device placement only. The same models get the same inputs, thresholds and
+# order on either device. A check that hits a device error runs again on the CPU;
+# any other error still stops the request.
+GENERATOR_RESERVE_BYTES = 12 * 1024**3
+GATE_HEADROOM_BYTES = 768 * 1024**2
+_gate_cuda_bytes = 0
+
+
+def _module_bytes(model: Any) -> int:
+    total = 0
+    for getter in ("parameters", "buffers"):
+        items = getattr(model, getter, None)
+        if callable(items):
+            for tensor in items():
+                total += int(tensor.numel()) * int(tensor.element_size())
+    return total
+
+
+def gate_device(need_bytes: int) -> str:
+    """``cuda`` when the model fits beside the generator's reserve, else ``cpu``."""
+    try:
+        import torch
+    except ImportError:
+        return "cpu"
+    try:
+        if not torch.cuda.is_available():
+            return "cpu"
+        free, _total = torch.cuda.mem_get_info()
+        generator_now = max(0, int(torch.cuda.memory_reserved()) - _gate_cuda_bytes)
+    except (RuntimeError, AssertionError):
+        return "cpu"
+    still_needed = max(0, GENERATOR_RESERVE_BYTES - generator_now)
+    if int(free) - still_needed - GATE_HEADROOM_BYTES >= int(need_bytes):
+        return "cuda"
+    return "cpu"
+
+
+def _device_error(exc: BaseException) -> bool:
+    """CUDA out-of-memory or another device failure."""
+    if type(exc).__name__ in {"OutOfMemoryError", "AcceleratorError"}:
+        return True
+    if isinstance(exc, RuntimeError):
+        message = str(exc).lower()
+        return "cuda" in message or "out of memory" in message or "device" in message
+    return False
+
+
+def _inputs_to(inputs: Any, device: str) -> Any:
+    if device == "cpu":
+        return inputs
+    if hasattr(inputs, "to"):
+        return inputs.to(device)
+    return {key: value.to(device) for key, value in inputs.items()}
+
+
+class _Placed:
+    """Puts one loaded model on the GPU when it fits, and falls back to the CPU."""
+
+    device: str = "cpu"
+    _model: Any = None
+    _cuda_bytes: int = 0
+
+    def _place(self, model: Any) -> Any:
+        global _gate_cuda_bytes
+        need = _module_bytes(model)
+        forced = getattr(self, "_forced", None)
+        device = gate_device(need) if forced is None else forced
+        if device == "cpu":
+            self.device = "cpu"
+            return model
+        try:
+            moved = model.to(device)
+        except Exception as exc:
+            if not _device_error(exc):
+                raise
+            self.device = "cpu"
+            _empty_cuda_cache()
+            return model.to("cpu")
+        self.device = device
+        self._cuda_bytes = need
+        _gate_cuda_bytes += need
+        return moved
+
+    def _to_cpu(self) -> None:
+        global _gate_cuda_bytes
+        if self._model is not None:
+            self._model = self._model.to("cpu")
+        _gate_cuda_bytes = max(0, _gate_cuda_bytes - self._cuda_bytes)
+        self._cuda_bytes = 0
+        self.device = "cpu"
+        _empty_cuda_cache()
+
+    def _checked(self, run: Any) -> Any:
+        """Run one check. A device error moves the model to the CPU and runs the same check again."""
+        try:
+            return run()
+        except Exception as exc:
+            if self.device == "cpu" or not _device_error(exc):
+                raise
+        self._to_cpu()
+        return run()
+
+
+def _empty_cuda_cache() -> None:
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except (ImportError, RuntimeError):
+        return
+
+
 FAIRFACE_AGE_LOW = {
     "0-2": 0.0,
     "3-9": 3.0,
@@ -146,7 +258,7 @@ def _pooled_features(out: Any) -> Any:
     raise SafetyUnavailable("classifier_error")
 
 
-class Qwen3GuardGen:
+class Qwen3GuardGen(_Placed):
     """Qwen3GuardGen."""
 
     model_id = REPO_GUARD
@@ -164,9 +276,9 @@ class Qwen3GuardGen:
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
         self._tokenizer = AutoTokenizer.from_pretrained(folder, local_files_only=True)
-        self._model = AutoModelForCausalLM.from_pretrained(
+        self._model = self._place(AutoModelForCausalLM.from_pretrained(
             folder, torch_dtype=torch.float32, local_files_only=True,
-        )
+        ))
 
     def assess(self, text: str) -> GuardVerdict:
         """Assess."""
@@ -180,13 +292,21 @@ class Qwen3GuardGen:
         )
         input_ids = encoded["input_ids"]
         attention_mask = encoded["attention_mask"]
-        with torch.no_grad():
-            output = model.generate(input_ids=input_ids, attention_mask=attention_mask, max_new_tokens=128)
+
+        def run() -> Any:
+            with torch.no_grad():
+                return self._model.generate(
+                    input_ids=input_ids.to(self.device), attention_mask=attention_mask.to(self.device),
+                    max_new_tokens=128,
+                ).cpu()
+
+        del model
+        output = self._checked(run)
         reply = tokenizer.decode(output[0][input_ids.shape[-1]:], skip_special_tokens=True)
         return parse_qwen3guard(reply)
 
 
-class SiglipZeroShot:
+class SiglipZeroShot(_Placed):
     """SiglipZeroShot."""
 
     model_id = REPO_SIGLIP
@@ -203,7 +323,7 @@ class SiglipZeroShot:
             return
         from transformers import AutoModel, AutoProcessor
         self._processor = AutoProcessor.from_pretrained(folder, local_files_only=True)
-        self._model = AutoModel.from_pretrained(folder, local_files_only=True)
+        self._model = self._place(AutoModel.from_pretrained(folder, local_files_only=True))
 
     def score_text(self, text: str, labels: Sequence[str]) -> dict[str, float]:
         """Score text."""
@@ -217,17 +337,30 @@ class SiglipZeroShot:
         self.load()
         import torch
         processor = self._processor
-        model = self._model
         label_list = list(labels)
-        text_inputs = processor(text=label_list, padding="max_length", return_tensors="pt")
+
+        def run() -> Any:
+            return self._siglip_probs(torch, processor, text, image, label_list)
+
+        probs = self._checked(run)
+        return {label: float(probs[index]) for index, label in enumerate(label_list)}
+
+    def _siglip_probs(
+        self, torch: Any, processor: Any, text: str | None, image: RawImage | None, label_list: list[str],
+    ) -> Any:
+        model = self._model
+        device = self.device
+        text_inputs = _inputs_to(processor(text=label_list, padding="max_length", return_tensors="pt"), device)
         with torch.no_grad():
             text_embeds = _pooled_features(model.get_text_features(**text_inputs))
             text_embeds = text_embeds / text_embeds.norm(dim=-1, keepdim=True)
             if image is not None:
-                image_inputs = processor(images=_rgb(image), return_tensors="pt")
+                image_inputs = _inputs_to(processor(images=_rgb(image), return_tensors="pt"), device)
                 image_embeds = _pooled_features(model.get_image_features(**image_inputs))
             else:
-                image_inputs = processor(text=[text or ""], padding="max_length", return_tensors="pt")
+                image_inputs = _inputs_to(
+                    processor(text=[text or ""], padding="max_length", return_tensors="pt"), device,
+                )
                 image_embeds = _pooled_features(model.get_text_features(**image_inputs))
             image_embeds = image_embeds / image_embeds.norm(dim=-1, keepdim=True)
             scale = model.logit_scale.exp()
@@ -235,8 +368,7 @@ class SiglipZeroShot:
             logits = image_embeds @ text_embeds.T * scale
             if bias is not None:
                 logits = logits + bias
-            probs = torch.sigmoid(logits)[0]
-        return {label: float(probs[index]) for index, label in enumerate(label_list)}
+            return torch.sigmoid(logits)[0].cpu()
 
 
 class YuNetFaces:
@@ -278,7 +410,7 @@ class YuNetFaces:
         return boxes
 
 
-class FairFaceAge:
+class FairFaceAge(_Placed):
     """FairFaceAge."""
 
     model_id = REPO_AGE
@@ -295,9 +427,9 @@ class FairFaceAge:
             return
         from transformers import AutoImageProcessor, AutoModelForImageClassification
         self._processor = AutoImageProcessor.from_pretrained(folder, local_files_only=True)
-        self._model = AutoModelForImageClassification.from_pretrained(
+        self._model = self._place(AutoModelForImageClassification.from_pretrained(
             folder, local_files_only=True,
-        )
+        ))
 
     def estimate(self, image: RawImage, faces: Sequence[Face]) -> Sequence[tuple[float, float]]:
         """Estimate."""
@@ -308,9 +440,13 @@ class FairFaceAge:
         for face in faces:
             crop = picture.crop((face.x, face.y, face.x + face.width, face.y + face.height))
             inputs = self._processor(images=crop, return_tensors="pt")
-            with torch.no_grad():
-                logits = self._model(**inputs).logits
-                probs = torch.softmax(logits, dim=-1)[0]
+
+            def run(inputs: Any = inputs) -> Any:
+                with torch.no_grad():
+                    logits = self._model(**_inputs_to(inputs, self.device)).logits
+                    return torch.softmax(logits, dim=-1)[0].cpu()
+
+            probs = self._checked(run)
             values = [float(probs[index]) for index in range(int(probs.shape[-1]))]
             bands.append(fairface_age_bands(self._model.config.id2label, values))
         return bands
@@ -388,14 +524,15 @@ def regressor_ages(raw: Sequence[object], scale: tuple[float, float, float], cou
     return [_finite(value) * (high - low) + mid for value in raw]
 
 
-class FaceAgeRegressor:
+class FaceAgeRegressor(_Placed):
     """FaceAgeRegressor."""
 
     model_id = REPO_AGE_FINE
 
-    def __init__(self, folder: Path | None = None, device: str = "cpu") -> None:
+    def __init__(self, folder: Path | None = None, device: str = "auto") -> None:
         self.folder = folder
-        self.device = device
+        self.device = "cpu"
+        self._forced = None if device == "auto" else device
         self._model: Any = None
         self._scale: tuple[float, float, float] | None = None
 
@@ -433,8 +570,7 @@ class FaceAgeRegressor:
             model.load_state_dict(stripped, strict=True)
         except RuntimeError as exc:
             raise SafetyUnavailable("model_not_ready") from exc
-        dtype = torch.float16 if self.device.startswith("cuda") else torch.float32
-        self._model = model.to(device=self.device, dtype=dtype).eval()
+        self._model = self._place(model.to(dtype=torch.float32).eval())
         self._scale = scale
 
     def _tensor(self, pixels: np.ndarray, size: int) -> Any:
@@ -463,15 +599,19 @@ class FaceAgeRegressor:
         std = torch.tensor(_REGRESSOR_STD, dtype=torch.float32).view(3, 1, 1)
         body = ((empty - mean) / std).unsqueeze(0).expand(len(faces), -1, -1, -1)
         batch = torch.cat((face_batch, body), dim=1)
-        dtype = next(model.parameters()).dtype
-        with torch.no_grad():
-            output = model(batch.to(device=self.device, dtype=dtype)).float().cpu()
+        del model
+
+        def run() -> Any:
+            with torch.no_grad():
+                return self._model(batch.to(device=self.device, dtype=torch.float32)).float().cpu()
+
+        output = self._checked(run)
         if output.ndim != 2 or int(output.shape[0]) != len(faces) or int(output.shape[1]) != 3:
             raise SafetyUnavailable("classifier_error")
         return regressor_ages([float(value) for value in output[:, 2]], scale, len(faces))
 
 
-class NsfwViT:
+class NsfwViT(_Placed):
     """NsfwViT."""
 
     model_id = REPO_NSFW
@@ -488,18 +628,22 @@ class NsfwViT:
             return
         from transformers import AutoImageProcessor, AutoModelForImageClassification
         self._processor = AutoImageProcessor.from_pretrained(folder, local_files_only=True)
-        self._model = AutoModelForImageClassification.from_pretrained(
+        self._model = self._place(AutoModelForImageClassification.from_pretrained(
             folder, local_files_only=True,
-        )
+        ))
 
     def sexual_score(self, image: RawImage) -> float:
         """Sexual score."""
         self.load()
         import torch
         inputs = self._processor(images=_rgb(image), return_tensors="pt")
-        with torch.no_grad():
-            logits = self._model(**inputs).logits
-            probs = torch.softmax(logits, dim=-1)[0]
+
+        def run() -> Any:
+            with torch.no_grad():
+                logits = self._model(**_inputs_to(inputs, self.device)).logits
+                return torch.softmax(logits, dim=-1)[0].cpu()
+
+        probs = self._checked(run)
         labels = {int(key): str(value).casefold() for key, value in self._model.config.id2label.items()}
         for index, name in labels.items():
             if name == "nsfw":

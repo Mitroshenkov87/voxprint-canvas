@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import Literal, assert_never
 
 from canvas.pipeline.adult_direction import LIGHT_SETUPS, POSE_FAMILIES, shot_plan
-from canvas.pipeline.enhance import quoted_spans, stated_ages
+from canvas.pipeline.enhance import added_aging_terms, quoted_spans, stated_ages
 
 PlaceMode = Literal["same", "different"]
 MAX_FRAMES = 99
@@ -37,6 +37,7 @@ Rules:
 - camera: lens and angle.
 - place: the location of this shot.
 - Do not write an age in a line. Do not add people who are not in the idea. Do not add youthful descriptors.
+- Do not add age or skin descriptors (mature, middle-aged, older, wrinkles, smile lines, laugh lines, crow's feet, grey hair) or youthful-appearance descriptors (young-looking, petite, smooth skin, round face).
 - Do not soften or rewrite adult content.
 - Keep each line under 60 words.
 - If place_mode is "same", every line has the same place. If place_mode is "different", every line has a different place.
@@ -355,6 +356,8 @@ def accept_shot(
     if not shot.scene:
         return None
     if _key(shot.scene) in {_key(item.scene) for item in taken}:
+        return None
+    if added_aging_terms(idea, " ".join((shot.scene, shot.pose, shot.camera, shot.place))):
         return None
     if not _keep_shots(idea, subject, (shot,)):
         return None

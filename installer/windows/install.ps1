@@ -744,6 +744,10 @@ function Invoke-Machine {
         if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
         & $Py -m canvas.infra.layout migrate --install-dir $App
         if ($LASTEXITCODE -ne 0) { throw "Setup stopped." }
+        # Byte-compile the suite runtime and the app once here, so the first run does not.
+        Write-Host "Precompiling Python files..."
+        & $Py -m compileall -q -j 0 $RuntimeSite (Join-Path $App "canvas") | Out-Null
+        if ($LASTEXITCODE -ne 0) { Write-Host "Precompiling finished with warnings." }
     } catch {
         Write-SetupFailure $_
         throw

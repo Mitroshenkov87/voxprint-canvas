@@ -43,6 +43,8 @@ from canvas.app.photoshoot_cli import model_generate, model_rewrite, reject_fram
 from canvas.pipeline.photoshoot import DEFAULT_FRAMES, MAX_FRAMES
 from canvas.ui.styles import LOOKS
 from canvas.pipeline.bf16_schedule import VramRefused
+from canvas.infra.stage_timer import StageTimes
+from canvas.pipeline.series import SerialGate
 from canvas.pipeline.enhance import EnhanceResult, fallback_message, open_rewriter, resolve_prompt, rewrite_text
 from canvas.pipeline.schedule import last_image_seconds, reset_image_seconds
 from canvas.pipeline.pipeline import CoolingDown, EnlargeMissing, JobError, Pipeline
@@ -472,6 +474,8 @@ def _photoshoot(args: argparse.Namespace) -> int:
         stack = load_catalog_stack(models_dir(), load_catalog())
         gate = AgeGate(stack)
         gate.warm()
+        serial = SerialGate.wrap(gate)
+        clock = StageTimes()
         payload, code = run_command(
             idea=str(args.prompt),
             folder=folder,
@@ -480,13 +484,14 @@ def _photoshoot(args: argparse.Namespace) -> int:
             style=style,
             places=str(args.places),
             adult=adult,
-            age_gate=gate,
+            age_gate=serial,
             rewrite=model_rewrite(gpu.tier, adult),
             generate=model_generate(
-                gate, gpu.tier, style, adult,
+                serial, gpu.tier, style, adult,
                 None if chosen is None else chosen[0],
                 0.7 if chosen is None else chosen[1],
             ),
+            timings=clock,
         )
     except (
         SafetyError, SnapshotError, DownloadDeclined, InferenceUnavailable, ModelNotReady,

@@ -11,6 +11,7 @@ from canvas.app.info import ENLARGE_NAME
 from canvas.core.exchange import read_picture, write_png
 from canvas.core.formats import DEFAULT_FORMAT, OutputFormat, save_image
 from canvas.infra.enlarge import EnlargeError, declared_vram_gb
+from canvas.infra.stage_timer import timed
 from canvas.infra.gpu_lock import GpuLockTimeout, lock_path, release, try_acquire
 from canvas.infra.thermal import Guard
 from canvas.models.loader import ModelNotReady
@@ -141,7 +142,8 @@ class Pipeline:
                 self.paused = True
                 raise CoolingDown()
             self.paused = False
-            screened = self.gate.release_request(prompt, mode.value, inputs, explicit=explicit)
+            with timed("input_check"):
+                screened = self.gate.release_request(prompt, mode.value, inputs, explicit=explicit)
             try:
                 width, height = self._frame(mode, aspect, output in {"2k", "4k"})
                 if output == "4k" and not _enlarge_ready(self.enlarge):
@@ -151,8 +153,10 @@ class Pipeline:
                 attach = getattr(self.generator, "attach_probe", None)
                 if attach is not None:
                     attach(probe)
-                raw = run_generator(self.generator, screened, width=width, height=height)
-                image = self._reviewed(raw, prompt)
+                with timed("generate"):
+                    raw = run_generator(self.generator, screened, width=width, height=height)
+                with timed("render_output_check"):
+                    image = self._reviewed(raw, prompt)
                 if probe is not None:
                     probe.mark("generate-end")
                 if output != "4k":

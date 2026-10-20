@@ -19,6 +19,7 @@ import psutil
 from PIL import Image
 
 from canvas.app.i18n import text
+from canvas.infra.stage_timer import timed
 from canvas.infra.vram import reset_peak_allocated
 from canvas.models.modes import Tier
 from canvas.models.pins import (
@@ -30,7 +31,14 @@ from canvas.models.pins import (
 )
 from canvas.models.plan import CallPlan
 from canvas.models.user_lora import UserLora, apply_lora, unload_lora
-from canvas.pipeline.offload import OffloadUnavailable, install_low_vram_offload
+from canvas.pipeline.offload import (
+    OffloadUnavailable,
+    install_low_vram_offload,
+    install_fp8_storage,
+    install_model_offload,
+    resident_fits,
+    model_offload_fits,
+)
 from canvas.pipeline.schedule import note_image_seconds
 from canvas.safety.image import RawImage, ScreenedFrame, ScreenedInput
 
@@ -241,13 +249,15 @@ def _pipeline_for(
             held.pipe = converted
             held.pipeline_name = pipeline_name
     if held is None:
-        pipe, controlnet = _open_pipeline(diffusers, pipeline_name, folder, dtype, control_file)
+        with timed("pipeline_load"):
+            pipe, controlnet = _open_pipeline(diffusers, pipeline_name, folder, dtype, control_file)
         held = _Held(
             folder=key[0], tier=tier, dtype=dtype, control=key[3], pipeline_name=pipeline_name,
             lora_key=None, pipe=pipe, controlnet=controlnet, torch=torch,
         )
         _slot = held
-        _place_and_bind(pipe, tier, lora, lora_strength)
+        with timed("pipeline_place"):
+            _place_and_bind(pipe, tier, lora, lora_strength)
         held.lora_key = _lora_key(lora, lora_strength)
         return pipe
     lora_key = _lora_key(lora, lora_strength)
@@ -407,6 +417,15 @@ def _release_lora(pipe: Any) -> None:
 def _place(pipe: Any, tier: Tier) -> None:
     """16 GB streams transformer blocks from pinned RAM. 24 GB keeps the pipeline resident."""
     if tier is Tier.GB16:
+        torch = _import_torch()
+        install_fp8_storage(pipe, torch, _layerwise_casting())
+        free = _free_vram_bytes()
+        if resident_fits(pipe, free):
+            pipe.to("cuda")
+            return
+        if model_offload_fits(pipe, free):
+            install_model_offload(pipe)
+            return
         try:
             install_low_vram_offload(pipe)
         except OffloadUnavailable as exc:
@@ -416,6 +435,27 @@ def _place(pipe: Any, tier: Tier) -> None:
         pipe.to("cuda")
         return
     assert_never(tier)
+
+
+def _layerwise_casting() -> Any:
+    """diffusers' layerwise casting hook, or None on a build without it."""
+    try:
+        from diffusers.hooks import apply_layerwise_casting
+    except ImportError:
+        return None
+    return apply_layerwise_casting
+
+
+def _free_vram_bytes() -> int | None:
+    """Free CUDA memory now, or None without a CUDA device."""
+    try:
+        torch = _import_torch()
+    except ImportError:
+        return None
+    if not torch.cuda.is_available():
+        return None
+    free, _total = torch.cuda.mem_get_info()
+    return int(free)
 
 
 def _pil(frame: ScreenedFrame) -> Image.Image:

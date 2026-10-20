@@ -27,6 +27,19 @@ def note_error(code: str) -> None:
         return
 
 
+def note_timing(line: str) -> None:
+    """Append one ``timing ...`` line from ``StageTimes.log_line``. Stage names and seconds only."""
+    if not line.startswith("timing "):
+        return
+    try:
+        folder = logs_dir()
+        folder.mkdir(parents=True, exist_ok=True)
+        with (folder / "voxprint.log").open("a", encoding="utf-8") as handle:
+            handle.write(line + "\n")
+    except OSError:
+        return
+
+
 def note_crash(code: str, exc: BaseException) -> None:
     """Append one crash line: a code, the exception type, and the traceback.
 

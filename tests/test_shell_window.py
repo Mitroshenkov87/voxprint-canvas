@@ -658,3 +658,37 @@ def test_proportions_and_image_size_menus_choose_presets(app, home: Path) -> Non
     image_size.menu().aboutToShow.emit()
     labels = [action.text() for action in image_size.menu().actions()]
     assert labels == ["Standard", "4K (needs Enlarge)"]
+
+
+@pytest.mark.parametrize("language", ["ru", "en"])
+@pytest.mark.parametrize("width", [1280, 1100, 960])
+def test_result_buttons_show_every_label_whole(app, home: Path, language: str, width: int) -> None:
+    set_language(language)
+    state = home / "state"
+    state.mkdir(parents=True, exist_ok=True)
+    payload = {"schema": 1, "items": [{"id": "pic-01", "prompt": "a red boat", "presets": [], "seed": 3}]}
+    (state / "image-history.json").write_text(json.dumps(payload) + "\n", encoding="utf-8")
+    window = _window(home)
+    window.resize(width, 800)
+    window.show()
+    window.view._select("pic-01")
+    for _ in range(3):
+        app.processEvents()
+    bar = window.findChild(QWidget, "actionBar")
+    assert bar is not None and bar.isVisible()
+    names = ("moreLike", "savePicture", "openFolder", "usePrompt", "useInput", "deletePicture")
+    buttons = [bar.findChild(QPushButton, name) for name in names]
+    for index, button in enumerate(buttons):
+        assert button is not None and button.isVisible() and button.text()
+        font = QFont(button.font())
+        font.setWeight(QFont.Weight.DemiBold)
+        assert button.width() >= QFontMetrics(font).horizontalAdvance(button.text()) + 16, button.objectName()
+        geometry = button.geometry()
+        assert geometry.left() >= 0 and geometry.right() < bar.width(), button.objectName()
+        assert geometry.bottom() < bar.height(), button.objectName()
+        right = button.mapTo(window, button.rect().topRight()).x()
+        assert right < window.width(), button.objectName()
+        holder = bar.parentWidget()
+        assert button.mapTo(holder, button.rect().topRight()).x() < holder.width(), button.objectName()
+        for other in buttons[index + 1:]:
+            assert not geometry.intersects(other.geometry()), (button.objectName(), other.objectName())

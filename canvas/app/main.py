@@ -13,7 +13,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from voxprint_common.i18n import tr
 
 from canvas.app.branding import icon_path, set_app_user_model_id
-from canvas.app.identity import version_label
+from canvas.app.identity import splash_line
 from canvas.app.i18n import text
 from canvas.app.info import APP_NAME, APP_VERSION, ENLARGE_NAME
 from canvas.app.platform import GpuCheck, check_gpu, current_os_check
@@ -565,7 +565,7 @@ def main(argv: list[str] | None = None) -> int:
     if refused is not None:
         return refused
     if args.version:
-        print(version_label())
+        print(splash_line())
         return 0
     if getattr(args, "command", None) == "generate":
         return _generate(args)

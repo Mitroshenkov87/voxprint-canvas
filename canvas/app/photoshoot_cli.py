@@ -214,7 +214,7 @@ def _run_command(
     lines = [assemble_line(scenario.subject_block, shot, include_camera=True) for shot in scenario.shots]
     scenario_path = result.folder / "scenario.txt"
     scenario_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    shots = _shot_rows(scenario, statuses, result.kept)
+    shots = _shot_rows(scenario, statuses, result.kept, result.code or "internal" if result.stopped == "error" else "")
     frame_paths = tuple(str(shot["path"]) for shot in shots if shot["code"] == "ok")
     made = len(frame_paths)
     if result.stopped == "error":
@@ -240,15 +240,21 @@ def _run_command(
     ), 0
 
 
-def _shot_rows(scenario: Scenario, statuses: dict[int, str], kept: tuple[Path, ...]) -> list[dict[str, object]]:
+def _shot_rows(
+    scenario: Scenario, statuses: dict[int, str], kept: tuple[Path, ...], error: str = "",
+) -> list[dict[str, object]]:
+    """One row per shot. After an error stop, unkept shots carry the error code, not ``not_produced``."""
     by_name = {path.name: path for path in kept}
     suffix = extension(DEFAULT_FORMAT)
     blocked = tr_lang("photoshoot.frame.blocked", "en")
+    failed = tr_lang("photoshoot.frame.error", "en")
     rows: list[dict[str, object]] = []
     for index, _shot in enumerate(scenario.shots):
         path = by_name.get(f"{index + 1:02}{suffix}")
         if statuses.get(index) == "kept" and path is not None:
             rows.append({"index": index + 1, "code": "ok", "path": str(path)})
+        elif error:
+            rows.append({"index": index + 1, "code": error, "message": failed})
         else:
             rows.append({"index": index + 1, "code": "not_produced", "message": blocked})
     return rows

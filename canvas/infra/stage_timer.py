@@ -22,6 +22,14 @@ class StageTimes:
         self._totals: dict[str, float] = {}
         self._counts: dict[str, int] = {}
         self._started = time.perf_counter()
+        self._tags: dict[str, str] = {}
+
+    def tag(self, key: str, value: str) -> None:
+        """Record one short code (for example ``tier=gb16``) for the log line."""
+        if not _NAME.match(key) or not _NAME.match(value):
+            raise ValueError("tags are short lowercase codes")
+        with self._lock:
+            self._tags[key] = value
 
     def add(self, stage: str, seconds: float) -> None:
         """Add one sample. ``stage`` must be a short lowercase code."""
@@ -60,6 +68,8 @@ class StageTimes:
         assert isinstance(stages, dict)
         parts = [f"wall={data['wall_s']}"]
         parts += [f"{name}={row['count']}x{row['total_s']}" for name, row in stages.items()]
+        with self._lock:
+            parts += [f"{key}={value}" for key, value in sorted(self._tags.items())]
         return "timing " + " ".join(parts)
 
 
@@ -89,3 +99,10 @@ def note_stage(stage: str, seconds: float) -> None:
     times = _current
     if times is not None:
         times.add(stage, seconds)
+
+
+def note_tag(key: str, value: str) -> None:
+    """Tag the run-wide collector, when one is set."""
+    times = _current
+    if times is not None:
+        times.tag(key, value)

@@ -19,7 +19,7 @@ import psutil
 from PIL import Image
 
 from canvas.app.i18n import text
-from canvas.infra.stage_timer import timed
+from canvas.infra.stage_timer import note_tag, timed
 from canvas.infra.vram import reset_peak_allocated
 from canvas.models.modes import Tier
 from canvas.models.pins import (
@@ -418,20 +418,28 @@ def _place(pipe: Any, tier: Tier) -> None:
     """16 GB streams transformer blocks from pinned RAM. 24 GB keeps the pipeline resident."""
     if tier is Tier.GB16:
         torch = _import_torch()
-        install_fp8_storage(pipe, torch, _layerwise_casting())
+        cast = install_fp8_storage(pipe, torch, _layerwise_casting())
+        note_tag("tier", "gb16")
+        note_tag("weights", "fp8" if cast else "bf16")
         free = _free_vram_bytes()
         if resident_fits(pipe, free):
+            note_tag("placement", "resident")
             pipe.to("cuda")
             return
         if model_offload_fits(pipe, free):
+            note_tag("placement", "model_offload")
             install_model_offload(pipe)
             return
         try:
             install_low_vram_offload(pipe)
         except OffloadUnavailable as exc:
             raise InferenceUnavailable("this pipeline cannot offload weights") from exc
+        note_tag("placement", "group_offload")
         return
     if tier is Tier.GB24:
+        note_tag("tier", "gb24")
+        note_tag("weights", "bf16")
+        note_tag("placement", "resident")
         pipe.to("cuda")
         return
     assert_never(tier)

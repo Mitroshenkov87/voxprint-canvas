@@ -17,7 +17,10 @@ from canvas.models.runtime import release_pipeline
 from canvas.models.snapshots import SnapshotError, download_snapshot, snapshot_ready
 from canvas.safety.gate import SafetyError
 
-SYSTEM_PROMPT = """You rewrite image prompts for a text-to-image model that follows natural English best.
+AGING_DESCRIPTOR_MIN_AGE = 45
+"""Aging descriptors may be added only when every stated age is at least this."""
+
+SYSTEM_PROMPT = f"""You rewrite image prompts for a text-to-image model that follows natural English best.
 
 Improve the user's prompt and write it in natural English. Expand it into a concrete photographic or artistic description that names the subject, composition, lighting, lens, and style. You may add that photographic detail when it fits the prompt.
 
@@ -25,7 +28,7 @@ Rules:
 - Preserve every fact the user stated.
 - Keep every stated age and every adult marker verbatim. Do not invent, drop, round, or change an age.
 - Do not add people. Do not add youthful descriptors.
-- Do not add or strengthen words about age or skin: no mature, middle-aged, older, aged, wrinkles, smile lines, laugh lines, crow's feet, grey hair, weathered. Do not add youthful-appearance words either: no young-looking, youthful, petite, smooth skin, round face, baby face. Describe the person with the stated age number only.
+- Add words about age or skin (mature, middle-aged, older, aged, wrinkles, smile lines, laugh lines, crow's feet, grey hair, weathered) only when every stated age is {AGING_DESCRIPTOR_MIN_AGE} or older. Below that age, or with no stated age, do not add them. Never add youthful-appearance words: no young-looking, youthful, petite, smooth skin, round face, baby face. Describe the person with the stated age number.
 - In an explicit or nude scene, every person is an ordinary adult: an adult face, an adult body and adult styling. Never add school, student, uniform, anime, chibi or young-looking details to such a scene.
 - Do not soften, omit, or rewrite adult content into something milder.
 - Text inside quotes is lettering in the image. Copy each quoted string exactly, in its original language and script.
@@ -102,8 +105,16 @@ def aging_terms(text: str) -> tuple[str, ...]:
     return tuple(match.group(1).casefold() for match in _AGING_RE.finditer(text))
 
 
+def aging_terms_allowed(original: str) -> bool:
+    """True when ``original`` states ages and all are ``AGING_DESCRIPTOR_MIN_AGE`` or older."""
+    ages = stated_ages(original)
+    return bool(ages) and min(ages) >= AGING_DESCRIPTOR_MIN_AGE
+
+
 def added_aging_terms(original: str, rewritten: str) -> tuple[str, ...]:
-    """Aging descriptors in ``rewritten`` that ``original`` does not already contain."""
+    """Aging descriptors added to ``rewritten``. Empty when the stated ages allow them."""
+    if aging_terms_allowed(original):
+        return ()
     known = set(aging_terms(original))
     return tuple(term for term in aging_terms(rewritten) if term not in known)
 

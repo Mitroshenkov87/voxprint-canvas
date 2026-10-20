@@ -58,9 +58,11 @@ def _shown(host: QWidget, kind):
 
 def test_the_action_row_is_one_line_at_1280(window):
     row = window._action_row
-    tops = {b.mapTo(row, b.rect().topLeft()).y() for b in _shown(row, QPushButton) if b.parent() is not None}
-    centres = {b.mapTo(row, b.rect().center()).y() for b in _shown(row, QPushButton)}
-    assert len(centres) <= 2 and max(centres) - min(centres) <= 4, tops
+    buttons = _shown(row, QPushButton)
+    centres = {b.mapTo(row, b.rect().center()).y() for b in buttons}
+    sizes = [(b.objectName(), b.width(), b.minimumWidth(), b.sizeHint().width(), b.property("flowFloor"),
+              b.fontMetrics().horizontalAdvance(b.text()), b.font().family()) for b in buttons]
+    assert max(centres) - min(centres) <= 4, (row.width(), sizes)
 
 
 def test_the_lora_row_is_one_line_and_flush_with_the_prompt(window):

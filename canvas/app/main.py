@@ -107,7 +107,7 @@ def _parser() -> argparse.ArgumentParser:
         default=argparse.SUPPRESS,
         help="plan as if the GPU had this many GB (CANVAS_VRAM_CAP_GB)",
     )
-    generate.add_argument("--lora", default="", help="LoRA .safetensors file or add-on folder")
+    generate.add_argument("--lora", default="", help="LoRA .safetensors file, .voxlora package, add-on folder, or imported LoRA name")
     generate.add_argument("--lora-scale", type=float, default=0.7, help="LoRA strength, from 0 to 2")
     generate.add_argument("--json", action="store_true")
     bench = commands.add_parser(
@@ -158,7 +158,7 @@ def _parser() -> argparse.ArgumentParser:
         default=argparse.SUPPRESS,
         help="plan as if the GPU had this many GB (CANVAS_VRAM_CAP_GB)",
     )
-    photoshoot.add_argument("--lora", default="", help="LoRA .safetensors file or add-on folder")
+    photoshoot.add_argument("--lora", default="", help="LoRA .safetensors file, .voxlora package, add-on folder, or imported LoRA name")
     photoshoot.add_argument("--lora-scale", type=float, default=0.7, help="LoRA strength, from 0 to 2")
     photoshoot.add_argument("--json", action="store_true")
     return parser

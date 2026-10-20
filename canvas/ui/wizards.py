@@ -298,6 +298,7 @@ class AddonsWizard(QDialog):
         selected: str,
         strength: float,
         on_save: Callable[[str, float], None],
+        on_import: Callable[[], UserLora | None] | None = None,
     ) -> None:
         """Build the add-ons screen.
 
@@ -307,6 +308,7 @@ class AddonsWizard(QDialog):
             selected: The current expert folder, or empty.
             strength: The current expert strength.
             on_save: Writes the folder and the strength into the shared state.
+            on_import: Runs «Import LoRA» and returns the imported LoRA, or None.
         """
         super().__init__(parent)
         self.setObjectName("addonsWizard")
@@ -329,11 +331,13 @@ class AddonsWizard(QDialog):
         self._items[none] = None
         none.toggled.connect(lambda checked: self._on_toggle(checked, None))
         rows.addWidget(none)
+        self._empty: QLabel | None = None
         if not index.available:
             empty = QLabel(text("canvas.addons.empty"))
             empty.setObjectName("addonsEmpty")
             empty.setWordWrap(True)
             rows.addWidget(empty)
+            self._empty = empty
         chosen: UserLora | None = None
         for item in index.available:
             button = QRadioButton(_lora_label(item))
@@ -366,13 +370,40 @@ class AddonsWizard(QDialog):
         save.setObjectName("addonsSave")
         save.clicked.connect(self._save)
         _fit_button(save)
+        self._group = group
+        self._rows = rows
+        self._on_import = on_import
         layout = QVBoxLayout(self)
         layout.addWidget(notice)
+        if on_import is not None:
+            importer = QPushButton(text("canvas.lora.import"))
+            importer.setObjectName("addonsImport")
+            importer.clicked.connect(self._import)
+            _fit_button(importer)
+            layout.addWidget(importer)
         layout.addWidget(scroll)
         layout.addWidget(QLabel(text("canvas.addons.strength")))
         layout.addWidget(self._strength)
         layout.addWidget(save)
         self.setMinimumWidth(420)
+
+    def _import(self) -> None:
+        if self._on_import is None:
+            return
+        lora = self._on_import()
+        if lora is None:
+            return
+        button = QRadioButton(_lora_label(lora))
+        button.setObjectName(f"loraOption-{lora.id}")
+        self._group.addButton(button)
+        self._items[button] = lora
+        button.toggled.connect(lambda checked, item=lora: self._on_toggle(checked, item))
+        if self._empty is not None:
+            self._rows.removeWidget(self._empty)
+            self._empty.deleteLater()
+            self._empty = None
+        self._rows.insertWidget(1, button)
+        button.setChecked(True)
 
     def _on_toggle(self, checked: bool, lora: UserLora | None) -> None:
         if not checked or self._loading:
@@ -394,7 +425,8 @@ class AddonsWizard(QDialog):
         if selected is None:
             self._on_save("", strength)
         else:
-            self._on_save(str(selected.folder), clamp_strength(selected, strength))
+            key = selected.id if selected.name else str(selected.folder)
+            self._on_save(key, clamp_strength(selected, strength))
         self.accept()
 
     def _selected(self) -> UserLora | None:
@@ -549,7 +581,7 @@ class _MaskBoard(QWidget):
 
 
 def _lora_label(lora: UserLora) -> str:
-    name = lora.trigger or lora.id
+    name = lora.name or lora.trigger or lora.id
     if lora.adult_content:
         return f"{name} — {text('canvas.addons.adult_label')}"
     return name

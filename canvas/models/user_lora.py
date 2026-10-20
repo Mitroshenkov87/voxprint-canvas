@@ -64,6 +64,8 @@ class UserLora:
     default_strength: float
     strength_range: tuple[float, float]
     adult_content: bool
+    name: str = ""
+    previews: tuple[Path, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -194,6 +196,11 @@ def resolve_selected(path: str | Path, root: Path | None = None) -> UserLora | N
     text = str(path).strip()
     if not text:
         return None
+    from canvas.models.lora_library import resolve_library
+
+    imported = resolve_library(text)
+    if imported is not None:
+        return imported
     candidate = Path(text)
     if not candidate.is_absolute():
         candidate = _lora_root(root) / text
@@ -251,12 +258,21 @@ def prepare_cli_lora(path: str | Path) -> UserLora:
     """Open one LoRA for a command. Strength stays inside 0..2.
 
     Args:
-        path: A ``.safetensors`` file or an add-on folder.
+        path: A ``.safetensors`` file, a ``.voxlora`` package, an add-on folder,
+            or the name of an imported LoRA.
 
     Raises:
         LoraRejected: The file is unreadable or its base does not match.
     """
+    from canvas.models.lora_library import PACKAGE_SUFFIX, open_package_weights, resolve_library
+
+    imported = resolve_library(str(path))
+    if imported is not None:
+        return replace(imported, default_strength=CLI_DEFAULT_STRENGTH, strength_range=CLI_STRENGTH_RANGE)
     candidate = Path(path)
+    if candidate.is_file() and candidate.suffix == PACKAGE_SUFFIX:
+        opened = open_package_weights(candidate)
+        return replace(opened, default_strength=CLI_DEFAULT_STRENGTH, strength_range=CLI_STRENGTH_RANGE)
     if candidate.is_dir():
         found, reason = inspect_folder(candidate)
         if found is None:

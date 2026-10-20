@@ -644,6 +644,118 @@
       "en": "LoRA scale must be from 0 to 2.",
       "ru": "Сила LoRA должна быть от 0 до 2."
     },
+    "lora.kind": {
+      "en": "This kind of LoRA cannot be imported yet.",
+      "ru": "Этот вид LoRA пока нельзя импортировать."
+    },
+    "lora.preview": {
+      "en": "This LoRA package cannot be imported.",
+      "ru": "Этот пакет LoRA нельзя импортировать."
+    },
+    "lora.base_missing": {
+      "en": "The base model for this LoRA could not be requested from VOXPrint MDL.",
+      "ru": "Не удалось запросить базовую модель для этой LoRA в VOXPrint MDL."
+    },
+    "canvas.lora.base_queued": {
+      "en": "VOXPrint MDL is downloading the base model for this LoRA.",
+      "ru": "VOXPrint MDL загружает базовую модель для этой LoRA."
+    },
+    "canvas.lora.import": {
+      "en": "Import LoRA",
+      "ru": "Импорт LoRA"
+    },
+    "canvas.lora.import_filter": {
+      "en": "Model Forge LoRA (*.voxlora *.safetensors)",
+      "ru": "LoRA из Model Forge (*.voxlora *.safetensors)"
+    },
+    "canvas.lora.imported": {
+      "en": "{name} is in the LoRA library.",
+      "ru": "{name} добавлена в библиотеку LoRA."
+    },
+    "canvas.lora.checking": {
+      "en": "Checking the file…",
+      "ru": "Проверяем файл…"
+    },
+    "canvas.lora.done": {
+      "en": "Done",
+      "ru": "Готово"
+    },
+    "canvas.lora.library": {
+      "en": "LoRA library",
+      "ru": "Библиотека LoRA"
+    },
+    "canvas.lora.library_empty": {
+      "en": "The library is empty. Import a LoRA from Model Forge.",
+      "ru": "Библиотека пуста. Импортируйте LoRA из Model Forge."
+    },
+    "canvas.lora.remove": {
+      "en": "Remove",
+      "ru": "Удалить"
+    },
+    "canvas.lora.kind_line": {
+      "en": "Kind: {kind}",
+      "ru": "Вид: {kind}"
+    },
+    "canvas.lora.trigger_line": {
+      "en": "Trigger word: {trigger}",
+      "ru": "Слово-триггер: {trigger}"
+    },
+    "canvas.lora.kind.object": {
+      "en": "object",
+      "ru": "объект"
+    },
+    "canvas.lora.kind.style": {
+      "en": "style",
+      "ru": "стиль"
+    },
+    "canvas.lora.kind.subject": {
+      "en": "subject",
+      "ru": "персонаж"
+    },
+    "canvas.lora.pick": {
+      "en": "LoRA",
+      "ru": "LoRA"
+    },
+    "canvas.lora.none": {
+      "en": "No LoRA",
+      "ru": "Без LoRA"
+    },
+    "canvas.lora.third_party.title": {
+      "en": "{name} was not made in VOXPrint Model Forge",
+      "ru": "{name} создана не в VOXPrint Model Forge"
+    },
+    "canvas.lora.third_party.body": {
+      "en": "Canvas is optimised for LoRAs made in VOXPrint Model Forge; this LoRA may work less well. It is added without previews and without a trigger word; you can enter one in the LoRA library.",
+      "ru": "Canvas оптимизирован для LoRA из VOXPrint Model Forge; эта LoRA может работать хуже. Она будет добавлена без превью и без слова-триггера; его можно указать в библиотеке LoRA."
+    },
+    "canvas.lora.continue": {
+      "en": "Continue",
+      "ru": "Продолжить"
+    },
+    "canvas.lora.cancel": {
+      "en": "Cancel",
+      "ru": "Отмена"
+    },
+    "canvas.lora.no_preview": {
+      "en": "No preview",
+      "ru": "Нет превью"
+    },
+    "canvas.lora.trigger_edit": {
+      "en": "Trigger word",
+      "ru": "Слово-триггер"
+    },
+    "canvas.lora.trigger_placeholder": {
+      "en": "Not set",
+      "ru": "Не задано"
+    },
+    "canvas.lora.kind.unknown": {
+      "en": "unknown",
+      "ru": "не указан"
+    },
+    "canvas.lora.strength": {
+      "en": "Strength",
+      "ru": "Сила"
+    },
     "canvas.check.title": {
       "en": "Check this PC",
       "ru": "Проверить компьютер"

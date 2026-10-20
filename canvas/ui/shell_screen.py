@@ -12,6 +12,7 @@ from PIL import Image
 from PySide6.QtCore import QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
+    QMessageBox,
     QApplication,
     QButtonGroup,
     QDialog,
@@ -36,7 +37,9 @@ from canvas.infra.enlarge import EnlargeClient
 from canvas.infra.vram import set_vram_cap_gb
 from canvas.models.mdl_registry import selectable
 from canvas.models.runtime import pipeline_scope
-from canvas.models.user_lora import discover, resolve_selected
+from canvas.models.lora_library import LibraryEntry
+from canvas.models.user_lora import LoraIndex, discover, resolve_selected
+from canvas.ui.lora_panel import ImportedDialog, LibraryDialog, import_with_dialog, library_loras
 from canvas.models.modes import Mode, Tier
 from canvas.models.sizes import closest_aspect
 from canvas.safety.image import RawImage
@@ -229,7 +232,57 @@ class ShellWindow(QMainWindow):
         layout = self.shell.layout
         strength = layout.get("shell.lora_weight")
         number = float(strength) if isinstance(strength, int | float) and not isinstance(strength, bool) else 0.7
-        return AddonsWizard(self, discover(), str(layout.get("shell.addons") or ""), number, self._save_addons)
+        found = discover()
+        index = LoraIndex(tuple(library_loras()) + found.available, found.skipped)
+        return AddonsWizard(
+            self, index, str(layout.get("shell.addons") or ""), number, self._save_addons, self._import_from_addons,
+        )
+
+    def lora_library(self) -> LibraryDialog:
+        """The LoRA library: «Import LoRA», previews and remove."""
+        return LibraryDialog(self, self.shell.gate.age_gate, self._library_changed)
+
+    def _library_changed(self) -> None:
+        self.refresh_loras()
+        self.view.refresh()
+
+    def import_lora(self, path: Path | None = None) -> LibraryEntry | str | None:
+        """Import one Model Forge export into the library and show what was added.
+
+        Returns:
+            The entry, a refusal code, or None when the file dialog was cancelled.
+        """
+        result = import_with_dialog(self, self.shell.gate.age_gate, path)
+        if isinstance(result, str):
+            QMessageBox.warning(self, text("canvas.lora.import"), text(result))
+        elif result is not None:
+            self.refresh_loras()
+            ImportedDialog(self, result).exec()
+        return result
+
+    def refresh_loras(self) -> None:
+        """Re-read the library into the generate panel's LoRA pick."""
+        picker = getattr(self, "_lora_picker", None)
+        if picker is None:
+            return
+        layout = self.shell.layout
+        strength = layout.get("shell.lora_weight")
+        number = float(strength) if isinstance(strength, int | float) and not isinstance(strength, bool) else None
+        picker.reload(str(layout.get("shell.addons") or ""), number)
+
+    def _import_from_addons(self):
+        result = self.import_lora()
+        if result is None or isinstance(result, str):
+            return None
+        return result.as_lora()
+
+    def _pick_lora(self, key: str, strength: float) -> None:
+        changed = str(self.shell.layout.get("shell.addons") or "") != key
+        self.shell.layout.set_value("shell.lora_weight", strength)
+        if changed:
+            # Only a new pick changes the trigger chip; a strength step does not redraw.
+            self.shell.layout.set_value("shell.addons", key)
+            self.view.refresh()
 
     def lora_trigger(self) -> str:
         """The trigger word of the selected LoRA, or empty when nothing is selected."""
@@ -282,6 +335,13 @@ class ShellWindow(QMainWindow):
 
     def _open_addons(self) -> None:
         self.addons_wizard().exec()
+        self.refresh_loras()
+
+    def _open_lora_import(self) -> None:
+        self.import_lora()
+
+    def _open_lora_library(self) -> None:
+        self.lora_library().exec()
 
     def _open_check(self) -> None:
         self.diagnostics_wizard().exec()
@@ -290,6 +350,7 @@ class ShellWindow(QMainWindow):
         self.shell.layout.set_value("shell.addons", path)
         self.shell.layout.set_value("shell.lora_weight", strength)
         self.view.refresh()
+        self.refresh_loras()
 
     def _run_check(self, deep: bool) -> str:
         report = selftest_report(deep=deep)

@@ -78,9 +78,12 @@ def file_dialog(parent: QWidget | None) -> QFileDialog:
 def pick_file(parent: QWidget | None) -> str:
     """Ask for one file. Empty when cancelled."""
     dialog = file_dialog(parent)
-    if dialog.exec() != QDialog.DialogCode.Accepted or not dialog.selectedFiles():
-        return ""
-    return dialog.selectedFiles()[0]
+    try:
+        if dialog.exec() != QDialog.DialogCode.Accepted or not dialog.selectedFiles():
+            return ""
+        return dialog.selectedFiles()[0]
+    finally:
+        dialog.deleteLater()
 
 
 def import_with_dialog(parent: QWidget, gate: object, path: Path | None = None, **options) -> LibraryEntry | str | None:

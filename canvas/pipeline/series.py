@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import threading
+from concurrent.futures import Future, ThreadPoolExecutor
 import struct
 import zipfile
 import zlib
@@ -13,7 +15,8 @@ from typing import Literal, Protocol
 from canvas.app.i18n import text
 from canvas.app.shell_run import RunStopped
 from canvas.core.formats import OutputFormat, extension, save_image
-from canvas.infra.errors import note_debug, note_error
+from canvas.infra.errors import note_debug, note_error, note_timing
+from canvas.infra.stage_timer import StageTimes, set_current
 from canvas.models.runtime import pipeline_scope
 from canvas.pipeline.enhance import mask_numbers
 from canvas.pipeline.adult_direction import ages_allowed, with_adult_anchor, youth_cues
@@ -83,8 +86,35 @@ def run_series(
     on_status: Callable[[int, str], None] | None = None,
     adult: bool = False,
     container: OutputFormat | None = None,
+    timings: StageTimes | None = None,
 ) -> SeriesResult:
-    """Run series."""
+    """Run series.
+
+    ``timings`` collects per-stage seconds (stage names only). Without it the
+    series keeps its own and writes one ``timing`` line to the generic log.
+    """
+    clock = timings if timings is not None else StageTimes()
+    previous_clock = set_current(clock)
+    try:
+        return _run_series(
+            idea=idea, count=count, style=style, place_mode=place_mode, seed=seed, strength=strength,
+            include_camera=include_camera, rewrite=rewrite, age_gate=age_gate, draw_frame=draw_frame,
+            cancelled=cancelled, folder=folder, on_scenario=on_scenario, line_for=line_for,
+            on_status=on_status, adult=adult, container=container, clock=clock, own_clock=timings is None,
+        )
+    finally:
+        set_current(previous_clock)
+
+
+def _run_series(
+    *, idea: str, count: int, style: str, place_mode: str, seed: int, strength: float | None,
+    include_camera: Callable[[], bool], rewrite: Callable[[str], str], age_gate: AgeGate,
+    draw_frame: Callable[[str, int, SeriesFrame | None, float | None], SeriesFrame | None],
+    cancelled: Callable[[], bool], folder: Path, on_scenario: Callable[[Scenario], None] | None,
+    line_for: Callable[[int], str] | None, on_status: Callable[[int, str], None] | None,
+    adult: bool, container: OutputFormat | None, clock: StageTimes, own_clock: bool,
+) -> SeriesResult:
+    gate = SerialGate.wrap(age_gate)
     if place_mode == "same":
         mode: PlaceMode = "same"
     elif place_mode == "different":
@@ -94,16 +124,18 @@ def run_series(
     request = scenario_request(idea, count, style, mode, adult=adult)
     if request is None:
         return _stop("scenario", "", "scenario.format")
-    reason = _refuse_prompt(age_gate, idea)
+    reason = _refuse_prompt(gate, idea)
     if reason:
         return _stop("idea", reason, "idea.policy")
     if adult and not ages_allowed(idea):
         return _stop("idea", "", "idea.minor")
-    scenario, fail_code, source = _scenario(idea, count, style, mode, rewrite, adult=adult)
+    with clock.stage("scenario"):
+        scenario, fail_code, source = _scenario(idea, count, style, mode, rewrite, adult=adult)
     if scenario is None or len(scenario.shots) < count:
         return _stop("scenario", "", fail_code if scenario is None else "scenario.count")
     lines = [assemble_line(scenario.subject_block, shot, include_camera=True) for shot in scenario.shots]
-    verdicts = [_prompt_verdict(age_gate, _with_idea(idea, line)) for line in lines]
+    with clock.stage("prompt_check"):
+        verdicts = [_prompt_verdict(gate, _with_idea(idea, line)) for line in lines]
     refused = [_verdict_message(verdict) for verdict in verdicts]
     hard = [
         reason for line, reason, verdict in zip(lines, refused, verdicts, strict=True)
@@ -122,86 +154,154 @@ def run_series(
     blocked: list[int] = []
     saved_lines: list[str] = []
     seeds: list[int] = []
-    with pipeline_scope():
-        for index, shot in enumerate(scenario.shots):
-            if cancelled():
-                _write_meta(folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept)
-                return SeriesResult("cancelled", "", tuple(kept), folder, "", source)
-            line = (
-                assemble_line(scenario.subject_block, shot, include_camera=include_camera())
-                if line_for is None
-                else line_for(index)
-            )
-            if scenario.subject_block not in line:
-                blocked.append(index)
-                _status(on_status, index, "blocked")
-                continue
-            if adult:
-                if youth_cues(line):
+    # Frame N is encoded and saved on one background thread while frame N+1 renders.
+    # Its output check has already passed on this thread: no unchecked pixels reach
+    # a file, and a picture verdict stops the series before the next render starts.
+    pending: _Pending | None = None
+    worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="series-store")
+
+    def settle() -> SeriesResult | None:
+        """Wait for the previous frame's check and save. A series stop is returned."""
+        nonlocal pending
+        item, pending = pending, None
+        if item is None:
+            return None
+        with clock.stage("wait_save"):
+            path, refusal = item.future.result()
+        if path is None:
+            blocked.append(item.index)
+            _status(on_status, item.index, "blocked")
+            if _ends_series(refusal):
+                return _stop_kept(
+                    "scenario", _verdict_message(refusal) or "", "scenario.minor", source,
+                    folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept,
+                )
+            return None
+        kept.append(path)
+        saved_lines.append(item.line)
+        seeds.append(item.seed)
+        _status(on_status, item.index, "kept")
+        _write_meta(folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept)
+        return None
+
+    def store(index: int, released: _Released) -> tuple[Path | None, Exception | None]:
+        with clock.stage("save"):
+            return _store_frame(folder, index, released, container), None
+
+    try:
+        with pipeline_scope():
+            for index, shot in enumerate(scenario.shots):
+                if cancelled():
+                    stop = settle()
+                    if stop is not None:
+                        return stop
+                    _write_meta(folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept)
+                    return SeriesResult("cancelled", "", tuple(kept), folder, "", source)
+                line = (
+                    assemble_line(scenario.subject_block, shot, include_camera=include_camera())
+                    if line_for is None
+                    else line_for(index)
+                )
+                if scenario.subject_block not in line:
                     blocked.append(index)
                     _status(on_status, index, "blocked")
                     continue
-                line = with_adult_anchor(line)
-            verdict = verdicts[index] if line == lines[index] else _prompt_verdict(age_gate, _with_idea(idea, line))
-            shot_reason = _verdict_message(verdict)
-            if shot_reason:
-                blocked.append(index)
-                _status(on_status, index, "blocked")
-                if _ends_series(verdict) or scan(line).minor:
-                    return _stop_kept(
-                        "scenario", shot_reason, "scenario.minor", source,
-                        folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept,
-                    )
-                continue
-            _status(on_status, index, "drawing")
-            if cancelled():
-                _write_meta(folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept)
-                return SeriesResult("cancelled", "", tuple(kept), folder, "", source)
-            try:
-                active = style_reference(strength)
-                image = draw_frame(line, seed + index, hero if active is not None else None, active)
-            except RunStopped as exc:
-                blocked.append(index)
-                _status(on_status, index, "blocked")
-                if _ends_series(exc) or (exc.code == "prompt" and scan(line).minor):
-                    return _stop_kept(
-                        "scenario", exc.message, "scenario.minor", source,
-                        folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept,
-                    )
-                if not exc.unavailable:
+                if adult:
+                    if youth_cues(line):
+                        blocked.append(index)
+                        _status(on_status, index, "blocked")
+                        continue
+                    line = with_adult_anchor(line)
+                if line == lines[index]:
+                    verdict = verdicts[index]
+                else:
+                    with clock.stage("prompt_check"):
+                        verdict = _prompt_verdict(gate, _with_idea(idea, line))
+                shot_reason = _verdict_message(verdict)
+                if shot_reason:
+                    stop = settle()
+                    if stop is not None:
+                        return stop
+                    blocked.append(index)
+                    _status(on_status, index, "blocked")
+                    if _ends_series(verdict) or scan(line).minor:
+                        return _stop_kept(
+                            "scenario", shot_reason, "scenario.minor", source,
+                            folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept,
+                        )
                     continue
-                _write_meta(folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept)
-                return SeriesResult(
-                    "error",
-                    exc.message,
-                    tuple(kept),
-                    folder,
-                    exc.code or "internal",
-                    source,
-                )
-            released, refusal = (None, None) if image is None else _released_frame(age_gate, image, line)
-            if released is None:
-                blocked.append(index)
-                _status(on_status, index, "blocked")
-                if _ends_series(refusal):
-                    return _stop_kept(
-                        "scenario", _verdict_message(refusal) or "", "scenario.minor", source,
-                        folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept,
+                active = style_reference(strength)
+                if active is not None:
+                    # A style reference must be a frame whose output check already passed.
+                    stop = settle()
+                    if stop is not None:
+                        return stop
+                _status(on_status, index, "drawing")
+                if cancelled():
+                    stop = settle()
+                    if stop is not None:
+                        return stop
+                    _write_meta(folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept)
+                    return SeriesResult("cancelled", "", tuple(kept), folder, "", source)
+                failure: RunStopped | None = None
+                image: SeriesFrame | None = None
+                try:
+                    with clock.stage("render"):
+                        image = draw_frame(line, seed + index, hero if active is not None else None, active)
+                except RunStopped as exc:
+                    failure = exc
+                # The earlier frame's verdict comes first: a stop there discards this frame unwritten.
+                stop = settle()
+                if stop is not None:
+                    return stop
+                if failure is not None:
+                    blocked.append(index)
+                    _status(on_status, index, "blocked")
+                    if _ends_series(failure) or (failure.code == "prompt" and scan(line).minor):
+                        return _stop_kept(
+                            "scenario", failure.message, "scenario.minor", source,
+                            folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept,
+                        )
+                    if not failure.unavailable:
+                        continue
+                    _write_meta(folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept)
+                    return SeriesResult(
+                        "error", failure.message, tuple(kept), folder, failure.code or "internal", source,
                     )
-                continue
-            path = _store_frame(folder, index, released, container)
-            kept.append(path)
-            saved_lines.append(line)
-            seeds.append(seed + index)
-            if hero is None:
-                hero = image
-            _status(on_status, index, "kept")
-            _write_meta(folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept)
-        _write_meta(folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept)
-        if not kept:
-            note_error("not_produced")
-            return SeriesResult("", "", (), folder, "not_produced", source)
-        return SeriesResult("", "", tuple(kept), folder, "", source)
+                if image is None:
+                    blocked.append(index)
+                    _status(on_status, index, "blocked")
+                    continue
+                # The output check runs before anything is encoded or written, and a
+                # picture verdict here stops the series before another frame is drawn.
+                with clock.stage("output_check"):
+                    released, refusal = _released_frame(gate, image, line)
+                if released is None:
+                    blocked.append(index)
+                    _status(on_status, index, "blocked")
+                    if _ends_series(refusal):
+                        return _stop_kept(
+                            "scenario", _verdict_message(refusal) or "", "scenario.minor", source,
+                            folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept,
+                        )
+                    continue
+                if hero is None:
+                    hero = image
+                pending = _Pending(index, line, seed + index, image, worker.submit(store, index, released))
+            stop = settle()
+            if stop is not None:
+                return stop
+    finally:
+        if pending is not None:
+            pending.future.cancel()
+        worker.shutdown(wait=True)
+        if own_clock:
+            note_timing(clock.log_line())
+    _write_meta(folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept)
+    if not kept:
+        note_error("not_produced")
+        return SeriesResult("", "", (), folder, "not_produced", source)
+    return SeriesResult("", "", tuple(kept), folder, "", source)
 
 
 def style_reference(strength: float | None) -> float | None:
@@ -279,6 +379,43 @@ def _ends_series(error: BaseException | None) -> bool:
     if error.code in _PICTURE_CODES:
         return True
     return error.code == "prompt" and not isinstance(error, (StylisedBlocked, YouthContextBlocked))
+
+
+@dataclass(frozen=True)
+class _Pending:
+    """A drawn frame whose output check and save run in the background. Memory only until checked."""
+
+    index: int
+    line: str
+    seed: int
+    image: SeriesFrame
+    future: Future[tuple[Path | None, Exception | None]]
+
+
+class SerialGate:
+    """The same gate, one call at a time across the series threads.
+
+    Every call goes to the wrapped gate unchanged. Only the concurrency differs.
+    """
+
+    def __init__(self, gate: AgeGate) -> None:
+        self._gate = gate
+        self._lock = threading.RLock()
+
+    @classmethod
+    def wrap(cls, gate: AgeGate) -> SerialGate:
+        return gate if isinstance(gate, SerialGate) else cls(gate)
+
+    def __getattr__(self, name: str) -> object:
+        attr = getattr(self._gate, name)
+        if not callable(attr):
+            return attr
+
+        def call(*args: object, **kwargs: object) -> object:
+            with self._lock:
+                return attr(*args, **kwargs)
+
+        return call
 
 
 @dataclass(frozen=True)

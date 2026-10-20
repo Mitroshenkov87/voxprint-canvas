@@ -208,3 +208,42 @@ def _device(name: str) -> Any:
     except ImportError:
         return name
     return torch.device(name)
+
+
+MODEL_OFFLOAD_HEADROOM_BYTES = int(2.5 * 1024**3)
+
+
+def component_bytes(module: Any) -> int:
+    """Parameter and buffer bytes of one torch module. 0 when it has none."""
+    total = 0
+    for getter in ("parameters", "buffers"):
+        items = getattr(module, getter, None)
+        if not callable(items):
+            continue
+        for tensor in items():
+            total += int(tensor.numel()) * int(tensor.element_size())
+    return total
+
+
+def model_offload_fits(pipe: Any, free_bytes: int | None) -> bool:
+    """True when the largest component plus headroom fits in free VRAM.
+
+    Model offload keeps one whole component on the GPU at a time, so the
+    transformer denoises at full speed instead of streaming one block per step.
+    """
+    if free_bytes is None or not callable(getattr(pipe, "enable_model_cpu_offload", None)):
+        return False
+    largest = max((component_bytes(item) for item in _components(pipe)), default=0)
+    if largest <= 0:
+        return False
+    return largest + MODEL_OFFLOAD_HEADROOM_BYTES <= int(free_bytes)
+
+
+def install_model_offload(pipe: Any) -> OffloadInstall:
+    """Whole-component offload: the transformer stays on the GPU through every step."""
+    pipe.enable_model_cpu_offload()
+    return OffloadInstall(
+        "model-cpu-offload", False, False, False,
+        _call_optional(pipe, "enable_vae_tiling"),
+        _call_optional(pipe, "enable_vae_slicing"),
+    )

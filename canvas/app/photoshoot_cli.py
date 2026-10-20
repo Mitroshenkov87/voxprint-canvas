@@ -19,7 +19,10 @@ from canvas.models.registry import load_catalog
 from canvas.pipeline.adult_direction import scenario_system
 from canvas.pipeline.enhance import open_rewriter
 from canvas.pipeline.photoshoot import MAX_FRAMES, SCENARIO_TOKENS, SYSTEM_PROMPT, Scenario, assemble_line
-from canvas.pipeline.series import SeriesFrame, run_series
+from canvas.infra.errors import note_timing
+from canvas.infra.stage_timer import StageTimes, note_stage
+from canvas.pipeline.schedule import last_image_seconds, reset_image_seconds
+from canvas.pipeline.series import SerialGate, SeriesFrame, run_series
 from canvas.safety.gate import AgeGate
 from canvas.safety.image import RawImage
 from canvas.safety.inputs import ImageRole, PendingInput
@@ -112,7 +115,13 @@ def model_generate(
         if hero is not None:
             raw = RawImage(hero.width, hero.height, hero.to_bytes())
             fresh = (PendingInput(ImageRole.INIT, raw),)
-        return runner(job, fresh)
+        reset_image_seconds()
+        try:
+            return runner(job, fresh)
+        finally:
+            seconds = last_image_seconds()
+            if seconds is not None:
+                note_stage("denoise", seconds)
 
     return generate
 
@@ -130,6 +139,7 @@ def run_command(
     rewrite: Callable[[str], str],
     generate: Callable[[str, int, SeriesFrame | None, float | None], SeriesFrame | None],
     strength: float | None = None,
+    timings: StageTimes | None = None,
 ) -> tuple[dict[str, object], int]:
     """Run one series into ``folder`` and describe what was written.
 
@@ -149,6 +159,22 @@ def run_command(
     catalogs()
     if frames < 1 or frames > MAX_FRAMES:
         return reject_frames(frames), 2
+    clock = timings if timings is not None else StageTimes()
+    body, code = _run_command(
+        idea=idea, folder=folder, frames=frames, seed=seed, style=style, places=places, adult=adult,
+        age_gate=age_gate, rewrite=rewrite, generate=generate, strength=strength, clock=clock,
+    )
+    body["timings"] = clock.summary()
+    note_timing(clock.log_line())
+    return body, code
+
+
+def _run_command(
+    *, idea: str, folder: Path, frames: int, seed: int, style: str, places: str, adult: bool,
+    age_gate: AgeGate, rewrite: Callable[[str], str],
+    generate: Callable[[str, int, SeriesFrame | None, float | None], SeriesFrame | None],
+    strength: float | None, clock: StageTimes,
+) -> tuple[dict[str, object], int]:
     scenario_style = style if style in _SCENARIO_STYLES else "photo"
     held: dict[str, Scenario] = {}
     statuses: dict[int, str] = {}
@@ -176,6 +202,7 @@ def run_command(
         on_status=on_status,
         adult=adult,
         container=DEFAULT_FORMAT,
+        timings=clock,
     )
     scenario = held.get("scenario")
     if (result.stopped in {"idea", "scenario"} and not result.kept) or scenario is None or result.folder is None:

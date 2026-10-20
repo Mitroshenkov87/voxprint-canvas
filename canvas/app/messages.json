@@ -280,6 +280,10 @@
       "en": "The enhanced prompt changed a stated age, so the original prompt was used.",
       "ru": "Улучшенный запрос изменил указанный возраст, поэтому использован исходный запрос."
     },
+    "enhance.age_descriptor": {
+      "en": "The enhanced prompt added words about age, so the original prompt was used.",
+      "ru": "Улучшенный запрос добавил слова о возрасте, поэтому использован исходный запрос."
+    },
     "enhance.quote": {
       "en": "The enhanced prompt dropped quoted text, so the original prompt was used.",
       "ru": "Улучшенный запрос потерял текст в кавычках, поэтому использован исходный запрос."

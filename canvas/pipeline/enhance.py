@@ -17,7 +17,10 @@ from canvas.models.runtime import release_pipeline
 from canvas.models.snapshots import SnapshotError, download_snapshot, snapshot_ready
 from canvas.safety.gate import SafetyError
 
-SYSTEM_PROMPT = """You rewrite image prompts for a text-to-image model that follows natural English best.
+AGING_DESCRIPTOR_MIN_AGE = 45
+"""Aging descriptors may be added only when every stated age is at least this."""
+
+SYSTEM_PROMPT = f"""You rewrite image prompts for a text-to-image model that follows natural English best.
 
 Improve the user's prompt and write it in natural English. Expand it into a concrete photographic or artistic description that names the subject, composition, lighting, lens, and style. You may add that photographic detail when it fits the prompt.
 
@@ -25,6 +28,7 @@ Rules:
 - Preserve every fact the user stated.
 - Keep every stated age and every adult marker verbatim. Do not invent, drop, round, or change an age.
 - Do not add people. Do not add youthful descriptors.
+- Add words about age or skin (mature, middle-aged, older, aged, wrinkles, smile lines, laugh lines, crow's feet, grey hair, weathered) only when every stated age is {AGING_DESCRIPTOR_MIN_AGE} or older. Below that age, or with no stated age, do not add them. Never add youthful-appearance words: no young-looking, youthful, petite, smooth skin, round face, baby face. Describe the person with the stated age number.
 - In an explicit or nude scene, every person is an ordinary adult: an adult face, an adult body and adult styling. Never add school, student, uniform, anime, chibi or young-looking details to such a scene.
 - Do not soften, omit, or rewrite adult content into something milder.
 - Text inside quotes is lettering in the image. Copy each quoted string exactly, in its original language and script.
@@ -79,9 +83,40 @@ _QUOTE = re.compile(r'"([^"\n]+)"|“([^”\n]+)”|«([^»\n]+)»|„([^“\n]+
 _THINKING = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
 _FALLBACK_KEYS = {
     "age": "enhance.age",
+    "age_descriptor": "enhance.age_descriptor",
     "quote": "enhance.quote",
     "empty": "enhance.empty",
 }
+
+AGING_TERMS = (
+    "mature", "middle-aged", "middle aged", "older", "elderly", "aged", "aging", "ageing",
+    "wrinkles", "wrinkled", "wrinkle", "fine lines", "smile lines", "laugh lines", "crow's feet",
+    "grey hair", "gray hair", "greying", "graying", "weathered", "sagging",
+)
+_AGING_RE = re.compile(
+    r"(?<![\w-])(" + "|".join(re.escape(term) for term in sorted(AGING_TERMS, key=len, reverse=True))
+    + r")(?![\w-])",
+    re.IGNORECASE,
+)
+
+
+def aging_terms(text: str) -> tuple[str, ...]:
+    """Aging descriptors in ``text``, case-folded, in order."""
+    return tuple(match.group(1).casefold() for match in _AGING_RE.finditer(text))
+
+
+def aging_terms_allowed(original: str) -> bool:
+    """True when ``original`` states ages and all are ``AGING_DESCRIPTOR_MIN_AGE`` or older."""
+    ages = stated_ages(original)
+    return bool(ages) and min(ages) >= AGING_DESCRIPTOR_MIN_AGE
+
+
+def added_aging_terms(original: str, rewritten: str) -> tuple[str, ...]:
+    """Aging descriptors added to ``rewritten``. Empty when the stated ages allow them."""
+    if aging_terms_allowed(original):
+        return ()
+    known = set(aging_terms(original))
+    return tuple(term for term in aging_terms(rewritten) if term not in known)
 
 
 class Rewriter(Protocol):
@@ -384,6 +419,8 @@ def _accept(original: str, rewritten: str) -> EnhanceResult:
         return EnhanceResult(original, original, rewritten, False, "empty")
     if _sorted(stated_ages(original)) != _sorted(stated_ages(cleaned)):
         return EnhanceResult(original, original, cleaned, False, "age")
+    if added_aging_terms(original, cleaned):
+        return EnhanceResult(original, original, cleaned, False, "age_descriptor")
     if any(piece not in cleaned for piece in quoted_spans(original)):
         return EnhanceResult(original, original, cleaned, False, "quote")
     return EnhanceResult(cleaned, original, cleaned, True, "")

@@ -20,14 +20,18 @@ COUNT_MAX = 99
 _COUNT_CHIPS = ("chip-count-1", "chip-count-2", "chip-count-4", "chip-count-custom", "reset-count")
 
 PANEL_SHARE = 0.43
-PANEL_MIN = 600
+PANEL_MIN = 540
+# From this window width up the panel keeps room for a one-line action row.
+WIDE_FROM = 1200
+WIDE_MIN = 600
 PANEL_MAX = 640
 SCROLL_ROOM = 14
 
 
 def panel_width(window_width: int) -> int:
     """The panel takes a share of the window, kept between the two limits."""
-    return max(PANEL_MIN, min(PANEL_MAX, int(window_width * PANEL_SHARE)))
+    floor = WIDE_MIN if window_width >= WIDE_FROM else PANEL_MIN
+    return max(floor, min(PANEL_MAX, int(window_width * PANEL_SHARE)))
 
 
 def arrange(window) -> None:

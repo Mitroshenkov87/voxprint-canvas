@@ -440,6 +440,16 @@ def available_loras(root: Path | None = None) -> list[UserLora]:
     return [*library_loras(root), *discover().available]
 
 
+class _Value(QLabel):
+    """The strength field: fixed width, sized from the font so "2.00" always fits."""
+
+    def sizeHint(self) -> QSize:  # noqa: N802
+        return QSize(max(VALUE_WIDTH, self.fontMetrics().horizontalAdvance("2.00") + 24), ROW_HEIGHT)
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802
+        return self.sizeHint()
+
+
 class LoraPicker(QWidget):
     """A LoRA pick with thumbnails and a strength slider that follows the LoRA's range."""
 
@@ -473,11 +483,12 @@ class LoraPicker(QWidget):
         self.slider.setFixedHeight(ROW_HEIGHT)
         self.slider.setMinimumWidth(80)
         self.slider.valueChanged.connect(self._moved)
-        self.value = QLabel("")
+        self.value = _Value("")
         self.value.setObjectName("loraStrengthValue")
         self.value.setToolTip(text("canvas.lora.strength_tip"))
         self.value.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.value.setFixedSize(VALUE_WIDTH, ROW_HEIGHT)
+        self.value.setFixedHeight(ROW_HEIGHT)
+        self.value.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.value.setStyleSheet(
             f"QLabel#loraStrengthValue {{ background: {CONTROL_BG}; border: 1px solid {CONTROL_BORDER};"
             f" border-radius: {BUTTON_RADIUS}px; }}"

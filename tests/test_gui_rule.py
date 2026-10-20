@@ -125,3 +125,4 @@ def test_menus_open_from_their_buttons(window):
     assert window.view._overflow.menu() is not None
     combo = window._lora_picker.findChild(QComboBox, "loraPick")
     assert "combobox-popup: 0" in combo.styleSheet()
+

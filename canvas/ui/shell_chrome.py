@@ -974,10 +974,10 @@ def _squeeze(items, inner, spacing):
     shown = [item for item in items if not _flow_hidden(item)]
     total = sum(_flow_size(item)[0] for item in shown) + spacing * max(0, len(shown) - 1)
     over = total - inner
-    tight = [item for item in shown if item.widget() is not None and item.widget().property("tightWidth")]
+    tight = [item for item in shown if _floor(item) is not None]
     if over <= 0 or not tight:
         return {}
-    room = {id(item): max(0, _flow_size(item)[0] - int(item.widget().property("tightWidth"))) for item in tight}
+    room = {id(item): max(0, _flow_size(item)[0] - int(_floor(item))) for item in tight}
     if sum(room.values()) < over:
         return room
     share = {}
@@ -988,6 +988,14 @@ def _squeeze(items, inner, spacing):
         share[id(item)] = take
         left -= take
     return share
+
+
+def _floor(item):
+    """The narrowest width an item may be trimmed to: a style chip's, or a fill button's floor."""
+    widget = item.widget()
+    if widget is None:
+        return None
+    return widget.property("tightWidth") or widget.property("flowFloor") or None
 
 
 def _flow_hidden(item):

@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QCoreApplication, QEvent, QLibraryInfo, QTranslator
-from PySide6.QtGui import QFontDatabase
+from PySide6.QtGui import QFont, QFontDatabase, QGuiApplication
 from voxprint_common.i18n import get_language
 
 FAMILY = "Noto Sans"
@@ -27,7 +27,15 @@ def register_fonts() -> bool:
             font_id = QFontDatabase.addApplicationFont(str(FONT_DIR / name))
             if font_id >= 0:
                 _loaded.append(font_id)
-    return FAMILY in QFontDatabase.families()
+    if FAMILY not in QFontDatabase.families():
+        return False
+    app = QGuiApplication.instance()
+    if isinstance(app, QGuiApplication) and app.font().family() != FAMILY:
+        # Widgets with their own stylesheet fall back to the application font, so make it the bundled one.
+        font = QFont(app.font())
+        font.setFamilies([FAMILY])
+        app.setFont(font)
+    return True
 
 
 def translations_dir() -> Path:

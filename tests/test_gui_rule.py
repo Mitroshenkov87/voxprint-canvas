@@ -61,8 +61,8 @@ def test_the_action_row_is_one_line_at_1280(window):
 
     from canvas.ui.fonts import FAMILY
 
-    generate = window._action_row.findChild(QPushButton, "generate")
-    assert QFontInfo(generate.font()).family() == FAMILY
+    for button in _shown(window._action_row, QPushButton) + _shown(window._lora_picker, QPushButton):
+        assert QFontInfo(button.font()).family() == FAMILY, button.objectName()
     row = window._action_row
     buttons = _shown(row, QPushButton)
     centres = {b.mapTo(row, b.rect().center()).y() for b in buttons}

@@ -657,40 +657,11 @@ def _third_party_manifest(source: Path, weights: bytes) -> bytes:
     return json.dumps(record).encode("utf-8")
 
 
-_MODULES: frozenset[str] | None = None
-
-
-def _modules() -> frozenset[str]:
-    """Weight names of the Z-Image-Turbo transformer, from the shipped index."""
-    global _MODULES
-    if _MODULES is None:
-        index = Path(__file__).with_name("turbo_transformer_index.json")
-        raw = json.loads(index.read_text(encoding="utf-8"))
-        _MODULES = frozenset(str(key) for key in raw.get("weight_map", {}))
-    return _MODULES
-
-
 def _fits_modules(weights: bytes) -> None:
-    """Every adapter pair must target a linear weight of the z-image transformer."""
-    from canvas.models.user_lora import _A_WEIGHT, _B_WEIGHT, _peft_key, _safetensors
+    """Every adapter must target a weight of the z-image transformer."""
+    from canvas.models.user_lora import fits_base
 
     with tempfile.TemporaryDirectory(prefix="canvas-lora-check-") as scratch:
         path = Path(scratch) / WEIGHTS_NAME
         path.write_bytes(weights)
-        opened = _safetensors(path)
-    if opened is None:
-        raise LoraRejected(CODE_INVALID)
-    header = opened[0]
-    modules = _modules()
-    for key in header:
-        if key == "__metadata__":
-            continue
-        name = _peft_key(str(key))
-        for suffix in (_A_WEIGHT, _B_WEIGHT):
-            if name.endswith(suffix):
-                stem = name[: -len(suffix)]
-                break
-        else:
-            raise LoraRejected(CODE_INVALID)
-        if f"{stem}.weight" not in modules:
-            raise LoraRejected(CODE_BASE_MISMATCH)
+        fits_base(path)

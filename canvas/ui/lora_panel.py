@@ -5,10 +5,11 @@ Import takes a Model Forge ``.voxlora`` package or a ``.safetensors`` with its
 """
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import QEventLoop, QSize, Qt, QTimer
 from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
@@ -18,6 +19,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QProgressDialog,
     QPushButton,
     QScrollArea,
     QSlider,
@@ -31,6 +33,7 @@ from canvas.app.i18n import text
 from canvas.models.lora_library import (
     THIRD_PARTY_KIND,
     LibraryEntry,
+    Manifest,
     import_lora,
     list_library,
     remove_entry,
@@ -60,11 +63,88 @@ def import_with_dialog(parent: QWidget, gate: object, path: Path | None = None, 
         if not chosen:
             return None
         path = Path(chosen)
-    options.setdefault("confirm", lambda manifest: ThirdPartyDialog(parent, manifest.name).exec() == QDialog.DialogCode.Accepted)
+    progress = options.pop("progress", None)
+    confirm = options.pop("confirm", None)
+
+    def ask(manifest: Manifest) -> bool:
+        return ThirdPartyDialog(parent, manifest.name).exec() == QDialog.DialogCode.Accepted
+
+    def work(confirm_here: Callable[[Manifest], bool], report: Callable[[str], None]) -> LibraryEntry | None:
+        return import_lora(Path(path), gate, confirm=confirm or confirm_here, progress=report, **options)
+
     try:
-        return import_lora(Path(path), gate, **options)
+        return run_in_background(parent, work, ask, progress)
     except LoraRejected as exc:
         return exc.code
+
+
+def run_in_background(
+    parent: QWidget | None,
+    work: Callable[[Callable[[Manifest], bool], Callable[[str], None]], LibraryEntry | None],
+    ask: Callable[[Manifest], bool],
+    progress: Callable[[str], None] | None = None,
+) -> LibraryEntry | None:
+    """Run an import on a worker thread while the window keeps handling events.
+
+    A busy indicator is shown. A question for the user is asked on the UI thread.
+    """
+    state: dict[str, object] = {"done": False, "result": None, "error": None, "ask": None}
+    lines: list[str] = []
+    answered = threading.Event()
+    reply = {"ok": False}
+
+    def confirm_from_worker(manifest: Manifest) -> bool:
+        state["ask"] = manifest
+        answered.wait()
+        return reply["ok"]
+
+    def run() -> None:
+        try:
+            state["result"] = work(confirm_from_worker, lines.append)
+        except BaseException as exc:  # noqa: BLE001 - re-raised on the UI thread
+            state["error"] = exc
+        finally:
+            state["done"] = True
+
+    busy = QProgressDialog(text("canvas.lora.checking"), "", 0, 0, parent)
+    busy.setObjectName("loraBusy")
+    busy.setWindowTitle(text("canvas.lora.import"))
+    busy.setCancelButton(None)
+    busy.setWindowModality(Qt.WindowModality.WindowModal)
+    busy.setMinimumDuration(200)
+    loop = QEventLoop()
+    timer = QTimer()
+    timer.setInterval(30)
+
+    def tick() -> None:
+        while lines:
+            line = lines.pop(0)
+            busy.setLabelText(line)
+            if progress is not None:
+                progress(line)
+        manifest = state["ask"]
+        if manifest is not None:
+            state["ask"] = None
+            busy.hide()
+            reply["ok"] = bool(ask(manifest))  # type: ignore[arg-type]
+            answered.set()
+        if state["done"]:
+            loop.quit()
+
+    timer.timeout.connect(tick)
+    worker = threading.Thread(target=run, name="canvas-lora-import", daemon=True)
+    worker.start()
+    timer.start()
+    loop.exec()
+    timer.stop()
+    tick()
+    busy.close()
+    busy.deleteLater()
+    worker.join()
+    error = state["error"]
+    if isinstance(error, BaseException):
+        raise error
+    return state["result"]  # type: ignore[return-value]
 
 
 class ThirdPartyDialog(QDialog):

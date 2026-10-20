@@ -214,7 +214,7 @@ def _run_command(
     lines = [assemble_line(scenario.subject_block, shot, include_camera=True) for shot in scenario.shots]
     scenario_path = result.folder / "scenario.txt"
     scenario_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    shots = _shot_rows(scenario, statuses, result.kept, result.code or "internal" if result.stopped == "error" else "")
+    shots = _shot_rows(scenario, statuses, result.kept, "internal" if result.stopped == "error" and (result.code or "internal") == "internal" else "")
     frame_paths = tuple(str(shot["path"]) for shot in shots if shot["code"] == "ok")
     made = len(frame_paths)
     if result.stopped == "error":

@@ -79,7 +79,7 @@ def file_dialog(parent: QWidget | None) -> QFileDialog:
     dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
     icons = _Icons()
     dialog.setIconProvider(icons)
-    dialog._icons = icons  # type: ignore[attr-defined]
+    setattr(dialog, "_icons", icons)  # the provider must live as long as the dialog
     label = QFileDialog.DialogLabel
     for which, key in ((label.LookIn, "look_in"), (label.FileName, "name"), (label.FileType, "type"),
                        (label.Accept, "open"), (label.Reject, "cancel")):

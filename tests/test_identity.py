@@ -52,4 +52,4 @@ def test_build_number_comes_from_build_json(monkeypatch):
 
 def test_version_flag_prints_the_release_identity(capsys):
     assert main(["--version"]) == 0
-    assert capsys.readouterr().out.strip() == version_label()
+    assert capsys.readouterr().out.strip() == splash_line()

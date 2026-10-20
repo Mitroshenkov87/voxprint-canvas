@@ -118,6 +118,7 @@
   "photoshoot.place.different": "Разные места",
   "photoshoot.progress.frame": "Кадр {current} из {total}",
   "photoshoot.frame.blocked": "Кадр заблокирован",
+  "photoshoot.frame.error": "Не сделан: серия остановлена из-за ошибки.",
   "photoshoot.frame.kept": "Готово",
   "photoshoot.row.status": "{line} — {note}",
   "photoshoot.frame.waiting": "Ждёт",

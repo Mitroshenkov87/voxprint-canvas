@@ -14,7 +14,7 @@ class _Torch:
     bfloat16 = "bf16"
 
 
-def _cast(module: _Module, storage_dtype: object, compute_dtype: object) -> None:
+def _cast(module: _Module, storage_dtype: object, compute_dtype: object, **kwargs: object) -> None:
     assert storage_dtype == "fp8" and compute_dtype == "bf16"
     module.size = 1
 

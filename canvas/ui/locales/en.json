@@ -113,6 +113,7 @@
   "photoshoot.place.different": "Different places",
   "photoshoot.progress.frame": "Shot {current} of {total}",
   "photoshoot.frame.blocked": "Shot blocked",
+  "photoshoot.frame.error": "Not made: the series stopped on an error.",
   "photoshoot.frame.kept": "Kept",
   "photoshoot.row.status": "{line} — {note}",
   "photoshoot.frame.waiting": "Waiting",

@@ -57,6 +57,11 @@ def _shown(host: QWidget, kind):
 
 
 def test_the_action_row_is_one_line_at_1280(window):
+    dpi = QApplication.primaryScreen().logicalDotsPerInch()
+    if abs(dpi - 96) > 1:
+        # Offscreen runs that scale text by the host DPI but keep a 1280 logical window
+        # do not show the layout a user sees, so the one-line check only runs at 96 dpi.
+        pytest.skip(f"text scaled by {dpi:.0f} dpi")
     row = window._action_row
     buttons = _shown(row, QPushButton)
     centres = {b.mapTo(row, b.rect().center()).y() for b in buttons}

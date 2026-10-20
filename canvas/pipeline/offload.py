@@ -267,9 +267,34 @@ def install_fp8_storage(pipe: Any, torch: Any, apply_casting: Any) -> tuple[str,
         module = getattr(pipe, name, None)
         if module is None:
             continue
-        apply_casting(module, storage_dtype=storage, compute_dtype=torch.bfloat16)
+        apply_casting(
+            module,
+            storage_dtype=storage,
+            compute_dtype=torch.bfloat16,
+            skip_modules_pattern=fp8_skip_patterns(module),
+        )
         cast.append(name)
     return tuple(cast)
+
+
+# diffusers' DEFAULT_SKIP_MODULES_PATTERN. The low-level hook does not read a
+# model's own ``_skip_layerwise_casting_patterns``; only ModelMixin does.
+FP8_DEFAULT_SKIP = ("pos_embed", "patch_embed", "norm", "^proj_in$", "^proj_out$")
+
+
+def fp8_skip_patterns(module: Any) -> tuple[str, ...]:
+    """Default skip patterns plus the layers the model marks as kept in full precision.
+
+    Z-Image lists ``t_embedder`` and ``cap_embedder``. Its timestep embedder casts
+    its input to the stored weight dtype, so an FP8-stored embedder feeds FP8 into
+    a BF16 matmul and the first step fails.
+    """
+    own = getattr(module, "_skip_layerwise_casting_patterns", None) or ()
+    if isinstance(own, str):
+        own = (own,)
+    merged = list(FP8_DEFAULT_SKIP)
+    merged += [item for item in own if item not in merged]
+    return tuple(merged)
 
 
 def resident_fits(pipe: Any, free_bytes: int | None) -> bool:

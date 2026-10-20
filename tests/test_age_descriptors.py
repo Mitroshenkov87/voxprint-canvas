@@ -6,6 +6,7 @@ import pytest
 from canvas.app.i18n import text
 from canvas.pipeline import adult_direction, photoshoot
 from canvas.pipeline.enhance import (
+    AGING_DESCRIPTOR_MIN_AGE,
     AGING_TERMS,
     SYSTEM_PROMPT,
     added_aging_terms,
@@ -99,3 +100,28 @@ def test_scenario_shot_that_adds_aging_words_is_rejected() -> None:
     assert isinstance(shot, Shot)
     line = photoshoot.assemble_line(idea, shot, include_camera=True)
     assert "32 years old" in line and stated_ages(line) == (32,)
+
+
+def test_threshold_is_45() -> None:
+    assert AGING_DESCRIPTOR_MIN_AGE == 45
+
+
+@pytest.mark.parametrize(("age", "allowed"), ((44, False), (45, True)))
+def test_rewrite_aging_words_44_vs_45(age: int, allowed: bool) -> None:
+    original = f"adult woman, {age} years old, red coat"
+    rewritten = f"adult woman, {age} years old, fine smile lines, red coat, 85 mm"
+    result = resolve_prompt(_Gate(), original, rewritten)
+    assert (result.fallback == "") is allowed
+    assert result.prompt == (rewritten if allowed else original)
+
+
+def test_no_stated_age_never_allows_aging_words() -> None:
+    result = resolve_prompt(_Gate(), "adult woman, red coat", "adult woman, red coat, wrinkles")
+    assert result.fallback == "age_descriptor"
+
+
+@pytest.mark.parametrize(("age", "allowed"), ((44, False), (45, True)))
+def test_scenario_aging_words_44_vs_45(age: int, allowed: bool) -> None:
+    idea = f"invented adult woman, {age} years old, red coat"
+    draft = Draft("waist-up shot, weathered face, soft light", "seated", "85 mm lens, eye level", "")
+    assert (accept_shot(idea, idea, "same", "loft", (), draft) is not None) is allowed

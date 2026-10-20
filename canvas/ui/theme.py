@@ -47,11 +47,12 @@ MENU_SELECTION = "#2f4c78"
 RED = "#fca5a5"
 # Canvas splash identity uses the suite accent. The rest of the window uses the tokens above.
 SPLASH = ACCENT
+# The bundled font comes first, so every platform draws with the same metrics.
 UI_FONT = (
+    "Noto Sans",
     "Segoe UI Variable Text",
     "Segoe UI",
     "Ubuntu",
-    "Noto Sans",
     "Cantarell",
     "DejaVu Sans",
 )
@@ -100,6 +101,9 @@ QLabel#status {{ color: {muted}; }}
 
 def build_style(glass: bool, more: bool = False) -> str:
     """Acrylic tint, or the solid fallback. ``more`` is the lighter glass setting."""
+    from canvas.ui.fonts import register_fonts
+
+    register_fonts()
     if glass and more:
         root_bg, card_bg = ROOT_GLASS_MORE, CARD_GLASS_MORE
     elif glass:

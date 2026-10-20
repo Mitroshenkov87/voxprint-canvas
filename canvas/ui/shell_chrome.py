@@ -53,7 +53,13 @@ from canvas.ui.result_bar import wrap as wrap_result  # noqa: E402
 
 def shell_style() -> str:
     """The shared shell stylesheet, with the window and labels kept on the dark ground."""
+    from canvas.ui.fonts import register_fonts
+    from canvas.ui.theme import UI_FONT
+
+    register_fonts()
+    family = ", ".join(f'"{name}"' for name in UI_FONT)
     return build_shell_style(False) + f"""
+* {{ font-family: {family}, sans-serif; }}
 QMainWindow#shell, QWidget#shellColumn, QWidget#simpleRoot, QDialog {{
     background: {ROOT_PLAIN}; color: {TEXT};
 }}

@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QFileDialog,
+    QFileIconProvider,
     QFrame,
     QHBoxLayout,
     QHeaderView,
@@ -60,12 +61,29 @@ def dark(widget: QWidget) -> QWidget:
     return widget
 
 
+class _Icons(QFileIconProvider):
+    """System icons, with the folder type in the app language."""
+
+    def type(self, info) -> str:  # noqa: A003
+        return text("canvas.file.folder") if info.isDir() else super().type(info)
+
+
 def file_dialog(parent: QWidget | None) -> QFileDialog:
     """The Qt file dialog in the dark style. A native dialog would follow the system theme."""
+    from canvas.ui.fonts import qt_translations
+
+    qt_translations()
     dialog = QFileDialog(parent, text("canvas.lora.import"), "", text("canvas.lora.import_filter"))
     dialog.setObjectName("loraFileDialog")
     dialog.setOption(QFileDialog.Option.DontUseNativeDialog, True)
     dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
+    icons = _Icons()
+    dialog.setIconProvider(icons)
+    dialog._icons = icons  # type: ignore[attr-defined]
+    label = QFileDialog.DialogLabel
+    for which, key in ((label.LookIn, "look_in"), (label.FileName, "name"), (label.FileType, "type"),
+                       (label.Accept, "open"), (label.Reject, "cancel")):
+        dialog.setLabelText(which, text(f"canvas.file.{key}"))
     dark(dialog)
     for view in dialog.findChildren(QTreeView):
         view.header().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)

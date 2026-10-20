@@ -983,6 +983,30 @@
     "menu.help.guide_ru": {
       "en": "VOXPrint AI Canvas Guide (Russian)",
       "ru": "Руководство VOXPrint AI Canvas (русский)"
+    },
+    "canvas.file.look_in": {
+      "en": "Look in:",
+      "ru": "Папка:"
+    },
+    "canvas.file.name": {
+      "en": "File name:",
+      "ru": "Имя файла:"
+    },
+    "canvas.file.type": {
+      "en": "Files of type:",
+      "ru": "Тип файлов:"
+    },
+    "canvas.file.open": {
+      "en": "Open",
+      "ru": "Открыть"
+    },
+    "canvas.file.cancel": {
+      "en": "Cancel",
+      "ru": "Отмена"
+    },
+    "canvas.file.folder": {
+      "en": "Folder",
+      "ru": "Папка"
     }
   }
 }

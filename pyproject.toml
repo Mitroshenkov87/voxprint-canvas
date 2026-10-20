@@ -59,7 +59,7 @@ include = ["canvas*"]
 "canvas.models" = ["catalog.json", "third_party.json", "turbo_transformer_index.json"]
 "canvas.app" = ["BUILD.json", "messages.json"]
 "canvas.infra" = ["uv.cu130.toml"]
-"canvas.ui" = ["art/splash.jpg", "art/splash@2x.jpg", "locales/*.json"]
+"canvas.ui" = ["art/splash.jpg", "art/splash@2x.jpg", "locales/*.json", "fonts/*.ttf", "fonts/OFL.txt"]
 
 [tool.ruff]
 target-version = "py312"

@@ -57,20 +57,12 @@ def _shown(host: QWidget, kind):
 
 
 def test_the_action_row_is_one_line_at_1280(window):
-    dpi = QApplication.primaryScreen().logicalDotsPerInch()
-    if abs(dpi - 96) > 1:
-        # Offscreen runs that scale text by the host DPI but keep a 1280 logical window
-        # do not show the layout a user sees, so the one-line check only runs at 96 dpi.
-        pytest.skip(f"text scaled by {dpi:.0f} dpi")
     from PySide6.QtGui import QFontInfo
 
-    from canvas.ui.theme import UI_FONT
+    from canvas.ui.fonts import FAMILY
 
-    known = set(UI_FONT) | {"Selawik", "DejaVu Sans", "Noto Sans", "Ubuntu", "Inter"}
-    family = QFontInfo(window._action_row.findChild(QPushButton, "generate").font()).family()
-    if family not in known:
-        # Without the UI font the platform falls back to a stand-in with other metrics.
-        pytest.skip(f"UI font not installed, drawn with {family}")
+    generate = window._action_row.findChild(QPushButton, "generate")
+    assert QFontInfo(generate.font()).family() == FAMILY
     row = window._action_row
     buttons = _shown(row, QPushButton)
     centres = {b.mapTo(row, b.rect().center()).y() for b in buttons}
@@ -142,3 +134,31 @@ def test_menus_open_from_their_buttons(window):
     combo = window._lora_picker.findChild(QComboBox, "loraPick")
     assert "combobox-popup: 0" in combo.styleSheet()
 
+
+
+def test_the_bundled_font_is_registered(app):
+    from canvas.ui.fonts import FAMILY, FONT_DIR, FONT_FILES, register_fonts
+
+    assert register_fonts()
+    assert all((FONT_DIR / name).is_file() for name in FONT_FILES)
+    assert "Open Font License" in (FONT_DIR / "OFL.txt").read_text(encoding="utf-8")
+    assert FAMILY == "Noto Sans"
+
+
+def test_the_file_dialog_reads_in_russian(app, monkeypatch):
+    from canvas.ui.fonts import qt_translations, translations_dir
+
+    assert (translations_dir() / "qtbase_ru.qm").is_file()
+    monkeypatch.setenv("LANG", "ru_RU.UTF-8")
+    monkeypatch.setenv("LC_ALL", "ru_RU.UTF-8")
+    set_language("ru")
+    try:
+        assert qt_translations() == "ru"
+        dialog = file_dialog(None)
+        labels = " ".join(w.text() for w in dialog.findChildren(QLabel)) + " ".join(
+            b.text() for b in dialog.findChildren(QPushButton))
+        assert "Look in" not in labels and "Отмена" in labels, labels
+        shiboken6.delete(dialog)
+    finally:
+        set_language("en")
+        qt_translations("en")

@@ -191,5 +191,11 @@
   "canvas.image_size": "Image size",
   "simple.size": "Proportions",
   "simple.output": "Image size",
-  "setting.shell.output": "Image size"
+  "setting.shell.output": "Image size",
+  "canvas.file.look_in": "Look in:",
+  "canvas.file.name": "File name:",
+  "canvas.file.type": "Files of type:",
+  "canvas.file.open": "Open",
+  "canvas.file.cancel": "Cancel",
+  "canvas.file.folder": "Folder"
 }

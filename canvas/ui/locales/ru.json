@@ -196,5 +196,11 @@
   "canvas.image_size": "Размер изображения",
   "simple.size": "Пропорции",
   "simple.output": "Размер изображения",
-  "setting.shell.output": "Размер изображения"
+  "setting.shell.output": "Размер изображения",
+  "canvas.file.look_in": "Папка:",
+  "canvas.file.name": "Имя файла:",
+  "canvas.file.type": "Тип файлов:",
+  "canvas.file.open": "Открыть",
+  "canvas.file.cancel": "Отмена",
+  "canvas.file.folder": "Папка"
 }

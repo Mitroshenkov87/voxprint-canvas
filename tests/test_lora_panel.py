@@ -168,3 +168,47 @@ def test_a_library_trigger_edit_updates_the_chip(app, home: Path, monkeypatch):
     app.processEvents()
     assert window._lora_chip.text() == "mylora"
     window.close()
+
+
+def test_import_runs_off_the_ui_thread_and_the_window_keeps_working(app, home: Path, monkeypatch):
+    import threading
+    import time
+
+    from PySide6.QtCore import QTimer
+
+    seen: dict[str, object] = {}
+    real = lora_panel.import_lora
+
+    def slow(path, gate, **options):
+        seen["thread"] = threading.current_thread() is not threading.main_thread()
+        time.sleep(0.3)
+        return real(path, gate, base_ready=lambda: True, **options)
+
+    monkeypatch.setattr(lora_panel, "import_lora", slow)
+    ticks: list[int] = []
+    timer = QTimer()
+    timer.timeout.connect(lambda: ticks.append(1))
+    timer.start(10)
+    result = lora_panel.import_with_dialog(None, World().gate(), write_voxlora(home / "in"))
+    timer.stop()
+    assert seen["thread"] is True
+    assert len(ticks) >= 5
+    assert not isinstance(result, str) and result is not None
+
+
+def test_a_third_party_question_is_asked_on_the_ui_thread(app, home: Path, monkeypatch):
+    import threading
+
+    from tests.lora_files import write_safetensors
+
+    path = home / "y.safetensors"
+    write_safetensors(path, {"layers.0.attention.to_q.lora_A.weight": b"\x01", "layers.0.attention.to_q.lora_B.weight": b"\x02"}, {})
+    asked: list[bool] = []
+
+    def answer(self):
+        asked.append(threading.current_thread() is threading.main_thread())
+        return 1
+
+    monkeypatch.setattr(lora_panel.ThirdPartyDialog, "exec", answer)
+    entry = lora_panel.import_with_dialog(None, World().gate(), path, base_ready=lambda: True)
+    assert asked == [True] and entry is not None

@@ -25,6 +25,9 @@ CODE_SCALE = "lora.scale"
 _KINDS = frozenset({"person", "object", "style"})
 _ADAPTER = "canvas-lora"
 _A_WEIGHT = ".lora_A.weight"
+_ALPHA = ".alpha"
+_KOHYA = "lora_unet_"
+THIRD_PARTY_KIND = "unknown"
 _B_WEIGHT = ".lora_B.weight"
 _HEADER_TRIGGER = "voxprint.subject.trigger"
 _HEADER_KIND = "voxprint.lora.kind"
@@ -288,12 +291,27 @@ def prepare_cli_lora(path: str | Path) -> UserLora:
         )
     if not candidate.is_file():
         raise LoraRejected(CODE_INVALID)
-    opened = open_weights(candidate)
+    if candidate.suffix == ".safetensors" and not _forge_file(candidate):
+        opened = open_third_party(candidate)
+    else:
+        opened = open_weights(candidate)
     return replace(
         opened,
         default_strength=CLI_DEFAULT_STRENGTH,
         strength_range=CLI_STRENGTH_RANGE,
     )
+
+
+def _forge_file(path: Path) -> bool:
+    """True when the header or a matching sidecar marks a Model Forge export."""
+    header = _header(path)
+    if header is None:
+        raise LoraRejected(CODE_INVALID)
+    if header.get(_HEADER_BASE):
+        return True
+    sidecar = path.parent / _SIDECAR
+    document = _document(sidecar) if sidecar.is_file() else None
+    return document is not None and document.get("file") == path.name
 
 
 def open_weights(path: Path) -> UserLora:
@@ -520,7 +538,11 @@ def _header(path: Path) -> dict[str, str] | None:
 
 
 def _opened_weights(path: Path) -> tuple[dict[str, str], Path]:
-    """Header strings and the file the loader should open."""
+    """Header strings and the file the loader should open.
+
+    Kohya ``lora_unet_*`` names are mapped to the z-image modules, and each
+    ``alpha`` is folded into its ``lora_B`` weight.
+    """
     opened = _safetensors(path)
     if opened is None:
         raise LoraRejected(CODE_INVALID)
@@ -529,15 +551,69 @@ def _opened_weights(path: Path) -> tuple[dict[str, str], Path]:
     if not isinstance(raw, dict):
         raise LoraRejected(CODE_INVALID)
     meta = {str(key): value for key, value in raw.items() if isinstance(key, str) and isinstance(value, str)}
-    names = [str(key) for key in header if key != "__metadata__" and isinstance(key, str)]
-    renamed = {name: _peft_key(name) for name in names}
-    if len(set(renamed.values())) != len(renamed) or not _paired(list(renamed.values())):
-        raise LoraRejected(CODE_INVALID)
     if not _offsets_fit(header, blob):
         raise LoraRejected(CODE_INVALID)
-    if list(renamed.values()) == names:
+    names = [str(key) for key in header if key != "__metadata__" and isinstance(key, str)]
+    renamed = {name: _peft_key(name) for name in names}
+    alphas = {new[: -len(_ALPHA)]: old for old, new in renamed.items() if new.endswith(_ALPHA)}
+    weights = {old: new for old, new in renamed.items() if not new.endswith(_ALPHA)}
+    if len(set(weights.values())) != len(weights) or not _paired(list(weights.values())):
+        raise LoraRejected(CODE_INVALID)
+    stems = {new[: -len(_A_WEIGHT)] for new in weights.values() if new.endswith(_A_WEIGHT)}
+    if any(stem not in stems for stem in alphas):
+        raise LoraRejected(CODE_INVALID)
+    if not alphas and list(renamed.values()) == names:
         return meta, path
-    return meta, _write_renamed(path, header, blob, renamed)
+    return meta, _write_normalised(path, header, blob, weights, alphas)
+
+
+def fits_base(path: Path) -> None:
+    """Every adapter must target a weight of the z-image transformer.
+
+    Raises:
+        LoraRejected: ``lora.invalid`` for a damaged file, ``lora.base_mismatch``
+            when an adapter names a module the base does not have.
+    """
+    opened = _safetensors(path)
+    if opened is None:
+        raise LoraRejected(CODE_INVALID)
+    modules = _modules()
+    for key in opened[0]:
+        if key == "__metadata__":
+            continue
+        name = _peft_key(str(key))
+        for suffix in (_A_WEIGHT, _B_WEIGHT, _ALPHA):
+            if name.endswith(suffix):
+                stem = name[: -len(suffix)]
+                break
+        else:
+            raise LoraRejected(CODE_INVALID)
+        if f"{stem}.weight" not in modules:
+            raise LoraRejected(CODE_BASE_MISMATCH)
+
+
+def open_third_party(path: Path) -> UserLora:
+    """A ``.safetensors`` LoRA made outside Model Forge, for one command.
+
+    Raises:
+        LoraRejected: The file is damaged, or its adapters do not fit the base.
+    """
+    meta, weights = _opened_weights(path)
+    base = meta.get(_HEADER_BASE, "")
+    if base and not base_matches(base):
+        raise LoraRejected(CODE_BASE_MISMATCH)
+    fits_base(path)
+    return UserLora(
+        path.stem,
+        THIRD_PARTY_KIND,
+        path.parent,
+        weights,
+        "",
+        CLI_DEFAULT_STRENGTH,
+        CLI_STRENGTH_RANGE,
+        False,
+        name=path.stem,
+    )
 
 
 def _matching_sidecar(path: Path) -> dict[str, object] | None:
@@ -583,12 +659,51 @@ def _safetensors(path: Path) -> tuple[dict[str, object], bytes] | None:
 
 
 def _peft_key(key: str) -> str:
-    """A transformer-relative ``lora_A`` / ``lora_B`` name."""
+    """A transformer-relative ``lora_A`` / ``lora_B`` / ``alpha`` name.
+
+    Raises:
+        LoraRejected: A Kohya name that maps to no z-image module (``lora.base_mismatch``).
+    """
     name = key
+    if name.startswith(_KOHYA):
+        prefix, _dot, rest = name.partition(".")
+        stem = _kohya_table().get(prefix)
+        if stem is None:
+            raise LoraRejected(CODE_BASE_MISMATCH)
+        name = f"{stem}.{rest}"
+    elif name.startswith(("lora_te", "lora_te1_", "lora_te2_")):
+        raise LoraRejected(CODE_BASE_MISMATCH)
     for prefix in ("transformer.", "diffusion_model."):
         if name.startswith(prefix):
             name = name[len(prefix):]
     return name.replace(".lora_down.weight", _A_WEIGHT).replace(".lora_up.weight", _B_WEIGHT)
+
+
+_MODULES: frozenset[str] | None = None
+_KOHYA_TABLE: dict[str, str] | None = None
+
+
+def _modules() -> frozenset[str]:
+    """Weight names of the Z-Image-Turbo transformer, from the shipped index."""
+    global _MODULES
+    if _MODULES is None:
+        index = Path(__file__).with_name("turbo_transformer_index.json")
+        raw = json.loads(index.read_text(encoding="utf-8"))
+        _MODULES = frozenset(str(key) for key in raw.get("weight_map", {}))
+    return _MODULES
+
+
+def _kohya_table() -> dict[str, str]:
+    """``lora_unet_<module with underscores>`` to the module name."""
+    global _KOHYA_TABLE
+    if _KOHYA_TABLE is None:
+        table: dict[str, str] = {}
+        for weight in _modules():
+            if weight.endswith(".weight"):
+                stem = weight[: -len(".weight")]
+                table[_KOHYA + stem.replace(".", "_")] = stem
+        _KOHYA_TABLE = table
+    return _KOHYA_TABLE
 
 
 def _paired(keys: list[str]) -> bool:
@@ -618,18 +733,81 @@ def _offsets_fit(header: dict[str, object], blob: bytes) -> bool:
     return True
 
 
-def _write_renamed(path: Path, header: dict[str, object], blob: bytes, renamed: dict[str, str]) -> Path:
+def _write_normalised(
+    path: Path, header: dict[str, object], blob: bytes, weights: dict[str, str], alphas: dict[str, str],
+) -> Path:
+    """Write the loader copy: PEFT names, with each alpha folded into ``lora_B``."""
+    scale: dict[str, float] = {}
+    for stem, alpha_key in alphas.items():
+        alpha = _scalar(header[alpha_key], blob)
+        down = next(old for old, new in weights.items() if new == f"{stem}{_A_WEIGHT}")
+        down_entry = header[down]
+        shape = down_entry.get("shape") if isinstance(down_entry, dict) else None
+        if not isinstance(shape, list) or not shape or not isinstance(shape[0], int) or shape[0] <= 0:
+            raise LoraRejected(CODE_INVALID)
+        scale[f"{stem}{_B_WEIGHT}"] = alpha / shape[0]
     new_header: dict[str, object] = {}
-    for key, value in header.items():
-        if key == "__metadata__":
-            new_header[key] = value
-        else:
-            new_header[renamed[str(key)]] = value
+    if "__metadata__" in header:
+        new_header["__metadata__"] = header["__metadata__"]
+    parts: list[bytes] = []
+    offset = 0
+    for old, new in weights.items():
+        source = header[old]
+        if not isinstance(source, dict):
+            raise LoraRejected(CODE_INVALID)
+        entry = dict(source)
+        start, stop = entry["data_offsets"]
+        data = blob[start:stop]
+        if new in scale and scale[new] != 1.0:
+            data = _scaled(str(entry.get("dtype")), data, scale[new])
+        entry["data_offsets"] = [offset, offset + len(data)]
+        offset += len(data)
+        new_header[new] = entry
+        parts.append(data)
     payload = json.dumps(new_header, separators=(",", ":")).encode("utf-8")
     target = Path(tempfile.gettempdir()) / "canvas-lora" / _sha256(path)[:16] / path.name
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(len(payload).to_bytes(8, "little") + payload + blob)
+    target.write_bytes(len(payload).to_bytes(8, "little") + payload + b"".join(parts))
     return target
+
+
+def _scalar(entry: object, blob: bytes) -> float:
+    if not isinstance(entry, dict):
+        raise LoraRejected(CODE_INVALID)
+    start, stop = entry["data_offsets"]
+    values = _floats(str(entry.get("dtype")), blob[start:stop])
+    if values.size != 1:
+        raise LoraRejected(CODE_INVALID)
+    value = float(values.reshape(-1)[0])
+    if not value > 0 or value != value or value == float("inf"):
+        raise LoraRejected(CODE_INVALID)
+    return value
+
+
+def _floats(dtype: str, data: bytes):  # noqa: ANN202 - numpy array
+    import numpy as np
+
+    if dtype == "F32":
+        return np.frombuffer(data, dtype="<f4").astype(np.float32)
+    if dtype == "F16":
+        return np.frombuffer(data, dtype="<f2").astype(np.float32)
+    if dtype == "BF16":
+        raw = np.frombuffer(data, dtype="<u2").astype(np.uint32) << 16
+        return raw.view(np.float32)
+    raise LoraRejected(CODE_INVALID)
+
+
+def _scaled(dtype: str, data: bytes, factor: float) -> bytes:
+    import numpy as np
+
+    values = _floats(dtype, data) * np.float32(factor)
+    if dtype == "F32":
+        return values.astype("<f4").tobytes()
+    if dtype == "F16":
+        return values.astype("<f2").tobytes()
+    bits = values.astype(np.float32).view(np.uint32)
+    rounded = ((bits + 0x7FFF + ((bits >> 16) & 1)) >> 16).astype("<u2")
+    return rounded.tobytes()
 
 
 def _loader_weights(path: Path) -> Path:

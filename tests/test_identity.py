@@ -10,15 +10,15 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_version_label_and_release_title_come_from_build_json():
     assert version() == "0.1.0"
-    assert version_label({}) == '0.1.0 RC · build 19 "Tavnit"'
-    assert splash_line({}) == '0.1.0 RC build 19 "Tavnit"'
-    assert release_title({}) == 'VOXPrint AI Canvas 0.1.0 RC · build 19 "Tavnit"'
-    assert release_title({"GITHUB_REF_NAME": "v0.1.0-rc.20"}) == "VOXPrint AI Canvas v0.1.0-rc.20 build 19"
-    assert "Tavnit" not in release_title({"GITHUB_REF_NAME": "v0.1.0-rc.20"})
+    assert version_label({}) == '0.1.0 RC · build 20 "Tavnit"'
+    assert splash_line({}) == '0.1.0 RC build 20 "Tavnit"'
+    assert release_title({}) == 'VOXPrint AI Canvas 0.1.0 RC · build 20 "Tavnit"'
+    assert release_title({"GITHUB_REF_NAME": "v0.1.0-rc.21"}) == "VOXPrint AI Canvas v0.1.0-rc.21 build 20"
+    assert "Tavnit" not in release_title({"GITHUB_REF_NAME": "v0.1.0-rc.21"})
     assert release_title({"GITHUB_REF_NAME": "v1.2.3-rc.4", "VOXPRINT_BUILD": "11"}) == (
         "VOXPrint AI Canvas v1.2.3-rc.4 build 11"
     )
-    assert release_title({"GITHUB_REF_NAME": "v0.1.0"}) == 'VOXPrint AI Canvas 0.1.0 RC · build 19 "Tavnit"'
+    assert release_title({"GITHUB_REF_NAME": "v0.1.0"}) == 'VOXPrint AI Canvas 0.1.0 RC · build 20 "Tavnit"'
     template = (ROOT / "docs" / "RELEASE-NOTES-TEMPLATE.md").read_text(encoding="utf-8")
     assert "VOXPrint AI Canvas vX.Y.Z-rc.N build B" in template
     data = json.loads((ROOT / "BUILD.json").read_text(encoding="utf-8"))
@@ -26,7 +26,7 @@ def test_version_label_and_release_title_come_from_build_json():
     assert packaged == data
     assert data["version"] == "0.1.0"
     assert data["channel"] == "RC"
-    assert data["build"] == 19
+    assert data["build"] == 20
     assert data["codename"] == "Tavnit"
     assert '"canvas.app" = ["BUILD.json", "messages.json"]' in (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     assert f'version = "{data["version"]}"' in (ROOT / "pyproject.toml").read_text(encoding="utf-8")

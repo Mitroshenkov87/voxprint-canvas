@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
     QScrollArea,
     QSlider,
@@ -27,7 +28,14 @@ from PySide6.QtWidgets import (
 from voxprint_common.ui.theme import CONTROL_BORDER
 
 from canvas.app.i18n import text
-from canvas.models.lora_library import LibraryEntry, import_lora, list_library, remove_entry
+from canvas.models.lora_library import (
+    THIRD_PARTY_KIND,
+    LibraryEntry,
+    import_lora,
+    list_library,
+    remove_entry,
+    set_trigger,
+)
 from canvas.models.user_lora import LoraRejected, UserLora, discover
 from canvas.ui.theme import BUTTON_RADIUS
 
@@ -52,10 +60,46 @@ def import_with_dialog(parent: QWidget, gate: object, path: Path | None = None, 
         if not chosen:
             return None
         path = Path(chosen)
+    options.setdefault("confirm", lambda manifest: ThirdPartyDialog(parent, manifest.name).exec() == QDialog.DialogCode.Accepted)
     try:
         return import_lora(Path(path), gate, **options)
     except LoraRejected as exc:
         return exc.code
+
+
+class ThirdPartyDialog(QDialog):
+    """Asked before a LoRA made outside Model Forge is added to the library."""
+
+    def __init__(self, parent: QWidget | None, name: str) -> None:
+        super().__init__(parent)
+        from canvas.ui.shell_chrome import shell_style
+
+        self.setObjectName("loraThirdParty")
+        self.setWindowTitle(text("canvas.lora.import"))
+        self.setStyleSheet(shell_style())
+        title = QLabel(text("canvas.lora.third_party.title", name=name))
+        title.setObjectName("loraThirdPartyTitle")
+        title.setWordWrap(True)
+        title.setStyleSheet("font-size: 16px; font-weight: 600;")
+        body = QLabel(text("canvas.lora.third_party.body"))
+        body.setObjectName("loraThirdPartyBody")
+        body.setWordWrap(True)
+        cancel = QPushButton(text("canvas.lora.cancel"))
+        cancel.setObjectName("loraThirdPartyCancel")
+        cancel.clicked.connect(self.reject)
+        go = QPushButton(text("canvas.lora.continue"))
+        go.setObjectName("loraThirdPartyContinue")
+        go.setDefault(True)
+        go.clicked.connect(self.accept)
+        layout = QVBoxLayout(self)
+        layout.addWidget(title)
+        layout.addWidget(body)
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        buttons.addWidget(cancel)
+        buttons.addWidget(go)
+        layout.addLayout(buttons)
+        self.setMinimumWidth(520)
 
 
 def _kind_text(kind: str) -> str:
@@ -75,6 +119,14 @@ def _preview_strip(previews: tuple[Path, ...], size: int = THUMB) -> QWidget:
     row = QHBoxLayout(strip)
     row.setContentsMargins(0, 0, 0, 0)
     row.setSpacing(6)
+    if not previews:
+        empty = QLabel(text("canvas.lora.no_preview"))
+        empty.setObjectName("loraPreviewPlaceholder")
+        empty.setFixedSize(size, size)
+        empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty.setWordWrap(True)
+        empty.setStyleSheet(f"border: 1px dashed {CONTROL_BORDER}; border-radius: {BUTTON_RADIUS}px; font-size: 11px;")
+        row.addWidget(empty)
     for index, path in enumerate(previews):
         label = QLabel()
         label.setObjectName(f"loraPreview-{index}")
@@ -215,8 +267,25 @@ class LibraryDialog(QDialog):
         details = _details(entry)
         details.setStyleSheet("border: none;")
         column.addWidget(details)
+        if entry.manifest.kind == THIRD_PARTY_KIND:
+            edit_row = QHBoxLayout()
+            caption = QLabel(text("canvas.lora.trigger_edit"))
+            caption.setStyleSheet("border: none;")
+            edit = QLineEdit(entry.manifest.trigger)
+            edit.setObjectName("loraTriggerEdit")
+            edit.setPlaceholderText(text("canvas.lora.trigger_placeholder"))
+            edit.editingFinished.connect(
+                lambda entry_id=entry.id, field=edit: self._set_trigger(entry_id, field.text())
+            )
+            edit_row.addWidget(caption)
+            edit_row.addWidget(edit, 1)
+            column.addLayout(edit_row)
         column.addWidget(_preview_strip(entry.previews))
         return card
+
+    def _set_trigger(self, entry_id: str, trigger: str) -> None:
+        set_trigger(entry_id, trigger, self._root)
+        self._on_change()
 
     def _remove(self, entry_id: str) -> None:
         remove_entry(entry_id, self._root)

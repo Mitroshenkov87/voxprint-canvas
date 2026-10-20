@@ -242,3 +242,60 @@ def test_an_encrypted_or_damaged_member_is_invalid(home: Path, monkeypatch):
 
     monkeypatch.setattr(zipfile.ZipFile, "read", broken)
     assert _code(package) == "lora.invalid"
+
+
+_ZIMAGE = {
+    "transformer.layers.0.attention.to_q.lora_A.weight": b"\x01\x02\x03\x04",
+    "transformer.layers.0.attention.to_q.lora_B.weight": b"\x05\x06\x07\x08",
+}
+
+
+def _plain(home: Path, tensors=None, metadata=None, name="My_Cool Lora.safetensors") -> Path:
+    folder = home / "plain"
+    folder.mkdir(exist_ok=True)
+    path = folder / name
+    write_safetensors(path, tensors if tensors is not None else _ZIMAGE, metadata or {})
+    return path
+
+
+def test_a_third_party_lora_is_stored_after_confirmation(home: Path):
+    asked: list[str] = []
+    gate = _Counting()
+    entry = _import(_plain(home), gate, confirm=lambda manifest: asked.append(manifest.name) or True)
+    assert asked == ["My Cool Lora"]
+    assert entry.manifest.kind == "unknown" and entry.manifest.trigger == "" and entry.previews == ()
+    assert (entry.manifest.scale_min, entry.manifest.scale_max) == (0.0, 1.2)
+    lora = entry.as_lora()
+    assert lora.strength_range == (0.0, 1.2) and lora.trigger == ""
+    assert gate.calls == 0
+    assert [item.id for item in list_library()] == [entry.id]
+
+
+def test_a_third_party_lora_is_not_stored_when_cancelled_or_unasked(home: Path):
+    assert _import(_plain(home), confirm=lambda _manifest: False) is None
+    assert _import(_plain(home)) is None
+    assert list_library() == ()
+
+
+def test_a_third_party_trigger_can_be_set(home: Path):
+    entry = _import(_plain(home), confirm=lambda _manifest: True)
+    updated = lora_library.set_trigger(entry.id, "  mylora  ")
+    assert updated is not None and updated.manifest.trigger == "mylora"
+    assert resolve_library(entry.id).trigger == "mylora"
+
+
+def test_a_third_party_lora_must_fit_the_z_image_modules(home: Path):
+    yes = lambda _manifest: True  # noqa: E731
+    other = {"down_blocks.0.attn.to_q.lora_A.weight": b"\x01", "down_blocks.0.attn.to_q.lora_B.weight": b"\x02"}
+    assert _code(_plain(home, other), confirm=yes) == "lora.base_mismatch"
+    unpaired = {"layers.0.attention.to_q.lora_A.weight": b"\x01"}
+    assert _code(_plain(home, unpaired, name="b.safetensors"), confirm=yes) == "lora.invalid"
+    broken = home / "plain" / "c.safetensors"
+    broken.write_bytes(b"\x10\x00\x00\x00\x00\x00\x00\x00{not json}")
+    assert _code(broken, confirm=yes) == "lora.invalid"
+    assert list_library() == ()
+
+
+def test_an_unknown_kind_is_still_refused_in_a_forge_package(home: Path):
+    package = write_voxlora(home / "in", record=manifest(kind="unknown"))
+    assert _code(package) == "lora.kind"

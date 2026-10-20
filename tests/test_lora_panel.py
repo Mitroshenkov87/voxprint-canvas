@@ -125,3 +125,25 @@ def test_a_strength_step_does_not_redraw_the_window(app, home: Path, monkeypatch
     window.findChild(QSlider, "loraStrength").setValue(50)
     assert calls == [] and window.shell.layout.get("shell.lora_weight") == pytest.approx(0.5)
     window.close()
+
+
+def test_the_third_party_dialog_asks_before_storing(app, home: Path, monkeypatch):
+    from tests.lora_files import write_safetensors
+
+    path = home / "x.safetensors"
+    write_safetensors(path, {"layers.0.attention.to_q.lora_A.weight": b"\x01", "layers.0.attention.to_q.lora_B.weight": b"\x02"}, {})
+    monkeypatch.setattr(lora_panel.ThirdPartyDialog, "exec", lambda self: 0)
+    assert lora_panel.import_with_dialog(None, World().gate(), path, base_ready=lambda: True) is None
+    assert list_library() == ()
+    monkeypatch.setattr(lora_panel.ThirdPartyDialog, "exec", lambda self: 1)
+    entry = lora_panel.import_with_dialog(None, World().gate(), path, base_ready=lambda: True)
+    assert entry is not None and entry.manifest.kind == "unknown"
+    dialog = LibraryDialog(None, World().gate())
+    assert dialog.findChild(QLabel, "loraPreviewPlaceholder") is not None
+    from PySide6.QtWidgets import QLineEdit
+
+    edit = dialog.findChild(QLineEdit, "loraTriggerEdit")
+    edit.setText("mylora")
+    edit.editingFinished.emit()
+    assert list_library()[0].manifest.trigger == "mylora"
+    shiboken6.delete(dialog)

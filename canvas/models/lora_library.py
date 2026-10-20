@@ -47,6 +47,9 @@ DEFAULT_RANGE = (0.0, 1.2)
 
 # The kinds the library takes. One constant, set by the owner's decision.
 ACCEPTED_KINDS = frozenset({"object", "style", "subject"})
+# A LoRA made outside Model Forge: no record of its own, kind unknown.
+THIRD_PARTY_KIND = "unknown"
+THIRD_PARTY_SOURCE = "third_party"
 
 CODE_KIND = "lora.kind"
 CODE_PREVIEW = "lora.preview"
@@ -127,7 +130,8 @@ def import_lora(
     base_ready: Callable[[], bool] | None = None,
     fetch_base: Callable[[Callable[[str], None]], bool] | None = None,
     progress: Callable[[str], None] | None = None,
-) -> LibraryEntry:
+    confirm: Callable[[Manifest], bool] | None = None,
+) -> LibraryEntry | None:
     """Validate one Forge export and copy it into the library.
 
     Args:
@@ -137,11 +141,17 @@ def import_lora(
         base_ready: True when the base model is installed. Checked on disk when omitted.
         fetch_base: Asks VOXPrint MDL for the base model. MDL is used when omitted.
         progress: Status lines while the base model is requested.
+        confirm: Asked before a LoRA made outside Model Forge is stored. Without it, such a LoRA is not stored.
+
+    Returns:
+        The entry, or None when the import was not confirmed.
 
     Raises:
         LoraRejected: The export is refused. Nothing is stored.
     """
     staged = _stage(source)
+    if staged.raw_manifest.get("source") == THIRD_PARTY_SOURCE and (confirm is None or not confirm(staged.manifest)):
+        return None
     _check_previews(staged.previews, gate)
     ready = base_ready if base_ready is not None else _base_on_disk
     if not ready():
@@ -206,7 +216,7 @@ def read_entry(folder: Path) -> LibraryEntry | None:
         digest = _file_digest(weights)
     except (OSError, UnicodeError, json.JSONDecodeError, LoraRejected):
         return None
-    if manifest.kind not in ACCEPTED_KINDS:
+    if not _kind_allowed(manifest.kind, raw):
         return None
     if manifest.weights_sha256 is None or digest != manifest.weights_sha256:
         return None
@@ -298,7 +308,11 @@ def _stage(source: Path, *, with_previews: bool = True) -> _Staged:
     elif source.suffix == ".safetensors":
         files = _read_bare(source)
         if files.get(MANIFEST_NAME) is None or "name" not in _json(files[MANIFEST_NAME]):
-            files[MANIFEST_NAME] = _rc3_manifest(source)
+            if _forge_header(files[WEIGHTS_NAME]):
+                files[MANIFEST_NAME] = _rc3_manifest(source)
+            else:
+                files.pop(MANIFEST_NAME, None)
+                files[MANIFEST_NAME] = _third_party_manifest(source, files[WEIGHTS_NAME])
     else:
         raise LoraRejected(CODE_INVALID)
     raw_manifest = _json(files.get(MANIFEST_NAME))
@@ -313,8 +327,10 @@ def _stage(source: Path, *, with_previews: bool = True) -> _Staged:
     _agree(manifest, meta)
     if not base_matches(manifest.base, ZIMAGE_TURBO_MDL_ID):
         raise LoraRejected(CODE_BASE_MISMATCH)
-    if manifest.kind not in ACCEPTED_KINDS:
+    if not _kind_allowed(manifest.kind, raw_manifest):
         raise LoraRejected(CODE_KIND)
+    if raw_manifest.get("source") == THIRD_PARTY_SOURCE:
+        _fits_modules(weights)
     previews: list[tuple[str, bytes]] = []
     if with_previews:
         previews = _previews(files, raw_manifest, package=source.suffix == PACKAGE_SUFFIX)
@@ -580,3 +596,101 @@ def _fetch_with_mdl(progress: Callable[[str], None]) -> bool:
 
     progress(text("canvas.lora.base_queued"))
     return True
+
+
+def is_third_party(manifest_record: dict[str, object]) -> bool:
+    """True for a LoRA made outside Model Forge."""
+    return manifest_record.get("source") == THIRD_PARTY_SOURCE
+
+
+def set_trigger(entry_id: str, trigger: str, root: Path | None = None) -> LibraryEntry | None:
+    """Change the trigger word of a stored entry. Returns the updated entry."""
+    if not entry_id or "/" in entry_id or "\\" in entry_id or entry_id in {".", ".."}:
+        return None
+    folder = library_root(root) / entry_id
+    record_path = folder / MANIFEST_NAME
+    try:
+        record = json.loads(record_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(record, dict):
+        return None
+    record["trigger"] = " ".join(str(trigger).split())[:64]
+    record_path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return read_entry(folder)
+
+
+def _kind_allowed(kind: str, record: dict[str, object]) -> bool:
+    if kind in ACCEPTED_KINDS:
+        return True
+    return kind == THIRD_PARTY_KIND and record.get("source") == THIRD_PARTY_SOURCE
+
+
+def _forge_header(weights: bytes) -> bool:
+    try:
+        meta = _weights_meta(weights)
+    except LoraRejected:
+        return False
+    return bool(meta.get(_HEADER_BASE))
+
+
+def _third_party_manifest(source: Path, weights: bytes) -> bytes:
+    """A record for a LoRA without a Forge json: name from the file, no trigger, kind unknown."""
+    meta = _weights_meta(weights)
+    base = meta.get(_HEADER_BASE, "")
+    if base and not base_matches(base, ZIMAGE_TURBO_MDL_ID):
+        raise LoraRejected(CODE_BASE_MISMATCH)
+    name = " ".join(source.stem.replace("_", " ").split())[:64] or "LoRA"
+    record = {
+        "schema": SCHEMA,
+        "name": name,
+        "base": FORGE_BASE_ID,
+        "trigger": "",
+        "kind": THIRD_PARTY_KIND,
+        "scale_default": 0.8,
+        "scale_min": DEFAULT_RANGE[0],
+        "scale_max": DEFAULT_RANGE[1],
+        "forge_version": "",
+        "created": "",
+        "source": THIRD_PARTY_SOURCE,
+    }
+    return json.dumps(record).encode("utf-8")
+
+
+_MODULES: frozenset[str] | None = None
+
+
+def _modules() -> frozenset[str]:
+    """Weight names of the Z-Image-Turbo transformer, from the shipped index."""
+    global _MODULES
+    if _MODULES is None:
+        index = Path(__file__).with_name("turbo_transformer_index.json")
+        raw = json.loads(index.read_text(encoding="utf-8"))
+        _MODULES = frozenset(str(key) for key in raw.get("weight_map", {}))
+    return _MODULES
+
+
+def _fits_modules(weights: bytes) -> None:
+    """Every adapter pair must target a linear weight of the z-image transformer."""
+    from canvas.models.user_lora import _A_WEIGHT, _B_WEIGHT, _peft_key, _safetensors
+
+    with tempfile.TemporaryDirectory(prefix="canvas-lora-check-") as scratch:
+        path = Path(scratch) / WEIGHTS_NAME
+        path.write_bytes(weights)
+        opened = _safetensors(path)
+    if opened is None:
+        raise LoraRejected(CODE_INVALID)
+    header = opened[0]
+    modules = _modules()
+    for key in header:
+        if key == "__metadata__":
+            continue
+        name = _peft_key(str(key))
+        for suffix in (_A_WEIGHT, _B_WEIGHT):
+            if name.endswith(suffix):
+                stem = name[: -len(suffix)]
+                break
+        else:
+            raise LoraRejected(CODE_INVALID)
+        if f"{stem}.weight" not in modules:
+            raise LoraRejected(CODE_BASE_MISMATCH)

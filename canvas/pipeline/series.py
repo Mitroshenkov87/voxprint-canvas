@@ -10,7 +10,7 @@ import zlib
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import Literal, Protocol, cast
 
 from canvas.app.i18n import text
 from canvas.app.shell_run import RunStopped
@@ -403,8 +403,11 @@ class SerialGate:
         self._lock = threading.RLock()
 
     @classmethod
-    def wrap(cls, gate: AgeGate) -> SerialGate:
-        return gate if isinstance(gate, SerialGate) else cls(gate)
+    def wrap(cls, gate: AgeGate) -> AgeGate:
+        """The gate behind a lock. Typed as the gate: every call is passed through unchanged."""
+        if isinstance(gate, SerialGate):
+            return gate
+        return cast(AgeGate, cls(gate))
 
     def __getattr__(self, name: str) -> object:
         attr = getattr(self._gate, name)

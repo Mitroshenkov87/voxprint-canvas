@@ -22,7 +22,7 @@ from canvas.pipeline.photoshoot import MAX_FRAMES, SCENARIO_TOKENS, SYSTEM_PROMP
 from canvas.infra.errors import note_timing
 from canvas.infra.stage_timer import StageTimes, note_stage
 from canvas.pipeline.schedule import last_image_seconds, reset_image_seconds
-from canvas.pipeline.series import SerialGate, SeriesFrame, run_series
+from canvas.pipeline.series import SeriesFrame, run_series
 from canvas.safety.gate import AgeGate
 from canvas.safety.image import RawImage
 from canvas.safety.inputs import ImageRole, PendingInput

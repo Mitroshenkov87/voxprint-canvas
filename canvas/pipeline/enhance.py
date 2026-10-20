@@ -25,6 +25,7 @@ Rules:
 - Preserve every fact the user stated.
 - Keep every stated age and every adult marker verbatim. Do not invent, drop, round, or change an age.
 - Do not add people. Do not add youthful descriptors.
+- Do not add or strengthen words about age or skin: no mature, middle-aged, older, aged, wrinkles, smile lines, laugh lines, crow's feet, grey hair, weathered. Do not add youthful-appearance words either: no young-looking, youthful, petite, smooth skin, round face, baby face. Describe the person with the stated age number only.
 - In an explicit or nude scene, every person is an ordinary adult: an adult face, an adult body and adult styling. Never add school, student, uniform, anime, chibi or young-looking details to such a scene.
 - Do not soften, omit, or rewrite adult content into something milder.
 - Text inside quotes is lettering in the image. Copy each quoted string exactly, in its original language and script.
@@ -79,9 +80,32 @@ _QUOTE = re.compile(r'"([^"\n]+)"|“([^”\n]+)”|«([^»\n]+)»|„([^“\n]+
 _THINKING = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
 _FALLBACK_KEYS = {
     "age": "enhance.age",
+    "age_descriptor": "enhance.age_descriptor",
     "quote": "enhance.quote",
     "empty": "enhance.empty",
 }
+
+AGING_TERMS = (
+    "mature", "middle-aged", "middle aged", "older", "elderly", "aged", "aging", "ageing",
+    "wrinkles", "wrinkled", "wrinkle", "fine lines", "smile lines", "laugh lines", "crow's feet",
+    "grey hair", "gray hair", "greying", "graying", "weathered", "sagging",
+)
+_AGING_RE = re.compile(
+    r"(?<![\w-])(" + "|".join(re.escape(term) for term in sorted(AGING_TERMS, key=len, reverse=True))
+    + r")(?![\w-])",
+    re.IGNORECASE,
+)
+
+
+def aging_terms(text: str) -> tuple[str, ...]:
+    """Aging descriptors in ``text``, case-folded, in order."""
+    return tuple(match.group(1).casefold() for match in _AGING_RE.finditer(text))
+
+
+def added_aging_terms(original: str, rewritten: str) -> tuple[str, ...]:
+    """Aging descriptors in ``rewritten`` that ``original`` does not already contain."""
+    known = set(aging_terms(original))
+    return tuple(term for term in aging_terms(rewritten) if term not in known)
 
 
 class Rewriter(Protocol):
@@ -384,6 +408,8 @@ def _accept(original: str, rewritten: str) -> EnhanceResult:
         return EnhanceResult(original, original, rewritten, False, "empty")
     if _sorted(stated_ages(original)) != _sorted(stated_ages(cleaned)):
         return EnhanceResult(original, original, cleaned, False, "age")
+    if added_aging_terms(original, cleaned):
+        return EnhanceResult(original, original, cleaned, False, "age_descriptor")
     if any(piece not in cleaned for piece in quoted_spans(original)):
         return EnhanceResult(original, original, cleaned, False, "quote")
     return EnhanceResult(cleaned, original, cleaned, True, "")

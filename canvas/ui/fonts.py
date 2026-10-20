@@ -32,8 +32,8 @@ def register_fonts() -> bool:
     app = QGuiApplication.instance()
     if isinstance(app, QGuiApplication) and app.font().family() != FAMILY:
         # Widgets with their own stylesheet fall back to the application font, so make it the bundled one.
-        font = QFont(app.font())
-        font.setFamilies([FAMILY])
+        font = QFont(FAMILY)
+        font.setPointSizeF(app.font().pointSizeF())
         app.setFont(font)
     return True
 

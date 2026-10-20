@@ -32,7 +32,7 @@ class StageTimes:
             self._counts[stage] = self._counts.get(stage, 0) + 1
 
     @contextmanager
-    def stage(self, stage: str) -> Iterator[None]:
+    def measure(self, stage: str) -> Iterator[None]:
         """Time the block under ``stage``, including when it raises."""
         started = time.perf_counter()
         try:
@@ -80,7 +80,7 @@ def timed(stage: str) -> Iterator[None]:
     if times is None:
         yield
         return
-    with times.stage(stage):
+    with times.measure(stage):
         yield
 
 

@@ -247,3 +247,34 @@ def install_model_offload(pipe: Any) -> OffloadInstall:
         _call_optional(pipe, "enable_vae_tiling"),
         _call_optional(pipe, "enable_vae_slicing"),
     )
+
+
+FP8_COMPONENTS = ("transformer", "text_encoder")
+
+
+def install_fp8_storage(pipe: Any, torch: Any, apply_casting: Any) -> tuple[str, ...]:
+    """Store the transformer and text encoder weights as FP8, compute in BF16.
+
+    The 16 GB spec runs FP8. ``apply_casting`` is diffusers'
+    ``hooks.apply_layerwise_casting``; it works on any torch module. Returns the
+    components that were cast; none when this torch has no float8 type.
+    """
+    storage = getattr(torch, "float8_e4m3fn", None)
+    if storage is None or not callable(apply_casting):
+        return ()
+    cast: list[str] = []
+    for name in FP8_COMPONENTS:
+        module = getattr(pipe, name, None)
+        if module is None:
+            continue
+        apply_casting(module, storage_dtype=storage, compute_dtype=torch.bfloat16)
+        cast.append(name)
+    return tuple(cast)
+
+
+def resident_fits(pipe: Any, free_bytes: int | None) -> bool:
+    """True when every component plus headroom fits in free VRAM, so nothing moves per frame."""
+    if free_bytes is None:
+        return False
+    total = sum(component_bytes(item) for item in _components(pipe))
+    return total > 0 and total + MODEL_OFFLOAD_HEADROOM_BYTES <= int(free_bytes)

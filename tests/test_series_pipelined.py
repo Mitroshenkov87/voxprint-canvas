@@ -158,7 +158,7 @@ def test_serial_gate_passes_every_call_through_one_at_a_time() -> None:
 
 def test_stage_times_report_names_and_seconds_only() -> None:
     times = StageTimes()
-    with times.stage("render"):
+    with times.measure("render"):
         pass
     times.add("save", 0.5)
     summary = times.summary()

@@ -129,12 +129,12 @@ def _run_series(
         return _stop("idea", reason, "idea.policy")
     if adult and not ages_allowed(idea):
         return _stop("idea", "", "idea.minor")
-    with clock.stage("scenario"):
+    with clock.measure("scenario"):
         scenario, fail_code, source = _scenario(idea, count, style, mode, rewrite, adult=adult)
     if scenario is None or len(scenario.shots) < count:
         return _stop("scenario", "", fail_code if scenario is None else "scenario.count")
     lines = [assemble_line(scenario.subject_block, shot, include_camera=True) for shot in scenario.shots]
-    with clock.stage("prompt_check"):
+    with clock.measure("prompt_check"):
         verdicts = [_prompt_verdict(gate, _with_idea(idea, line)) for line in lines]
     refused = [_verdict_message(verdict) for verdict in verdicts]
     hard = [
@@ -166,7 +166,7 @@ def _run_series(
         item, pending = pending, None
         if item is None:
             return None
-        with clock.stage("wait_save"):
+        with clock.measure("wait_save"):
             path, refusal = item.future.result()
         if path is None:
             blocked.append(item.index)
@@ -185,7 +185,7 @@ def _run_series(
         return None
 
     def store(index: int, released: _Released) -> tuple[Path | None, Exception | None]:
-        with clock.stage("save"):
+        with clock.measure("save"):
             return _store_frame(folder, index, released, container), None
 
     try:
@@ -215,7 +215,7 @@ def _run_series(
                 if line == lines[index]:
                     verdict = verdicts[index]
                 else:
-                    with clock.stage("prompt_check"):
+                    with clock.measure("prompt_check"):
                         verdict = _prompt_verdict(gate, _with_idea(idea, line))
                 shot_reason = _verdict_message(verdict)
                 if shot_reason:
@@ -246,7 +246,7 @@ def _run_series(
                 failure: RunStopped | None = None
                 image: SeriesFrame | None = None
                 try:
-                    with clock.stage("render"):
+                    with clock.measure("render"):
                         image = draw_frame(line, seed + index, hero if active is not None else None, active)
                 except RunStopped as exc:
                     failure = exc
@@ -274,7 +274,7 @@ def _run_series(
                     continue
                 # The output check runs before anything is encoded or written, and a
                 # picture verdict here stops the series before another frame is drawn.
-                with clock.stage("output_check"):
+                with clock.measure("output_check"):
                     released, refusal = _released_frame(gate, image, line)
                 if released is None:
                     blocked.append(index)

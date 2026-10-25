@@ -1,12 +1,50 @@
-"""RAM copies stay for the session. A later series does not read them from disk."""
+"""RAM copies stay for the session. A later open does not read them from disk.
+
+The default CI job has no torch. These doubles have a dtype and a ``.to`` so the
+park can pin them without that package.
+"""
 from __future__ import annotations
 
-import torch
-from torch import nn
 from voxprint_common.paths import logs_dir
 
 from canvas.models import hot_tier
 from canvas.models.hot_tier import open_module, plan, reset
+
+
+class _Weight:
+    """One tensor. ``.to`` keeps the dtype and copies the values."""
+
+    def __init__(self, dtype: str, values: list[int]) -> None:
+        self.dtype = dtype
+        self.values = list(values)
+        self.nbytes = len(values) * 4
+        self.data = self
+        self.device = "cpu"
+
+    def detach(self) -> _Weight:
+        return self
+
+    def to(self, device: object, non_blocking: bool = False) -> _Weight:
+        del non_blocking
+        copy = _Weight(self.dtype, self.values)
+        copy.device = str(device)
+        return copy
+
+    def pin_memory(self) -> _Weight:
+        pinned = self.to("cpu")
+        pinned.pinned = True
+        return pinned
+
+
+class _Module:
+    def __init__(self, dtype: str) -> None:
+        self.weight = _Weight(dtype, [1, 2, 3, 4])
+
+    def named_parameters(self):
+        yield "weight", self.weight
+
+    def named_buffers(self):
+        return iter(())
 
 
 def _tier(monkeypatch, name: str, total: int) -> None:
@@ -15,57 +53,40 @@ def _tier(monkeypatch, name: str, total: int) -> None:
     reset()
 
 
-def _linear(dtype: torch.dtype) -> nn.Linear:
-    module = nn.Linear(4, 3, bias=False)
-    with torch.no_grad():
-        module.weight.copy_(torch.arange(12, dtype=torch.float32).reshape(3, 4))
-    return module.to(dtype=dtype)
-
-
-def _weight(module: nn.Linear) -> torch.Tensor:
-    return module.weight.detach().cpu()
-
-
 def test_a_second_open_does_not_read_a_parked_model(monkeypatch) -> None:
     _tier(monkeypatch, "ram96", 96 * 1024**3)
     calls = {"n": 0}
-    original = _weight(_linear(torch.bfloat16))
 
-    def load() -> nn.Linear:
+    def load() -> _Module:
         calls["n"] += 1
-        module = _linear(torch.bfloat16)
-        with torch.no_grad():
-            module.weight.copy_(original.to(dtype=torch.bfloat16))
-        return module
+        return _Module("bfloat16")
 
     first = open_module("transformer", load)
     second = open_module("transformer", load)
     assert calls["n"] == 1
     assert second is first
-    assert _weight(first).dtype is torch.bfloat16
     hot_tier.deactivate("transformer")
-    assert _weight(first).dtype is torch.bfloat16
-    assert torch.equal(_weight(first), original.to(dtype=torch.bfloat16))
+    assert first.weight.data.dtype == "bfloat16"
+    assert first.weight.data.values == [1, 2, 3, 4]
 
 
 def test_parking_keeps_the_gate_dtype(monkeypatch) -> None:
     _tier(monkeypatch, "ram96", 96 * 1024**3)
-    module = _linear(torch.float32)
-    before = _weight(module).clone()
+    module = _Module("float32")
     assert hot_tier.remember("gate_nsfw", module) is True
     hot_tier.activate("gate_nsfw", "cpu")
     hot_tier.deactivate("gate_nsfw")
-    assert _weight(module).dtype is torch.float32
-    assert torch.equal(_weight(module), before)
+    assert module.weight.data.dtype == "float32"
+    assert module.weight.data.values == [1, 2, 3, 4]
 
 
 def test_ram32_reads_the_disk_again(monkeypatch) -> None:
     _tier(monkeypatch, "ram32", 32 * 1024**3)
     calls = {"n": 0}
 
-    def load() -> nn.Linear:
+    def load() -> _Module:
         calls["n"] += 1
-        return _linear(torch.float32)
+        return _Module("float32")
 
     open_module("vae", load)
     open_module("vae", load)
@@ -94,8 +115,7 @@ def test_park_and_unpark_log_milliseconds_bytes_ram_and_vram(monkeypatch) -> Non
     _tier(monkeypatch, "ram96", 96 * 1024**3)
     log = logs_dir() / "voxprint.log"
     before = log.stat().st_size if log.is_file() else 0
-    module = _linear(torch.float32)
-    hot_tier.remember("writer", module)
+    hot_tier.remember("writer", _Module("float32"))
     hot_tier.activate("writer", "cpu")
     hot_tier.deactivate("writer")
     text = log.read_bytes()[before:].decode("utf-8")

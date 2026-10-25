@@ -39,6 +39,7 @@ Rules:
 - Do not write an age in a line. Do not add people who are not in the idea. Do not add youthful descriptors.
 - Add age or skin descriptors (mature, middle-aged, older, wrinkles, smile lines, laugh lines, crow's feet, grey hair) only when every stated age in the idea is {AGING_DESCRIPTOR_MIN_AGE} or older; otherwise do not add them. Never add youthful-appearance descriptors (young-looking, petite, smooth skin, round face).
 - Do not soften or rewrite adult content.
+- One scene only. Do not write a collage, a grid, panels, a sequence, a series of views, or a before/after.
 - Keep each line under 60 words.
 - If place_mode is "same", every line has the same place. If place_mode is "different", every line has a different place.
 - When previous is present, those shots are already taken. Write count new shots. Do not repeat a scene from previous. When place_mode is "different", do not repeat a place from previous.
@@ -205,18 +206,48 @@ def scenario_request(
     return json.dumps(payload, ensure_ascii=False)
 
 
-SINGLE_FRAME = "one photo, single frame"
+SINGLE_FRAME = "A single photograph of"
 COLLAGE_NEGATIVE = "collage, grid, panels, split screen"
+# The text encoder keeps this many tokens, including its chat wrapper.
+ENCODER_TOKEN_LIMIT = 512
+_ENCODER_WRAPPER_TOKENS = 48
+_MULTI_SCENE = re.compile(
+    r"\b(?:collage|grids?|panels?|split[- ]screen|before\s*/\s*after|before and after"
+    r"|series of|sequences?|multiple views|multi[- ]panel)\b",
+    re.IGNORECASE,
+)
 
 
 def single_frame(line: str) -> str:
-    """Append the single-frame wording when the line does not already carry it."""
-    if SINGLE_FRAME in line:
-        return line
+    """Lead with one photograph. The picture model does not read a negative."""
     text = line.strip()
+    if text.lower().startswith(SINGLE_FRAME.lower()):
+        return text
     if not text:
         return SINGLE_FRAME
-    return f"{text}, {SINGLE_FRAME}"
+    return f"{SINGLE_FRAME} {text}"
+
+
+def one_scene(text: str) -> bool:
+    """False when a shot line describes more than one view."""
+    return _MULTI_SCENE.search(text) is None
+
+
+def truncate_for_encoder(prompt: str, limit: int | None = None) -> str:
+    """Keep the head of ``prompt`` inside the text encoder's token cap.
+
+    A token is at most one word, so the first ``limit`` words fit. The lead and
+    the appearance sit in that head, and the tail is what the cap drops. The
+    default leaves room for the encoder's chat wrapper.
+    """
+    if limit is None:
+        limit = ENCODER_TOKEN_LIMIT - _ENCODER_WRAPPER_TOKENS
+    if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+        limit = ENCODER_TOKEN_LIMIT - _ENCODER_WRAPPER_TOKENS
+    words = prompt.split()
+    if len(words) <= limit:
+        return prompt
+    return " ".join(words[:limit])
 
 
 def frame_negative(negative: str) -> str:
@@ -229,19 +260,19 @@ def frame_negative(negative: str) -> str:
 def assemble_line(subject: str, shot: Shot, *, include_camera: bool) -> str:
     """The line sent for one shot.
 
-    Order is pose, camera when included, scene, the subject block, place, then
-    one photo in a single frame. The subject block stays verbatim.
+    The subject block, appearance first, leads the scene. The line starts with
+    one photograph and stays inside the text encoder's token cap.
 
     Args:
         subject: The verbatim subject block.
         shot: Scene, pose, camera, and place.
         include_camera: When true, the lens and angle stay on the line.
     """
-    parts = [shot.pose.strip()]
+    parts = [subject.strip(), shot.pose.strip()]
     if include_camera and shot.camera.strip():
         parts.append(shot.camera.strip())
-    parts.extend((shot.scene.strip(), subject.strip(), shot.place.strip(), SINGLE_FRAME))
-    return ", ".join(part for part in parts if part)
+    parts.extend((shot.scene.strip(), shot.place.strip()))
+    return truncate_for_encoder(single_frame(", ".join(part for part in parts if part)))
 
 
 def validate_scenario(idea: str, raw: str, *, count: int, place_mode: PlaceMode) -> Scenario | None:
@@ -459,6 +490,8 @@ def accept_shot(
         assert_never(mode)
     shot = Shot(draft.scene.strip(), draft.pose.strip(), draft.camera.strip(), where)
     if not shot.scene:
+        return None
+    if not one_scene(" ".join((shot.scene, shot.pose, shot.camera, shot.place))):
         return None
     if _key(shot.scene) in {_key(item.scene) for item in taken}:
         return None

@@ -11,6 +11,8 @@ from collections.abc import Callable
 from pathlib import Path
 
 from canvas.app.shell_run import RunStopped, ShellRunner
+from canvas.models.loader import ModelNotReady
+from canvas.models.runtime import InferenceUnavailable
 from canvas.core.formats import DEFAULT_FORMAT
 from canvas.infra.enlarge import EnlargeClient
 from canvas.infra.paths import models_dir
@@ -102,10 +104,20 @@ def live_generate(age_gate: AgeGate, tier: Tier) -> Callable[[str, int, SeriesFr
         tier: The tier chosen for this machine.
     """
     runner = ShellRunner(gate=age_gate, tier=tier, enlarge=EnlargeClient())
+    runner.cook = True
     look = look_for("photo")
 
+    def _prompt(line: str) -> str:
+        return " ".join(part for part in (line.strip(), look.suffix) if part)
+
+    def prepare(lines: list[str]) -> None:
+        try:
+            runner.precompute(tuple(_prompt(line) for line in lines))
+        except (ImportError, ModelNotReady, InferenceUnavailable):
+            return
+
     def generate(line: str, seed: int, hero: SeriesFrame | None, strength: float | None) -> RawImage | None:
-        prompt = " ".join(part for part in (line.strip(), look.suffix) if part)
+        prompt = _prompt(line)
         mode = Mode.TEXT if hero is None else Mode.RESTYLE
         job = PictureJob(prompt, frame_negative(look.negative), mode, "1:1", "native", DEFAULT_FORMAT, seed, 8, 0.0, "euler", 1)
         runner.img2img_strength = None if hero is None else strength
@@ -120,6 +132,7 @@ def live_generate(age_gate: AgeGate, tier: Tier) -> Callable[[str, int, SeriesFr
                 return None
             raise
 
+    generate.prepare = prepare  # type: ignore[attr-defined]
     return generate
 
 

@@ -16,7 +16,7 @@ from canvas.pipeline.adult_direction import ADULT_ANCHOR
 from canvas.pipeline.photoshoot import SYSTEM_PROMPT, scenario_request, scenario_token_budget
 from canvas.pipeline.series import REFERENCE_STRENGTH, SeriesResult
 from canvas.safety.constants import IMAGE_MINOR_SEXUAL
-from canvas.safety.gate import StylisedBlocked
+from canvas.safety.gate import GenerationBlocked, StylisedBlocked
 from canvas.safety.image import RawImage
 from canvas.safety.inputs import ImageRole
 from canvas.ui.shell_layout import PictureJob
@@ -70,6 +70,8 @@ def test_parser_accepts_one_and_ninety_nine_frames(tmp_path: Path) -> None:
     assert default.seed == 1
     assert default.adult is False
     assert default.command == "photoshoot"
+    assert default.vram_trace is False
+    assert default.vram_trace is False
 
 
 @pytest.mark.parametrize("frames", ["0", "100"])
@@ -114,7 +116,7 @@ def test_command_writes_scenario_and_frame_files(monkeypatch, capsys, tmp_path: 
     assert scenario == tmp_path / "scenario.txt"
     lines = scenario.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 4
-    assert all(line.startswith("still, 50 mm, ") and IDEA in line for line in lines)
+    assert all(line.startswith(f"A single photograph of {IDEA}, still, 50 mm, ") for line in lines)
 
 
 def test_ten_frames_vary_pose_camera_and_seed(monkeypatch, tmp_path: Path) -> None:
@@ -172,8 +174,8 @@ def test_ten_frames_vary_pose_camera_and_seed(monkeypatch, tmp_path: Path) -> No
     assert len(set(lines)) == 10
     assert [seed for _prompt, _mode, seed, _strength, _roles in calls] == list(range(1, 11))
     for index, (line, (_prompt, mode, _seed, strength, roles)) in enumerate(zip(lines, calls, strict=True)):
-        assert line.startswith(f"pose {index}, {30 + index} mm lens, ")
-        assert line.endswith("kitchen table, one photo, single frame")
+        assert line.startswith(f"A single photograph of {IDEA}, pose {index}, {30 + index} mm lens, ")
+        assert line.endswith(", kitchen table")
         assert IDEA in line
         assert mode is Mode.TEXT
         assert strength is None
@@ -197,7 +199,8 @@ def test_ten_frames_vary_pose_camera_and_seed(monkeypatch, tmp_path: Path) -> No
     assert REFERENCE_STRENGTH >= 0.75
     assert calls[0][1] is Mode.TEXT and calls[0][3] is None and calls[0][4] == ()
     for prompt, mode, _seed, strength, roles in calls[1:]:
-        assert _series_line(prompt).startswith("pose ")
+        assert _series_line(prompt).startswith("A single photograph of ")
+        assert "pose " in _series_line(prompt)
         assert mode is Mode.RESTYLE
         assert strength == REFERENCE_STRENGTH
         assert roles == (ImageRole.INIT,)
@@ -356,17 +359,15 @@ def test_series_copies_the_hero_before_the_next_shot(monkeypatch, tmp_path: Path
     _arm_runner(monkeypatch, tmp_path)
     gate = World().gate()
     heroes: list[object | None] = []
-    screened: list[tuple[int, int, int]] = []
-    original = gate.release_request
+    copies: list[tuple[int, int]] = []
+    real_image = RawImage
 
-    def release_request(prompt: str, mode: str, inputs: tuple[object, ...] = (), *, explicit: bool = False):
-        hero = heroes[-1] if heroes else None
-        for item in inputs:
-            image = item.image
-            screened.append((id(image), image.width, id(hero) if hero is not None else 0))
-        return original(prompt, mode, inputs, explicit=explicit)
+    def tracking(width: int, height: int, data: bytes, mode: str = "RGB") -> RawImage:
+        image = real_image(width, height, data, mode)
+        copies.append((id(image), width))
+        return image
 
-    gate.release_request = release_request
+    monkeypatch.setattr("canvas.app.photoshoot_cli.RawImage", tracking)
     inner = model_generate(gate, Tier.GB16, "photo", False)
 
     def generate(line: str, seed: int, hero: object | None, strength: float) -> object | None:
@@ -393,10 +394,10 @@ def test_series_copies_the_hero_before_the_next_shot(monkeypatch, tmp_path: Path
     assert payload["code"] == ""
     assert heroes[0] is None
     assert all(getattr(hero, "width", 0) > 0 for hero in heroes[1:])
-    assert len(screened) == 4
-    third = screened[1]
+    assert len(copies) == 4
+    third = copies[1]
     assert third[1] > 0
-    assert third[0] != third[2]
+    assert third[0] != id(heroes[2])
     assert getattr(heroes[2], "width") > 0
 
 
@@ -404,13 +405,13 @@ def test_a_check_failure_stops_with_partial_frames(monkeypatch, tmp_path: Path) 
     _arm_runner(monkeypatch, tmp_path)
     gate = World().gate()
     seen = {"frames": 0}
-    original = gate.release_request
+    original = gate.review_image
     score = gate._stack.nsfw.sexual_score
     score_image = gate._stack.zeroshot.score_image
 
-    def release_request(prompt: str, mode: str, inputs: tuple[object, ...] = (), *, explicit: bool = False):
+    def review_image(raw: object, prompt: str = "") -> object:
         seen["frames"] += 1
-        return original(prompt, mode, inputs, explicit=explicit)
+        return original(raw, prompt)
 
     def sexual_score(image: RawImage) -> float:
         if seen["frames"] >= 3:
@@ -422,7 +423,7 @@ def test_a_check_failure_stops_with_partial_frames(monkeypatch, tmp_path: Path) 
             raise RuntimeError(f"image scores failed {IDEA}")
         return score_image(image, labels)
 
-    gate.release_request = release_request
+    gate.review_image = review_image
     gate._stack.nsfw.sexual_score = sexual_score
     gate._stack.zeroshot.score_image = score_image_later
     payload, code = run_command(
@@ -463,16 +464,14 @@ def test_a_check_failure_stops_with_partial_frames(monkeypatch, tmp_path: Path) 
 def test_a_frame_refusal_continues_without_an_internal_code(monkeypatch, tmp_path: Path) -> None:
     _arm_runner(monkeypatch, tmp_path)
     gate = World().gate()
-    seen = {"frames": 0}
-    original = gate.release_request
+    original = gate.review_prompt
 
-    def release_request(prompt: str, mode: str, inputs: tuple[object, ...] = (), *, explicit: bool = False):
-        seen["frames"] += 1
-        if seen["frames"] == 3:
+    def review_prompt(prompt: str) -> None:
+        if "from above" in prompt:
             raise StylisedBlocked("prompt")
-        return original(prompt, mode, inputs, explicit=explicit)
+        original(prompt)
 
-    gate.release_request = release_request
+    gate.review_prompt = review_prompt
     payload, code = run_command(
         idea=IDEA,
         folder=tmp_path / "series",
@@ -506,33 +505,38 @@ def _prompt_verdict(world: World) -> None:
     world.categories = ("Minors",)
 
 
-@pytest.mark.parametrize(
-    ("stage", "arm"),
-    [("output", _picture_verdict), ("input", _picture_verdict), ("prompt", _prompt_verdict)],
-)
-def test_a_real_frame_verdict_stops_the_series(monkeypatch, tmp_path: Path, stage: str, arm) -> None:
-    """The real gate verdict on frame 3 ends the series with scenario.minor. Frames 1 and 2 stay."""
+@pytest.mark.parametrize("stage", ["output", "prompt"])
+def test_a_real_frame_verdict_stops_the_series(monkeypatch, tmp_path: Path, stage: str) -> None:
+    """Frame 3's verdict ends the saves with scenario.minor. Frames 1 and 2 stay."""
     _arm_runner(monkeypatch, tmp_path)
     world = World()
     gate = world.gate()
+    if stage == "prompt":
+        real_prompt = gate.review_prompt
+
+        def review_prompt(prompt: str) -> None:
+            if "from above" in prompt:
+                raise GenerationBlocked("prompt")
+            real_prompt(prompt)
+
+        gate.review_prompt = review_prompt
     inner = model_generate(gate, Tier.GB16, "photo", False)
     calls = {"n": 0}
-    third: dict[str, object] = {}
+    reviewed = {"n": 0}
+    if stage == "output":
+        real_image = gate.review_image
+
+        def review_image(raw: object, prompt: str = "") -> object:
+            reviewed["n"] += 1
+            if reviewed["n"] == 3:
+                _picture_verdict(world)
+            return real_image(raw, prompt)
+
+        gate.review_image = review_image
 
     def generate(line: str, seed: int, hero: object | None, strength: float | None) -> object | None:
         calls["n"] += 1
-        if calls["n"] == 3:
-            third["hero"] = hero
-            if stage != "output":
-                arm(world)
-        try:
-            image = inner(line, seed, hero, strength)
-        except RunStopped as exc:
-            third["stopped"] = exc.code
-            raise
-        if calls["n"] == 3 and stage == "output":
-            arm(world)
-        return image
+        return inner(line, seed, hero, strength)
 
     folder = tmp_path / "series"
     payload, code = run_command(
@@ -546,25 +550,23 @@ def test_a_real_frame_verdict_stops_the_series(monkeypatch, tmp_path: Path, stag
         age_gate=gate,
         rewrite=_rewrite,
         generate=generate,
-        strength=REFERENCE_STRENGTH if stage == "input" else None,
     )
     assert code == 1
     assert payload["ok"] is False
     assert payload["code"] == "scenario.minor"
-    assert payload["made"] == 2
-    assert calls["n"] == 3
-    if stage == "input":
-        assert third["hero"] is not None
-        assert third["stopped"] == "input"
-    elif stage == "prompt":
-        assert third["stopped"] == "prompt"
+    assert payload["made"] == (2 if stage == "output" else 0)
+    assert calls["n"] == (5 if stage == "output" else 0)
+    if stage == "output":
+        assert [shot["code"] for shot in payload["shots"][:2]] == ["ok", "ok"]
+        for path in payload["frames"]:
+            assert Path(str(path)).is_file()
+        numbered = sorted(
+            path.name for path in next(folder.rglob("scenario.txt")).parent.iterdir() if path.stem.isdigit()
+        )
+        assert len(numbered) == 2
     else:
-        assert "stopped" not in third
-    assert [shot["code"] for shot in payload["shots"][:2]] == ["ok", "ok"]
-    for path in payload["frames"]:
-        assert Path(str(path)).is_file()
-    numbered = sorted(path.name for path in next(folder.rglob("scenario.txt")).parent.iterdir() if path.stem.isdigit())
-    assert len(numbered) == 2
+        assert payload["frames"] == []
+        assert payload["shots"] == []
     log = tmp_path / "home" / "logs" / "voxprint.log"
     assert not log.exists() or "crash " not in log.read_text(encoding="utf-8")
 

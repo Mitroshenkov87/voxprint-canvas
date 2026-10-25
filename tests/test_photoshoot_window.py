@@ -124,7 +124,10 @@ def test_generate_writes_a_read_only_series(app, home: Path, monkeypatch) -> Non
     window.findChild(QPushButton, "generate").click()
     app.processEvents()
     assert len(prompts) == 6
-    assert all("still, 50 mm, " in prompt and prompt.index("still, 50 mm, ") < prompt.index(IDEA) for prompt in prompts)
+    assert all(
+        "A single photograph of" in prompt and "still, 50 mm, " in prompt and prompt.index(IDEA) < prompt.index("still, 50 mm, ")
+        for prompt in prompts
+    )
     assert all(IDEA in prompt for prompt in prompts)
     lines = window.findChildren(QLabel, "photoshootLine")
     assert len(lines) == 6

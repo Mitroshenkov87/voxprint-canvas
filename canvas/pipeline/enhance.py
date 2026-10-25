@@ -13,6 +13,7 @@ from typing import Any, Protocol, assert_never
 from canvas.app.i18n import text
 from canvas.infra.errors import note_error
 from canvas.infra.stage_timer import note_tag, timed
+from canvas.infra.vram_trace import drop_model, hold_model, note_vram
 from canvas.models.modes import Tier
 from canvas.models.registry import Catalog, ModelSpec
 from canvas.models.runtime import release_pipeline
@@ -314,6 +315,8 @@ class QwenRewriter:
 
     def close(self) -> None:
         """Close."""
+        note_vram("writer", "before", self._model)
+        drop_model("writer")
         self._model = None
         self._tokenizer = None
         self.closed = True
@@ -321,11 +324,13 @@ class QwenRewriter:
         torch = _optional_torch()
         if torch is not None and torch.cuda.is_available():
             torch.cuda.empty_cache()
+        note_vram("writer", "after")
 
     def _load(self) -> None:
         if self._model is not None:
             return
         release_pipeline()
+        note_vram("writer_load", "before")
         with timed("writer_load"):
             torch, transformers = _generation_libs()
             config_path = self.encoder_dir / "config.json"
@@ -356,6 +361,8 @@ class QwenRewriter:
             self._model = model
             self.device = device
             self.closed = False
+            hold_model("writer", model)
+            note_vram("writer_load", "after", model)
             if device in {"cpu", "cuda"}:
                 note_tag("writer", device)
 

@@ -157,7 +157,8 @@ def test_a_person_series_anchors_at_the_default_strength(app, home: Path, tmp_pa
     assert len(names) == 6 and set(names[1:]) == {"img2img"}
     hero_pixels = Image.open(next((home / "state" / "pictures" / "series").iterdir()) / "01.png").convert("RGB")
     for _name, kwargs in _Pipe.calls:
-        assert "one photo, single frame" in kwargs["prompt"]
+        assert "A single photograph of" in kwargs["prompt"]
+        assert kwargs["prompt"].index(look) < kwargs["prompt"].index(PERSON)
         assert "collage, grid, panels, split screen" in kwargs["negative_prompt"]
     for _name, kwargs in _Pipe.calls[1:]:
         assert kwargs["strength"] == pytest.approx(REFERENCE_STRENGTH)

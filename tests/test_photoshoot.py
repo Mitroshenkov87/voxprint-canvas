@@ -12,6 +12,7 @@ from canvas.pipeline.photoshoot import (
     FORMAT_REMINDER,
     SCENARIO_TOKENS,
     TOKENS_PER_FRAME,
+    Draft,
     Shot,
     _BUILD,
     _ETHNICITY,
@@ -19,12 +20,14 @@ from canvas.pipeline.photoshoot import (
     _FACE,
     _HAIR,
     _object,
+    accept_shot,
     assemble_line,
     fixed_appearance,
     planned_shots,
     scenario_request,
     scenario_token_budget,
     tokens_for_request,
+    truncate_for_encoder,
     validate_scenario,
 )
 from canvas.pipeline.series import REFERENCE_STRENGTH, ages_allowed, run_series
@@ -92,15 +95,44 @@ def _payload(
     return json.dumps(body)
 
 
-def test_assemble_line_leads_with_pose_and_keeps_the_subject() -> None:
+def test_a_shot_that_describes_several_views_is_rejected() -> None:
+    scenes = (
+        "a collage of the teapot",
+        "a grid of views",
+        "three panels",
+        "a sequence of pours",
+        "a series of angles",
+        "before/after the pour",
+        "before and after",
+        "multiple views of the handle",
+        "a multi-panel layout",
+        "split screen",
+    )
+    for scene in scenes:
+        assert accept_shot(IDEA, IDEA, "same", "kitchen table", (), Draft(scene, "still", "50 mm", "")) is None
+    kept = accept_shot(IDEA, IDEA, "same", "kitchen table", (), Draft("close view", "still", "50 mm", ""))
+    assert isinstance(kept, Shot)
+
+
+def test_appearance_stays_inside_the_encoder_head() -> None:
+    look = "Southeast Asian, straight blonde hair, blue eyes, oval face, slender"
+    subject = f"{look}, a woman in a red coat"
+    shot = Shot(" ".join(["wide room"] * 400), "still", "50 mm", "kitchen table")
+    line = assemble_line(subject, shot, include_camera=True)
+    assert line.startswith(f"A single photograph of {look},")
+    assert len(line.split()) <= 512 - 48
+    assert truncate_for_encoder(line, limit=12).startswith("A single photograph of Southeast")
+
+
+def test_assemble_line_leads_with_the_subject() -> None:
     shot = Shot("close view", "still", "50 mm", "kitchen table")
     plain = assemble_line(IDEA, shot, include_camera=False)
     detailed = assemble_line(IDEA, shot, include_camera=True)
-    assert plain == f"still, close view, {IDEA}, kitchen table, one photo, single frame"
+    assert plain == f"A single photograph of {IDEA}, still, close view, kitchen table"
     assert "50 mm" not in plain
-    assert detailed == f"still, 50 mm, close view, {IDEA}, kitchen table, one photo, single frame"
+    assert detailed == f"A single photograph of {IDEA}, still, 50 mm, close view, kitchen table"
     assert IDEA in detailed
-    assert detailed.index(IDEA) > detailed.index("50 mm")
+    assert detailed.index(IDEA) < detailed.index("50 mm")
 
 
 def test_changed_age_discards_the_scenario() -> None:
@@ -273,14 +305,16 @@ def test_blocked_frame_is_dropped_without_a_rewrite(tmp_path: Path) -> None:
         del seed
         heroes.append(hero)
         assert strength is None
-        assert line.startswith("still, 50 mm, ")
+        assert line.startswith(f"A single photograph of {IDEA}, still, 50 mm, ")
         assert IDEA in line
         return _frame(b"\x10\x20\x30")
 
     result = _run(tmp_path, age_gate=gate, rewrite=lambda prompt: calls.append(prompt) or _payload(IDEA), generate=generate)
-    assert result.stopped == ""
+    assert result.stopped == "error"
+    assert result.code == "check.classifier_error"
     assert len(calls) == 1
-    assert len(result.kept) == 5
+    assert len(heroes) == 6
+    assert len(result.kept) == 1
     assert all(hero is None for hero in heroes)
     assert all(path.suffix == ".png" for path in result.kept)
     assert (tmp_path / "series.json").is_file()
@@ -294,7 +328,8 @@ def test_an_image_gate_failure_drops_every_frame(tmp_path: Path) -> None:
     world.error = "faces"
     calls: list[str] = []
     result = _run(tmp_path, age_gate=world.gate(), rewrite=lambda prompt: calls.append(prompt) or _payload(IDEA))
-    assert result.stopped == ""
+    assert result.stopped == "error"
+    assert result.code == "check.classifier_error"
     assert result.kept == ()
     assert len(calls) == 1
 
@@ -565,7 +600,7 @@ def test_numbered_lines_are_read_as_shots(tmp_path: Path) -> None:
     assert document["age"] is None
     assert document["subject_block"] == IDEA
     assert document["lines"][0] == (
-        f"still, 50 mm, eye level, view 0, soft light, {IDEA}, kitchen table, one photo, single frame"
+        f"A single photograph of {IDEA}, still, 50 mm, eye level, view 0, soft light, kitchen table"
     )
 
 
@@ -579,7 +614,7 @@ def test_lines_without_a_place_use_the_series_place(tmp_path: Path) -> None:
     result = _run(tmp_path, rewrite=rewrite)
     document = json.loads((tmp_path / "series.json").read_text(encoding="utf-8"))
     assert result.source == "writer"
-    assert all(line.endswith(", kitchen table, one photo, single frame") for line in document["lines"])
+    assert all(line.endswith(", kitchen table") for line in document["lines"])
 
 
 def test_json_shots_without_a_place_use_the_shared_place(tmp_path: Path) -> None:
@@ -629,7 +664,7 @@ def test_planned_shots_cover_ninety_nine_frames_in_either_place_mode() -> None:
                 assert len({shot.place for shot in shots}) == 99
             for shot in shots:
                 line = assemble_line(AGED, shot, include_camera=True)
-                assert line.startswith(shot.pose)
+                assert line.startswith(f"A single photograph of {AGED}, {shot.pose}")
                 assert AGED in line
                 assert sorted(stated_ages(line)) == [34]
     assert planned_shots(IDEA, 6, "same", place="", taken=()) == planned_shots(IDEA, 6, "same", place="", taken=())
@@ -689,7 +724,7 @@ def test_a_three_part_line_is_read_by_its_last_part(tmp_path: Path) -> None:
     result = _run(tmp_path, place_mode="different", rewrite=rewrite)
     document = json.loads((tmp_path / "series.json").read_text(encoding="utf-8"))
     assert result.source == "writer"
-    places = {line.removesuffix(", one photo, single frame").rsplit(", ", 1)[-1] for line in document["lines"]}
+    places = {line.rsplit(", ", 1)[-1] for line in document["lines"]}
     assert len(places) == 6
     still = _run(tmp_path / "same", rewrite=lambda _prompt: "\n".join(
         f"{index + 1}. view {index} | still | 85 mm lens" for index in range(6)))
@@ -732,12 +767,12 @@ def test_a_person_series_repeats_one_appearance_and_anchors_the_hero(tmp_path: P
     assert len(result.kept) == 6
     assert look
     assert document["appearance"] == look
-    assert document["subject_block"] == f"{PERSON}, {look}"
+    assert document["subject_block"] == f"{look}, {PERSON}"
     assert all(line.count(look) == 1 and PERSON in line for line in document["lines"])
     assert all(sorted(stated_ages(line)) == [25] for line in document["lines"])
     assert seen[0][1] is None
     assert all(item[1] is seen[1][1] for item in seen[1:])
-    assert all("one photo, single frame" in item[0] for item in seen)
+    assert all(item[0].startswith(f"A single photograph of {look},") for item in seen)
     assert [item[2] for item in seen] == [REFERENCE_STRENGTH] * 6
     assert document["age"] == 25
 

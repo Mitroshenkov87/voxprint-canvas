@@ -8,6 +8,7 @@ from canvas.app.main import _parser, main
 from canvas.app.photoshoot_bench import SERIES_FRAMES, live_generate, live_rewrite, measure_series
 from canvas.pipeline.photoshoot import scenario_request, scenario_token_budget
 from canvas.pipeline.series import REFERENCE_STRENGTH
+from canvas.safety.image import RawImage
 from canvas.app.platform import GpuCheck, OsCheck
 from canvas.infra.gpu import GpuInfo
 from canvas.models.modes import Tier
@@ -48,17 +49,15 @@ def test_live_generate_copies_the_reused_hero(monkeypatch, tmp_path: Path) -> No
     _arm_runner(monkeypatch, tmp_path)
     gate = World().gate()
     heroes: list[object | None] = []
-    screened: list[tuple[int, int, int]] = []
-    original = gate.release_request
+    copies: list[tuple[int, int]] = []
+    real_image = RawImage
 
-    def release_request(prompt: str, mode: str, inputs: tuple[object, ...] = (), *, explicit: bool = False):
-        hero = heroes[-1] if heroes else None
-        for item in inputs:
-            image = item.image
-            screened.append((id(image), image.width, id(hero) if hero is not None else 0))
-        return original(prompt, mode, inputs, explicit=explicit)
+    def tracking(width: int, height: int, data: bytes, mode: str = "RGB") -> RawImage:
+        image = real_image(width, height, data, mode)
+        copies.append((id(image), width))
+        return image
 
-    gate.release_request = release_request
+    monkeypatch.setattr("canvas.app.photoshoot_bench.RawImage", tracking)
     inner = live_generate(gate, Tier.GB16)
 
     def generate(line: str, seed: int, hero: object | None, strength: float) -> object | None:
@@ -77,9 +76,9 @@ def test_live_generate_copies_the_reused_hero(monkeypatch, tmp_path: Path) -> No
     assert report["ok"] is True
     assert report["kept"] == SERIES_FRAMES
     assert heroes[0] is None
-    assert len(screened) == SERIES_FRAMES - 1
-    assert screened[1][1] > 0
-    assert screened[1][0] != screened[1][2]
+    assert len(copies) == SERIES_FRAMES - 1
+    assert copies[1][1] > 0
+    assert copies[1][0] != id(heroes[2])
     assert getattr(heroes[2], "width") > 0
 
 

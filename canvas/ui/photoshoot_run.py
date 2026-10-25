@@ -15,6 +15,8 @@ from canvas.app.i18n import text
 from canvas.app.info import ENLARGE_NAME
 from canvas.app.shell_gate import reviewed_output
 from canvas.app.shell_run import RunStopped, load_rgb
+from canvas.models.loader import ModelNotReady
+from canvas.models.runtime import InferenceUnavailable
 from canvas.infra.gpu_lock import lock_path, release
 from canvas.infra.paths import models_dir
 from canvas.models.mdl_registry import selectable
@@ -94,6 +96,8 @@ def run_photoshoot(window: ShellWindow) -> None:
             seed=used,
             mode=Mode.TEXT if hero is None else Mode.RESTYLE,
             copies=1,
+            aspect="1:1",
+            output="native",
         )
         runner = window._runner
         fresh: tuple[PendingInput, ...] = ()
@@ -113,6 +117,18 @@ def run_photoshoot(window: ShellWindow) -> None:
                 raise _Halt(exc.message, unavailable=True) from exc
             raise
         return raw
+
+    def prepare(lines: list[str]) -> None:
+        precompute = getattr(window._runner, "precompute", None)
+        if not callable(precompute):
+            return
+        prompts = tuple(_compose(layout, line, style) for line in lines)
+        try:
+            precompute(prompts)
+        except (ImportError, ModelNotReady, InferenceUnavailable) as exc:
+            raise _Halt(str(exc), unavailable=True) from exc
+
+    generate.prepare = prepare  # type: ignore[attr-defined]
 
     def on_scenario(scenario: Scenario) -> None:
         def show(scenario: Scenario = scenario) -> None:
@@ -136,6 +152,9 @@ def run_photoshoot(window: ShellWindow) -> None:
     def stopped() -> bool:
         return bool(on_ui(lambda: bar._stop or layout.phase is not Phase.BUSY))
 
+    runner = window._runner
+    if hasattr(runner, "cook"):
+        runner.cook = True
     try:
         result = run_off_ui(
             lambda: run_series(
@@ -166,6 +185,8 @@ def run_photoshoot(window: ShellWindow) -> None:
         bar.sync()
         return
     finally:
+        if hasattr(runner, "cook"):
+            runner.cook = False
         release(lock_path())
     _finish(window, result, idea)
 

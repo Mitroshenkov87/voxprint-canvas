@@ -9,13 +9,17 @@ from __future__ import annotations
 import gc
 from typing import Any
 
+from canvas.infra.vram_trace import note_vram
+
 
 def release_gate_weights(gate: object) -> None:
     """Drop a gate's GPU weights, then return the freed blocks to the driver."""
+    note_vram("gate", "before", gate)
     release = getattr(gate, "release_weights", None)
     if callable(release):
         release()
     release_cuda_cache()
+    note_vram("gate", "after")
 
 
 def release_cuda_cache() -> None:

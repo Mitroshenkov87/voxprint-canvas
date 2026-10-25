@@ -196,14 +196,14 @@ def test_frame_two_runs_through_the_shared_pipeline(tmp_path: Path, monkeypatch)
     _install(monkeypatch, encoder, transformer, vae, seen)
     runtime.reset_pipeline_cache()
     runtime.clear_series_embeds()
-    original = runtime.release_pipeline
+    original = runtime.park_pipeline
 
     def release() -> None:
         order.append("release")
         original()
 
-    monkeypatch.setattr(runtime, "release_pipeline", release)
-    monkeypatch.setattr("canvas.pipeline.series.release_pipeline", release)
+    monkeypatch.setattr(runtime, "park_pipeline", release)
+    monkeypatch.setattr("canvas.pipeline.series.park_pipeline", release)
     gate = World().gate()
     real = gate.review_image
 

@@ -1,8 +1,9 @@
 """Run one Photoshoot series: prep every frame, cook them, then check them.
 
-Prep writes the scenario and reviews every prompt, then unloads those models.
-Cook loads the picture pipeline once and draws every frame. The output check
-runs after that pipeline is gone. A frame is written only after it passes.
+Prep writes the scenario and reviews every prompt, then drops those models
+from VRAM. Cook loads the picture pipeline once and draws every frame. The
+output check runs after the pipeline leaves the GPU. RAM copies stay when the
+tier keeps them. A frame is written only after it passes.
 """
 from __future__ import annotations
 
@@ -22,7 +23,8 @@ from canvas.core.formats import OutputFormat, extension, save_image
 from canvas.infra.errors import note_crash, note_debug, note_error, note_timing
 from canvas.infra.stage_timer import StageTimes, note_peak_mib, set_current, timed
 from canvas.infra.vram import peak_allocated_bytes
-from canvas.models.runtime import clear_series_embeds, pipeline_scope, release_pipeline
+from canvas.models import hot_tier as hot
+from canvas.models.runtime import clear_series_embeds, park_pipeline, pipeline_scope
 from canvas.pipeline.device_guard import DeviceRefused
 from canvas.pipeline.enhance import mask_numbers, stated_ages
 from canvas.pipeline.gpu_release import release_gate_weights
@@ -157,6 +159,7 @@ def _run_series(
     adult: bool, container: OutputFormat | None, clock: StageTimes, own_clock: bool,
     noted: list[bool],
 ) -> SeriesResult:
+    hot.note_tier()
     gate = SerialGate.wrap(age_gate)
     if place_mode == "same":
         mode: PlaceMode = "same"
@@ -229,7 +232,7 @@ def _run_series(
                 accepted, series_strength, draw_frame, cancelled, clock, blocked, on_status,
             )
         finally:
-            release_pipeline()
+            park_pipeline()
             clear_series_embeds()
         release_gate_weights(gate)
         check_code, check_reason, ending = _review_frames(

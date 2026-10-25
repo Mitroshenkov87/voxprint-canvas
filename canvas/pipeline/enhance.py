@@ -27,7 +27,8 @@ from canvas.pipeline.device_guard import (
 )
 from canvas.pipeline.offload import cast_module_fp8
 from canvas.models.registry import Catalog, ModelSpec
-from canvas.models.runtime import release_pipeline
+from canvas.models import hot_tier as hot
+from canvas.models.runtime import park_pipeline
 from canvas.models.snapshots import SnapshotError, download_snapshot, snapshot_ready
 from canvas.models.verified import flush_process_cache, process_cache
 from canvas.safety.gate import SafetyError
@@ -341,8 +342,11 @@ class QwenRewriter:
         note_vram(self.stage, "before", self._model)
         drop_model(self.stage)
         drop_model("writer")
-        self._model = None
-        self._tokenizer = None
+        if hot.retained("writer"):
+            hot.deactivate("writer")
+        else:
+            self._model = None
+            self._tokenizer = None
         self.closed = True
         gc.collect()
         torch = _optional_torch()
@@ -357,8 +361,21 @@ class QwenRewriter:
 
     def _load(self) -> None:
         if self._model is not None:
+            self.closed = False
+            if self.device == "cuda":
+                hot.activate("writer", "cuda")
             return
-        release_pipeline()
+        found = hot.cached("writer")
+        if found is not None:
+            self._model = found
+            tokenizer = hot.bundle("writer")
+            if tokenizer is not None:
+                self._tokenizer = tokenizer
+            self.closed = False
+            if self.device == "cuda":
+                hot.activate("writer", "cuda")
+            return
+        park_pipeline()
         if self.tier is Tier.GB16:
             try:
                 begin_stage(self.stage, self.tier)
@@ -386,16 +403,23 @@ class QwenRewriter:
                 self.tokenizer_dir, local_files_only=True,
             )
             try:
-                # Safetensors are mapped onto CUDA. A later ``to`` of the whole
-                # module would keep the CPU copy alive until the copy finished.
-                # FP8 is cast on the card. An out-of-memory error stops the series.
-                model = _causal_model(transformers, torch, self.encoder_dir, device)
+                # The session copy is read onto the CPU and cast there, then one
+                # stage copies it RAM to VRAM. ``ram32`` still maps the file
+                # straight onto the card because that tier does not keep RAM.
+                load_on = "cpu" if device == "cuda" and hot.keeps_main_tier() else device
+                model = _causal_model(transformers, torch, self.encoder_dir, load_on)
                 if device != "cpu" and self.tier is Tier.GB16:
                     with timed("cast"):
                         if not cast_module_fp8(model, torch):
                             note_error(f"{self.stage}.bf16")
                     if cuda:
                         torch.cuda.empty_cache()
+                if hot.remember("writer", model):
+                    hot.remember_bundle("writer", tokenizer)
+                if device != "cpu" and hot.retained("writer"):
+                    with timed("place"):
+                        hot.activate("writer", "cuda")
+                elif device != "cpu" and self.tier is Tier.GB16:
                     with timed("place"):
                         if not weights_on_cuda(model):
                             model = place_on_cuda(model)

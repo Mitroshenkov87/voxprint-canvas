@@ -13,6 +13,7 @@ import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 
+import psutil
 from voxprint_common.paths import logs_dir
 
 from canvas.infra.vram_trace import note_vram
@@ -159,6 +160,12 @@ def log_stage(
     _write_stage(stage, event, device, vram, suffix)
 
 
+def log_detail(stage: str, event: str, device: str, suffix: str = "") -> None:
+    """Write one stage line with an extra suffix. RAM and VRAM are included."""
+    _device, vram = _device_and_vram()
+    _write_stage(stage, event, device, vram, suffix)
+
+
 def _heartbeat(stage: str, stop: threading.Event) -> None:
     """Write a heartbeat to the log every ``HEARTBEAT_S`` until the stage ends.
 
@@ -187,7 +194,10 @@ def _write_stage(stage: str, event: str, device: str, vram: int, suffix: str = "
     if not _NAME.match(stage) or not _NAME.match(event):
         return
     kind = device if device in {"cuda", "cpu", "none"} else "none"
-    line = f"stage {stage} {event} device={kind} vram_mib={max(0, int(vram))}"
+    line = (
+        f"stage {stage} {event} device={kind} "
+        f"vram_mib={max(0, int(vram))} ram_mib={_ram_mib()}"
+    )
     if suffix:
         line = f"{line} {suffix}"
     for attempt in range(_LOG_TRIES):
@@ -205,6 +215,14 @@ def _write_stage(stage: str, event: str, device: str, vram: int, suffix: str = "
             time.sleep(0.02 * (attempt + 1))
         except OSError:
             return
+
+
+def _ram_mib() -> int:
+    """RAM in use, in MiB. A failed read logs zero."""
+    try:
+        return max(0, int(psutil.virtual_memory().used) // (1024 * 1024))
+    except (OSError, AttributeError, ValueError, TypeError):
+        return 0
 
 
 def _device_and_vram() -> tuple[str, int]:

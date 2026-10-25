@@ -1,5 +1,6 @@
 """Classifier adapters."""
 import math
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -7,6 +8,7 @@ import numpy as np
 from PIL import Image
 
 from canvas.infra.stage_timer import log_stage, note_tag
+from canvas.models.hot_tier import cached, deactivate, remember, retained
 from canvas.models.pins import REPO_AGE, REPO_AGE_FINE, REPO_GUARD, REPO_NSFW, REPO_SIGLIP, REPO_YUNET
 from canvas.safety.classifiers import Face, GuardVerdict
 from canvas.safety.gate import SafetyUnavailable
@@ -115,9 +117,34 @@ class _Placed:
         _empty_cuda_cache()
 
     def release(self) -> None:
-        """Drop loaded weights so the picture model can use the GPU. The next check loads them again."""
+        """Drop the VRAM copy so the picture model can use the GPU.
+
+        A tier that keeps this check leaves the RAM weights, in their current
+        dtype, for the rest of the session.
+        """
+        name = getattr(self, "_park_name", "")
         self._to_cpu()
-        self._model = None
+        if isinstance(name, str) and name:
+            deactivate(name)
+        if not isinstance(name, str) or not retained(name):
+            self._model = None
+
+    def _held(self, name: str) -> bool:
+        """True when this instance already holds the model. It is put on its device again."""
+        self._park_name = name
+        if self._model is None:
+            return False
+        self._model = self._place(self._model)
+        return True
+
+    def _take(self, name: str, build: Callable[[], Any]) -> None:
+        """Load ``name`` from RAM when the session kept it, otherwise from ``build``."""
+        self._park_name = name
+        found = cached(name)
+        if found is None:
+            found = build()
+            remember(name, found)
+        self._model = self._place(found)
 
     def _checked(self, run: Any) -> Any:
         """Run one check. A device error moves the model to the CPU and runs the same check again."""
@@ -294,12 +321,13 @@ class Qwen3GuardGen(_Placed):
     def load(self) -> None:
         """Load."""
         folder = _need_folder(self.folder)
-        if self._model is not None:
+        if self._held("prompt_check"):
             return
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
-        self._tokenizer = AutoTokenizer.from_pretrained(folder, local_files_only=True)
-        self._model = self._place(AutoModelForCausalLM.from_pretrained(
+        if self._tokenizer is None:
+            self._tokenizer = AutoTokenizer.from_pretrained(folder, local_files_only=True)
+        self._take("prompt_check", lambda: AutoModelForCausalLM.from_pretrained(
             folder, torch_dtype=torch.float32, local_files_only=True,
         ))
 
@@ -342,11 +370,12 @@ class SiglipZeroShot(_Placed):
     def load(self) -> None:
         """Load."""
         folder = _need_folder(self.folder)
-        if self._model is not None:
+        if self._held("gate_siglip"):
             return
         from transformers import AutoModel, AutoProcessor
-        self._processor = AutoProcessor.from_pretrained(folder, local_files_only=True)
-        self._model = self._place(AutoModel.from_pretrained(folder, local_files_only=True))
+        if self._processor is None:
+            self._processor = AutoProcessor.from_pretrained(folder, local_files_only=True)
+        self._take("gate_siglip", lambda: AutoModel.from_pretrained(folder, local_files_only=True))
 
     def score_text(self, text: str, labels: Sequence[str]) -> dict[str, float]:
         """Score text."""
@@ -446,11 +475,12 @@ class FairFaceAge(_Placed):
     def load(self) -> None:
         """Load."""
         folder = _need_folder(self.folder)
-        if self._model is not None:
+        if self._held("gate_fairface"):
             return
         from transformers import AutoImageProcessor, AutoModelForImageClassification
-        self._processor = AutoImageProcessor.from_pretrained(folder, local_files_only=True)
-        self._model = self._place(AutoModelForImageClassification.from_pretrained(
+        if self._processor is None:
+            self._processor = AutoImageProcessor.from_pretrained(folder, local_files_only=True)
+        self._take("gate_fairface", lambda: AutoModelForImageClassification.from_pretrained(
             folder, local_files_only=True,
         ))
 
@@ -562,7 +592,7 @@ class FaceAgeRegressor(_Placed):
     def load(self) -> None:
         """Load."""
         folder = _need_folder(self.folder)
-        if self._model is not None:
+        if self._held("gate_regressor"):
             return
         import json
 
@@ -584,6 +614,12 @@ class FaceAgeRegressor(_Placed):
         if not isinstance(config, dict):
             raise SafetyUnavailable("model_not_ready")
         scale = regressor_scale(config)
+        found = cached("gate_regressor")
+        if found is not None:
+            self._scale = scale
+            self._park_name = "gate_regressor"
+            self._model = self._place(found)
+            return
         state = load_file(str(weights))
         if not state or not all(key.startswith(_REGRESSOR_PREFIX) for key in state):
             raise SafetyUnavailable("model_not_ready")
@@ -593,7 +629,10 @@ class FaceAgeRegressor(_Placed):
             model.load_state_dict(stripped, strict=True)
         except RuntimeError as exc:
             raise SafetyUnavailable("model_not_ready") from exc
-        self._model = self._place(model.to(dtype=torch.float32).eval())
+        model = model.to(dtype=torch.float32).eval()
+        self._park_name = "gate_regressor"
+        remember("gate_regressor", model)
+        self._model = self._place(model)
         self._scale = scale
 
     def _tensor(self, pixels: np.ndarray, size: int) -> Any:
@@ -647,11 +686,12 @@ class NsfwViT(_Placed):
     def load(self) -> None:
         """Load."""
         folder = _need_folder(self.folder)
-        if self._model is not None:
+        if self._held("gate_nsfw"):
             return
         from transformers import AutoImageProcessor, AutoModelForImageClassification
-        self._processor = AutoImageProcessor.from_pretrained(folder, local_files_only=True)
-        self._model = self._place(AutoModelForImageClassification.from_pretrained(
+        if self._processor is None:
+            self._processor = AutoImageProcessor.from_pretrained(folder, local_files_only=True)
+        self._take("gate_nsfw", lambda: AutoModelForImageClassification.from_pretrained(
             folder, local_files_only=True,
         ))
 

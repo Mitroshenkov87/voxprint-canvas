@@ -36,6 +36,7 @@ from canvas.infra.stage_guard import (
 )
 from canvas.infra.vram_trace import drop_model, hold_model, note_vram
 from canvas.infra.vram import peak_allocated_bytes, reset_peak_allocated
+from canvas.models import hot_tier as hot
 from canvas.models.modes import Tier
 from canvas.models.pins import (
     PIPELINE_CONTROL,
@@ -87,7 +88,6 @@ def _load(loader: Any, *args: Any, **kwargs: Any) -> Any:
 
 
 _BASE_PIPELINES = frozenset({PIPELINE_TEXT, PIPELINE_IMG2IMG, PIPELINE_INPAINT})
-_PARK_RAM_BYTES = 64 * 1024**3
 _scope_depth = 0
 _lock = threading.RLock()
 
@@ -119,8 +119,8 @@ def system_ram_bytes() -> int:
 
 
 def _park_between_runs() -> bool:
-    """64 GB and above may keep the pipeline after the run. Smaller machines load it again."""
-    return system_ram_bytes() >= _PARK_RAM_BYTES
+    """``ram64`` and ``ram96`` keep the pipeline weights in RAM. ``ram32`` loads them again."""
+    return hot.keeps_main_tier()
 
 
 def _should_retain() -> bool:
@@ -136,7 +136,10 @@ def pipeline_scope() -> Iterator[None]:
     try:
         yield
     except Exception:
-        release_pipeline()
+        if _park_between_runs():
+            park_pipeline()
+        else:
+            release_pipeline()
         raise
     finally:
         with _lock:
@@ -164,8 +167,17 @@ def release_pipeline() -> None:
             drop_model(name)
         note_vram("pipeline_release", "after")
         tier = held.tier
+    hot.forget("transformer", "text_encoder", "vae", "controlnet")
     if tier is Tier.GB16:
         _leave("cook", tier)
+
+
+def park_pipeline() -> None:
+    """Drop VRAM copies. Tiers that keep main models leave the RAM copies in place."""
+    for name in ("transformer", "text_encoder", "vae", "controlnet"):
+        hot.deactivate(name)
+    if not _park_between_runs():
+        release_pipeline()
 
 
 def reset_pipeline_cache() -> None:
@@ -173,6 +185,7 @@ def reset_pipeline_cache() -> None:
     global _scope_depth
     with _lock:
         release_pipeline()
+        hot.reset()
         _scope_depth = 0
 
 
@@ -306,23 +319,34 @@ def prepare_series_embeds(
 def _prepare_locked(folder: Path, tier: Tier, prompts: tuple[str, ...]) -> None:
     global _prompt_embeds, _borrowed_pair
     torch = _import_torch()
+    hot.note_tier()
     _enter("text_encoder", tier)
     tokenizer: Any = None
     encoder: Any = None
     try:
         with timed("encoder"):
-            with timed("load"):
-                tokenizer, encoder = _load_text_pair(folder, torch)
-                _borrowed_pair = (tokenizer, encoder)
-                try:
-                    score = _encoder_cosine(folder, tier, torch)
-                finally:
-                    _borrowed_pair = None
-                storage = choose_encoder_storage(tier, _fp8_ready(torch), score, _free_vram_bytes())
-                if _encoder_needs_reload(encoder, storage):
-                    _release_text_encoder(encoder, tokenizer, torch)
+            found = hot.bundle("text_encoder")
+            if isinstance(found, tuple) and len(found) == 3 and found[2] is tier:
+                tokenizer, encoder = found[0], found[1]
+            else:
+                if found is not None:
+                    hot.forget("text_encoder")
+                with timed("load"):
                     tokenizer, encoder = _load_text_pair(folder, torch)
-            _place_encoder(encoder, storage, torch, tier)
+                    _borrowed_pair = (tokenizer, encoder)
+                    try:
+                        score = _encoder_cosine(folder, tier, torch)
+                    finally:
+                        _borrowed_pair = None
+                    storage = choose_encoder_storage(tier, _fp8_ready(torch), score, _free_vram_bytes())
+                    if _encoder_needs_reload(encoder, storage):
+                        _release_text_encoder(encoder, tokenizer, torch)
+                        tokenizer, encoder = _load_text_pair(folder, torch)
+                _place_encoder(encoder, storage, torch, tier)
+                if hot.remember("text_encoder", encoder):
+                    hot.remember_bundle("text_encoder", (tokenizer, encoder, tier))
+            device = "cuda" if _cuda_is_up(torch) else "cpu"
+            hot.activate("text_encoder", device)
             if _cuda_is_up(torch):
                 require_cuda(encoder, "encoder.device", torch)
             _keep("text_encoder", encoder, tier)
@@ -335,7 +359,11 @@ def _prepare_locked(folder: Path, tier: Tier, prompts: tuple[str, ...]) -> None:
             else:
                 _prompt_embeds = {**_prompt_embeds, **encoded}
     finally:
-        _release_text_encoder(encoder, tokenizer, torch)
+        if hot.retained("text_encoder"):
+            hot.deactivate("text_encoder")
+            _borrowed_pair = None
+        else:
+            _release_text_encoder(encoder, tokenizer, torch)
         encoder = None
         tokenizer = None
         gc.collect()
@@ -908,6 +936,7 @@ def _pipeline_for(
                 with timed("place"):
                     _place_and_bind(pipe, tier, lora, lora_strength)
             _remember_components(pipe, tier)
+            _shelter(pipe)
             _peak("cook", tier)
         except Exception:
             release_pipeline()
@@ -945,11 +974,22 @@ def applied_strength(requested: float | None) -> float:
     return value
 
 
+def _shelter(pipe: Any) -> None:
+    """Park the cast picture models in RAM. A resident pipeline leaves VRAM until its stage."""
+    if not hot.keeps_main_tier():
+        return
+    for name in ("transformer", "text_encoder", "vae", "controlnet"):
+        module = getattr(pipe, name, None)
+        if module is not None:
+            hot.remember(name, module)
+
+
 def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, height: int, tier: Tier, *,
            seed: int = 0, control_file: Path | None = None,
            strength: float | None = None, lora: UserLora | None = None,
            lora_strength: float | None = None, negative: str = "") -> RawImage:
     """Run one pinned snapshot. ``folder`` is a local diffusers tree."""
+    hot.note_tier()
     reset_peak_allocated()
     torch = _import_torch()
     diffusers = _import_diffusers()
@@ -984,40 +1024,53 @@ def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, he
             )
             call = _accepting(pipe, common)
             _disable_vae_upcast(pipe)
-            if pipeline_name == PIPELINE_TEXT:
-                result = _timed(pipe, **call)
-            elif pipeline_name == PIPELINE_IMG2IMG:
-                result = _timed(
-                    pipe, image=_pil(_frame(screened, "init")), strength=applied_strength(strength), **call,
-                )
-            elif pipeline_name == PIPELINE_INPAINT:
-                result = _timed(
-                    pipe, image=_pil(_frame(screened, "init")), mask_image=_pil(_frame(screened, "mask")), **call,
-                )
-            elif pipeline_name == PIPELINE_CONTROL:
-                role = _control_role(screened)
-                result = _timed(
-                    pipe, control_image=_pil(_frame(screened, role)), controlnet_conditioning_scale=0.75, **call,
-                )
-            elif pipeline_name == PIPELINE_CONTROL_INPAINT:
-                result = _timed(
-                    pipe,
-                    image=_pil(_frame(screened, "init")),
-                    mask_image=_pil(_frame(screened, "mask")),
-                    control_image=_pil(_frame(screened, _control_role(screened))),
-                    controlnet_conditioning_scale=0.75,
-                    **call,
-                )
-            else:
-                raise InferenceUnavailable(f"unknown pipeline {pipeline_name}")
+            resident = getattr(pipe, "_canvas_placement", "resident") == "resident"
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            if resident:
+                hot.activate("transformer", device)
+                if getattr(pipe, "controlnet", None) is not None:
+                    hot.activate("controlnet", device)
+            try:
+                if pipeline_name == PIPELINE_TEXT:
+                    result = _timed(pipe, **call)
+                elif pipeline_name == PIPELINE_IMG2IMG:
+                    result = _timed(
+                        pipe, image=_pil(_frame(screened, "init")), strength=applied_strength(strength), **call,
+                    )
+                elif pipeline_name == PIPELINE_INPAINT:
+                    result = _timed(
+                        pipe, image=_pil(_frame(screened, "init")), mask_image=_pil(_frame(screened, "mask")), **call,
+                    )
+                elif pipeline_name == PIPELINE_CONTROL:
+                    role = _control_role(screened)
+                    result = _timed(
+                        pipe, control_image=_pil(_frame(screened, role)), controlnet_conditioning_scale=0.75, **call,
+                    )
+                elif pipeline_name == PIPELINE_CONTROL_INPAINT:
+                    result = _timed(
+                        pipe,
+                        image=_pil(_frame(screened, "init")),
+                        mask_image=_pil(_frame(screened, "mask")),
+                        control_image=_pil(_frame(screened, _control_role(screened))),
+                        controlnet_conditioning_scale=0.75,
+                        **call,
+                    )
+                else:
+                    raise InferenceUnavailable(f"unknown pipeline {pipeline_name}")
+            finally:
+                if resident:
+                    hot.deactivate("transformer")
+                    hot.deactivate("controlnet")
             return _image_from_result(pipe, result, torch)
         except Exception:
             failed = True
             raise
         finally:
             _remember_vram_peak()
-            if failed or not _should_retain():
+            if not _should_retain():
                 release_pipeline()
+            elif failed:
+                park_pipeline()
 
 
 def _timed(pipe: Any, **kwargs: Any) -> Any:
@@ -1079,16 +1132,21 @@ def _decode_latents(pipe: Any, latents: Any, torch: Any) -> Any:
         tiling = getattr(vae, "enable_tiling", None)
         if callable(tiling):
             tiling()
-    vae = _vae_for_decode(pipe, vae, torch)
-    config = getattr(vae, "config", None)
-    scaling = getattr(config, "scaling_factor", 0.3611) if config is not None else 0.3611
-    shift = getattr(config, "shift_factor", 0.1159) if config is not None else 0.1159
+    device = "cuda" if _cuda_is_up(torch) else "cpu"
+    hot.activate("vae", device)
     try:
-        scaled = (latents / scaling) + shift
-    except TypeError:
-        scaled = latents
-    scaled = _latents_like_vae(vae, scaled)
-    decoded = vae.decode(scaled)
+        vae = _vae_for_decode(pipe, vae, torch)
+        config = getattr(vae, "config", None)
+        scaling = getattr(config, "scaling_factor", 0.3611) if config is not None else 0.3611
+        shift = getattr(config, "shift_factor", 0.1159) if config is not None else 0.1159
+        try:
+            scaled = (latents / scaling) + shift
+        except TypeError:
+            scaled = latents
+        scaled = _latents_like_vae(vae, scaled)
+        decoded = vae.decode(scaled)
+    finally:
+        hot.deactivate("vae")
     sample = getattr(decoded, "sample", None)
     return decoded if sample is None else sample
 
@@ -1264,6 +1322,14 @@ def _release_lora(pipe: Any) -> None:
         unload_lora(transformer)
 
 
+def _mark_placement(pipe: Any, kind: str) -> None:
+    """Remember whether this pipeline owns its CUDA copies or an offload hook does."""
+    try:
+        setattr(pipe, "_canvas_placement", kind)
+    except (AttributeError, TypeError):
+        return
+
+
 def _place(pipe: Any, tier: Tier) -> None:
     """16 GB offloads unless the whole pipeline fits with room for activations.
 
@@ -1283,11 +1349,13 @@ def _place(pipe: Any, tier: Tier) -> None:
         budget = room if free is None else min(int(free), room)
         if resident_fits(pipe, budget):
             note_tag("placement", "resident")
+            _mark_placement(pipe, "resident")
             pipe.to("cuda")
             _peak("cook", tier)
             return
         if model_offload_fits(pipe, budget):
             note_tag("placement", "model_offload")
+            _mark_placement(pipe, "offload")
             install_model_offload(pipe)
             _peak("cook", tier)
             return
@@ -1296,12 +1364,14 @@ def _place(pipe: Any, tier: Tier) -> None:
         except OffloadUnavailable as exc:
             raise InferenceUnavailable("this pipeline cannot offload weights") from exc
         note_tag("placement", "group_offload")
+        _mark_placement(pipe, "offload")
         _peak("cook", tier)
         return
     if tier is Tier.GB24:
         note_tag("tier", "gb24")
         note_tag("weights", "bf16")
         note_tag("placement", "resident")
+        _mark_placement(pipe, "resident")
         pipe.to("cuda")
         return
     assert_never(tier)

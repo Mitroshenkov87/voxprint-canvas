@@ -151,7 +151,11 @@ def _writer_dir(folder: Path) -> Path:
     return folder
 
 
-def _arm_writer(monkeypatch, devices: list[str], codes: list[str], *, fail: str, cuda: bool = True) -> None:
+def _arm_writer(
+    monkeypatch, devices: list[str], codes: list[str], *, fail: str, cuda: bool = True,
+    ram: int = 32 * 1024**3,
+) -> None:
+    monkeypatch.setattr("canvas.models.runtime.system_ram_bytes", lambda: ram)
     class _Tensor:
         shape = (1, 2)
 
@@ -279,6 +283,18 @@ def test_a_cuda_writer_records_its_device_without_a_fallback(tmp_path: Path, mon
     assert "writer_generate=" in line
     assert "writer_tps=tps" in line
     assert "writer_fallback=" not in line
+
+
+def test_a_kept_writer_is_read_into_ram_once(tmp_path: Path, monkeypatch) -> None:
+    devices: list[str] = []
+    codes: list[str] = []
+    folder = _writer_dir(tmp_path / "encoder")
+    _arm_writer(monkeypatch, devices, codes, fail="", ram=96 * 1024**3)
+    _reply, line = _run_writer(folder)
+    _run_writer(folder)
+    assert devices == ["cpu"]
+    assert codes == []
+    assert "writer=cuda" in line
 
 
 def test_a_writer_error_that_is_not_oom_is_raised(tmp_path: Path, monkeypatch) -> None:

@@ -1,9 +1,13 @@
-"""Run one Photoshoot series: scenario, gate, then one frame at a time."""
+"""Run one Photoshoot series: prep every frame, cook them, then check them.
+
+Prep writes the scenario and reviews every prompt, then unloads those models.
+Cook loads the picture pipeline once and draws every frame. The output check
+runs after that pipeline is gone. A frame is written only after it passes.
+"""
 from __future__ import annotations
 
 import json
 import threading
-from concurrent.futures import Future, ThreadPoolExecutor
 import struct
 import zipfile
 import zlib
@@ -15,10 +19,10 @@ from typing import Literal, Protocol, cast
 from canvas.app.i18n import text
 from canvas.app.shell_run import RunStopped
 from canvas.core.formats import OutputFormat, extension, save_image
-from canvas.infra.errors import note_debug, note_error, note_timing
+from canvas.infra.errors import note_crash, note_debug, note_error, note_timing
 from canvas.infra.stage_timer import StageTimes, note_peak_mib, set_current
 from canvas.infra.vram import peak_allocated_bytes
-from canvas.models.runtime import pipeline_scope
+from canvas.models.runtime import clear_series_embeds, pipeline_scope, release_pipeline
 from canvas.pipeline.enhance import mask_numbers, stated_ages
 from canvas.pipeline.gpu_release import release_gate_weights
 from canvas.pipeline.adult_direction import ages_allowed, with_adult_anchor, youth_cues
@@ -38,7 +42,14 @@ from canvas.pipeline.photoshoot import (
     scenario_request,
 )
 from canvas.safety.denylist import scan
-from canvas.safety.gate import AgeGate, GenerationBlocked, SafetyError, StylisedBlocked, YouthContextBlocked
+from canvas.safety.gate import (
+    AgeGate,
+    GenerationBlocked,
+    SafetyError,
+    SafetyUnavailable,
+    StylisedBlocked,
+    YouthContextBlocked,
+)
 from canvas.safety.image import RawImage, SafeImage
 
 StopCode = Literal["", "idea", "scenario", "cancelled", "error"]
@@ -57,6 +68,25 @@ class SeriesFrame(Protocol):
 
     def to_bytes(self) -> bytes:
         """RGB bytes, three per pixel."""
+
+
+@dataclass(frozen=True)
+class _CookShot:
+    """One frame whose prompt has already been accepted."""
+
+    index: int
+    line: str
+    seed: int
+
+
+@dataclass(frozen=True)
+class _Drawn:
+    """Pixels held in memory until the output check."""
+
+    index: int
+    line: str
+    seed: int
+    image: SeriesFrame
 
 
 @dataclass(frozen=True)
@@ -168,164 +198,62 @@ def _run_series(
     if on_scenario is not None:
         on_scenario(scenario)
     folder.mkdir(parents=True, exist_ok=True)
-    hero: SeriesFrame | None = None
     kept: list[Path] = []
     blocked: list[int] = []
     saved_lines: list[str] = []
     seeds: list[int] = []
-    # Frame N is encoded and saved on one background thread while frame N+1 renders.
-    # Its output check has already passed on this thread: no unchecked pixels reach
-    # a file, and a picture verdict stops the series before the next render starts.
-    pending: _Pending | None = None
-    worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="series-store")
-
-    def settle() -> SeriesResult | None:
-        """Wait for the previous frame's check and save. A series stop is returned."""
-        nonlocal pending
-        item, pending = pending, None
-        if item is None:
-            return None
-        with clock.measure("wait_save"):
-            path, refusal = item.future.result()
-        if path is None:
-            blocked.append(item.index)
-            _status(on_status, item.index, "blocked")
-            if _ends_series(refusal):
-                return _stop_kept(
-                    "scenario", _verdict_message(refusal) or "", "scenario.minor", source,
-                    folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept,
-                )
-            return None
-        kept.append(path)
-        saved_lines.append(item.line)
-        seeds.append(item.seed)
-        _status(on_status, item.index, "kept")
+    accepted, prep_stop, cancelled_prep = _accepted_shots(
+        scenario, lines, verdicts, seed, idea, adult, include_camera, line_for, gate, clock, blocked,
+        on_status, cancelled,
+    )
+    if cancelled_prep:
+        release_gate_weights(gate)
         _write_meta(folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept)
-        return None
-
-    def store(index: int, released: _Released) -> tuple[Path | None, Exception | None]:
-        with clock.measure("save"):
-            return _store_frame(folder, index, released, container), None
-
-    try:
-        # Every frame of the series shares this scope, so the pipeline and its weight cast load once.
-        with pipeline_scope():
-            for index, shot in enumerate(scenario.shots):
-                if cancelled():
-                    stop = settle()
-                    if stop is not None:
-                        return stop
-                    _write_meta(folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept)
-                    return SeriesResult("cancelled", "", tuple(kept), folder, "", source)
-                line = (
-                    assemble_line(scenario.subject_block, shot, include_camera=include_camera())
-                    if line_for is None
-                    else line_for(index)
-                )
-                line = single_frame(line)
-                if scenario.subject_block not in line:
-                    blocked.append(index)
-                    _status(on_status, index, "blocked")
-                    continue
-                if adult:
-                    if youth_cues(line):
-                        blocked.append(index)
-                        _status(on_status, index, "blocked")
-                        continue
-                    line = with_adult_anchor(line)
-                if line == lines[index]:
-                    verdict = verdicts[index]
-                else:
-                    with clock.measure("prompt_check"):
-                        verdict = _prompt_verdict(gate, _with_idea(idea, line))
-                shot_reason = _verdict_message(verdict)
-                if shot_reason:
-                    stop = settle()
-                    if stop is not None:
-                        return stop
-                    blocked.append(index)
-                    _status(on_status, index, "blocked")
-                    if _ends_series(verdict) or scan(line).minor:
-                        return _stop_kept(
-                            "scenario", shot_reason, "scenario.minor", source,
-                            folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept,
-                        )
-                    continue
-                active = style_reference(series_strength)
-                if active is not None:
-                    # A style reference must be a frame whose output check already passed.
-                    stop = settle()
-                    if stop is not None:
-                        return stop
-                _status(on_status, index, "drawing")
-                if cancelled():
-                    stop = settle()
-                    if stop is not None:
-                        return stop
-                    _write_meta(folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept)
-                    return SeriesResult("cancelled", "", tuple(kept), folder, "", source)
-                failure: RunStopped | None = None
-                image: SeriesFrame | None = None
-                try:
-                    with clock.measure("render"):
-                        image = draw_frame(line, seed + index, hero if active is not None else None, active)
-                    _remember_vram_peak()
-                except RunStopped as exc:
-                    _remember_vram_peak()
-                    failure = exc
-                # The earlier frame's verdict comes first: a stop there discards this frame unwritten.
-                stop = settle()
-                if stop is not None:
-                    return stop
-                if failure is not None:
-                    blocked.append(index)
-                    _status(on_status, index, "blocked")
-                    if _ends_series(failure) or (failure.code == "prompt" and scan(line).minor):
-                        return _stop_kept(
-                            "scenario", failure.message, "scenario.minor", source,
-                            folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept,
-                        )
-                    if not failure.unavailable:
-                        continue
-                    _write_meta(folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept)
-                    return SeriesResult(
-                        "error", failure.message, tuple(kept), folder, failure.code or "internal", source,
-                    )
-                if image is None:
-                    blocked.append(index)
-                    _status(on_status, index, "blocked")
-                    continue
-                # The output check runs before anything is encoded or written, and a
-                # picture verdict here stops the series before another frame is drawn.
-                with clock.measure("output_check"):
-                    released, refusal = _released_frame(gate, image, line)
-                if released is None:
-                    blocked.append(index)
-                    _status(on_status, index, "blocked")
-                    if _ends_series(refusal):
-                        return _stop_kept(
-                            "scenario", _verdict_message(refusal) or "", "scenario.minor", source,
-                            folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept,
-                        )
-                    continue
-                if hero is None:
-                    hero = image
-                release_gate_weights(gate)
-                pending = _Pending(index, line, seed + index, image, worker.submit(store, index, released))
-            stop = settle()
-            if stop is not None:
-                return stop
-    finally:
-        if pending is not None:
-            pending.future.cancel()
-        worker.shutdown(wait=True)
         if own_clock:
             note_timing(clock.log_line())
-    _write_meta(folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept)
-    if not kept:
-        note_error("not_produced")
-        return SeriesResult("", "", (), folder, "not_produced", source)
-    return SeriesResult("", "", tuple(kept), folder, "", source)
+        return SeriesResult("cancelled", "", (), folder, "", source)
+    # Prompt models are finished. The picture pipeline is the next thing on the GPU.
+    release_gate_weights(gate)
+    try:
+        try:
+            drawn, cook_error, cancelled_run = _cook_frames(
+                accepted, series_strength, draw_frame, cancelled, clock, blocked, on_status,
+            )
+        finally:
+            release_pipeline()
+            clear_series_embeds()
+        release_gate_weights(gate)
+        check_code, check_reason, ending = _review_frames(
+            drawn, gate, folder, container, clock, blocked, kept, saved_lines, seeds, on_status,
+        )
+        _write_meta(folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept)
+        if cancelled_run:
+            return SeriesResult("cancelled", "", tuple(kept), folder, "", source)
+        if cook_error is not None and cook_error.unavailable:
+            return SeriesResult(
+                "error", cook_error.message, tuple(kept), folder, cook_error.code or "internal", source,
+            )
+        if cook_error is not None and (_ends_series(cook_error) or cook_error.code == "prompt"):
+            note_error("scenario.minor")
+            return SeriesResult("scenario", cook_error.message, tuple(kept), folder, "scenario.minor", source)
+        if check_code:
+            note_error(check_code)
+            return SeriesResult("error", check_reason, tuple(kept), folder, check_code, source)
+        if ending is not None:
+            note_error("scenario.minor")
+            return SeriesResult("scenario", ending, tuple(kept), folder, "scenario.minor", source)
+        if prep_stop is not None:
+            note_error("scenario.minor")
+            return SeriesResult(
+                "scenario", _verdict_message(prep_stop) or "", tuple(kept), folder, "scenario.minor", source,
+            )
+        if not kept:
+            note_error("not_produced")
+            return SeriesResult("", "", (), folder, "not_produced", source)
+        return SeriesResult("", "", tuple(kept), folder, "", source)
+    finally:
+        if own_clock:
+            note_timing(clock.log_line())
 
 
 def _remember_vram_peak() -> None:
@@ -334,6 +262,157 @@ def _remember_vram_peak() -> None:
     if not peak or peak <= 0:
         return
     note_peak_mib(peak // (1024 * 1024))
+
+
+def _accepted_shots(
+    scenario: Scenario,
+    lines: list[str],
+    verdicts: list[Exception | None],
+    seed: int,
+    idea: str,
+    adult: bool,
+    include_camera: Callable[[], bool],
+    line_for: Callable[[int], str] | None,
+    gate: AgeGate,
+    clock: StageTimes,
+    blocked: list[int],
+    on_status: Callable[[int, str], None] | None,
+    cancelled: Callable[[], bool],
+) -> tuple[list[_CookShot], Exception | None, bool]:
+    """Every shot line and its prompt verdict, before the picture model loads.
+
+    A series-ending prompt verdict keeps the shots accepted before it and stops
+    the list there. A refusal that does not end the series drops that shot.
+    """
+    accepted: list[_CookShot] = []
+    for index, shot in enumerate(scenario.shots):
+        if cancelled():
+            return accepted, None, True
+        line = (
+            assemble_line(scenario.subject_block, shot, include_camera=include_camera())
+            if line_for is None
+            else line_for(index)
+        )
+        line = single_frame(line)
+        if scenario.subject_block not in line or (adult and youth_cues(line)):
+            blocked.append(index)
+            _status(on_status, index, "blocked")
+            continue
+        if adult:
+            line = with_adult_anchor(line)
+        if line == lines[index]:
+            verdict = verdicts[index]
+        else:
+            with clock.measure("prompt_check"):
+                verdict = _prompt_verdict(gate, _with_idea(idea, line))
+        if _verdict_message(verdict):
+            blocked.append(index)
+            _status(on_status, index, "blocked")
+            if _ends_series(verdict) or scan(line).minor:
+                return accepted, verdict, False
+            continue
+        accepted.append(_CookShot(index, line, seed + index))
+    return accepted, None, False
+
+
+def _cook_frames(
+    accepted: list[_CookShot],
+    series_strength: float | None,
+    draw_frame: Callable[[str, int, SeriesFrame | None, float | None], SeriesFrame | None],
+    cancelled: Callable[[], bool],
+    clock: StageTimes,
+    blocked: list[int],
+    on_status: Callable[[int, str], None] | None,
+) -> tuple[list[_Drawn], RunStopped | None, bool]:
+    """Draw every accepted frame on the pipeline loaded for this series."""
+    hero: SeriesFrame | None = None
+    drawn: list[_Drawn] = []
+    active = style_reference(series_strength)
+    prepare = getattr(draw_frame, "prepare", None)
+    with pipeline_scope():
+        if callable(prepare):
+            prepare([shot.line for shot in accepted])
+        for shot in accepted:
+            if cancelled():
+                return drawn, None, True
+            _status(on_status, shot.index, "drawing")
+            if cancelled():
+                return drawn, None, True
+            try:
+                with clock.measure("render"):
+                    image = draw_frame(shot.line, shot.seed, hero if active is not None else None, active)
+                _remember_vram_peak()
+            except RunStopped as exc:
+                _remember_vram_peak()
+                blocked.append(shot.index)
+                _status(on_status, shot.index, "blocked")
+                if exc.unavailable or _ends_series(exc) or (exc.code == "prompt" and scan(shot.line).minor):
+                    return drawn, exc, False
+                continue
+            if image is None:
+                blocked.append(shot.index)
+                _status(on_status, shot.index, "blocked")
+                continue
+            if hero is None:
+                hero = image
+            drawn.append(_Drawn(shot.index, shot.line, shot.seed, image))
+    return drawn, None, False
+
+
+def _review_frames(
+    drawn: list[_Drawn],
+    gate: AgeGate,
+    folder: Path,
+    container: OutputFormat | None,
+    clock: StageTimes,
+    blocked: list[int],
+    kept: list[Path],
+    saved_lines: list[str],
+    seeds: list[int],
+    on_status: Callable[[int, str], None] | None,
+) -> tuple[str, str, str | None]:
+    """Check every held frame, then write the ones that passed before a series stop.
+
+    A check that cannot finish is recorded once. Later frames are still checked
+    and none of them are written.
+    """
+    save_stop = False
+    crash_noted = False
+    check_code = ""
+    check_reason = ""
+    ending: str | None = None
+    for item in drawn:
+        with clock.measure("output_check"):
+            released, refusal = _released_frame(gate, item.image, item.line)
+        if released is None:
+            blocked.append(item.index)
+            _status(on_status, item.index, "blocked")
+            if isinstance(refusal, SafetyUnavailable):
+                if not crash_noted:
+                    note_crash(f"check.{refusal.code}", refusal)
+                    crash_noted = True
+                if not check_code:
+                    check_code = f"check.{refusal.code}"
+                    check_reason = _verdict_message(refusal) or text("gate.unavailable")
+                save_stop = True
+                continue
+            if _ends_series(refusal):
+                save_stop = True
+                if ending is None:
+                    ending = _verdict_message(refusal) or ""
+                continue
+            continue
+        if save_stop:
+            blocked.append(item.index)
+            _status(on_status, item.index, "blocked")
+            continue
+        with clock.measure("save"):
+            path = _store_frame(folder, item.index, released, container)
+        kept.append(path)
+        saved_lines.append(item.line)
+        seeds.append(item.seed)
+        _status(on_status, item.index, "kept")
+    return check_code, check_reason, ending
 
 
 def _stated_age(idea: str) -> int | list[int] | None:
@@ -423,17 +502,6 @@ def _ends_series(error: BaseException | None) -> bool:
     return error.code == "prompt" and not isinstance(error, (StylisedBlocked, YouthContextBlocked))
 
 
-@dataclass(frozen=True)
-class _Pending:
-    """A drawn frame whose output check and save run in the background. Memory only until checked."""
-
-    index: int
-    line: str
-    seed: int
-    image: SeriesFrame
-    future: Future[tuple[Path | None, Exception | None]]
-
-
 class SerialGate:
     """The same gate, one call at a time across the series threads.
 
@@ -515,7 +583,7 @@ def _scenario(
     if not subject:
         return None, "scenario.format", ""
     if appearance:
-        subject = f"{subject}, {appearance}"
+        subject = f"{appearance}, {subject}"
     collected: list[Shot] = []
     place = ""
     replies: list[str] = []

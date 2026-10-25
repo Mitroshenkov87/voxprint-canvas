@@ -48,13 +48,16 @@ def note_crash(code: str, exc: BaseException) -> None:
     """
     label = code or "internal"
     type_name = type(exc).__name__
+    message = " ".join(str(exc).split())
     flat = " ".join(_stack_only(exc).split())
     _LOG.error("%s %s", label, type_name)
+    # A non-empty message can carry request text, so only an empty one is written.
+    shown = " message=''" if message == "" else ""
     try:
         folder = logs_dir()
         folder.mkdir(parents=True, exist_ok=True)
         with (folder / "voxprint.log").open("a", encoding="utf-8") as handle:
-            handle.write(f"crash {label} {type_name} {flat}\n")
+            handle.write(f"crash {label} {type_name}{shown} {flat}\n")
     except OSError:
         return
 

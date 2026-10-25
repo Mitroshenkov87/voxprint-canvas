@@ -20,7 +20,8 @@ import psutil
 from PIL import Image
 
 from canvas.app.i18n import text
-from canvas.infra.stage_timer import note_peak_mib, note_tag, timed
+from canvas.infra.stage_timer import note_peak_mib, note_stage, note_tag, timed
+from canvas.infra.vram_trace import drop_model, hold_model, note_vram
 from canvas.infra.vram import peak_allocated_bytes, reset_peak_allocated
 from canvas.models.modes import Tier
 from canvas.models.pins import (
@@ -139,8 +140,12 @@ def release_pipeline() -> None:
         _slot = None
         if held is None:
             return
+        note_vram("pipeline_release", "before", held.pipe)
         _release_lora(held.pipe)
         _release_inference(held.torch, held.pipe, held.controlnet)
+        for name in ("transformer", "vae", "text_encoder"):
+            drop_model(name)
+        note_vram("pipeline_release", "after")
 
 
 def reset_pipeline_cache() -> None:
@@ -178,16 +183,169 @@ def _pipeline_type(diffusers: Any, pipeline_name: str) -> Any:
 
 
 def _retarget(diffusers: Any, held: _Held, pipeline_name: str) -> Any | None:
-    """Share the loaded weights with another pipeline class. No second load from disk."""
+    """Share the loaded weights with another pipeline class. No second load from disk.
+
+    ``from_pipe`` casts every shared module to float32. That moves FP8 storage
+    and the layers that must stay in BF16, and the next matmul fails. A new
+    pipeline object is built on the same modules and is not cast.
+    """
     if held.pipeline_name not in _BASE_PIPELINES or pipeline_name not in _BASE_PIPELINES:
         return None
+    shared = _share_pipeline(diffusers, held.pipe, pipeline_name)
+    if shared is not None:
+        return shared
     convert = getattr(_pipeline_type(diffusers, pipeline_name), "from_pipe", None)
     if not callable(convert):
         return None
     try:
-        return convert(held.pipe)
+        return _from_pipe_keep_dtype(convert, held.pipe)
     except (OSError, ValueError, KeyError, RuntimeError, AttributeError, TypeError):
         return None
+
+
+def _share_pipeline(diffusers: Any, pipe: Any, pipeline_name: str) -> Any | None:
+    """Another pipeline class on the modules ``pipe`` already holds."""
+    kind = _pipeline_type(diffusers, pipeline_name)
+    if not isinstance(kind, type):
+        return None
+    try:
+        return kind(
+            scheduler=pipe.scheduler,
+            vae=pipe.vae,
+            text_encoder=pipe.text_encoder,
+            tokenizer=pipe.tokenizer,
+            transformer=pipe.transformer,
+        )
+    except (AttributeError, TypeError):
+        return None
+
+
+def _from_pipe_keep_dtype(convert: Any, pipe: Any) -> Any:
+    """``from_pipe`` without the float32 cast it applies to shared modules."""
+    modules = _dtype_modules(pipe)
+    originals: list[tuple[Any, Any]] = []
+    for module in modules:
+        original = module.to
+
+        def frozen(*args: Any, _module: Any = module, _original: Any = original, **kwargs: Any) -> Any:
+            args = tuple(arg for arg in args if not _is_dtype(arg))
+            kwargs = {key: value for key, value in kwargs.items() if key not in {"dtype", "torch_dtype"} and not _is_dtype(value)}
+            if not args and not kwargs:
+                return _module
+            return _original(*args, **kwargs)
+
+        module.to = frozen
+        originals.append((module, original))
+    try:
+        return convert(pipe)
+    finally:
+        for module, original in originals:
+            module.to = original
+
+
+def _dtype_modules(pipe: Any) -> list[Any]:
+    components = getattr(pipe, "components", None)
+    if not isinstance(components, dict):
+        return []
+    return [module for module in components.values() if callable(getattr(module, "to", None))]
+
+
+def _is_dtype(value: object) -> bool:
+    return type(value).__name__ == "dtype"
+
+
+_prompt_embeds: dict[str, Any] | None = None
+
+
+def encode_series_prompts(pipe: Any, prompts: tuple[str, ...]) -> dict[str, Any]:
+    """Prompt embeddings for every line. The text encoder runs here, in prep."""
+    encoded: dict[str, Any] = {}
+    for prompt in prompts:
+        encoded[prompt] = _encode_prompt(pipe, prompt)
+    return encoded
+
+
+def park_text_encoder(pipe: Any) -> None:
+    """Move the text encoder off the GPU. Cook keeps the transformer and the VAE."""
+    for name in ("text_encoder", "text_encoder_2"):
+        module = getattr(pipe, name, None)
+        if module is None:
+            continue
+        mover = getattr(module, "to", None)
+        if callable(mover):
+            try:
+                mover("cpu")
+            except (TypeError, RuntimeError, AttributeError):
+                continue
+    note_vram("text_encoder", "after", pipe)
+
+
+def text_encoder_on_cuda(pipe: Any) -> bool:
+    """True when a text encoder parameter still lives on the GPU."""
+    for name in ("text_encoder", "text_encoder_2"):
+        module = getattr(pipe, name, None)
+        if module is not None and _module_on_cuda(module):
+            return True
+    return False
+
+
+def _module_on_cuda(module: Any) -> bool:
+    parameters = getattr(module, "parameters", None)
+    if callable(parameters):
+        try:
+            for param in parameters():
+                device = getattr(param, "device", None)
+                if device is not None and getattr(device, "type", None) == "cuda":
+                    return True
+        except (TypeError, RuntimeError):
+            return False
+        return False
+    device = getattr(module, "device", None)
+    return device is not None and "cuda" in str(getattr(device, "type", device))
+
+
+def _encode_prompt(pipe: Any, prompt: str) -> Any:
+    encode = getattr(pipe, "encode_prompt", None)
+    if not callable(encode):
+        raise InferenceUnavailable("the pipeline cannot encode a prompt")
+    try:
+        result = encode(prompt, do_classifier_free_guidance=False, max_sequence_length=512)
+    except TypeError:
+        result = encode(prompt)
+    if isinstance(result, tuple):
+        return result[0]
+    return result
+
+
+def prepare_series_embeds(
+    folder: Path, tier: Tier, prompts: tuple[str, ...], *,
+    lora: UserLora | None = None, lora_strength: float | None = None,
+) -> None:
+    """Load the picture pipeline, encode every prompt, then park the text encoder."""
+    global _prompt_embeds
+    torch = _import_torch()
+    diffusers = _import_diffusers()
+    with _lock:
+        pipe = _pipeline_for(
+            diffusers, torch, PIPELINE_TEXT, folder, torch.bfloat16, tier, lora, lora_strength, None,
+        )
+        note_vram("text_encoder", "before", pipe)
+        _prompt_embeds = encode_series_prompts(pipe, prompts)
+        park_text_encoder(pipe)
+        _remember_components(pipe)
+
+
+def clear_series_embeds() -> None:
+    """Drop cached prompt embeddings at the end of a series."""
+    global _prompt_embeds
+    _prompt_embeds = None
+
+
+def _remember_components(pipe: Any) -> None:
+    for name in ("transformer", "vae", "text_encoder"):
+        module = getattr(pipe, name, None)
+        if module is not None:
+            hold_model(name, module)
 
 
 def _bind_lora(pipe: Any, lora: UserLora | None, lora_strength: float | None) -> None:
@@ -250,8 +408,10 @@ def _pipeline_for(
             held.pipe = converted
             held.pipeline_name = pipeline_name
     if held is None:
+        note_vram("pipeline_load", "before")
         with timed("pipeline_load"):
             pipe, controlnet = _open_pipeline(diffusers, pipeline_name, folder, dtype, control_file)
+        note_vram("pipeline_load", "after", pipe)
         held = _Held(
             folder=key[0], tier=tier, dtype=dtype, control=key[3], pipeline_name=pipeline_name,
             lora_key=None, pipe=pipe, controlnet=controlnet, torch=torch,
@@ -313,6 +473,10 @@ def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, he
         "generator": generator,
         "output_type": "pil",
     }
+    embed = None if _prompt_embeds is None else _prompt_embeds.get(screened.prompt)
+    if embed is not None:
+        common["prompt"] = None
+        common["prompt_embeds"] = embed
     common.update(guidance)
     common.update(_negative_argument(negative))
     pipeline_name = plan.pipeline_class
@@ -364,7 +528,9 @@ def _timed(pipe: Any, **kwargs: Any) -> Any:
     """Run one pipeline call and remember the seconds for the JSON report."""
     started = time.perf_counter()
     result = pipe(**kwargs)
-    note_image_seconds(time.perf_counter() - started)
+    seconds = time.perf_counter() - started
+    note_image_seconds(seconds)
+    note_stage("sample", seconds)
     return result
 
 

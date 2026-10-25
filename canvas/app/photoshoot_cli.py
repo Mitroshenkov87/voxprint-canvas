@@ -14,8 +14,10 @@ from canvas.app.shell_run import ShellRunner
 from canvas.core.formats import DEFAULT_FORMAT, extension
 from canvas.infra.enlarge import EnlargeClient
 from canvas.infra.paths import models_dir
+from canvas.models.loader import ModelNotReady
 from canvas.models.modes import Mode, Tier
 from canvas.models.registry import load_catalog
+from canvas.models.runtime import InferenceUnavailable
 from canvas.pipeline.adult_direction import scenario_system
 from canvas.pipeline.enhance import open_rewriter
 from canvas.pipeline.photoshoot import (
@@ -104,11 +106,25 @@ def model_generate(
     """
     runner = ShellRunner(gate=age_gate, tier=tier, enlarge=EnlargeClient())
     runner.bound_lora = lora
+    runner.lora_strength = lora_scale
+    runner.cook = True
     look = look_for(style)
     policy = adult_prompt_policy(allowed=adult)
 
+    def _prompt(line: str) -> str:
+        return " ".join(part for part in (policy.template, line.strip(), look.suffix) if part)
+
+    def prepare(lines: list[str]) -> None:
+        precompute = getattr(runner, "precompute", None)
+        if not callable(precompute):
+            return
+        try:
+            precompute(tuple(_prompt(line) for line in lines))
+        except (ImportError, ModelNotReady, InferenceUnavailable):
+            return
+
     def generate(line: str, seed: int, hero: SeriesFrame | None, strength: float | None) -> RawImage | None:
-        prompt = " ".join(part for part in (policy.template, line.strip(), look.suffix) if part)
+        prompt = _prompt(line)
         negative = frame_negative(", ".join(part for part in (look.negative, policy.negatives) if part))
         mode = Mode.TEXT if hero is None else Mode.RESTYLE
         job = PictureJob(
@@ -130,6 +146,7 @@ def model_generate(
             if seconds is not None:
                 note_stage("denoise", seconds)
 
+    generate.prepare = prepare  # type: ignore[attr-defined]
     return generate
 
 

@@ -1,7 +1,6 @@
-"""The pipelined series: frame N is encoded and saved while frame N+1 renders.
+"""Cook draws every frame, then each output check runs before that frame is saved.
 
-Pixels reach disk only after their output check. A picture verdict on frame N
-stops the series before another frame is drawn.
+A picture verdict does not stop the remaining checks. It stops the remaining saves.
 """
 from __future__ import annotations
 
@@ -38,7 +37,7 @@ def test_an_output_picture_verdict_stops_before_the_next_render(tmp_path: Path) 
     result = _run(tmp_path, age_gate=gate, rewrite=lambda _p: _payload(IDEA), generate=generate)
     assert result.stopped == "scenario"
     assert result.code == "scenario.minor"
-    assert len(drawn) == 2
+    assert len(drawn) == 6
     assert (tmp_path / "01.png").is_file()
     assert not (tmp_path / "02.png").exists()
     assert not (tmp_path / "03.png").exists()
@@ -77,10 +76,11 @@ def test_saving_overlaps_the_next_render_and_follows_the_check(tmp_path: Path, m
         draw_frame=generate, cancelled=lambda: False, folder=tmp_path, timings=times,
     )
     assert len(result.kept) == 6
+    assert order.index("draw5") < order.index("check0")
     for index in range(6):
         assert order.index(f"check{index}") < order.index(f"save{index}")
-    # Frame 2 was drawn before frame 1 finished saving.
-    assert order.index("draw1") < order.index("save0")
+        if index:
+            assert order.index(f"save{index - 1}") < order.index(f"check{index}")
     stages = times.summary()["stages"]
     assert isinstance(stages, dict)
     assert {"scenario", "prompt_check", "render", "output_check", "save"} <= set(stages)

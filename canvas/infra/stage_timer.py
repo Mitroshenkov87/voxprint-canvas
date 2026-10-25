@@ -11,6 +11,8 @@ import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 
+from canvas.infra.vram_trace import note_vram
+
 _NAME = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
 
 
@@ -53,11 +55,13 @@ class StageTimes:
     @contextmanager
     def measure(self, stage: str) -> Iterator[None]:
         """Time the block under ``stage``, including when it raises."""
+        note_vram(stage, "before")
         started = time.perf_counter()
         try:
             yield
         finally:
             self.add(stage, time.perf_counter() - started)
+            note_vram(stage, "after")
 
     def summary(self) -> dict[str, object]:
         """``{"wall_s": .., "stages": {name: {"count", "total_s", "mean_s"}}}``."""

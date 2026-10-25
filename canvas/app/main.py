@@ -1,6 +1,7 @@
 """Command line and window startup."""
 import argparse
 import json
+import os
 import sys
 import threading
 import time
@@ -162,6 +163,11 @@ def _parser() -> argparse.ArgumentParser:
     )
     photoshoot.add_argument("--lora", default="", help="LoRA .safetensors file, .voxlora package, add-on folder, or imported LoRA name")
     photoshoot.add_argument("--lora-scale", type=float, default=0.7, help="LoRA strength, from 0 to 2")
+    photoshoot.add_argument(
+        "--vram-trace",
+        action="store_true",
+        help="write a VRAM line to voxprint.log before and after each load, unload, and stage",
+    )
     photoshoot.add_argument("--json", action="store_true")
     return parser
 
@@ -455,6 +461,8 @@ def _photoshoot_bench(args: argparse.Namespace) -> int:
 
 def _photoshoot(args: argparse.Namespace) -> int:
     """Write a series into --out. A stopped frame is reported, not a crash."""
+    if getattr(args, "vram_trace", False):
+        os.environ["VOXPRINT_VRAM_TRACE"] = "1"
     as_json = bool(args.json)
     frames = int(args.frames)
     if frames < 1 or frames > MAX_FRAMES:

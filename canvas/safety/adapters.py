@@ -1,5 +1,6 @@
 """Classifier adapters."""
 import math
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -8,7 +9,8 @@ import numpy as np
 from PIL import Image
 
 from canvas.infra.stage_timer import log_stage, note_tag
-from canvas.models.hot_tier import cached, deactivate, remember, retained
+from canvas.infra.vram_trace import on_cuda
+from canvas.models.hot_tier import cached, deactivate, note_ssd, remember, retained
 from canvas.models.pins import REPO_AGE, REPO_AGE_FINE, REPO_GUARD, REPO_NSFW, REPO_SIGLIP, REPO_YUNET
 from canvas.safety.classifiers import Face, GuardVerdict
 from canvas.safety.gate import SafetyUnavailable
@@ -19,6 +21,10 @@ from canvas.safety.image import RawImage
 # any other error still stops the request.
 GENERATOR_RESERVE_BYTES = 12 * 1024**3
 GATE_HEADROOM_BYTES = 768 * 1024**2
+# Allocator slack past the bytes this process already counted for its own
+# check weights. A few hundred MiB is not the picture generator, and treating
+# it as one applies the 12 GB reserve to a card that only holds the check.
+RESERVE_SLACK_BYTES = 512 * 1024**2
 _gate_cuda_bytes = 0
 
 
@@ -46,10 +52,11 @@ def gate_device(need_bytes: int) -> str:
         if not torch.cuda.is_available():
             return "cpu"
         free, _total = torch.cuda.mem_get_info()
-        generator_now = max(0, int(torch.cuda.memory_reserved()) - _gate_cuda_bytes)
+        reserved = int(torch.cuda.memory_reserved())
+        generator_now = max(0, reserved - _gate_cuda_bytes)
     except (RuntimeError, AssertionError):
         return "cpu"
-    if generator_now == 0:
+    if generator_now <= RESERVE_SLACK_BYTES:
         still_needed = 0
     else:
         still_needed = max(0, GENERATOR_RESERVE_BYTES - generator_now)
@@ -89,9 +96,14 @@ class _Placed:
         forced = getattr(self, "_forced", None)
         device = gate_device(need) if forced is None else forced
         if device == "cpu":
-            self.device = "cpu"
+            if self.device == "cuda" or on_cuda(model):
+                self._model = model
+                self._to_cpu()
+            else:
+                self.device = "cpu"
             _remember_check_device("cpu")
-            return model
+            parked = self._model if self._model is not None else model
+            return parked
         try:
             moved = model.to(device)
         except Exception as exc:
@@ -142,7 +154,9 @@ class _Placed:
         self._park_name = name
         found = cached(name)
         if found is None:
+            started = time.perf_counter()
             found = build()
+            note_ssd(name, found, started)
             remember(name, found)
         self._model = self._place(found)
 

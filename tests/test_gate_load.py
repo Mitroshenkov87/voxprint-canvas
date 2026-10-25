@@ -21,6 +21,27 @@ def test_model_load_bound_is_separate() -> None:
     assert "timeout=IMAGE_TIMEOUT_S" in source
 
 
+def test_a_prompt_loads_the_guard_and_leaves_the_image_models() -> None:
+    calls: list[str] = []
+
+    class Part:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        def load(self) -> None:
+            calls.append(self.name)
+
+        def assess(self, text: str) -> GuardVerdict:
+            del text
+            return GuardVerdict("safe", ())
+
+    stack = SafetyStack(
+        Part("guard"), Part("zeroshot"), Part("faces"), Part("ages"), Part("nsfw"), Part("fine"),
+    )
+    AgeGate(stack).review_prompt("a red boat")
+    assert calls == ["guard"]
+
+
 def test_warm_loads_every_component_once() -> None:
     calls: list[str] = []
 

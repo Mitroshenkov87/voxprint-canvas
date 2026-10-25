@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from typing import Literal, Sequence, assert_never
 
 from canvas.app.i18n import text
+from canvas.infra.stage_timer import beat_while
+from canvas.infra.vram_trace import on_cuda
 from canvas.safety.classifiers import AgeEstimator, AgeRegressor, FaceDetector, NsfwDetector, PromptGuard, ZeroShot
 from canvas.safety.constants import (
     ADOLESCENT_16_17_AT,
@@ -290,6 +292,18 @@ def refusal_stage(text: str, safety: str, categories: Sequence[str]) -> str:
 _LOAD_ORDER = ("guard", "nsfw", "zeroshot", "faces", "ages", "fine")
 
 
+def _component_on_gpu(component: object) -> bool:
+    """True when the component's flag or its tensors say the weights are on the GPU."""
+    if component is None:
+        return False
+    if getattr(component, "device", None) == "cuda":
+        return True
+    model = getattr(component, "_model", None)
+    if model is None:
+        return False
+    return on_cuda(model)
+
+
 class AgeGate:
     """Decides whether a request may continue. There is no off switch."""
 
@@ -298,6 +312,7 @@ class AgeGate:
         self._load_cv = threading.Condition()
         self._load_state = "idle"
         self._load_code = "classifier_error"
+        self._loaded: set[str] = set()
 
     def warm(self) -> None:
         """Load each component once."""
@@ -306,49 +321,51 @@ class AgeGate:
     def release_weights(self) -> None:
         """Drop GPU weights. The next use loads them again.
 
-        Weights that are already on the CPU stay loaded.
+        Weights that are already on the CPU stay loaded. A component whose
+        device flag says CPU while its tensors are still on the GPU is parked
+        too: the flag is not the allocation.
         """
         with self._load_cv:
             if self._load_state == "loading":
                 while self._load_state == "loading":
                     self._load_cv.wait()
-            if self._load_state != "ready":
-                return
-            on_gpu = False
+            targets: list[object] = []
             for name in _LOAD_ORDER:
                 component = getattr(self._stack, name, None)
-                if getattr(component, "device", None) == "cuda":
-                    on_gpu = True
-                    break
-            if not on_gpu:
+                if _component_on_gpu(component):
+                    targets.append(component)
+            if not targets:
                 return
-            for name in _LOAD_ORDER:
-                component = getattr(self._stack, name, None)
-                if getattr(component, "device", None) != "cuda":
-                    continue
+            for component in targets:
                 release = getattr(component, "release", None)
                 if callable(release):
                     release()
-            self._load_state = "idle"
+            self._loaded.clear()
+            if self._load_state == "ready":
+                self._load_state = "idle"
 
     def _ensure_loaded(self) -> None:
-        """One load for this gate. Later callers wait for it."""
+        """Load every component once. Later callers wait for it."""
+        self._ensure_some(_LOAD_ORDER)
+
+    def _ensure_some(self, names: tuple[str, ...]) -> None:
+        """Load ``names`` that are not already in RAM. A prompt does not load the image models."""
         with self._load_cv:
-            if self._load_state == "ready":
-                return
             if self._load_state == "failed":
                 raise SafetyUnavailable(self._load_code)
-            if self._load_state == "loading":
-                while self._load_state == "loading":
-                    self._load_cv.wait()
-                if self._load_state == "ready":
-                    return
+            while self._load_state == "loading":
+                self._load_cv.wait()
+            if self._load_state == "failed":
                 raise SafetyUnavailable(self._load_code)
+            pending = tuple(name for name in names if name not in self._loaded)
+            if not pending:
+                return
             self._load_state = "loading"
         failed = True
         code = "classifier_error"
         try:
-            self._load_components()
+            with beat_while("warmup"):
+                self._load_components(pending)
             failed = False
         except SafetyUnavailable as exc:
             code = exc.code
@@ -359,12 +376,16 @@ class AgeGate:
                     self._load_state = "failed"
                     self._load_code = code
                 else:
-                    self._load_state = "ready"
+                    self._loaded.update(pending)
+                    if set(_LOAD_ORDER) <= self._loaded:
+                        self._load_state = "ready"
+                    else:
+                        self._load_state = "idle"
                 self._load_cv.notify_all()
 
-    def _load_components(self) -> None:
+    def _load_components(self, names: tuple[str, ...] = _LOAD_ORDER) -> None:
         """Load each component under its own bound."""
-        for name in _LOAD_ORDER:
+        for name in names:
             component = getattr(self._stack, name)
             load = getattr(component, "load", None)
             if not callable(load):
@@ -376,8 +397,8 @@ class AgeGate:
         self._screen_prompt(text)
 
     def _screen_prompt(self, text: str) -> bool:
-        """Screen a prompt."""
-        self._ensure_loaded()
+        """Screen a prompt. Image models stay on disk until a picture is checked."""
+        self._ensure_some(("guard",))
         verdict = _wait(lambda: self._stack.guard.assess(text), timeout=CLASSIFIER_TIMEOUT_S)
         if verdict.safety not in ("safe", "controversial", "unsafe"):
             raise SafetyUnavailable("classifier_error")
@@ -427,7 +448,7 @@ class AgeGate:
 
     def _check_image(self, raw: RawImage, code: str, prompt: str = "", *, full: bool = False) -> None:
         """Screen an image."""
-        self._ensure_loaded()
+        self._ensure_some(_LOAD_ORDER)
         try:
             score = _wait(lambda: self._stack.nsfw.sexual_score(raw), timeout=IMAGE_TIMEOUT_S)
             if isinstance(score, bool) or not isinstance(score, (int, float)):

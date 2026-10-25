@@ -46,7 +46,7 @@ from canvas.ui.styles import LOOKS
 from canvas.pipeline.bf16_schedule import VramRefused
 from canvas.pipeline.device_guard import DeviceRefused
 from canvas.pipeline.gpu_release import release_gate_weights
-from canvas.infra.stage_timer import StageTimes
+from canvas.infra.stage_timer import StageTimes, beat_while
 from canvas.pipeline.series import SerialGate
 from canvas.pipeline.enhance import EnhanceResult, fallback_message, open_rewriter, resolve_prompt, rewrite_text
 from canvas.pipeline.schedule import last_image_seconds, reset_image_seconds
@@ -252,9 +252,10 @@ def _application() -> QApplication:
 
 
 def _prepare_gate(gate: AgeGate) -> None:
-    """Load stack components."""
+    """Load stack components. The warm-up heartbeats under pythonw, which has no stderr."""
     try:
-        gate.warm()
+        with beat_while("warmup"):
+            gate.warm()
     except SafetyError:
         return
 

@@ -166,18 +166,44 @@ def log_detail(stage: str, event: str, device: str, suffix: str = "") -> None:
     _write_stage(stage, event, device, vram, suffix)
 
 
+@contextmanager
+def beat_while(stage: str) -> Iterator[None]:
+    """Write heartbeats for one block, including when no ``StageTimes`` is current.
+
+    The Photoshoot entry loads the prompt check before it opens a measured
+    stage, and the window warms the same models on a side thread. Both run
+    under ``pythonw``, whose stderr is ``None``. This uses the same log writer
+    as ``StageTimes.measure``.
+    """
+    if not _NAME.match(stage):
+        yield
+        return
+    stop = threading.Event()
+    beater = threading.Thread(target=_heartbeat, args=(stage, stop), name=f"stage-{stage}", daemon=True)
+    beater.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        beater.join(timeout=1)
+
+
 def _heartbeat(stage: str, stop: threading.Event) -> None:
     """Write a heartbeat to the log every ``HEARTBEAT_S`` until the stage ends.
 
     ``pythonw`` has no stderr. A print there used to kill this thread after the
     first wait, so the log never grew. A Windows sharing violation on the log
-    file is retried inside ``_write_stage``.
+    file is retried inside ``_write_stage``. A later failure in the device read
+    must not kill the thread either: the next wait still writes.
     """
     delay = HEARTBEAT_S if HEARTBEAT_S > 0 else 30.0
     while not stop.wait(delay):
-        device, vram = _device_and_vram()
-        _write_stage(stage, "heartbeat", device, vram)
-        _echo_heartbeat(stage, device, vram)
+        try:
+            device, vram = _device_and_vram()
+            _write_stage(stage, "heartbeat", device, vram)
+            _echo_heartbeat(stage, device, vram)
+        except Exception:
+            continue
 
 
 def _echo_heartbeat(stage: str, device: str, vram: int) -> None:

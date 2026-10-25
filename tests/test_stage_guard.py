@@ -13,6 +13,7 @@ from canvas.infra.stage_guard import (
     begin_stage,
     choose_encoder_storage,
     cosine,
+    decide_image_fit,
     finish_stage,
     heavy_names_on_cuda,
 )
@@ -181,6 +182,57 @@ def test_encoder_storage_uses_fp8_when_the_cosine_holds(monkeypatch) -> None:
     assert choose_encoder_storage(Tier.GB24, True, 0.5, free) == "bf16"
     assert choose_encoder_storage(Tier.GB24, True, None, None) == "cpu"
     assert codes == []
+
+
+def test_a_parked_residual_lets_an_fp8_transformer_and_vae_fit(monkeypatch, tmp_path) -> None:
+    """2.3 GB left on a 16 GB card is parked, then the FP8 image weights fit."""
+    monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
+    residual = int(2.3 * _GIB)
+    total = 16 * _GIB
+    free_before = total - residual
+    parked = {"done": False}
+
+    def park() -> int:
+        parked["done"] = True
+        return total
+
+    assert decide_image_fit(
+        free_bytes=free_before,
+        total_bytes=total,
+        models=(
+            ("transformer", 12 * _GIB, "float8_e4m3fn"),
+            ("vae", _GIB // 2, "bfloat16"),
+        ),
+        residuals=(("writer", residual),),
+        park=park,
+    )
+    assert parked["done"] is True
+    log = (tmp_path / "logs" / "voxprint.log").read_text(encoding="utf-8")
+    assert f"free={total}" in log
+    assert f"total={total}" in log
+    assert "needed=transformer:" in log
+    assert "float8_e4m3fn" in log
+    assert f"residual=writer:{residual}" in log
+    assert "headroom=" in log
+    assert "bfloat16" in log
+
+
+def test_a_bf16_transformer_is_billed_at_its_fp8_size(monkeypatch, tmp_path) -> None:
+    """A BF16 byte count for the transformer is the FP8 size. Free VRAM is the budget."""
+    monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
+    free = 10 * _GIB
+    assert decide_image_fit(
+        free_bytes=free,
+        total_bytes=16 * _GIB,
+        models=(
+            ("transformer", 12 * _GIB, "bfloat16"),
+            ("vae", _GIB // 2, "bfloat16"),
+        ),
+    )
+    log = (tmp_path / "logs" / "voxprint.log").read_text(encoding="utf-8")
+    assert f"free={free}" in log
+    assert f"needed=transformer:{6 * _GIB}:float8_e4m3fn" in log
+    assert f"vae:{_GIB // 2}:bfloat16" in log
 
 
 def test_vram_trace_logs_dtype_size_and_peak(monkeypatch, tmp_path) -> None:

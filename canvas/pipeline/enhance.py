@@ -338,26 +338,35 @@ class QwenRewriter:
         return self._complete(prompt, system)
 
     def close(self) -> None:
-        """Close."""
+        """Park the writer and drop its VRAM copy. RAM stays when the tier keeps it."""
         note_vram(self.stage, "before", self._model)
-        drop_model(self.stage)
-        drop_model("writer")
-        if hot.retained("writer"):
+        try:
+            if self._model is not None and not hot.retained("writer"):
+                hot.remember("writer", self._model)
             hot.deactivate("writer")
-        else:
-            self._model = None
-            self._tokenizer = None
-        self.closed = True
-        gc.collect()
-        torch = _optional_torch()
-        if torch is not None and torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        note_vram(self.stage, "after")
-        if self.tier is Tier.GB16:
-            try:
-                finish_stage(self.stage, self.tier)
-            except StageBlocked as exc:
-                raise VramRefused() from exc
+            if not hot.retained("writer") and self._model is not None:
+                mover = getattr(self._model, "to", None)
+                if callable(mover):
+                    try:
+                        self._model = mover("cpu")
+                    except (TypeError, RuntimeError, AttributeError):
+                        pass
+                self._model = None
+                self._tokenizer = None
+        finally:
+            drop_model(self.stage)
+            drop_model("writer")
+            self.closed = True
+            gc.collect()
+            torch = _optional_torch()
+            if torch is not None and torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            note_vram(self.stage, "after")
+            if self.tier is Tier.GB16:
+                try:
+                    finish_stage(self.stage, self.tier)
+                except StageBlocked as exc:
+                    raise VramRefused() from exc
 
     def _load(self) -> None:
         if self._model is not None:
@@ -407,7 +416,9 @@ class QwenRewriter:
                 # stage copies it RAM to VRAM. ``ram32`` still maps the file
                 # straight onto the card because that tier does not keep RAM.
                 load_on = "cpu" if device == "cuda" and hot.keeps_main_tier() else device
+                started_ssd = time.perf_counter()
                 model = _causal_model(transformers, torch, self.encoder_dir, load_on)
+                hot.note_ssd("writer", model, started_ssd)
                 if device != "cpu" and self.tier is Tier.GB16:
                     with timed("cast"):
                         if not cast_module_fp8(model, torch):

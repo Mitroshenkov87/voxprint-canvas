@@ -170,9 +170,12 @@ def _run_series(
     request = scenario_request(idea, count, style, mode, adult=adult)
     if request is None:
         return _stop("scenario", "", "scenario.format")
-    reason = _refuse_prompt(gate, idea)
-    # The writer needs the GPU to itself. Anything the check put on the card is dropped first.
-    release_gate_weights(gate)
+    # The prompt check is the long SSD read. It is measured so a multi-minute
+    # load writes heartbeats, including when pythonw has no stderr.
+    with clock.measure("prep"):
+        reason = _refuse_prompt(gate, idea)
+        # The writer needs the GPU to itself. Anything the check put on the card is dropped first.
+        release_gate_weights(gate)
     if reason:
         return _stop("idea", reason, "idea.policy")
     if adult and not ages_allowed(idea):
@@ -182,9 +185,12 @@ def _run_series(
     # loosely enough that the pose can still change.
     series_strength = REFERENCE_STRENGTH if strength is None and appearance else strength
     with clock.measure("scenario"):
-        scenario, fail_code, source = _scenario(
-            idea, count, style, mode, rewrite, adult=adult, appearance=appearance,
-        )
+        try:
+            scenario, fail_code, source = _scenario(
+                idea, count, style, mode, rewrite, adult=adult, appearance=appearance,
+            )
+        finally:
+            hot.deactivate("writer")
     if scenario is None or len(scenario.shots) < count:
         return _stop("scenario", "", fail_code if scenario is None else "scenario.count")
     lines = [

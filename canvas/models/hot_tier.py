@@ -43,6 +43,7 @@ _bundles: dict[str, Any] = {}
 _committed = 0
 _tier_noted = False
 _planned: set[str] = set()
+_ssd_logged: set[str] = set()
 
 
 @dataclass
@@ -194,6 +195,43 @@ def deactivate(name: str) -> None:
     _log_move("park", name, "cpu", resident.nbytes, started)
 
 
+def park_loaded(*, force: bool = False) -> tuple[str, ...]:
+    """Drop VRAM copies. RAM copies stay.
+
+    ``force`` parks every cached model. Otherwise only models whose tensors
+    are on CUDA are parked, so a stage boundary does not log a second park
+    for a model that is already in RAM.
+    """
+    if force:
+        names = tuple(_cache)
+    else:
+        names = tuple(name for name, _size in cuda_residents())
+    for name in names:
+        deactivate(name)
+    return names
+
+
+def cuda_residents() -> tuple[tuple[str, int], ...]:
+    """Cached models that still have a tensor on CUDA, with their byte sizes."""
+    found: list[tuple[str, int]] = []
+    for name, resident in _cache.items():
+        if _module_on_cuda(resident.module):
+            found.append((name, resident.nbytes))
+    return tuple(found)
+
+
+def note_ssd(name: str, module: Any, started: float) -> None:
+    """Log one session's SSD read. A later open of ``name`` does not log again."""
+    if name in _ssd_logged:
+        return
+    _ssd_logged.add(name)
+    elapsed = max(0, int((time.perf_counter() - started) * 1000))
+    log_detail(
+        "load", "ssd", "cpu",
+        f"model={_token(name)} ms={elapsed} bytes={_module_bytes(module)}",
+    )
+
+
 def forget(*names: str) -> None:
     """Drop these RAM copies. Other parked models are pinned again."""
     global _committed
@@ -220,6 +258,7 @@ def reset() -> None:
     _cache.clear()
     _bundles.clear()
     _planned.clear()
+    _ssd_logged.clear()
     _committed = 0
     _tier_noted = False
     reset_process_park()
@@ -400,6 +439,24 @@ def _nbytes(tensor: Any) -> int:
 
 def _hooked(module: Any) -> bool:
     return getattr(module, "_hf_hook", None) is not None
+
+
+def _module_on_cuda(module: Any) -> bool:
+    for _key, tensor in _tensors(module):
+        if _tensor_on_cuda(tensor) or _tensor_on_cuda(getattr(tensor, "data", None)):
+            return True
+    return False
+
+
+def _tensor_on_cuda(tensor: Any) -> bool:
+    if tensor is None:
+        return False
+    device = getattr(tensor, "device", None)
+    if device is None:
+        return False
+    kind = getattr(device, "type", None)
+    text = kind if isinstance(kind, str) else str(device)
+    return "cuda" in text
 
 
 def _rank(name: str) -> int:

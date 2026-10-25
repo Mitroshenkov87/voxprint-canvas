@@ -108,6 +108,18 @@ def _nsfw(tmp_path: Path, model: _Model, device: str) -> NsfwViT:
 _PICTURE = RawImage(2, 2, bytes(12))
 
 
+def test_own_weights_are_not_a_foreign_generator(monkeypatch) -> None:
+    """A few hundred MiB of allocator slack is not the 12 GB picture reserve."""
+    adapters._gate_cuda_bytes = 2 * GB
+    try:
+        monkeypatch.setitem(
+            sys.modules, "torch", _fake_torch(free=13 * GB, reserved=2 * GB + 128 * 1024**2),
+        )
+        assert gate_device(2 * GB) == "cuda"
+    finally:
+        adapters._gate_cuda_bytes = 0
+
+
 def test_device_choice_respects_the_generator_reserve(monkeypatch) -> None:
     monkeypatch.setitem(sys.modules, "torch", _fake_torch(free=15 * GB, reserved=0))
     assert gate_device(2 * GB) == "cuda"  # empty card: no generator reserve
@@ -165,6 +177,26 @@ class _Held:
     def release(self) -> None:
         self.released = True
         self.device = "cpu"
+
+
+def test_cuda_weights_are_parked_when_the_device_flag_says_cpu() -> None:
+    class _Tensor:
+        def __init__(self) -> None:
+            self.device = types.SimpleNamespace(type="cuda")
+
+    class _Model:
+        def parameters(self):
+            yield _Tensor()
+
+        def buffers(self):
+            return iter(())
+
+    leaked = _Held("cpu")
+    leaked._model = _Model()
+    gate = AgeGate(SafetyStack(leaked, _Held("cpu"), _Held("cpu"), _Held("cpu"), _Held("cpu"), _Held("cpu")))
+    gate._load_state = "idle"
+    gate.release_weights()
+    assert leaked.released is True
 
 
 def test_gpu_weights_are_dropped_and_cpu_weights_stay() -> None:

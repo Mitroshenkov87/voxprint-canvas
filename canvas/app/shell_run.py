@@ -26,6 +26,7 @@ from canvas.pipeline.bf16_schedule import VramRefused
 from canvas.pipeline.adult_direction import improve_adult
 from canvas.pipeline.enhance import SYSTEM_PROMPT as ENHANCE_SYSTEM
 from canvas.pipeline.enhance import open_rewriter, resolve_prompt, rewrite_text
+from canvas.pipeline.gpu_release import release_gate_weights
 from canvas.pipeline.engine import run_generator
 from canvas.pipeline.pipeline import CoolingDown, EnlargeMissing, JobError, Pipeline
 from canvas.safety.gate import AgeGate, SafetyError, SafetyUnavailable, issue_input
@@ -67,9 +68,9 @@ class ShellRunner:
         self.cook = False
 
     def precompute(self, prompts: tuple[str, ...]) -> None:
-        """Encode every series prompt, then park the text encoder.
+        """Encode every series prompt with the text encoder alone, then unload it.
 
-        The picture pipeline stays loaded for the cook pass that follows.
+        Cook loads the transformer and the VAE and reuses these embeddings.
         """
         catalog = load_catalog()
         screened = issue_input(prompts[0] if prompts else "", "text", ())
@@ -211,10 +212,11 @@ def improve_prompt(
         SafetyError: The gate refused the field. The window keeps the old words.
     """
     gate.review_prompt(prompt)
+    release_gate_weights(gate)
     if not selectable():
         return prompt
     catalog = load_catalog()
-    rewriter = open_rewriter(catalog, tier, models_dir(), progress or _silent)
+    rewriter = open_rewriter(catalog, tier, models_dir(), progress or _silent, stage="enhancer")
     if adult:
         rewritten = improve_adult(rewriter, prompt, ENHANCE_SYSTEM)
     else:

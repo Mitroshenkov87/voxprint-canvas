@@ -12,9 +12,12 @@ from typing import Any, Protocol, assert_never
 
 from canvas.app.i18n import text
 from canvas.infra.errors import note_error
+from canvas.infra.stage_guard import StageBlocked, admit, begin_stage, finish_stage
 from canvas.infra.stage_timer import note_tag, timed
 from canvas.infra.vram_trace import drop_model, hold_model, note_vram
 from canvas.models.modes import Tier
+from canvas.pipeline.bf16_schedule import VramRefused
+from canvas.pipeline.offload import cast_module_fp8
 from canvas.models.registry import Catalog, ModelSpec
 from canvas.models.runtime import release_pipeline
 from canvas.models.snapshots import SnapshotError, download_snapshot, snapshot_ready
@@ -258,14 +261,17 @@ def open_rewriter(
     *,
     max_new_tokens: int = 320,
     device: str | None = None,
+    stage: str = "writer",
 ) -> QwenRewriter:
     """Open the scenario writer. Missing files are downloaded on first use.
 
-    The caller closes the writer before diffusion. ``tier`` names the picture
-    card and does not change this model.
+    The caller closes the writer before diffusion. On a 16 GB card the weights
+    are stored as FP8. ``stage`` is ``writer`` or ``enhancer``.
     """
     if tier is not Tier.GB16 and tier is not Tier.GB24:
         assert_never(tier)
+    if stage not in {"writer", "enhancer"}:
+        raise ValueError(f"unknown stage {stage}")
     spec = writer_spec(catalog)
     folder = snapshot_ready(spec, root)
     if folder is None:
@@ -277,6 +283,8 @@ def open_rewriter(
         folder,
         max_new_tokens=max_new_tokens,
         device=device,
+        tier=tier,
+        stage=stage,
     )
 
 
@@ -290,11 +298,15 @@ class QwenRewriter:
         *,
         max_new_tokens: int = 320,
         device: str | None = None,
+        tier: Tier | None = None,
+        stage: str = "writer",
     ) -> None:
         self.encoder_dir = encoder_dir
         self.tokenizer_dir = tokenizer_dir
         self.max_new_tokens = max_new_tokens
         self.device = device
+        self.tier = tier
+        self.stage = stage
         self.closed = False
         self._model: Any = None
         self._tokenizer: Any = None
@@ -315,7 +327,8 @@ class QwenRewriter:
 
     def close(self) -> None:
         """Close."""
-        note_vram("writer", "before", self._model)
+        note_vram(self.stage, "before", self._model)
+        drop_model(self.stage)
         drop_model("writer")
         self._model = None
         self._tokenizer = None
@@ -324,12 +337,22 @@ class QwenRewriter:
         torch = _optional_torch()
         if torch is not None and torch.cuda.is_available():
             torch.cuda.empty_cache()
-        note_vram("writer", "after")
+        note_vram(self.stage, "after")
+        if self.tier is Tier.GB16:
+            try:
+                finish_stage(self.stage, self.tier)
+            except StageBlocked as exc:
+                raise VramRefused() from exc
 
     def _load(self) -> None:
         if self._model is not None:
             return
         release_pipeline()
+        if self.tier is Tier.GB16:
+            try:
+                begin_stage(self.stage, self.tier)
+            except StageBlocked as exc:
+                raise VramRefused() from exc
         note_vram("writer_load", "before")
         with timed("writer_load"):
             torch, transformers = _generation_libs()
@@ -348,7 +371,13 @@ class QwenRewriter:
                 self.tokenizer_dir, local_files_only=True,
             )
             try:
-                model = _causal_model(transformers, torch, self.encoder_dir, device)
+                model = _causal_model(
+                    transformers, torch, self.encoder_dir, "cpu" if self.tier is Tier.GB16 else device,
+                )
+                if device != "cpu" and self.tier is Tier.GB16:
+                    if not cast_module_fp8(model, torch):
+                        note_error(f"{self.stage}.bf16")
+                    model = model.to(device)
             except RuntimeError as exc:
                 if device == "cpu" or "out of memory" not in str(exc).lower():
                     raise
@@ -361,7 +390,13 @@ class QwenRewriter:
             self._model = model
             self.device = device
             self.closed = False
-            hold_model("writer", model)
+            if self.tier is Tier.GB16:
+                try:
+                    admit(self.stage, model, self.tier)
+                except StageBlocked as exc:
+                    raise VramRefused() from exc
+            else:
+                hold_model(self.stage, model)
             note_vram("writer_load", "after", model)
             if device in {"cpu", "cuda"}:
                 note_tag("writer", device)

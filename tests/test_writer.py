@@ -13,6 +13,7 @@ from canvas.models.modes import Tier
 from canvas.models.pins import TEXT_ENCODER
 from canvas.models.registry import load_catalog
 from canvas.models.snapshots import _urls
+from canvas.infra import vram_trace
 from canvas.infra.stage_timer import StageTimes, set_current
 from canvas.pipeline.enhance import WRITER_ID, QwenRewriter, encoder_names, open_rewriter, turbo_spec, writer_spec
 from tests.fakes import World
@@ -158,6 +159,10 @@ def _arm_writer(monkeypatch, devices: list[str], codes: list[str], *, fail: str,
             return [1, 2, 3]
 
     class _Model:
+        def to(self, device: str) -> _Model:
+            devices.append(f"to:{device}")
+            return self
+
         def generate(self, **kwargs: object) -> _Output:
             del kwargs
             return _Output()
@@ -268,6 +273,28 @@ def test_no_cuda_is_a_visible_cpu_fallback(tmp_path: Path, monkeypatch) -> None:
     assert codes == ["writer.nocuda"]
     assert "writer=cpu" in line
     assert "writer_fallback=nocuda" in line
+
+
+def test_a_16gb_enhancer_logs_bf16_when_fp8_is_missing(tmp_path: Path, monkeypatch) -> None:
+    devices: list[str] = []
+    codes: list[str] = []
+    folder = _writer_dir(tmp_path / "encoder")
+    _arm_writer(monkeypatch, devices, codes, fail="")
+    monkeypatch.setattr("canvas.pipeline.enhance.cast_module_fp8", lambda *_args, **_kwargs: False)
+    vram_trace._holders.clear()
+    clock = StageTimes()
+    previous = set_current(clock)
+    rewriter = QwenRewriter(folder, folder, device="cuda", tier=Tier.GB16, stage="enhancer")
+    try:
+        reply = rewriter.complete("ping", system="sys")
+    finally:
+        set_current(previous)
+        rewriter.close()
+        vram_trace._holders.clear()
+    assert reply.startswith("1.")
+    assert devices[0] == "cpu"
+    assert "to:cuda" in devices
+    assert any(code.startswith("enhancer.bf16") for code in codes)
 
 
 def test_an_explicit_cpu_writer_does_not_report_oom(tmp_path: Path, monkeypatch) -> None:

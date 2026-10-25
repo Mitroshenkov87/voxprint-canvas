@@ -253,6 +253,33 @@ def install_model_offload(pipe: Any) -> OffloadInstall:
 
 
 FP8_COMPONENTS = ("transformer", "text_encoder")
+_UNSET = object()
+
+
+def cast_module_fp8(module: Any, torch: Any, apply_casting: Any = _UNSET) -> bool:
+    """Store one module as FP8 and compute in BF16.
+
+    The default loads diffusers' layerwise hook. That package is an optional
+    extra, so the import stays beside the call. Pass a hook, including None,
+    to skip the import. False when this torch has no float8 type or the hook
+    is missing.
+    """
+    if apply_casting is _UNSET:
+        try:
+            from diffusers.hooks import apply_layerwise_casting
+        except ImportError:
+            return False
+        apply_casting = apply_layerwise_casting
+    storage = getattr(torch, "float8_e4m3fn", None)
+    if module is None or storage is None or not callable(apply_casting):
+        return False
+    apply_casting(
+        module,
+        storage_dtype=storage,
+        compute_dtype=torch.bfloat16,
+        skip_modules_pattern=fp8_skip_patterns(module),
+    )
+    return True
 
 
 def install_fp8_storage(pipe: Any, torch: Any, apply_casting: Any) -> tuple[str, ...]:
@@ -262,21 +289,13 @@ def install_fp8_storage(pipe: Any, torch: Any, apply_casting: Any) -> tuple[str,
     ``hooks.apply_layerwise_casting``; it works on any torch module. Returns the
     components that were cast; none when this torch has no float8 type.
     """
-    storage = getattr(torch, "float8_e4m3fn", None)
-    if storage is None or not callable(apply_casting):
-        return ()
     cast: list[str] = []
     for name in FP8_COMPONENTS:
         module = getattr(pipe, name, None)
         if module is None:
             continue
-        apply_casting(
-            module,
-            storage_dtype=storage,
-            compute_dtype=torch.bfloat16,
-            skip_modules_pattern=fp8_skip_patterns(module),
-        )
-        cast.append(name)
+        if cast_module_fp8(module, torch, apply_casting):
+            cast.append(name)
     return tuple(cast)
 
 

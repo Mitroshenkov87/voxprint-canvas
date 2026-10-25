@@ -15,6 +15,8 @@ REQUIRE = os.environ.get("VOXPRINT_REQUIRE_ENHANCE") == "1"
 if not REQUIRE:
     pytest.importorskip("torch")
 
+import torch
+
 from canvas.infra.paths import models_dir
 from canvas.models.registry import load_catalog
 from canvas.models.snapshots import weight_dir
@@ -33,7 +35,8 @@ def test_shipped_encoder_rewrites_a_tiny_prompt_on_cpu():
     assert config.get("tie_word_embeddings") is True
     assert not any("lm_head" in name for name in names)
     assert any(name.endswith("embed_tokens.weight") for name in names)
-    rewriter = QwenRewriter(encoder, folder / "tokenizer", max_new_tokens=24, device="cpu")
+    device = None if torch.cuda.is_available() else "cpu"
+    rewriter = QwenRewriter(encoder, folder / "tokenizer", max_new_tokens=24, device=device)
     text = rewriter.rewrite("a red cup")
     assert rewriter.closed is True
     assert rewriter._model is None

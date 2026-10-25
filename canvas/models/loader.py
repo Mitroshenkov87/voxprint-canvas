@@ -15,6 +15,7 @@ from canvas.models.registry import Catalog, ModelSpec, RegistryError, load_catal
 from canvas.models.runtime import WeightsLoadError, render
 from canvas.models.user_lora import UserLora, resolve_selected
 from canvas.models.snapshots import SnapshotError, fallback_ready, snapshot_ready, weight_dir
+from canvas.models.verified import VerifiedCache, flush_process_cache, process_cache
 from canvas.pipeline.bf16_schedule import (
     EmbeddingCache,
     GpuLedger,
@@ -166,12 +167,13 @@ class ZImageGenerator:
         self._schedule(plan, mode, 1024 if width is None else width, 1024 if height is None else height, screened.prompt)
         root = self.models if self.models is not None else models_dir()
         spec = _spec_for(self.catalog, plan)
-        folder = snapshot_ready(spec, root)
-        if folder is None or width is None or height is None:
-            raise ModelNotReady(plan)
-        control_file = _control_file(self.catalog, plan, root)
-        lora, lora_strength = self._selected_lora()
+        cache = process_cache()
         try:
+            folder = snapshot_ready(spec, root, cache)
+            if folder is None or width is None or height is None:
+                raise ModelNotReady(plan)
+            control_file = _control_file(self.catalog, plan, root, cache)
+            lora, lora_strength = self._selected_lora()
             try:
                 return render(
                     plan, folder, screened, width, height, self.tier,
@@ -182,7 +184,7 @@ class ZImageGenerator:
                 )
             except WeightsLoadError:
                 # The BF16 weights did not open: use the author's FP32 -upstream entry.
-                fp32 = fallback_ready(spec, root)
+                fp32 = fallback_ready(spec, root, cache)
                 if fp32 is None or fp32 == folder:
                     request_fp32(spec)
                     raise ModelNotReady(plan) from None
@@ -193,8 +195,10 @@ class ZImageGenerator:
                     lora=lora, lora_strength=lora_strength,
                     negative=self.negative_prompt,
                 )
-        except ImportError as exc:
-            raise ModelNotReady(plan) from exc
+            except ImportError as exc:
+                raise ModelNotReady(plan) from exc
+        finally:
+            flush_process_cache()
 
     def _selected_lora(self) -> tuple[UserLora | None, float | None]:
         """The listed LoRA for the expert field, and the strength to apply."""
@@ -274,11 +278,13 @@ def _control_spec(catalog: Catalog, plan: CallPlan) -> ModelSpec | None:
     return None
 
 
-def _control_file(catalog: Catalog, plan: CallPlan, root: Path) -> Path | None:
+def _control_file(
+    catalog: Catalog, plan: CallPlan, root: Path, cache: VerifiedCache | None = None,
+) -> Path | None:
     spec = _control_spec(catalog, plan)
     if spec is None:
         return None
-    folder = snapshot_ready(spec, root)
+    folder = snapshot_ready(spec, root, cache)
     if folder is None:
         return None
     for name in spec.files:

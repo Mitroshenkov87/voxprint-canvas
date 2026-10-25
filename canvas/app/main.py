@@ -44,6 +44,7 @@ from canvas.app.photoshoot_cli import model_generate, model_rewrite, reject_fram
 from canvas.pipeline.photoshoot import DEFAULT_FRAMES, MAX_FRAMES
 from canvas.ui.styles import LOOKS
 from canvas.pipeline.bf16_schedule import VramRefused
+from canvas.pipeline.device_guard import DeviceRefused
 from canvas.pipeline.gpu_release import release_gate_weights
 from canvas.infra.stage_timer import StageTimes
 from canvas.pipeline.series import SerialGate
@@ -210,7 +211,7 @@ def _callback(tier: Tier, window_box: list[MainWindow | None], enlarge: EnlargeC
             pipeline.generate(active, mode, aspect=aspect, output=output)
         except (
             SafetyError, SnapshotError, DownloadDeclined, InferenceUnavailable, ModelNotReady,
-            ModeUnavailable, BaseNotSelected, JobError, CoolingDown, EnlargeMissing, EnlargeError, VramRefused,
+            ModeUnavailable, BaseNotSelected, JobError, CoolingDown, EnlargeMissing, EnlargeError, VramRefused, DeviceRefused,
         ) as exc:
             return str(exc)
         if note:
@@ -421,7 +422,7 @@ def _generate(args: argparse.Namespace) -> int:
         pipeline.export(active, mode, fresh, path, fmt, aspect=args.aspect, output=output)
     except (
         SafetyError, SnapshotError, DownloadDeclined, InferenceUnavailable, ModelNotReady,
-        ModeUnavailable, BaseNotSelected, JobError, CoolingDown, EnlargeMissing, EnlargeError, VramRefused,
+        ModeUnavailable, BaseNotSelected, JobError, CoolingDown, EnlargeMissing, EnlargeError, VramRefused, DeviceRefused,
         OSError,
     ) as exc:
         return _emit({"ok": False, "error": str(exc)}, as_json, 1)
@@ -459,7 +460,7 @@ def _photoshoot_bench(args: argparse.Namespace) -> int:
         )
     except (
         SafetyError, SnapshotError, DownloadDeclined, InferenceUnavailable, ModelNotReady,
-        ModeUnavailable, BaseNotSelected, JobError, CoolingDown, EnlargeMissing, EnlargeError, VramRefused,
+        ModeUnavailable, BaseNotSelected, JobError, CoolingDown, EnlargeMissing, EnlargeError, VramRefused, DeviceRefused,
         OSError,
     ) as exc:
         return _emit({"ok": False, "error": str(exc)}, as_json, 1)
@@ -512,7 +513,7 @@ def _photoshoot(args: argparse.Namespace) -> int:
         )
     except (
         SafetyError, SnapshotError, DownloadDeclined, InferenceUnavailable, ModelNotReady,
-        ModeUnavailable, BaseNotSelected, JobError, CoolingDown, EnlargeMissing, EnlargeError, VramRefused,
+        ModeUnavailable, BaseNotSelected, JobError, CoolingDown, EnlargeMissing, EnlargeError, VramRefused, DeviceRefused,
         OSError,
     ) as exc:
         return _emit({"ok": False, "error": str(exc)}, as_json, 1)

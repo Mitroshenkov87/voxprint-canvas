@@ -17,6 +17,7 @@ from canvas.models.plan import BaseNotSelected
 from canvas.models.modes import Tier, select_tier
 from canvas.models.registry import load_catalog
 from canvas.pipeline.bf16_schedule import VramRefused
+from canvas.pipeline.device_guard import DeviceRefused
 from canvas.pipeline.engine import run_generator
 from canvas.safety.gate import AgeGate, SafetyError, SafetyUnavailable
 from canvas.safety.image import RawImage, SafeImage
@@ -40,7 +41,7 @@ def handle_message(payload: dict[str, Any], gate: AgeGate, generator: object) ->
             raw = RawImage(int(item["width"]), int(item["height"]), base64.b64decode(item["data_b64"]))
             inputs.append(PendingInput(ImageRole(str(item["role"])), raw))
         image = worker_generate(gate, generator, str(payload.get("prompt") or ""), str(payload.get("mode") or ""), inputs)
-    except (SafetyError, ModelNotReady, BaseNotSelected, VramRefused) as exc:
+    except (SafetyError, ModelNotReady, BaseNotSelected, VramRefused, DeviceRefused) as exc:
         for item in inputs:
             item.image.wipe()
         return {"ok": False, "message": str(exc)}

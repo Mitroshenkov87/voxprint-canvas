@@ -4,6 +4,7 @@ from __future__ import annotations
 import gc
 import json
 import re
+import time
 import unicodedata
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
@@ -13,10 +14,11 @@ from typing import Any, Protocol, assert_never
 from canvas.app.i18n import text
 from canvas.infra.errors import note_error
 from canvas.infra.stage_guard import StageBlocked, admit, begin_stage, finish_stage
-from canvas.infra.stage_timer import note_tag, timed
+from canvas.infra.stage_timer import log_stage, note_tag, timed
 from canvas.infra.vram_trace import drop_model, hold_model, note_vram
 from canvas.models.modes import Tier
 from canvas.pipeline.bf16_schedule import VramRefused
+from canvas.pipeline.device_guard import DeviceRefused, place_on_cuda, require_cuda
 from canvas.pipeline.offload import cast_module_fp8
 from canvas.models.registry import Catalog, ModelSpec
 from canvas.models.runtime import release_pipeline
@@ -363,29 +365,44 @@ class QwenRewriter:
             names = index.get("weight_map") or {}
             if not isinstance(names, dict) or not causal_lm_ready(config, names):
                 raise SnapshotError("the text encoder cannot generate text")
-            if self.device is None and not torch.cuda.is_available():
+            cuda = bool(torch.cuda.is_available())
+            if self.device is None and not cuda:
                 note_error("writer.nocuda")
                 note_tag("writer_fallback", "nocuda")
-            device = self.device or ("cuda" if torch.cuda.is_available() else "cpu")
+            device = self.device or ("cuda" if cuda else "cpu")
+            if device == "cpu" and cuda:
+                note_error("writer.device")
+                raise DeviceRefused()
             tokenizer = transformers.AutoTokenizer.from_pretrained(
                 self.tokenizer_dir, local_files_only=True,
             )
             try:
+                # The 16 GB card stages the weights on the CPU only to cast them.
+                # Moving the full BF16 copy onto CUDA asks for the model twice and
+                # runs out of memory even when the cast model would fit. An out-of-
+                # memory error stops the series. Generation does not continue on the CPU.
                 model = _causal_model(
                     transformers, torch, self.encoder_dir, "cpu" if self.tier is Tier.GB16 else device,
                 )
                 if device != "cpu" and self.tier is Tier.GB16:
-                    if not cast_module_fp8(model, torch):
-                        note_error(f"{self.stage}.bf16")
-                    model = model.to(device)
+                    with timed("cast"):
+                        if not cast_module_fp8(model, torch):
+                            note_error(f"{self.stage}.bf16")
+                    if cuda:
+                        torch.cuda.empty_cache()
+                    with timed("place"):
+                        model = place_on_cuda(model)
+                if device != "cpu":
+                    require_cuda(model, "writer.device", torch)
+            except DeviceRefused:
+                raise
             except RuntimeError as exc:
                 if device == "cpu" or "out of memory" not in str(exc).lower():
                     raise
-                torch.cuda.empty_cache()
+                if cuda:
+                    torch.cuda.empty_cache()
                 note_error("writer.oom")
-                note_tag("writer_fallback", "oom")
-                device = "cpu"
-                model = _causal_model(transformers, torch, self.encoder_dir, device)
+                raise DeviceRefused() from exc
             self._tokenizer = tokenizer
             self._model = model
             self.device = device
@@ -419,15 +436,24 @@ class QwenRewriter:
         encoded = tokenizer(templated, return_tensors="pt")
         device = self.device or "cpu"
         encoded = {key: value.to(device) for key, value in encoded.items()}
+        elapsed = 0.0
+        count = 0
         with timed("writer_generate"):
+            started = time.perf_counter()
             with torch.inference_mode():
                 output = model.generate(
                     **encoded,
                     max_new_tokens=self.max_new_tokens,
                     do_sample=False,
                 )
+            elapsed = time.perf_counter() - started
             start = int(encoded["input_ids"].shape[-1])
+            count = _generated_count(output, start)
             reply = str(tokenizer.decode(output[0, start:], skip_special_tokens=True))
+        rate = 0 if elapsed <= 0 else min(1_000_000, int(count / elapsed))
+        note_tag("writer_tps", f"tps{rate}")
+        logged = device if device in {"cpu", "cuda"} else "none"
+        log_stage("writer", "tokens", logged, tokens=count, tok_s=rate)
         return _visible_reply(reply)
 
 
@@ -435,16 +461,53 @@ def _causal_model(transformers: Any, torch: Any, folder: Path, device: str) -> A
     """Load the causal LM in BF16. ``device`` is ``cuda`` or ``cpu``.
 
     BF16 is what fits a 16 GB card. A full-precision load does not.
+    ``device_map`` stays unset so the loader does not pin the weights to the CPU.
     """
     common = {"local_files_only": True, "low_cpu_mem_usage": True}
     loader = transformers.AutoModelForCausalLM.from_pretrained
-    try:
-        model = loader(folder, dtype=torch.bfloat16, **common)
-    except TypeError:
-        model = loader(folder, torch_dtype=torch.bfloat16, **common)
+    model = _open_causal(loader, folder, torch, common)
     if device != "cpu":
         model = model.to(device)
     return model.eval()
+
+
+def _open_causal(loader: Any, folder: Path, torch: Any, common: dict[str, Any]) -> Any:
+    """Open the causal LM. A build that rejects ``device_map`` is tried without it."""
+    attempts = (
+        {**common, "dtype": torch.bfloat16, "device_map": None},
+        {**common, "torch_dtype": torch.bfloat16, "device_map": None},
+        {**common, "dtype": torch.bfloat16},
+        {**common, "torch_dtype": torch.bfloat16},
+    )
+    error: TypeError | None = None
+    for kwargs in attempts:
+        try:
+            return loader(folder, **kwargs)
+        except TypeError as exc:
+            error = exc
+    if error is None:
+        raise SnapshotError("the text encoder cannot be loaded")
+    raise error
+
+
+def _generated_count(output: Any, start: int) -> int:
+    """New tokens in one generate result. A short fake reply still counts."""
+    try:
+        row = output[0, start:]
+    except (TypeError, IndexError, KeyError):
+        try:
+            row = output[0]
+        except (TypeError, IndexError, KeyError):
+            return 0
+    if isinstance(row, (list, tuple)):
+        return len(row)
+    shape = getattr(row, "shape", None)
+    if shape is None:
+        return 0
+    try:
+        return int(shape[-1])
+    except (TypeError, ValueError, IndexError):
+        return 0
 
 
 def _optional_torch() -> Any:

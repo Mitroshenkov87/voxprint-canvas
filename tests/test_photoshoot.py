@@ -492,7 +492,7 @@ def test_a_declined_scenario_logs_only_the_code_by_default(tmp_path: Path, monke
     log = (tmp_path / "home" / "logs" / "voxprint.log").read_text(encoding="utf-8")
     assert "scenario.declined" in log
     assert "scenario.raw" not in log and "cannot write" not in log
-    assert "34" not in log
+    assert "34" not in _without_metric_lines(log)
     assert "red coat" not in log
 
 
@@ -502,8 +502,19 @@ def test_the_debug_switch_adds_the_masked_reply(tmp_path: Path, monkeypatch) -> 
     _run(tmp_path / "series", idea=AGED, rewrite=lambda _prompt: "Sorry, I cannot write 34 lines.")
     log = (tmp_path / "home" / "logs" / "voxprint.log").read_text(encoding="utf-8")
     assert "debug scenario.raw" in log and "cannot write" in log
-    assert "34" not in log
+    raw = [line for line in log.splitlines() if "scenario.raw" in line]
+    assert raw and all("34" not in line for line in raw)
+    assert "34" not in _without_metric_lines(log)
     assert "red coat" not in log
+
+
+def _without_metric_lines(log: str) -> str:
+    """Drop timing, stage, and VRAM lines. Their numbers are not the reply."""
+    kept = [
+        line for line in log.splitlines()
+        if not line.startswith(("timing ", "stage ", "vram "))
+    ]
+    return "\n".join(kept)
 
 
 def _guard_error():

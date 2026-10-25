@@ -192,6 +192,10 @@
       "en": "This picture does not fit on the GPU.",
       "ru": "Это изображение не помещается на видеокарту."
     },
+    "error.device": {
+      "en": "The model did not stay on the GPU.",
+      "ru": "Модель не осталась на видеокарте."
+    },
     "error.download": {
       "en": "The model could not be downloaded.",
       "ru": "Не удалось скачать модель."

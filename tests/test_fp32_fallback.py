@@ -30,8 +30,8 @@ def _screened():
 
 def _generator(monkeypatch, fp32: Path | None, calls: list[Path], fail_bf16: bool = True):
     queued: list[str] = []
-    monkeypatch.setattr(loader_mod, "snapshot_ready", lambda spec, root: BF16)
-    monkeypatch.setattr(loader_mod, "fallback_ready", lambda spec, root: fp32)
+    monkeypatch.setattr(loader_mod, "snapshot_ready", lambda spec, root, cache=None: BF16)
+    monkeypatch.setattr(loader_mod, "fallback_ready", lambda spec, root, cache=None: fp32)
     monkeypatch.setattr(loader_mod, "request_fp32", lambda spec: queued.append(spec.id) or True)
 
     def render(plan, folder, screened, width, height, tier, **kwargs):

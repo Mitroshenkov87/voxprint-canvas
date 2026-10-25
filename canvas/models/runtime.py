@@ -47,6 +47,7 @@ from canvas.models.pins import (
 from canvas.models.plan import CallPlan
 from canvas.models.user_lora import UserLora, apply_lora, unload_lora
 from canvas.pipeline.bf16_schedule import VramRefused
+from canvas.pipeline.device_guard import DeviceRefused, require_cuda
 from canvas.pipeline.offload import (
     OffloadUnavailable,
     cast_module_fp8,
@@ -274,6 +275,7 @@ def _is_dtype(value: object) -> bool:
 
 
 _prompt_embeds: dict[str, Any] | None = None
+_cosine_cache: dict[str, float | None] = {}
 
 
 # A few neutral lines. FP8 stays when each embedding is within cosine 0.99 of BF16.
@@ -306,16 +308,23 @@ def _prepare_locked(folder: Path, tier: Tier, prompts: tuple[str, ...]) -> None:
     tokenizer: Any = None
     encoder: Any = None
     try:
-        score = _encoder_cosine(folder, tier, torch)
-        storage = choose_encoder_storage(tier, _fp8_ready(torch), score, _free_vram_bytes())
-        tokenizer, encoder = _load_text_pair(folder, torch)
-        _place_encoder(encoder, storage, torch, tier)
-        _keep("text_encoder", encoder, tier)
-        note_vram("text_encoder", "before", encoder)
-        encoded: dict[str, Any] = {}
-        for prompt in prompts:
-            encoded[prompt] = _to_cpu(_encode_prompt_text(tokenizer, encoder, prompt, torch))
-        _prompt_embeds = encoded
+        with timed("encoder"):
+            with timed("load"):
+                score = _encoder_cosine(folder, tier, torch)
+                storage = choose_encoder_storage(tier, _fp8_ready(torch), score, _free_vram_bytes())
+                tokenizer, encoder = _load_text_pair(folder, torch)
+            _place_encoder(encoder, storage, torch, tier)
+            if _cuda_is_up(torch):
+                require_cuda(encoder, "encoder.device", torch)
+            _keep("text_encoder", encoder, tier)
+            note_vram("text_encoder", "before", encoder)
+            encoded: dict[str, Any] = {}
+            for prompt in prompts:
+                encoded[prompt] = _to_cpu(_encode_prompt_text(tokenizer, encoder, prompt, torch))
+            if _prompt_embeds is None:
+                _prompt_embeds = encoded
+            else:
+                _prompt_embeds = {**_prompt_embeds, **encoded}
     finally:
         _release_text_encoder(encoder, tokenizer, torch)
         encoder = None
@@ -384,30 +393,54 @@ def _fp8_ready(torch: Any) -> bool:
 
 
 def _encoder_cosine(folder: Path, tier: Tier, torch: Any) -> float | None:
-    """Minimum cosine of FP8 embeddings against a CPU BF16 pass. None outside 16 GB."""
+    """Minimum cosine of FP8 embeddings against a BF16 pass. None outside 16 GB.
+
+    On CUDA the reference pass stays on the GPU and is unloaded before the FP8
+    pass. A CPU reference is used only when CUDA is absent.
+    """
     if tier is not Tier.GB16 or not _fp8_ready(torch):
         return None
+    key = str(folder)
+    if key in _cosine_cache:
+        return _cosine_cache[key]
+    reference_storage: Literal["cpu", "bf16"] = "bf16" if _cuda_is_up(torch) else "cpu"
     try:
-        reference = _probe_vectors(folder, torch, "cpu")
+        reference = _probe_vectors(folder, torch, reference_storage)
         candidate = _probe_vectors(folder, torch, "fp8")
+    except DeviceRefused:
+        raise
     except (OSError, RuntimeError, ValueError, TypeError, AttributeError, WeightsLoadError):
+        _cosine_cache[key] = 0.0
         return 0.0
     if len(reference) != len(candidate) or not reference:
+        _cosine_cache[key] = 0.0
         return 0.0
     scores = [cosine(left, right) for left, right in zip(reference, candidate, strict=True)]
-    return min(scores) if scores else 0.0
+    score = min(scores) if scores else 0.0
+    _cosine_cache[key] = score
+    return score
 
 
-def _probe_vectors(folder: Path, torch: Any, storage: Literal["cpu", "fp8"]) -> list[list[float]]:
+def _probe_vectors(folder: Path, torch: Any, storage: Literal["cpu", "bf16", "fp8"]) -> list[list[float]]:
     tokenizer, encoder = _load_text_pair(folder, torch)
     try:
         if storage == "cpu":
+            _refuse_cpu_encoder(torch)
             encoder.to("cpu")
+        elif storage == "bf16":
+            if _cuda_is_up(torch):
+                encoder.to("cuda")
+                require_cuda(encoder, "encoder.device", torch)
+            else:
+                encoder.to("cpu")
         elif storage == "fp8":
             if not cast_module_fp8(encoder, torch):
                 raise RuntimeError("fp8 cast failed")
-            if torch.cuda.is_available():
+            if _cuda_is_up(torch):
                 encoder.to("cuda")
+                require_cuda(encoder, "encoder.device", torch)
+            else:
+                raise RuntimeError("fp8 cast failed")
         else:
             assert_never(storage)
         vectors: list[list[float]] = []
@@ -420,48 +453,78 @@ def _probe_vectors(folder: Path, torch: Any, storage: Literal["cpu", "fp8"]) -> 
 
 
 def _load_text_pair(folder: Path, torch: Any) -> tuple[Any, Any]:
-    """The tokenizer and the text encoder. The picture pipeline stays unloaded."""
+    """The tokenizer and the text encoder. The picture pipeline stays unloaded.
+
+    ``device_map`` stays unset so the loader does not leave the encoder on the CPU.
+    """
     transformers = _import_transformers()
     tokenizer = _load(
         transformers.AutoTokenizer.from_pretrained, folder / "tokenizer", local_files_only=True,
     )
-    try:
-        encoder = _load(
-            transformers.AutoModel.from_pretrained,
-            folder / "text_encoder",
-            torch_dtype=torch.bfloat16,
-            local_files_only=True,
-        )
-    except TypeError:
-        encoder = _load(
-            transformers.AutoModel.from_pretrained,
-            folder / "text_encoder",
-            dtype=torch.bfloat16,
-            local_files_only=True,
-        )
-    return tokenizer, encoder
+    attempts = (
+        {"torch_dtype": torch.bfloat16, "local_files_only": True, "device_map": None},
+        {"dtype": torch.bfloat16, "local_files_only": True, "device_map": None},
+        {"torch_dtype": torch.bfloat16, "local_files_only": True},
+        {"dtype": torch.bfloat16, "local_files_only": True},
+    )
+    error: TypeError | None = None
+    for kwargs in attempts:
+        try:
+            encoder = _load(transformers.AutoModel.from_pretrained, folder / "text_encoder", **kwargs)
+        except TypeError as exc:
+            error = exc
+            continue
+        return tokenizer, encoder
+    if error is None:
+        raise InferenceUnavailable("the text encoder could not be loaded")
+    raise error
 
 
 def _place_encoder(encoder: Any, storage: Literal["fp8", "bf16", "cpu"], torch: Any, tier: Tier) -> None:
     if storage == "fp8":
-        if not cast_module_fp8(encoder, torch) or not torch.cuda.is_available():
+        with timed("cast"):
+            cast_ok = bool(cast_module_fp8(encoder, torch))
+        if not cast_ok or not _cuda_is_up(torch):
             note_error("encoder.fp8_missing")
             storage = "cpu" if _free_vram_bytes() is None else "bf16"
         else:
-            encoder.to("cuda")
+            with timed("place"):
+                encoder.to("cuda")
             _peak("text_encoder", tier)
+            require_cuda(encoder, "encoder.device", torch)
             return
     if storage == "bf16":
-        if torch.cuda.is_available():
-            encoder.to("cuda")
+        if _cuda_is_up(torch):
+            with timed("place"):
+                encoder.to("cuda")
             _peak("text_encoder", tier)
+            require_cuda(encoder, "encoder.device", torch)
             return
+        _refuse_cpu_encoder(torch)
         encoder.to("cpu")
         return
     if storage == "cpu":
+        _refuse_cpu_encoder(torch)
         encoder.to("cpu")
         return
     assert_never(storage)
+
+
+def _refuse_cpu_encoder(torch: Any) -> None:
+    """Stop when a CUDA machine would encode on the CPU."""
+    if _cuda_is_up(torch):
+        note_error("encoder.device")
+        raise DeviceRefused()
+
+
+def _cuda_is_up(torch: Any) -> bool:
+    cuda = getattr(torch, "cuda", None)
+    if cuda is None:
+        return False
+    try:
+        return bool(cuda.is_available())
+    except (TypeError, RuntimeError):
+        return False
 
 
 def _encode_prompt_text(tokenizer: Any, encoder: Any, prompt: str, torch: Any) -> Any:
@@ -589,6 +652,7 @@ def clear_series_embeds() -> None:
     """Drop cached prompt embeddings at the end of a series."""
     global _prompt_embeds
     _prompt_embeds = None
+    _cosine_cache.clear()
 
 
 def _remember_components(pipe: Any, tier: Tier) -> None:
@@ -720,6 +784,8 @@ def _ensure_prompt_embed(
         return
     try:
         prepare_series_embeds(folder, tier, (prompt,), lora=lora, lora_strength=lora_strength)
+    except DeviceRefused:
+        raise
     except (WeightsLoadError, ImportError, OSError, RuntimeError, ValueError, AttributeError, TypeError) as exc:
         if _cook_classes_ready():
             note_error("encoder.standalone")
@@ -767,10 +833,11 @@ def _pipeline_for(
         note_vram("pipeline_load", "before")
         try:
             with timed("pipeline_load"):
-                pipe, controlnet = _open_pipeline(
-                    diffusers, pipeline_name, folder, dtype, control_file,
-                    drop_text=tier is Tier.GB16 or _prompt_embeds is not None,
-                )
+                with timed("load"):
+                    pipe, controlnet = _open_pipeline(
+                        diffusers, pipeline_name, folder, dtype, control_file,
+                        drop_text=tier is Tier.GB16 or _prompt_embeds is not None,
+                    )
             note_vram("pipeline_load", "after", pipe)
             held = _Held(
                 folder=key[0], tier=tier, dtype=dtype, control=key[3], pipeline_name=pipeline_name,
@@ -778,7 +845,8 @@ def _pipeline_for(
             )
             _slot = held
             with timed("pipeline_place"):
-                _place_and_bind(pipe, tier, lora, lora_strength)
+                with timed("place"):
+                    _place_and_bind(pipe, tier, lora, lora_strength)
             _remember_components(pipe, tier)
             _peak("cook", tier)
         except Exception:
@@ -836,7 +904,7 @@ def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, he
         "width": width,
         "num_inference_steps": steps,
         "generator": generator,
-        "output_type": "pil",
+        "output_type": "latent",
     }
     embed = None if _prompt_embeds is None else _prompt_embeds.get(screened.prompt)
     if embed is None:
@@ -855,6 +923,7 @@ def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, he
                 diffusers, torch, pipeline_name, folder, dtype, tier, lora, lora_strength, control_file,
             )
             call = _accepting(pipe, common)
+            _disable_vae_upcast(pipe)
             if pipeline_name == PIPELINE_TEXT:
                 result = _timed(pipe, **call)
             elif pipeline_name == PIPELINE_IMG2IMG:
@@ -881,8 +950,7 @@ def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, he
                 )
             else:
                 raise InferenceUnavailable(f"unknown pipeline {pipeline_name}")
-            image = result.images[0].convert("RGB")
-            return RawImage(image.width, image.height, image.tobytes())
+            return _image_from_result(pipe, result, torch)
         except Exception:
             failed = True
             raise
@@ -900,6 +968,97 @@ def _timed(pipe: Any, **kwargs: Any) -> Any:
     note_image_seconds(seconds)
     note_stage("sample", seconds)
     return result
+
+
+def _disable_vae_upcast(pipe: Any) -> None:
+    """Keep the VAE in its loaded dtype. A missing config is left alone."""
+    vae = getattr(pipe, "vae", None)
+    config = getattr(vae, "config", None)
+    if config is None or not hasattr(config, "force_upcast"):
+        return
+    try:
+        config.force_upcast = False
+    except (AttributeError, TypeError):
+        return
+
+
+def _image_from_result(pipe: Any, result: Any, torch: Any) -> RawImage:
+    """Pixels from a pipeline result. A latent is decoded on CUDA in BF16."""
+    first = _first_output(result)
+    if isinstance(first, Image.Image):
+        with timed("to_pil"):
+            image = first.convert("RGB")
+        return RawImage(image.width, image.height, image.tobytes())
+    with timed("vae_decode"):
+        decoded = _decode_latents(pipe, first, torch)
+    with timed("to_pil"):
+        image = _latents_to_pil(pipe, decoded)
+    return RawImage(image.width, image.height, image.tobytes())
+
+
+def _first_output(result: Any) -> Any:
+    images = getattr(result, "images", result)
+    if isinstance(images, Image.Image):
+        return images
+    if isinstance(images, (list, tuple)):
+        return images[0]
+    return images
+
+
+def _decode_latents(pipe: Any, latents: Any, torch: Any) -> Any:
+    """Decode one latent on CUDA in BF16. Tile when the card is near the 14 GB line."""
+    vae = getattr(pipe, "vae", None)
+    if vae is None:
+        raise InferenceUnavailable("the generator has no vae")
+    if _needs_vae_tiling():
+        tiling = getattr(vae, "enable_tiling", None)
+        if callable(tiling):
+            tiling()
+    if _cuda_is_up(torch):
+        dtype = getattr(torch, "bfloat16", None)
+        mover = getattr(vae, "to", None)
+        if callable(mover):
+            try:
+                moved = mover("cuda", dtype) if dtype is not None else mover("cuda")
+            except TypeError:
+                moved = mover("cuda")
+            if moved is not None:
+                vae = moved
+                try:
+                    pipe.vae = vae
+                except (AttributeError, TypeError):
+                    pass
+    config = getattr(vae, "config", None)
+    scaling = getattr(config, "scaling_factor", 0.3611) if config is not None else 0.3611
+    shift = getattr(config, "shift_factor", 0.1159) if config is not None else 0.1159
+    try:
+        scaled = (latents / scaling) + shift
+    except TypeError:
+        scaled = latents
+    decoded = vae.decode(scaled)
+    sample = getattr(decoded, "sample", None)
+    return decoded if sample is None else sample
+
+
+def _needs_vae_tiling() -> bool:
+    """Tile when another 2 GiB would pass 14 GiB, or when less than 3 GiB is free."""
+    if allocated_bytes() + (2 * 1024**3) > PEAK_LIMIT_BYTES:
+        return True
+    free = _free_vram_bytes()
+    return free is not None and free < 3 * 1024**3
+
+
+def _latents_to_pil(pipe: Any, decoded: Any) -> Image.Image:
+    processor = getattr(pipe, "image_processor", None)
+    post = getattr(processor, "postprocess", None) if processor is not None else None
+    if callable(post):
+        images = post(decoded, output_type="pil")
+        image = images[0] if isinstance(images, (list, tuple)) else images
+        if isinstance(image, Image.Image):
+            return image.convert("RGB")
+    if isinstance(decoded, Image.Image):
+        return decoded.convert("RGB")
+    raise InferenceUnavailable("the vae did not return an image")
 
 
 def _negative_argument(negative: str) -> dict[str, str]:
@@ -992,7 +1151,8 @@ def _place(pipe: Any, tier: Tier) -> None:
     """
     if tier is Tier.GB16:
         torch = _import_torch()
-        cast = install_fp8_storage(pipe, torch, _layerwise_casting())
+        with timed("cast"):
+            cast = install_fp8_storage(pipe, torch, _layerwise_casting())
         if "transformer" not in cast:
             note_error("weights.bf16")
         note_tag("tier", "gb16")

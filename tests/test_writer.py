@@ -15,6 +15,7 @@ from canvas.models.registry import load_catalog
 from canvas.models.snapshots import _urls
 from canvas.infra import vram_trace
 from canvas.infra.stage_timer import StageTimes, set_current
+from canvas.pipeline.device_guard import DeviceRefused
 from canvas.pipeline.enhance import WRITER_ID, QwenRewriter, encoder_names, open_rewriter, turbo_spec, writer_spec
 from tests.fakes import World
 from tests.test_photoshoot import IDEA
@@ -224,19 +225,26 @@ def _run_writer(folder: Path, *, device: str | None = None) -> tuple[str, str]:
     return reply, clock.log_line()
 
 
-def test_oom_on_cuda_is_a_visible_cpu_fallback(tmp_path: Path, monkeypatch) -> None:
+def test_oom_on_cuda_stops_instead_of_generating_on_cpu(tmp_path: Path, monkeypatch) -> None:
     devices: list[str] = []
     codes: list[str] = []
     folder = _writer_dir(tmp_path / "encoder")
     _arm_writer(monkeypatch, devices, codes, fail="oom")
-    reply, line = _run_writer(folder)
-    assert reply.startswith("1.")
-    assert devices == ["cuda", "cpu"]
+    clock = StageTimes()
+    previous = set_current(clock)
+    try:
+        with pytest.raises(DeviceRefused) as caught:
+            QwenRewriter(folder, folder).complete("ping", system="sys")
+    finally:
+        set_current(previous)
+    assert caught.value.code == "device.cpu"
+    assert str(caught.value) == text("error.device")
+    assert devices == ["cuda"]
     assert codes == ["writer.oom"]
-    assert "writer=cpu" in line
-    assert "writer_fallback=oom" in line
-    assert "writer_load=" in line
-    assert "writer_generate=" in line
+    line = clock.log_line()
+    assert "writer_fallback" not in line
+    assert "writer=cpu" not in line
+    assert "writer_generate=" not in line
 
 
 def test_a_cuda_writer_records_its_device_without_a_fallback(tmp_path: Path, monkeypatch) -> None:
@@ -250,6 +258,7 @@ def test_a_cuda_writer_records_its_device_without_a_fallback(tmp_path: Path, mon
     assert "writer=cuda" in line
     assert "writer_load=" in line
     assert "writer_generate=" in line
+    assert "writer_tps=tps" in line
     assert "writer_fallback=" not in line
 
 
@@ -297,13 +306,14 @@ def test_a_16gb_enhancer_logs_bf16_when_fp8_is_missing(tmp_path: Path, monkeypat
     assert any(code.startswith("enhancer.bf16") for code in codes)
 
 
-def test_an_explicit_cpu_writer_does_not_report_oom(tmp_path: Path, monkeypatch) -> None:
+def test_an_explicit_cpu_writer_stops_when_cuda_is_available(tmp_path: Path, monkeypatch) -> None:
     devices: list[str] = []
     codes: list[str] = []
     folder = _writer_dir(tmp_path / "encoder")
     _arm_writer(monkeypatch, devices, codes, fail="oom")
-    _reply, line = _run_writer(folder, device="cpu")
-    assert devices == ["cpu"]
-    assert codes == []
-    assert "writer=cpu" in line
-    assert "writer_fallback=" not in line
+    with pytest.raises(DeviceRefused) as caught:
+        _run_writer(folder, device="cpu")
+    assert caught.value.code == "device.cpu"
+    assert devices == []
+    assert codes == ["writer.device"]
+    assert "writer.oom" not in codes

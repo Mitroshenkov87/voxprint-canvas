@@ -303,6 +303,34 @@ class AgeGate:
         """Load each component once."""
         self._ensure_loaded()
 
+    def release_weights(self) -> None:
+        """Drop GPU weights. The next use loads them again.
+
+        Weights that are already on the CPU stay loaded.
+        """
+        with self._load_cv:
+            if self._load_state == "loading":
+                while self._load_state == "loading":
+                    self._load_cv.wait()
+            if self._load_state != "ready":
+                return
+            on_gpu = False
+            for name in _LOAD_ORDER:
+                component = getattr(self._stack, name, None)
+                if getattr(component, "device", None) == "cuda":
+                    on_gpu = True
+                    break
+            if not on_gpu:
+                return
+            for name in _LOAD_ORDER:
+                component = getattr(self._stack, name, None)
+                if getattr(component, "device", None) != "cuda":
+                    continue
+                release = getattr(component, "release", None)
+                if callable(release):
+                    release()
+            self._load_state = "idle"
+
     def _ensure_loaded(self) -> None:
         """One load for this gate. Later callers wait for it."""
         with self._load_cv:

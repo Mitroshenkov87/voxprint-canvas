@@ -77,6 +77,7 @@ class ShellRunner:
         generator.lora_path = job.lora_path
         generator.lora_strength = job.lora_weight
         generator.bound_lora = self.bound_lora
+        generator.negative_prompt = job.negative
         if self.img2img_strength is not None:
             generator.img2img_strength = self.img2img_strength
         generator.models = models_dir()

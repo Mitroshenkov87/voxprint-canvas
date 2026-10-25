@@ -211,6 +211,9 @@ def _device(name: str) -> Any:
 
 
 MODEL_OFFLOAD_HEADROOM_BYTES = int(2.5 * 1024**3)
+# A fully resident pipeline also needs room for activations. Without it a 16 GB
+# card fills up and the driver spills into system memory.
+RESIDENT_ACTIVATION_BYTES = 4 * 1024**3
 
 
 def component_bytes(module: Any) -> int:
@@ -298,8 +301,13 @@ def fp8_skip_patterns(module: Any) -> tuple[str, ...]:
 
 
 def resident_fits(pipe: Any, free_bytes: int | None) -> bool:
-    """True when every component plus headroom fits in free VRAM, so nothing moves per frame."""
+    """True when every component, headroom and activation room fit in free VRAM.
+
+    Anything tighter stays on the offload path so a 16 GB card does not spill
+    into system memory.
+    """
     if free_bytes is None:
         return False
     total = sum(component_bytes(item) for item in _components(pipe))
-    return total > 0 and total + MODEL_OFFLOAD_HEADROOM_BYTES <= int(free_bytes)
+    need = total + MODEL_OFFLOAD_HEADROOM_BYTES + RESIDENT_ACTIVATION_BYTES
+    return total > 0 and need <= int(free_bytes)

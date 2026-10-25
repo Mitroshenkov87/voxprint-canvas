@@ -7,6 +7,7 @@ the unit tests can import Canvas without them.
 from __future__ import annotations
 
 import gc
+import inspect
 import threading
 import time
 from collections.abc import Iterator
@@ -19,8 +20,8 @@ import psutil
 from PIL import Image
 
 from canvas.app.i18n import text
-from canvas.infra.stage_timer import note_tag, timed
-from canvas.infra.vram import reset_peak_allocated
+from canvas.infra.stage_timer import note_peak_mib, note_tag, timed
+from canvas.infra.vram import peak_allocated_bytes, reset_peak_allocated
 from canvas.models.modes import Tier
 from canvas.models.pins import (
     PIPELINE_CONTROL,
@@ -294,7 +295,7 @@ def applied_strength(requested: float | None) -> float:
 def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, height: int, tier: Tier, *,
            seed: int = 0, control_file: Path | None = None,
            strength: float | None = None, lora: UserLora | None = None,
-           lora_strength: float | None = None) -> RawImage:
+           lora_strength: float | None = None, negative: str = "") -> RawImage:
     """Run one pinned snapshot. ``folder`` is a local diffusers tree."""
     reset_peak_allocated()
     torch = _import_torch()
@@ -313,6 +314,7 @@ def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, he
         "output_type": "pil",
     }
     common.update(guidance)
+    common.update(_negative_argument(negative))
     pipeline_name = plan.pipeline_class
     failed = False
     with _lock:
@@ -320,18 +322,21 @@ def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, he
             pipe = _pipeline_for(
                 diffusers, torch, pipeline_name, folder, dtype, tier, lora, lora_strength, control_file,
             )
+            call = _accepting(pipe, common)
             if pipeline_name == PIPELINE_TEXT:
-                result = _timed(pipe, **common)
+                result = _timed(pipe, **call)
             elif pipeline_name == PIPELINE_IMG2IMG:
-                result = _timed(pipe, image=_pil(_frame(screened, "init")), strength=applied_strength(strength), **common)
+                result = _timed(
+                    pipe, image=_pil(_frame(screened, "init")), strength=applied_strength(strength), **call,
+                )
             elif pipeline_name == PIPELINE_INPAINT:
                 result = _timed(
-                    pipe, image=_pil(_frame(screened, "init")), mask_image=_pil(_frame(screened, "mask")), **common,
+                    pipe, image=_pil(_frame(screened, "init")), mask_image=_pil(_frame(screened, "mask")), **call,
                 )
             elif pipeline_name == PIPELINE_CONTROL:
                 role = _control_role(screened)
                 result = _timed(
-                    pipe, control_image=_pil(_frame(screened, role)), controlnet_conditioning_scale=0.75, **common,
+                    pipe, control_image=_pil(_frame(screened, role)), controlnet_conditioning_scale=0.75, **call,
                 )
             elif pipeline_name == PIPELINE_CONTROL_INPAINT:
                 result = _timed(
@@ -340,7 +345,7 @@ def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, he
                     mask_image=_pil(_frame(screened, "mask")),
                     control_image=_pil(_frame(screened, _control_role(screened))),
                     controlnet_conditioning_scale=0.75,
-                    **common,
+                    **call,
                 )
             else:
                 raise InferenceUnavailable(f"unknown pipeline {pipeline_name}")
@@ -350,6 +355,7 @@ def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, he
             failed = True
             raise
         finally:
+            _remember_vram_peak()
             if failed or not _should_retain():
                 release_pipeline()
 
@@ -360,6 +366,36 @@ def _timed(pipe: Any, **kwargs: Any) -> Any:
     result = pipe(**kwargs)
     note_image_seconds(time.perf_counter() - started)
     return result
+
+
+def _negative_argument(negative: str) -> dict[str, str]:
+    """The negative text, kept aside until the pipeline call is known."""
+    text = negative.strip()
+    if not text:
+        return {}
+    return {"negative_prompt": text}
+
+
+def _accepting(pipe: Any, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Drop ``negative_prompt`` when this pipeline call does not take one."""
+    if "negative_prompt" not in arguments:
+        return arguments
+    try:
+        parameters = inspect.signature(pipe.__call__).parameters
+    except (TypeError, ValueError):
+        return {key: value for key, value in arguments.items() if key != "negative_prompt"}
+    names = set(parameters)
+    if "negative_prompt" in names or any(item.kind is inspect.Parameter.VAR_KEYWORD for item in parameters.values()):
+        return arguments
+    return {key: value for key, value in arguments.items() if key != "negative_prompt"}
+
+
+def _remember_vram_peak() -> None:
+    """Write the CUDA allocation peak onto the timing line, in MiB."""
+    peak = peak_allocated_bytes()
+    if not peak or peak <= 0:
+        return
+    note_peak_mib(peak // (1024 * 1024))
 
 
 def _call_guidance(plan: CallPlan) -> dict[str, float]:
@@ -415,7 +451,11 @@ def _release_lora(pipe: Any) -> None:
 
 
 def _place(pipe: Any, tier: Tier) -> None:
-    """16 GB streams transformer blocks from pinned RAM. 24 GB keeps the pipeline resident."""
+    """16 GB offloads unless the whole pipeline fits with room for activations.
+
+    Keeping a tight pipeline resident fills a 16 GB card and spills into system
+    memory. 24 GB keeps the pipeline resident.
+    """
     if tier is Tier.GB16:
         torch = _import_torch()
         cast = install_fp8_storage(pipe, torch, _layerwise_casting())

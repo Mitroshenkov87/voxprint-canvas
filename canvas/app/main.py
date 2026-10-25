@@ -435,7 +435,6 @@ def _photoshoot_bench(args: argparse.Namespace) -> int:
         install_supporting(load_catalog(), lambda message: print(message, file=sys.stderr))
         stack = load_catalog_stack(models_dir(), load_catalog())
         gate = AgeGate(stack)
-        gate.warm()
         report = run_bench(
             prompt=str(args.prompt),
             folder=folder,
@@ -477,7 +476,6 @@ def _photoshoot(args: argparse.Namespace) -> int:
         install_supporting(load_catalog(), lambda message: print(message, file=sys.stderr))
         stack = load_catalog_stack(models_dir(), load_catalog())
         gate = AgeGate(stack)
-        gate.warm()
         serial = SerialGate.wrap(gate)
         clock = StageTimes()
         payload, code = run_command(

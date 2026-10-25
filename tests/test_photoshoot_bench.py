@@ -5,7 +5,8 @@ import json
 from pathlib import Path
 
 from canvas.app.main import _parser, main
-from canvas.app.photoshoot_bench import SERIES_FRAMES, live_generate, measure_series
+from canvas.app.photoshoot_bench import SERIES_FRAMES, live_generate, live_rewrite, measure_series
+from canvas.pipeline.photoshoot import scenario_request, scenario_token_budget
 from canvas.pipeline.series import REFERENCE_STRENGTH
 from canvas.app.platform import GpuCheck, OsCheck
 from canvas.infra.gpu import GpuInfo
@@ -80,6 +81,28 @@ def test_live_generate_copies_the_reused_hero(monkeypatch, tmp_path: Path) -> No
     assert screened[1][1] > 0
     assert screened[1][0] != screened[1][2]
     assert getattr(heroes[2], "width") > 0
+
+
+def test_live_rewrite_caps_tokens_at_the_request_count(monkeypatch) -> None:
+    seen: dict[str, int] = {}
+
+    class _Rewriter:
+        def complete(self, prompt: str, *, system: str) -> str:
+            del prompt, system
+            return "{}"
+
+        def close(self) -> None:
+            return None
+
+    def open_rewriter(*_args: object, **kwargs: object) -> _Rewriter:
+        seen["tokens"] = int(kwargs["max_new_tokens"])  # type: ignore[arg-type]
+        return _Rewriter()
+
+    monkeypatch.setattr("canvas.app.photoshoot_bench.open_rewriter", open_rewriter)
+    request = scenario_request(IDEA, SERIES_FRAMES, "photo", "same")
+    assert request is not None
+    live_rewrite(Tier.GB16)(request)
+    assert seen["tokens"] == scenario_token_budget(SERIES_FRAMES)
 
 
 def test_photoshoot_bench_command_asks_for_six_frames(monkeypatch, capsys, tmp_path: Path) -> None:

@@ -1,7 +1,10 @@
 """The scenario writer is a separate pinned model. The generator encoder stays stock."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
+
+import pytest
 
 from canvas.app.i18n import text
 from canvas.app.photoshoot_cli import model_rewrite
@@ -10,7 +13,8 @@ from canvas.models.modes import Tier
 from canvas.models.pins import TEXT_ENCODER
 from canvas.models.registry import load_catalog
 from canvas.models.snapshots import _urls
-from canvas.pipeline.enhance import WRITER_ID, encoder_names, open_rewriter, turbo_spec, writer_spec
+from canvas.infra.stage_timer import StageTimes, set_current
+from canvas.pipeline.enhance import WRITER_ID, QwenRewriter, encoder_names, open_rewriter, turbo_spec, writer_spec
 from tests.fakes import World
 from tests.test_photoshoot import IDEA
 
@@ -111,3 +115,168 @@ def test_scenario_and_enhance_use_the_writer_id(tmp_path: Path, monkeypatch) -> 
     improve_prompt(gate=World().gate(), prompt=IDEA, tier=Tier.GB16)
     model_rewrite(Tier.GB16, False)("ping")
     assert ids == [WRITER_ID, WRITER_ID]
+
+
+def _writer_dir(folder: Path) -> Path:
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "config.json").write_text(
+        json.dumps({"architectures": ["Qwen3ForCausalLM"], "tie_word_embeddings": True}),
+        encoding="utf-8",
+    )
+    (folder / "model.safetensors.index.json").write_text(
+        json.dumps({"weight_map": {"model.embed_tokens.weight": "model.safetensors"}}),
+        encoding="utf-8",
+    )
+    return folder
+
+
+def _arm_writer(monkeypatch, devices: list[str], codes: list[str], *, fail: str, cuda: bool = True) -> None:
+    class _Tensor:
+        shape = (1, 2)
+
+        def to(self, device: str) -> _Tensor:
+            del device
+            return self
+
+    class _Tokenizer:
+        def apply_chat_template(self, messages: object, tokenize: bool = False, add_generation_prompt: bool = True,
+                                enable_thinking: bool = False) -> str:
+            del messages, tokenize, add_generation_prompt, enable_thinking
+            return "ready"
+
+        def __call__(self, text: str, return_tensors: str = "pt") -> dict[str, _Tensor]:
+            del text, return_tensors
+            return {"input_ids": _Tensor()}
+
+        def decode(self, tokens: object, skip_special_tokens: bool = True) -> str:
+            del tokens, skip_special_tokens
+            return "1. wide shot | standing | 50 mm lens | loft"
+
+    class _Output:
+        def __getitem__(self, key: object) -> list[int]:
+            del key
+            return [1, 2, 3]
+
+    class _Model:
+        def generate(self, **kwargs: object) -> _Output:
+            del kwargs
+            return _Output()
+
+    class _Null:
+        def __enter__(self) -> None:
+            return None
+
+        def __exit__(self, *args: object) -> bool:
+            del args
+            return False
+
+    class _Cuda:
+        @staticmethod
+        def is_available() -> bool:
+            return cuda
+
+        @staticmethod
+        def empty_cache() -> None:
+            return None
+
+    class _Torch:
+        bfloat16 = "bf16"
+        cuda = _Cuda
+
+        @staticmethod
+        def inference_mode() -> _Null:
+            return _Null()
+
+    class _Transformers:
+        class AutoTokenizer:
+            @staticmethod
+            def from_pretrained(*args: object, **kwargs: object) -> _Tokenizer:
+                del args, kwargs
+                return _Tokenizer()
+
+    def causal(_transformers: object, _torch: object, folder: Path, device: str) -> _Model:
+        del _transformers, _torch, folder
+        devices.append(device)
+        if fail == "oom" and device != "cpu":
+            raise RuntimeError("CUDA out of memory")
+        if fail == "other":
+            raise RuntimeError("weights failed")
+        return _Model()
+
+    monkeypatch.setattr("canvas.pipeline.enhance._generation_libs", lambda: (_Torch(), _Transformers()))
+    monkeypatch.setattr("canvas.pipeline.enhance._causal_model", causal)
+    monkeypatch.setattr("canvas.pipeline.enhance.note_error", codes.append)
+
+
+def _run_writer(folder: Path, *, device: str | None = None) -> tuple[str, str]:
+    clock = StageTimes()
+    previous = set_current(clock)
+    try:
+        rewriter = QwenRewriter(folder, folder, device=device)
+        reply = rewriter.complete("ping", system="sys")
+    finally:
+        set_current(previous)
+    return reply, clock.log_line()
+
+
+def test_oom_on_cuda_is_a_visible_cpu_fallback(tmp_path: Path, monkeypatch) -> None:
+    devices: list[str] = []
+    codes: list[str] = []
+    folder = _writer_dir(tmp_path / "encoder")
+    _arm_writer(monkeypatch, devices, codes, fail="oom")
+    reply, line = _run_writer(folder)
+    assert reply.startswith("1.")
+    assert devices == ["cuda", "cpu"]
+    assert codes == ["writer.oom"]
+    assert "writer=cpu" in line
+    assert "writer_fallback=oom" in line
+    assert "writer_load=" in line
+    assert "writer_generate=" in line
+
+
+def test_a_cuda_writer_records_its_device_without_a_fallback(tmp_path: Path, monkeypatch) -> None:
+    devices: list[str] = []
+    codes: list[str] = []
+    folder = _writer_dir(tmp_path / "encoder")
+    _arm_writer(monkeypatch, devices, codes, fail="")
+    _reply, line = _run_writer(folder)
+    assert devices == ["cuda"]
+    assert codes == []
+    assert "writer=cuda" in line
+    assert "writer_load=" in line
+    assert "writer_generate=" in line
+    assert "writer_fallback=" not in line
+
+
+def test_a_writer_error_that_is_not_oom_is_raised(tmp_path: Path, monkeypatch) -> None:
+    devices: list[str] = []
+    codes: list[str] = []
+    folder = _writer_dir(tmp_path / "encoder")
+    _arm_writer(monkeypatch, devices, codes, fail="other")
+    with pytest.raises(RuntimeError, match="weights failed"):
+        _run_writer(folder)
+    assert codes == []
+
+
+def test_no_cuda_is_a_visible_cpu_fallback(tmp_path: Path, monkeypatch) -> None:
+    devices: list[str] = []
+    codes: list[str] = []
+    folder = _writer_dir(tmp_path / "encoder")
+    _arm_writer(monkeypatch, devices, codes, fail="", cuda=False)
+    _reply, line = _run_writer(folder)
+    assert devices == ["cpu"]
+    assert codes == ["writer.nocuda"]
+    assert "writer=cpu" in line
+    assert "writer_fallback=nocuda" in line
+
+
+def test_an_explicit_cpu_writer_does_not_report_oom(tmp_path: Path, monkeypatch) -> None:
+    devices: list[str] = []
+    codes: list[str] = []
+    folder = _writer_dir(tmp_path / "encoder")
+    _arm_writer(monkeypatch, devices, codes, fail="oom")
+    _reply, line = _run_writer(folder, device="cpu")
+    assert devices == ["cpu"]
+    assert codes == []
+    assert "writer=cpu" in line
+    assert "writer_fallback=" not in line

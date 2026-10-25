@@ -18,7 +18,14 @@ from canvas.models.modes import Mode, Tier
 from canvas.models.registry import load_catalog
 from canvas.pipeline.adult_direction import scenario_system
 from canvas.pipeline.enhance import open_rewriter
-from canvas.pipeline.photoshoot import MAX_FRAMES, SCENARIO_TOKENS, SYSTEM_PROMPT, Scenario, assemble_line
+from canvas.pipeline.photoshoot import (
+    MAX_FRAMES,
+    SYSTEM_PROMPT,
+    Scenario,
+    assemble_line,
+    frame_negative,
+    tokens_for_request,
+)
 from canvas.infra.errors import note_timing
 from canvas.infra.stage_timer import StageTimes, note_stage
 from canvas.pipeline.schedule import last_image_seconds, reset_image_seconds
@@ -71,7 +78,7 @@ def model_rewrite(tier: Tier, adult: bool) -> Callable[[str], str]:
         rewriter = open_rewriter(
             catalog, tier, models_dir(),
             lambda message: print(message, file=sys.stderr),
-            max_new_tokens=SCENARIO_TOKENS,
+            max_new_tokens=tokens_for_request(prompt),
         )
         try:
             return rewriter.complete(prompt, system=scenario_system(SYSTEM_PROMPT, adult))
@@ -102,7 +109,7 @@ def model_generate(
 
     def generate(line: str, seed: int, hero: SeriesFrame | None, strength: float | None) -> RawImage | None:
         prompt = " ".join(part for part in (policy.template, line.strip(), look.suffix) if part)
-        negative = ", ".join(part for part in (look.negative, policy.negatives) if part)
+        negative = frame_negative(", ".join(part for part in (look.negative, policy.negatives) if part))
         mode = Mode.TEXT if hero is None else Mode.RESTYLE
         job = PictureJob(
             prompt, negative, mode, "1:1", "native", DEFAULT_FORMAT, seed, 8, 0.0, "euler", 1,
@@ -154,7 +161,8 @@ def run_command(
         age_gate: Passed through to the series.
         rewrite: Scenario writer.
         generate: One frame. A stopped frame returns None.
-        strength: Loose style reference. None draws every frame from text.
+        strength: Loose reference for later frames. None leaves an object series as text
+            and follows the first frame for a person series.
     """
     catalogs()
     if frames < 1 or frames > MAX_FRAMES:

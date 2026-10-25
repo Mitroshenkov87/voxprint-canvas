@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Any, Protocol, assert_never
 
 from canvas.app.i18n import text
+from canvas.infra.errors import note_error
+from canvas.infra.stage_timer import note_tag, timed
 from canvas.models.modes import Tier
 from canvas.models.registry import Catalog, ModelSpec
 from canvas.models.runtime import release_pipeline
@@ -324,30 +326,38 @@ class QwenRewriter:
         if self._model is not None:
             return
         release_pipeline()
-        torch, transformers = _generation_libs()
-        config_path = self.encoder_dir / "config.json"
-        index_path = self.encoder_dir / "model.safetensors.index.json"
-        config = json.loads(config_path.read_text(encoding="utf-8"))
-        index = json.loads(index_path.read_text(encoding="utf-8"))
-        names = index.get("weight_map") or {}
-        if not isinstance(names, dict) or not causal_lm_ready(config, names):
-            raise SnapshotError("the text encoder cannot generate text")
-        device = self.device or ("cuda" if torch.cuda.is_available() else "cpu")
-        tokenizer = transformers.AutoTokenizer.from_pretrained(
-            self.tokenizer_dir, local_files_only=True,
-        )
-        try:
-            model = _causal_model(transformers, torch, self.encoder_dir, device)
-        except RuntimeError as exc:
-            if device == "cpu" or "out of memory" not in str(exc).lower():
-                raise
-            torch.cuda.empty_cache()
-            device = "cpu"
-            model = _causal_model(transformers, torch, self.encoder_dir, device)
-        self._tokenizer = tokenizer
-        self._model = model
-        self.device = device
-        self.closed = False
+        with timed("writer_load"):
+            torch, transformers = _generation_libs()
+            config_path = self.encoder_dir / "config.json"
+            index_path = self.encoder_dir / "model.safetensors.index.json"
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+            index = json.loads(index_path.read_text(encoding="utf-8"))
+            names = index.get("weight_map") or {}
+            if not isinstance(names, dict) or not causal_lm_ready(config, names):
+                raise SnapshotError("the text encoder cannot generate text")
+            if self.device is None and not torch.cuda.is_available():
+                note_error("writer.nocuda")
+                note_tag("writer_fallback", "nocuda")
+            device = self.device or ("cuda" if torch.cuda.is_available() else "cpu")
+            tokenizer = transformers.AutoTokenizer.from_pretrained(
+                self.tokenizer_dir, local_files_only=True,
+            )
+            try:
+                model = _causal_model(transformers, torch, self.encoder_dir, device)
+            except RuntimeError as exc:
+                if device == "cpu" or "out of memory" not in str(exc).lower():
+                    raise
+                torch.cuda.empty_cache()
+                note_error("writer.oom")
+                note_tag("writer_fallback", "oom")
+                device = "cpu"
+                model = _causal_model(transformers, torch, self.encoder_dir, device)
+            self._tokenizer = tokenizer
+            self._model = model
+            self.device = device
+            self.closed = False
+            if device in {"cpu", "cuda"}:
+                note_tag("writer", device)
 
     def _complete(self, prompt: str, system: str) -> str:
         torch, _transformers = _generation_libs()
@@ -367,25 +377,29 @@ class QwenRewriter:
         encoded = tokenizer(templated, return_tensors="pt")
         device = self.device or "cpu"
         encoded = {key: value.to(device) for key, value in encoded.items()}
-        with torch.inference_mode():
-            output = model.generate(
-                **encoded,
-                max_new_tokens=self.max_new_tokens,
-                do_sample=False,
-            )
-        start = int(encoded["input_ids"].shape[-1])
-        reply = str(tokenizer.decode(output[0, start:], skip_special_tokens=True))
+        with timed("writer_generate"):
+            with torch.inference_mode():
+                output = model.generate(
+                    **encoded,
+                    max_new_tokens=self.max_new_tokens,
+                    do_sample=False,
+                )
+            start = int(encoded["input_ids"].shape[-1])
+            reply = str(tokenizer.decode(output[0, start:], skip_special_tokens=True))
         return _visible_reply(reply)
 
 
 def _causal_model(transformers: Any, torch: Any, folder: Path, device: str) -> Any:
-    """Load the causal LM. ``device`` is ``cuda`` or ``cpu``."""
-    model = transformers.AutoModelForCausalLM.from_pretrained(
-        folder,
-        torch_dtype=torch.bfloat16,
-        local_files_only=True,
-        low_cpu_mem_usage=True,
-    )
+    """Load the causal LM in BF16. ``device`` is ``cuda`` or ``cpu``.
+
+    BF16 is what fits a 16 GB card. A full-precision load does not.
+    """
+    common = {"local_files_only": True, "low_cpu_mem_usage": True}
+    loader = transformers.AutoModelForCausalLM.from_pretrained
+    try:
+        model = loader(folder, dtype=torch.bfloat16, **common)
+    except TypeError:
+        model = loader(folder, torch_dtype=torch.bfloat16, **common)
     if device != "cpu":
         model = model.to(device)
     return model.eval()

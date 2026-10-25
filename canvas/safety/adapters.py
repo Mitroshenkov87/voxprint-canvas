@@ -30,7 +30,11 @@ def _module_bytes(model: Any) -> int:
 
 
 def gate_device(need_bytes: int) -> str:
-    """``cuda`` when the model fits beside the generator's reserve, else ``cpu``."""
+    """``cuda`` when the weights fit in free VRAM, else ``cpu``.
+
+    The generator reserve applies only while the generator already holds VRAM.
+    An empty card does not keep that reserve.
+    """
     try:
         import torch
     except ImportError:
@@ -42,7 +46,10 @@ def gate_device(need_bytes: int) -> str:
         generator_now = max(0, int(torch.cuda.memory_reserved()) - _gate_cuda_bytes)
     except (RuntimeError, AssertionError):
         return "cpu"
-    still_needed = max(0, GENERATOR_RESERVE_BYTES - generator_now)
+    if generator_now == 0:
+        still_needed = 0
+    else:
+        still_needed = max(0, GENERATOR_RESERVE_BYTES - generator_now)
     if int(free) - still_needed - GATE_HEADROOM_BYTES >= int(need_bytes):
         return "cuda"
     return "cpu"
@@ -102,6 +109,11 @@ class _Placed:
         self._cuda_bytes = 0
         self.device = "cpu"
         _empty_cuda_cache()
+
+    def release(self) -> None:
+        """Drop loaded weights so the picture model can use the GPU. The next check loads them again."""
+        self._to_cpu()
+        self._model = None
 
     def _checked(self, run: Any) -> Any:
         """Run one check. A device error moves the model to the CPU and runs the same check again."""

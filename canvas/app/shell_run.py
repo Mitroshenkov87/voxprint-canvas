@@ -98,9 +98,11 @@ class ShellRunner:
         try:
             try:
                 if self.cook:
-                    safe = self._cook(job, inputs)
+                    cooked = self._cook(job, inputs)
+                    width, height, pixels = cooked.width, cooked.height, cooked.to_bytes()
                 else:
-                    safe = self._through_pipeline(job, inputs)
+                    reviewed = self._through_pipeline(job, inputs)
+                    width, height, pixels = reviewed.width, reviewed.height, reviewed.data
             except SafetyUnavailable as exc:
                 _halt(exc.user_message, exc, f"check.{exc.code}", unavailable=True)
             except GpuLockTimeout as exc:
@@ -130,10 +132,7 @@ class ShellRunner:
                 _halt(str(exc), exc, "internal", unavailable=True)
             except Exception as exc:
                 _halt(text("gate.unavailable"), exc, "internal", unavailable=True)
-            pixels = getattr(safe, "data", None)
-            if not isinstance(pixels, (bytes, bytearray)):
-                pixels = safe.to_bytes()
-            return RawImage(safe.width, safe.height, bytes(pixels))
+            return RawImage(width, height, pixels)
         finally:
             release(lock_path())
 

@@ -5,6 +5,9 @@ park can pin them without that package.
 """
 from __future__ import annotations
 
+import sys
+import types
+
 from voxprint_common.paths import logs_dir
 
 from canvas.models import hot_tier
@@ -109,6 +112,77 @@ def test_ram64_keeps_earlier_models_and_logs_the_rest_as_disk(monkeypatch) -> No
     assert decision["vae"] == "ram"
     assert decision["writer"] == "disk"
     assert decision["prompt_check"] == "disk"
+
+
+def test_a_cuda_weight_parks_into_pinned_memory(monkeypatch, tmp_path) -> None:
+    """The first park copies a CUDA weight straight into pinned host memory."""
+    monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
+    _tier(monkeypatch, "ram96", 96 * 1024**3)
+
+    class _Pinned:
+        def __init__(self) -> None:
+            self.device = types.SimpleNamespace(type="cpu")
+            self.dtype = "bfloat16"
+            self.nbytes = 16
+            self.data = self
+
+        def is_pinned(self) -> bool:
+            return True
+
+        def detach(self) -> _Pinned:
+            return self
+
+        def to(self, device: object, non_blocking: bool = False) -> _Pinned:
+            del device, non_blocking
+            return self
+
+        def pin_memory(self) -> _Pinned:
+            return self
+
+        def copy_(self, source: object) -> _Pinned:
+            del source
+            return self
+
+    class _Torch:
+        @staticmethod
+        def empty_like(tensor: object, device: str = "cpu", pin_memory: bool = False) -> _Pinned:
+            del tensor
+            assert device == "cpu"
+            assert pin_memory is True
+            return _Pinned()
+
+    class _CudaWeight:
+        def __init__(self) -> None:
+            self.device = types.SimpleNamespace(type="cuda")
+            self.dtype = "bfloat16"
+            self.nbytes = 16
+            self.data = self
+
+        def detach(self) -> _CudaWeight:
+            return self
+
+        def to(self, *args: object, **kwargs: object) -> _CudaWeight:
+            del args, kwargs
+            raise AssertionError("pageable copy")
+
+    class _GpuModule:
+        def __init__(self) -> None:
+            self.weight = _CudaWeight()
+
+        def named_parameters(self):
+            yield "weight", self.weight
+
+        def named_buffers(self):
+            return iter(())
+
+    monkeypatch.setitem(sys.modules, "torch", _Torch)
+    try:
+        assert hot_tier.remember("transformer", _GpuModule()) is True
+    finally:
+        hot_tier.reset()
+    text = (tmp_path / "logs" / "voxprint.log").read_text(encoding="utf-8")
+    assert "stage park transformer" in text
+    assert "pinned=1" in text
 
 
 def test_park_and_unpark_log_milliseconds_bytes_ram_and_vram(monkeypatch) -> None:

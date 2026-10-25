@@ -21,7 +21,7 @@ from PIL import Image
 
 from canvas.app.i18n import text
 from canvas.infra.errors import note_error
-from canvas.infra.stage_timer import note_peak_mib, note_stage, note_tag, timed
+from canvas.infra.stage_timer import log_detail, note_peak_mib, note_stage, note_tag, timed
 from canvas.infra.stage_guard import (
     PEAK_LIMIT_BYTES,
     StageBlocked,
@@ -32,6 +32,7 @@ from canvas.infra.stage_guard import (
     cosine,
     finish_stage,
     guard_peak,
+    note_image_fit,
     register_release,
 )
 from canvas.infra.vram_trace import drop_model, hold_model, note_vram
@@ -990,6 +991,8 @@ def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, he
            lora_strength: float | None = None, negative: str = "") -> RawImage:
     """Run one pinned snapshot. ``folder`` is a local diffusers tree."""
     hot.note_tier()
+    if tier is Tier.GB16:
+        note_image_fit()
     reset_peak_allocated()
     torch = _import_torch()
     diffusers = _import_diffusers()
@@ -1105,7 +1108,7 @@ def _image_from_result(pipe: Any, result: Any, torch: Any) -> RawImage:
     with timed("vae_decode"):
         decoded = _decode_latents(pipe, first, torch)
     with timed("to_pil"):
-        image = _latents_to_pil(pipe, decoded)
+        image = _latents_to_pil(pipe, decoded, torch)
     return RawImage(image.width, image.height, image.tobytes())
 
 
@@ -1119,23 +1122,27 @@ def _first_output(result: Any) -> Any:
 
 
 def _decode_latents(pipe: Any, latents: Any, torch: Any) -> Any:
-    """Decode one latent on the VAE's device and dtype. Tile when the card is near the 14 GB line.
+    """Decode one latent on the VAE, then return CPU float32 pixels.
 
-    On CUDA the VAE is moved to BF16 first. The latents are cast to that same
-    device and dtype after scaling, immediately before ``decode``. A VAE that
-    stays in FP32 keeps the latents in FP32.
+    On CUDA the transformer is parked first, and the VAE decodes in tiles so the
+    activation peak stays on the card. ``decode`` is synchronized before the
+    weights move. An empty ``RuntimeError`` from that sync is the CUDA error
+    that used to surface later in ``pt_to_numpy``.
     """
     vae = getattr(pipe, "vae", None)
     if vae is None:
         raise InferenceUnavailable("the generator has no vae")
-    if _needs_vae_tiling():
-        tiling = getattr(vae, "enable_tiling", None)
-        if callable(tiling):
-            tiling()
-    device = "cuda" if _cuda_is_up(torch) else "cpu"
+    cuda = _cuda_is_up(torch)
+    if cuda:
+        for name in ("transformer", "text_encoder", "controlnet"):
+            hot.deactivate(name)
+    device = "cuda" if cuda else "cpu"
     hot.activate("vae", device)
+    sample: Any = None
     try:
         vae = _vae_for_decode(pipe, vae, torch)
+        if cuda:
+            _enable_vae_tiles(vae)
         config = getattr(vae, "config", None)
         scaling = getattr(config, "scaling_factor", 0.3611) if config is not None else 0.3611
         shift = getattr(config, "shift_factor", 0.1159) if config is not None else 0.1159
@@ -1144,11 +1151,88 @@ def _decode_latents(pipe: Any, latents: Any, torch: Any) -> Any:
         except TypeError:
             scaled = latents
         scaled = _latents_like_vae(vae, scaled)
-        decoded = vae.decode(scaled)
+        try:
+            decoded = vae.decode(scaled)
+            _sync_cuda(torch)
+        except RuntimeError as exc:
+            _log_decode_error(torch, exc)
+            raise
+        held = getattr(decoded, "sample", None)
+        sample = _cpu_float(held if held is not None else decoded, torch)
+        del decoded, held
     finally:
         hot.deactivate("vae")
-    sample = getattr(decoded, "sample", None)
-    return decoded if sample is None else sample
+        gc.collect()
+        _release_cuda_cache(torch)
+    return sample
+
+
+def _enable_vae_tiles(vae: Any) -> None:
+    """Decode in tiles and slices. A full 1024 frame otherwise holds about 11 GB."""
+    for name in ("enable_tiling", "enable_slicing"):
+        toggle = getattr(vae, name, None)
+        if not callable(toggle):
+            continue
+        try:
+            toggle()
+        except (TypeError, RuntimeError, AttributeError):
+            continue
+
+
+def _sync_cuda(torch: Any) -> None:
+    """Wait for the decode kernels. The CPU copy is where an async error surfaces."""
+    if not _cuda_is_up(torch):
+        return
+    sync = getattr(torch.cuda, "synchronize", None)
+    if not callable(sync):
+        return
+    sync()
+
+
+def _log_decode_error(torch: Any, exc: BaseException) -> None:
+    """Write the exception type and the CUDA memory summary to the suite log."""
+    summary = ""
+    cuda = getattr(torch, "cuda", None)
+    report = getattr(cuda, "memory_summary", None) if cuda is not None else None
+    if callable(report):
+        try:
+            summary = " ".join(str(report()).split())
+        except (TypeError, RuntimeError, AttributeError):
+            summary = ""
+    kind = type(exc).__name__
+    message = " ".join(str(exc).split())
+    log_detail(
+        "vae_decode", "error", "cuda",
+        f"type={kind} message={message[:180]} summary={summary[:1200]}",
+    )
+
+
+def _cpu_float(value: Any, torch: Any) -> Any:
+    """The decode output on CPU in float32, before postprocess touches it."""
+    dtype = getattr(torch, "float32", None)
+    mover = getattr(value, "to", None)
+    if dtype is None or not callable(mover):
+        return value
+    try:
+        return mover(device="cpu", dtype=dtype)
+    except TypeError:
+        try:
+            return mover("cpu", dtype)
+        except (TypeError, RuntimeError, AttributeError):
+            return value
+    except (RuntimeError, AttributeError):
+        return value
+
+
+def _release_cuda_cache(torch: Any) -> None:
+    if not _cuda_is_up(torch):
+        return
+    empty = getattr(torch.cuda, "empty_cache", None)
+    if callable(empty):
+        try:
+            empty()
+        except (TypeError, RuntimeError, AttributeError):
+            return
 
 
 def _vae_for_decode(pipe: Any, vae: Any, torch: Any) -> Any:
@@ -1219,15 +1303,9 @@ def _cast_latents(value: Any, device: Any, dtype: Any) -> Any:
         return value
 
 
-def _needs_vae_tiling() -> bool:
-    """Tile when another 2 GiB would pass 14 GiB, or when less than 3 GiB is free."""
-    if allocated_bytes() + (2 * 1024**3) > PEAK_LIMIT_BYTES:
-        return True
-    free = _free_vram_bytes()
-    return free is not None and free < 3 * 1024**3
-
-
-def _latents_to_pil(pipe: Any, decoded: Any) -> Image.Image:
+def _latents_to_pil(pipe: Any, decoded: Any, torch: Any) -> Image.Image:
+    decoded = _cpu_float(decoded, torch)
+    _release_cuda_cache(torch)
     processor = getattr(pipe, "image_processor", None)
     post = getattr(processor, "postprocess", None) if processor is not None else None
     if callable(post):

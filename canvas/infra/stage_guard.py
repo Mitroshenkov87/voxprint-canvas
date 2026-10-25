@@ -151,6 +151,26 @@ def clear_residual(stage: str) -> None:
     )
 
 
+def note_image_fit() -> bool:
+    """Log the picture budget on the render path. The line is written even when the card is clear.
+
+    ``begin_stage`` only reached this check when a residual was already on the card,
+    so a clean render logged nothing. This uses the same log writer as the other
+    ``stage`` lines.
+    """
+    span = _cuda_span()
+    free, total = span if span is not None else (0, 0)
+    return decide_image_fit(
+        free_bytes=free,
+        total_bytes=total,
+        models=(
+            ("transformer", TRANSFORMER_FP8_BYTES, "float8_e4m3fn"),
+            ("vae", VAE_WEIGHT_BYTES, "bfloat16"),
+        ),
+        residuals=_snapshot_residual(),
+    )
+
+
 def decide_image_fit(
     *,
     free_bytes: int,

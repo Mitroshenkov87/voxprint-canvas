@@ -150,6 +150,32 @@ def _plan(pipeline: str) -> CallPlan:
     return CallPlan("diffusers", pipeline, ("stub",), "bf16", 8, None, "none", "16gb", mode)
 
 
+def test_render_logs_the_fit_budget(tmp_path: Path, monkeypatch) -> None:
+    """The picture budget is written by render, through the same log as the stage lines."""
+    monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
+    encoder, transformer, vae = _Encoder(), _Module(), _Module()
+    _install(monkeypatch, encoder, transformer, vae, [])
+    runtime.reset_pipeline_cache()
+    runtime.clear_series_embeds()
+    screened = issue_input("one frame", "text", ())
+    try:
+        with runtime.pipeline_scope():
+            runtime.prepare_series_embeds(tmp_path / "weights", Tier.GB16, ("one frame",))
+            runtime.render(_plan(PIPELINE_TEXT), tmp_path / "weights", screened, 8, 8, Tier.GB16, seed=1)
+    finally:
+        screened.wipe()
+        runtime.clear_series_embeds()
+        runtime.reset_pipeline_cache()
+    log = (tmp_path / "logs" / "voxprint.log").read_text(encoding="utf-8")
+    assert "stage fit budget" in log
+    assert "free=" in log
+    assert "total=" in log
+    assert "needed=" in log
+    assert "residual=" in log
+    assert "headroom=" in log
+    assert "float8_e4m3fn" in log
+
+
 def test_the_text_encoder_is_not_on_cuda_during_cook(tmp_path: Path, monkeypatch) -> None:
     encoder, transformer, vae = _Encoder(), _Module(), _Module()
     seen: list[str] = []

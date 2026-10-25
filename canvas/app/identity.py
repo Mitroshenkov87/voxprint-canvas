@@ -51,12 +51,20 @@ def build_number(env: Mapping[str, str] | None = None) -> int:
         return 0
 
 
-def version_label(env: Mapping[str, str] | None = None) -> str:
-    """``0.1.0 RC · build N "Tavnit"``."""
-    data = load_build()
+def _release_head(data: Mapping[str, Any]) -> str:
+    """``0.1.0-rc.27`` when ``rc`` is set, otherwise ``0.1.0 RC``."""
+    base = str(data.get("version") or "").strip() or version()
+    rc = data.get("rc")
+    if isinstance(rc, int) and not isinstance(rc, bool) and rc > 0:
+        return f"{base}-rc.{rc}"
     channel = str(data.get("channel") or "").strip()
-    head = f"{version()} {channel}".strip()
-    label = f"{head} · build {build_number(env)}"
+    return f"{base} {channel}".strip()
+
+
+def version_label(env: Mapping[str, str] | None = None) -> str:
+    """``0.1.0-rc.27 · build N "Tavnit"``."""
+    data = load_build()
+    label = f"{_release_head(data)} · build {build_number(env)}"
     codename = str(data.get("codename") or "").strip()
     if codename:
         label += f' "{codename}"'
@@ -64,11 +72,9 @@ def version_label(env: Mapping[str, str] | None = None) -> str:
 
 
 def splash_line(env: Mapping[str, str] | None = None) -> str:
-    """``X.Y.Z RC build N "Codename"`` for the startup window."""
+    """``0.1.0-rc.27 build N "Codename"`` for ``--version`` and the startup window."""
     data = load_build()
-    channel = str(data.get("channel") or "").strip()
-    head = f"{version()} {channel}".strip()
-    label = f"{head} build {build_number(env)}"
+    label = f"{_release_head(data)} build {build_number(env)}"
     codename = str(data.get("codename") or "").strip()
     if codename:
         label += f' "{codename}"'

@@ -154,7 +154,7 @@ def remember(name: str, module: Any, *, size_bytes: int | None = None) -> bool:
     global _committed
     _committed += declared
     _log_plan(name, "ram", declared)
-    _log_move("park", name, "cpu", measured, started)
+    _log_move("park", name, "cpu", measured, started, _pin_note(view))
     return True
 
 
@@ -407,12 +407,22 @@ def _assign(module: Any, state: dict[str, Any]) -> None:
 
 
 def _cpu_copy(tensor: Any) -> Any:
+    """A CPU copy of ``tensor``.
+
+    A CUDA tensor is copied once into pinned host memory. ``.to("cpu")`` lands
+    in pageable memory, and the park then pins that copy, so the first park of
+    the transformer was a slow transfer plus a second full copy.
+    """
     detach = getattr(tensor, "detach", None)
     if callable(detach):
         try:
             tensor = detach()
         except (TypeError, RuntimeError):
             pass
+    if _tensor_on_cuda(tensor):
+        pinned = _pinned_from_cuda(tensor)
+        if pinned is not None:
+            return pinned
     mover = getattr(tensor, "to", None)
     if not callable(mover):
         return tensor
@@ -420,6 +430,43 @@ def _cpu_copy(tensor: Any) -> Any:
         return mover("cpu")
     except (TypeError, RuntimeError, AttributeError):
         return tensor
+
+
+def _pinned_from_cuda(tensor: Any) -> Any | None:
+    """One pinned CPU copy of a CUDA tensor. None when torch cannot pin it.
+
+    Torch is optional. The import stays inside this function so the park loads
+    when the package is absent. This is not a circular import.
+    """
+    try:
+        import torch
+    except ImportError:
+        return None
+    try:
+        pinned = torch.empty_like(tensor, device="cpu", pin_memory=True)
+        pinned.copy_(tensor)
+    except (TypeError, RuntimeError, AttributeError, ValueError):
+        return None
+    return pinned
+
+
+def _pin_note(state: dict[str, Any]) -> str:
+    """``pinned=1`` when every parked tensor is pinned."""
+    if not state:
+        return "pinned=0"
+    pinned = 0
+    for tensor in state.values():
+        probe = getattr(tensor, "is_pinned", None)
+        if callable(probe):
+            try:
+                if probe():
+                    pinned += 1
+                    continue
+            except (TypeError, RuntimeError):
+                continue
+        if getattr(tensor, "pinned", False):
+            pinned += 1
+    return "pinned=1" if pinned == len(state) else "pinned=0"
 
 
 def _module_bytes(module: Any) -> int:
@@ -487,9 +534,12 @@ def _log_plan(name: str, where: str, size: int) -> None:
     log_detail("hot", "plan", "cpu", f"model={safe} where={place} bytes={max(0, int(size))}")
 
 
-def _log_move(kind: str, name: str, device: str, nbytes: int, started: float) -> None:
+def _log_move(kind: str, name: str, device: str, nbytes: int, started: float, extra: str = "") -> None:
     elapsed = max(0, int((time.perf_counter() - started) * 1000))
-    log_detail(kind, _token(name), device, f"ms={elapsed} bytes={max(0, int(nbytes))}")
+    suffix = f"ms={elapsed} bytes={max(0, int(nbytes))}"
+    if extra:
+        suffix = f"{suffix} {extra}"
+    log_detail(kind, _token(name), device, suffix)
 
 
 def _token(name: str) -> str:

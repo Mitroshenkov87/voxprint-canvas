@@ -11,6 +11,7 @@ import pytest
 
 from canvas.safety import adapters
 from canvas.safety.adapters import NsfwViT, gate_device
+from canvas.safety.gate import AgeGate, SafetyStack
 from canvas.safety.image import RawImage
 
 GB = 1024**3
@@ -109,8 +110,8 @@ _PICTURE = RawImage(2, 2, bytes(12))
 
 def test_device_choice_respects_the_generator_reserve(monkeypatch) -> None:
     monkeypatch.setitem(sys.modules, "torch", _fake_torch(free=15 * GB, reserved=0))
-    assert gate_device(2 * GB) == "cuda"  # 15 - 12 reserve - 0.75 headroom >= 2
-    assert gate_device(3 * GB) == "cpu"
+    assert gate_device(2 * GB) == "cuda"  # empty card: no generator reserve
+    assert gate_device(3 * GB) == "cuda"
     monkeypatch.setitem(sys.modules, "torch", _fake_torch(free=5 * GB, reserved=11 * GB))
     assert gate_device(4 * GB) == "cpu"  # 1 GB of the reserve is still needed
     monkeypatch.setitem(sys.modules, "torch", _fake_torch(free=6 * GB, reserved=12 * GB))
@@ -154,6 +155,34 @@ def test_cpu_and_gpu_paths_give_the_same_verdict(monkeypatch, tmp_path: Path) ->
     gpu = _nsfw(tmp_path, gpu_model, "cuda").sexual_score(_PICTURE)
     assert cpu == gpu
     assert gpu_model.calls == ["cuda"]
+
+
+class _Held:
+    def __init__(self, device: str) -> None:
+        self.device = device
+        self.released = False
+
+    def release(self) -> None:
+        self.released = True
+        self.device = "cpu"
+
+
+def test_gpu_weights_are_dropped_and_cpu_weights_stay() -> None:
+    gpu = _Held("cuda")
+    cpu = _Held("cpu")
+    gate = AgeGate(SafetyStack(gpu, cpu, cpu, cpu, cpu, cpu))
+    gate._load_state = "ready"
+    gate.release_weights()
+    assert gpu.released is True
+    assert cpu.released is False
+    assert gate._load_state == "idle"
+
+    staying = _Held("cpu")
+    other = AgeGate(SafetyStack(staying, staying, staying, staying, staying, staying))
+    other._load_state = "ready"
+    other.release_weights()
+    assert staying.released is False
+    assert other._load_state == "ready"
 
 
 def test_a_non_device_error_is_not_retried(monkeypatch, tmp_path: Path) -> None:

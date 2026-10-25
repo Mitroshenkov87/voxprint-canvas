@@ -139,6 +139,7 @@ class ZImageGenerator:
         self.probe: PeakVramProbe | None = None
         self.seed = 0
         self.img2img_strength: float | None = None
+        self.negative_prompt = ""
         self.models: Path | None = None
         self.lora_path = ""
         self.lora_strength = 0.7
@@ -177,6 +178,7 @@ class ZImageGenerator:
                     seed=self.seed, control_file=control_file,
                     strength=self.img2img_strength,
                     lora=lora, lora_strength=lora_strength,
+                    negative=self.negative_prompt,
                 )
             except WeightsLoadError:
                 # The BF16 weights did not open: use the author's FP32 -upstream entry.
@@ -189,6 +191,7 @@ class ZImageGenerator:
                     seed=self.seed, control_file=control_file,
                     strength=self.img2img_strength,
                     lora=lora, lora_strength=lora_strength,
+                    negative=self.negative_prompt,
                 )
         except ImportError as exc:
             raise ModelNotReady(plan) from exc

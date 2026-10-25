@@ -23,7 +23,7 @@ from canvas.models.registry import load_catalog
 from canvas.models.snapshots import SnapshotError
 from canvas.pipeline.adult_direction import scenario_system
 from canvas.pipeline.enhance import open_rewriter
-from canvas.pipeline.photoshoot import SYSTEM_PROMPT, Scenario, tokens_for_request
+from canvas.pipeline.photoshoot import SYSTEM_PROMPT, Scenario, frame_negative, tokens_for_request
 from canvas.pipeline.series import REFERENCE_STRENGTH, SeriesFrame, SeriesResult, run_series
 
 if TYPE_CHECKING:
@@ -90,6 +90,7 @@ def run_photoshoot(window: ShellWindow) -> None:
         # Later shots can follow the first kept frame. The first frame itself is text.
         picture = job._replace(
             prompt=prompt,
+            negative=frame_negative(job.negative),
             seed=used,
             mode=Mode.TEXT if hero is None else Mode.RESTYLE,
             copies=1,

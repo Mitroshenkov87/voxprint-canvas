@@ -84,7 +84,10 @@ class _RenderRunner:
         screened = self.gate.release_request(job.prompt, job.mode.value, inputs)
         pipeline = PIPELINE_IMG2IMG if inputs else PIPELINE_TEXT
         plan = CallPlan("diffusers", pipeline, ("stub",), "bf16", 8, None, "none", "24gb", job.mode.value)
-        return runtime.render(plan, self.folder, screened, 64, 64, Tier.GB24, seed=job.seed, strength=self.img2img_strength)
+        return runtime.render(
+            plan, self.folder, screened, 64, 64, Tier.GB24,
+            seed=job.seed, strength=self.img2img_strength, negative=job.negative,
+        )
 
 
 def test_hero_frame_feeds_img2img_at_045_and_the_series_is_one_history_entry(app, home: Path, tmp_path, monkeypatch):
@@ -152,12 +155,18 @@ def test_a_person_series_anchors_at_the_default_strength(app, home: Path, tmp_pa
     names = [name for name, _ in _Pipe.calls]
     assert names[0] == "text"
     assert len(names) == 6 and set(names[1:]) == {"img2img"}
+    hero_pixels = Image.open(next((home / "state" / "pictures" / "series").iterdir()) / "01.png").convert("RGB")
+    for _name, kwargs in _Pipe.calls:
+        assert "one photo, single frame" in kwargs["prompt"]
+        assert "collage, grid, panels, split screen" in kwargs["negative_prompt"]
     for _name, kwargs in _Pipe.calls[1:]:
         assert kwargs["strength"] == pytest.approx(REFERENCE_STRENGTH)
         assert kwargs["strength"] >= REFERENCE_MIN
+        assert kwargs["image"].tobytes() == hero_pixels.tobytes()
         assert look in kwargs["prompt"]
     assert all(look in row.full and row.full.count(look) == 1 for row in window.photoshoot.rows)
     folder = next((home / "state" / "pictures" / "series").iterdir())
     document = json.loads((folder / "series.json").read_text(encoding="utf-8"))
     assert document["appearance"] == look
+    assert document["age"] == 25
     window.close()

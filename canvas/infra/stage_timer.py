@@ -31,6 +31,17 @@ class StageTimes:
         with self._lock:
             self._tags[key] = value
 
+    def note_mib(self, key: str, mib: int) -> None:
+        """Keep the larger MiB reading. The value is ``mib`` plus the number."""
+        if not _NAME.match(key) or mib <= 0:
+            raise ValueError("tags are short lowercase codes")
+        with self._lock:
+            current = self._tags.get(key, "")
+            previous = int(current[3:]) if current.startswith("mib") and current[3:].isdigit() else 0
+            best = max(previous, mib)
+            value = f"mib{best}"
+        self.tag(key, value)
+
     def add(self, stage: str, seconds: float) -> None:
         """Add one sample. ``stage`` must be a short lowercase code."""
         if not _NAME.match(stage):
@@ -106,3 +117,11 @@ def note_tag(key: str, value: str) -> None:
     times = _current
     if times is not None:
         times.tag(key, value)
+
+
+def note_peak_mib(mib: int) -> None:
+    """Remember the higher MiB peak on the timing line as ``peak_vram=mibN``."""
+    times = _current
+    if times is None or isinstance(mib, bool) or not isinstance(mib, int) or mib <= 0:
+        return
+    times.note_mib("peak_vram", mib)

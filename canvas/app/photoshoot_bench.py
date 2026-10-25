@@ -17,7 +17,7 @@ from canvas.infra.paths import models_dir
 from canvas.models.modes import Mode, Tier
 from canvas.models.registry import load_catalog
 from canvas.pipeline.enhance import open_rewriter
-from canvas.pipeline.photoshoot import SYSTEM_PROMPT, tokens_for_request
+from canvas.pipeline.photoshoot import SYSTEM_PROMPT, frame_negative, tokens_for_request
 from canvas.pipeline.series import SeriesFrame, SeriesResult, run_series
 from canvas.safety.gate import AgeGate
 from canvas.safety.image import RawImage
@@ -107,7 +107,7 @@ def live_generate(age_gate: AgeGate, tier: Tier) -> Callable[[str, int, SeriesFr
     def generate(line: str, seed: int, hero: SeriesFrame | None, strength: float | None) -> RawImage | None:
         prompt = " ".join(part for part in (line.strip(), look.suffix) if part)
         mode = Mode.TEXT if hero is None else Mode.RESTYLE
-        job = PictureJob(prompt, look.negative, mode, "1:1", "native", DEFAULT_FORMAT, seed, 8, 0.0, "euler", 1)
+        job = PictureJob(prompt, frame_negative(look.negative), mode, "1:1", "native", DEFAULT_FORMAT, seed, 8, 0.0, "euler", 1)
         runner.img2img_strength = None if hero is None else strength
         fresh: tuple[PendingInput, ...] = ()
         if hero is not None:

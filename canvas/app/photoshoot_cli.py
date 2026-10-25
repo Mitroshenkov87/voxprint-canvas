@@ -18,7 +18,14 @@ from canvas.models.modes import Mode, Tier
 from canvas.models.registry import load_catalog
 from canvas.pipeline.adult_direction import scenario_system
 from canvas.pipeline.enhance import open_rewriter
-from canvas.pipeline.photoshoot import MAX_FRAMES, SYSTEM_PROMPT, Scenario, assemble_line, tokens_for_request
+from canvas.pipeline.photoshoot import (
+    MAX_FRAMES,
+    SYSTEM_PROMPT,
+    Scenario,
+    assemble_line,
+    frame_negative,
+    tokens_for_request,
+)
 from canvas.infra.errors import note_timing
 from canvas.infra.stage_timer import StageTimes, note_stage
 from canvas.pipeline.schedule import last_image_seconds, reset_image_seconds
@@ -102,7 +109,7 @@ def model_generate(
 
     def generate(line: str, seed: int, hero: SeriesFrame | None, strength: float | None) -> RawImage | None:
         prompt = " ".join(part for part in (policy.template, line.strip(), look.suffix) if part)
-        negative = ", ".join(part for part in (look.negative, policy.negatives) if part)
+        negative = frame_negative(", ".join(part for part in (look.negative, policy.negatives) if part))
         mode = Mode.TEXT if hero is None else Mode.RESTYLE
         job = PictureJob(
             prompt, negative, mode, "1:1", "native", DEFAULT_FORMAT, seed, 8, 0.0, "euler", 1,

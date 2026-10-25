@@ -173,7 +173,7 @@ def test_ten_frames_vary_pose_camera_and_seed(monkeypatch, tmp_path: Path) -> No
     assert [seed for _prompt, _mode, seed, _strength, _roles in calls] == list(range(1, 11))
     for index, (line, (_prompt, mode, _seed, strength, roles)) in enumerate(zip(lines, calls, strict=True)):
         assert line.startswith(f"pose {index}, {30 + index} mm lens, ")
-        assert line.endswith("kitchen table")
+        assert line.endswith("kitchen table, one photo, single frame")
         assert IDEA in line
         assert mode is Mode.TEXT
         assert strength is None

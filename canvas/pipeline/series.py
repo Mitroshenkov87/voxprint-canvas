@@ -16,9 +16,11 @@ from canvas.app.i18n import text
 from canvas.app.shell_run import RunStopped
 from canvas.core.formats import OutputFormat, extension, save_image
 from canvas.infra.errors import note_debug, note_error, note_timing
-from canvas.infra.stage_timer import StageTimes, set_current
+from canvas.infra.stage_timer import StageTimes, note_peak_mib, set_current
+from canvas.infra.vram import peak_allocated_bytes
 from canvas.models.runtime import pipeline_scope
-from canvas.pipeline.enhance import mask_numbers
+from canvas.pipeline.enhance import mask_numbers, stated_ages
+from canvas.pipeline.gpu_release import release_gate_weights
 from canvas.pipeline.adult_direction import ages_allowed, with_adult_anchor, youth_cues
 from canvas.pipeline.photoshoot import (
     FORMAT_REMINDER,
@@ -30,6 +32,7 @@ from canvas.pipeline.photoshoot import (
     assemble_line,
     fixed_appearance,
     planned_shots,
+    single_frame,
     read_drafts,
     reply_declined,
     scenario_request,
@@ -126,6 +129,8 @@ def _run_series(
     if request is None:
         return _stop("scenario", "", "scenario.format")
     reason = _refuse_prompt(gate, idea)
+    # The writer needs the GPU to itself. Anything the check put on the card is dropped first.
+    release_gate_weights(gate)
     if reason:
         return _stop("idea", reason, "idea.policy")
     if adult and not ages_allowed(idea):
@@ -140,9 +145,16 @@ def _run_series(
         )
     if scenario is None or len(scenario.shots) < count:
         return _stop("scenario", "", fail_code if scenario is None else "scenario.count")
-    lines = [assemble_line(scenario.subject_block, shot, include_camera=True) for shot in scenario.shots]
-    with clock.measure("prompt_check"):
-        verdicts = [_prompt_verdict(gate, _with_idea(idea, line)) for line in lines]
+    lines = [
+        single_frame(assemble_line(scenario.subject_block, shot, include_camera=True))
+        for shot in scenario.shots
+    ]
+    try:
+        with clock.measure("prompt_check"):
+            verdicts = [_prompt_verdict(gate, _with_idea(idea, line)) for line in lines]
+    finally:
+        # The picture model is next. GPU weights from the check are dropped first.
+        release_gate_weights(gate)
     refused = [_verdict_message(verdict) for verdict in verdicts]
     hard = [
         reason for line, reason, verdict in zip(lines, refused, verdicts, strict=True)
@@ -210,6 +222,7 @@ def _run_series(
                     if line_for is None
                     else line_for(index)
                 )
+                line = single_frame(line)
                 if scenario.subject_block not in line:
                     blocked.append(index)
                     _status(on_status, index, "blocked")
@@ -256,7 +269,9 @@ def _run_series(
                 try:
                     with clock.measure("render"):
                         image = draw_frame(line, seed + index, hero if active is not None else None, active)
+                    _remember_vram_peak()
                 except RunStopped as exc:
+                    _remember_vram_peak()
                     failure = exc
                 # The earlier frame's verdict comes first: a stop there discards this frame unwritten.
                 stop = settle()
@@ -295,6 +310,7 @@ def _run_series(
                     continue
                 if hero is None:
                     hero = image
+                release_gate_weights(gate)
                 pending = _Pending(index, line, seed + index, image, worker.submit(store, index, released))
             stop = settle()
             if stop is not None:
@@ -310,6 +326,24 @@ def _run_series(
         note_error("not_produced")
         return SeriesResult("", "", (), folder, "not_produced", source)
     return SeriesResult("", "", tuple(kept), folder, "", source)
+
+
+def _remember_vram_peak() -> None:
+    """Record the CUDA allocation peak on the timing line."""
+    peak = peak_allocated_bytes()
+    if not peak or peak <= 0:
+        return
+    note_peak_mib(peak // (1024 * 1024))
+
+
+def _stated_age(idea: str) -> int | list[int] | None:
+    """The age stated in the idea. Several ages stay a list. None when the idea states none."""
+    stated = stated_ages(idea)
+    if len(stated) == 1:
+        return stated[0]
+    if stated:
+        return list(stated)
+    return None
 
 
 def style_reference(strength: float | None) -> float | None:
@@ -578,6 +612,7 @@ def _write_meta(
         "seeds": seeds,
         "blocked": blocked,
         "appearance": scenario.appearance,
+        "age": _stated_age(idea),
     }
     (folder / "series.json").write_text(json.dumps(document, ensure_ascii=False, indent=2), encoding="utf-8")
     if not kept or any(path.suffix.lower() != ".png" for path in kept):

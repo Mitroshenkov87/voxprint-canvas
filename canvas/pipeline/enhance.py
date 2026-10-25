@@ -335,6 +335,9 @@ class QwenRewriter:
             names = index.get("weight_map") or {}
             if not isinstance(names, dict) or not causal_lm_ready(config, names):
                 raise SnapshotError("the text encoder cannot generate text")
+            if self.device is None and not torch.cuda.is_available():
+                note_error("writer.nocuda")
+                note_tag("writer_fallback", "nocuda")
             device = self.device or ("cuda" if torch.cuda.is_available() else "cpu")
             tokenizer = transformers.AutoTokenizer.from_pretrained(
                 self.tokenizer_dir, local_files_only=True,
@@ -387,13 +390,16 @@ class QwenRewriter:
 
 
 def _causal_model(transformers: Any, torch: Any, folder: Path, device: str) -> Any:
-    """Load the causal LM. ``device`` is ``cuda`` or ``cpu``."""
-    model = transformers.AutoModelForCausalLM.from_pretrained(
-        folder,
-        torch_dtype=torch.bfloat16,
-        local_files_only=True,
-        low_cpu_mem_usage=True,
-    )
+    """Load the causal LM in BF16. ``device`` is ``cuda`` or ``cpu``.
+
+    BF16 is what fits a 16 GB card. A full-precision load does not.
+    """
+    common = {"local_files_only": True, "low_cpu_mem_usage": True}
+    loader = transformers.AutoModelForCausalLM.from_pretrained
+    try:
+        model = loader(folder, dtype=torch.bfloat16, **common)
+    except TypeError:
+        model = loader(folder, torch_dtype=torch.bfloat16, **common)
     if device != "cpu":
         model = model.to(device)
     return model.eval()

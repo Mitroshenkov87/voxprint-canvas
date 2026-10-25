@@ -10,6 +10,14 @@ import gc
 from typing import Any
 
 
+def release_gate_weights(gate: object) -> None:
+    """Drop a gate's GPU weights, then return the freed blocks to the driver."""
+    release = getattr(gate, "release_weights", None)
+    if callable(release):
+        release()
+    release_cuda_cache()
+
+
 def release_cuda_cache() -> None:
     """Collect dropped models and return their CUDA blocks to the driver."""
     gc.collect()

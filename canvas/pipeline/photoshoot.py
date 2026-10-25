@@ -205,11 +205,32 @@ def scenario_request(
     return json.dumps(payload, ensure_ascii=False)
 
 
+SINGLE_FRAME = "one photo, single frame"
+COLLAGE_NEGATIVE = "collage, grid, panels, split screen"
+
+
+def single_frame(line: str) -> str:
+    """Append the single-frame wording when the line does not already carry it."""
+    if SINGLE_FRAME in line:
+        return line
+    text = line.strip()
+    if not text:
+        return SINGLE_FRAME
+    return f"{text}, {SINGLE_FRAME}"
+
+
+def frame_negative(negative: str) -> str:
+    """The caller's negative plus the collage wording."""
+    if COLLAGE_NEGATIVE in negative:
+        return negative
+    return ", ".join(part for part in (negative.strip(), COLLAGE_NEGATIVE) if part)
+
+
 def assemble_line(subject: str, shot: Shot, *, include_camera: bool) -> str:
     """The line sent for one shot.
 
-    Order is pose, camera when included, scene, the subject block, then place.
-    The subject block stays verbatim.
+    Order is pose, camera when included, scene, the subject block, place, then
+    one photo in a single frame. The subject block stays verbatim.
 
     Args:
         subject: The verbatim subject block.
@@ -219,7 +240,7 @@ def assemble_line(subject: str, shot: Shot, *, include_camera: bool) -> str:
     parts = [shot.pose.strip()]
     if include_camera and shot.camera.strip():
         parts.append(shot.camera.strip())
-    parts.extend((shot.scene.strip(), subject.strip(), shot.place.strip()))
+    parts.extend((shot.scene.strip(), subject.strip(), shot.place.strip(), SINGLE_FRAME))
     return ", ".join(part for part in parts if part)
 
 

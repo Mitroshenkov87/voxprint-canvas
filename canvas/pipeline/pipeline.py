@@ -20,7 +20,7 @@ from canvas.models.plan import BaseNotSelected, ModeUnavailable
 from canvas.models.registry import Catalog
 from canvas.models.sizes import FOUR_K_LONG, frame_size, family_for, upscale_factor
 from canvas.pipeline.engine import run_generator
-from canvas.pipeline.gpu_release import free_vram_gb, release_cuda_cache
+from canvas.pipeline.gpu_release import free_vram_gb, release_cuda_cache, release_gate_weights
 from canvas.pipeline.vram_probe import PeakVramProbe
 from canvas.safety.gate import AgeGate, SafetyError
 from canvas.safety.image import RawImage, SafeImage
@@ -144,6 +144,7 @@ class Pipeline:
             self.paused = False
             with timed("input_check"):
                 screened = self.gate.release_request(prompt, mode.value, inputs, explicit=explicit)
+            release_gate_weights(self.gate)
             try:
                 width, height = self._frame(mode, aspect, output in {"2k", "4k"})
                 if output == "4k" and not _enlarge_ready(self.enlarge):

@@ -78,11 +78,18 @@ def _arm(monkeypatch, free_gb: float, cast: bool = True) -> None:
     monkeypatch.setattr(runtime, "_free_vram_bytes", lambda: int(free_gb * GB))
 
 
-def test_16_gb_stores_fp8_and_stays_resident(monkeypatch) -> None:
-    pipe = _Pipe(6 * GB)  # 6 GB transformer + 4 GB encoder at FP8
+def test_16_gb_stores_fp8_and_offloads_when_activations_would_fill_the_card(monkeypatch) -> None:
+    pipe = _Pipe(6 * GB)  # 6 GB transformer + 4 GB encoder at FP8, plus activation room
     _arm(monkeypatch, 15.2)
     runtime._place(pipe, Tier.GB16)
     assert pipe.transformer.size == 1 and pipe.text_encoder.size == 1
+    assert pipe.installed == ["model"]
+
+
+def test_16_gb_stays_resident_when_the_pipeline_is_small(monkeypatch) -> None:
+    pipe = _Pipe(1 * GB)  # 1 GB transformer + 4 GB encoder at FP8, activation room still fits
+    _arm(monkeypatch, 15.2)
+    runtime._place(pipe, Tier.GB16)
     assert pipe.installed == ["cuda"]
 
 

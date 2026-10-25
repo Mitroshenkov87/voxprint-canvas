@@ -130,7 +130,7 @@ def _writer_dir(folder: Path) -> Path:
     return folder
 
 
-def _arm_writer(monkeypatch, devices: list[str], codes: list[str], *, fail: str) -> None:
+def _arm_writer(monkeypatch, devices: list[str], codes: list[str], *, fail: str, cuda: bool = True) -> None:
     class _Tensor:
         shape = (1, 2)
 
@@ -173,7 +173,7 @@ def _arm_writer(monkeypatch, devices: list[str], codes: list[str], *, fail: str)
     class _Cuda:
         @staticmethod
         def is_available() -> bool:
-            return True
+            return cuda
 
         @staticmethod
         def empty_cache() -> None:
@@ -256,6 +256,18 @@ def test_a_writer_error_that_is_not_oom_is_raised(tmp_path: Path, monkeypatch) -
     with pytest.raises(RuntimeError, match="weights failed"):
         _run_writer(folder)
     assert codes == []
+
+
+def test_no_cuda_is_a_visible_cpu_fallback(tmp_path: Path, monkeypatch) -> None:
+    devices: list[str] = []
+    codes: list[str] = []
+    folder = _writer_dir(tmp_path / "encoder")
+    _arm_writer(monkeypatch, devices, codes, fail="", cuda=False)
+    _reply, line = _run_writer(folder)
+    assert devices == ["cpu"]
+    assert codes == ["writer.nocuda"]
+    assert "writer=cpu" in line
+    assert "writer_fallback=nocuda" in line
 
 
 def test_an_explicit_cpu_writer_does_not_report_oom(tmp_path: Path, monkeypatch) -> None:

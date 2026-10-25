@@ -74,12 +74,96 @@ class Shot:
 
 @dataclass(frozen=True)
 class Scenario:
-    """A subject block and the shots that still qualify."""
+    """A subject block and the shots that still qualify.
+
+    ``appearance`` is the look shared by every frame of a person series, or empty.
+    """
 
     subject_block: str
     descriptors: tuple[str, ...]
     place: str
     shots: tuple[Shot, ...]
+    appearance: str = ""
+
+
+# One numbered shot line stays under 60 words. This is the new-token budget for that line.
+TOKENS_PER_FRAME = 160
+
+_PERSON_WORDS = (
+    "woman", "women", "man", "men", "person", "people", "human", "humans",
+    "lady", "ladies", "gentleman", "gentlemen", "actress", "actresses", "actor", "actors",
+    "женщина", "женщину", "женщины", "женщине", "женщиной",
+    "мужчина", "мужчину", "мужчины", "мужчине",
+    "человек", "человека", "человеку",
+    "люди", "людей", "людям",
+)
+_PERSON_RE = re.compile(
+    r"(?<![\w])(?:" + "|".join(re.escape(word) for word in sorted(_PERSON_WORDS, key=len, reverse=True)) + r")(?![\w])",
+    re.IGNORECASE,
+)
+_ETHNICITY = (
+    "East Asian", "South Asian", "Southeast Asian", "Black", "European", "Middle Eastern", "Hispanic",
+)
+_HAIR = (
+    "straight black hair", "wavy dark brown hair", "curly black hair",
+    "straight chestnut hair", "wavy auburn hair", "straight blonde hair",
+)
+_EYES = ("dark brown eyes", "brown eyes", "hazel eyes", "green eyes", "amber eyes", "blue eyes")
+_FACE = ("oval face", "square face", "oblong face", "angular face", "diamond face", "heart-shaped face")
+_BUILD = ("athletic build", "average build", "broad-shouldered build", "lean build", "sturdy build", "solid build")
+
+
+def fixed_appearance(idea: str, seed: int) -> str:
+    """One concrete look for a person series, or empty when the idea has no person.
+
+    The same idea and seed always return the same text. The text names ethnicity,
+    hair, eyes, face shape, and build.
+
+    Args:
+        idea: The prompt-field text.
+        seed: The series seed.
+    """
+    if not idea or _PERSON_RE.search(idea) is None:
+        return ""
+    if isinstance(seed, bool) or not isinstance(seed, int):
+        seed = 0
+    mix = zlib.crc32(f"{seed}\n{idea.strip()}".encode("utf-8"))
+    tables = (_ETHNICITY, _HAIR, _EYES, _FACE, _BUILD)
+    parts = [table[(mix >> (shift * 5)) % len(table)] for shift, table in enumerate(tables)]
+    return ", ".join(parts)
+
+
+def scenario_token_budget(count: int) -> int:
+    """New-token cap for a scenario reply of ``count`` shots.
+
+    The cap grows with the frame count and never exceeds ``SCENARIO_TOKENS``.
+
+    Args:
+        count: How many shots this reply should contain.
+    """
+    frames = count if isinstance(count, int) and not isinstance(count, bool) and count >= 1 else 1
+    return min(SCENARIO_TOKENS, frames * TOKENS_PER_FRAME)
+
+
+def tokens_for_request(prompt: str) -> int:
+    """New-token cap for one scenario request, from the JSON ``count`` in ``prompt``.
+
+    Args:
+        prompt: The user message, a JSON object, optionally followed by a reminder.
+    """
+    count = 1
+    start = prompt.find("{")
+    end = prompt.rfind("}")
+    if start >= 0 and end > start:
+        try:
+            body = json.loads(prompt[start:end + 1])
+        except json.JSONDecodeError:
+            body = None
+        if isinstance(body, dict):
+            raw = body.get("count")
+            if isinstance(raw, int) and not isinstance(raw, bool) and raw >= 1:
+                count = raw
+    return scenario_token_budget(count)
 
 
 def scenario_request(

@@ -19,7 +19,7 @@ from canvas.models.plan import PIPELINE_IMG2IMG, PIPELINE_TEXT, CallPlan
 from canvas.ui.shell_layout import open_layout
 from canvas.ui.shell_screen import ShellWindow
 from tests.fakes import World
-from tests.test_photoshoot import IDEA, _payload
+from tests.test_photoshoot import IDEA, PERSON, _payload, fixed_appearance
 from voxprint_common.i18n import set_language
 
 
@@ -127,3 +127,37 @@ def test_hero_frame_feeds_img2img_at_045_and_the_series_is_one_history_entry(app
     assert recorded[entry.item_id]["kind"] == "series"
     assert recorded[entry.item_id]["frames"] == [f"{index:02}.png" for index in range(1, 7)]
     assert window._series_folders[entry.item_id] == recorded[entry.item_id]["folder"]
+
+
+def test_a_person_series_anchors_at_the_default_strength(app, home: Path, tmp_path, monkeypatch):
+    del app
+    _Pipe.calls = []
+    monkeypatch.setattr(runtime, "_import_torch", _stub_torch)
+    monkeypatch.setattr(runtime, "_import_diffusers", _stub_diffusers)
+    monkeypatch.setattr(runtime, "_place", lambda pipe, tier: None)
+    monkeypatch.setattr(runtime, "reset_peak_allocated", lambda: None)
+    monkeypatch.setattr("canvas.ui.photoshoot_run.selectable", lambda: (object(),))
+    gate = World().gate()
+    shell = open_layout(home / "state", gate=gate)
+    window = ShellWindow(shell, tier=Tier.GB16, enlarge=object(), runner=_RenderRunner(gate, tmp_path))
+    window.photoshoot.writer = lambda _prompt: _payload(PERSON)
+    assert window.photoshoot.strength == "medium"
+    window.view.set_prompt_text(PERSON)
+    window.show()
+    window.findChild(QPushButton, "photoshootMode").click()
+    window.findChild(QPushButton, "generate").click()
+    QApplication.processEvents()
+
+    look = fixed_appearance(PERSON, int(window.shell.layout.seed))
+    names = [name for name, _ in _Pipe.calls]
+    assert names[0] == "text"
+    assert len(names) == 6 and set(names[1:]) == {"img2img"}
+    for _name, kwargs in _Pipe.calls[1:]:
+        assert kwargs["strength"] == pytest.approx(REFERENCE_STRENGTH)
+        assert kwargs["strength"] >= REFERENCE_MIN
+        assert look in kwargs["prompt"]
+    assert all(look in row.full and row.full.count(look) == 1 for row in window.photoshoot.rows)
+    folder = next((home / "state" / "pictures" / "series").iterdir())
+    document = json.loads((folder / "series.json").read_text(encoding="utf-8"))
+    assert document["appearance"] == look
+    window.close()

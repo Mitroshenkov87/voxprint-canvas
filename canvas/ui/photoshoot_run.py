@@ -23,7 +23,7 @@ from canvas.models.registry import load_catalog
 from canvas.models.snapshots import SnapshotError
 from canvas.pipeline.adult_direction import scenario_system
 from canvas.pipeline.enhance import open_rewriter
-from canvas.pipeline.photoshoot import SCENARIO_TOKENS, SYSTEM_PROMPT, Scenario
+from canvas.pipeline.photoshoot import SYSTEM_PROMPT, Scenario, tokens_for_request
 from canvas.pipeline.series import REFERENCE_STRENGTH, SeriesFrame, SeriesResult, run_series
 
 if TYPE_CHECKING:
@@ -87,7 +87,7 @@ def run_photoshoot(window: ShellWindow) -> None:
     def generate(line: str, seed: int, hero: SeriesFrame | None, strength: float | None) -> RawImage | None:
         used = _seed(bar.seed_mode, base_seed, seed)
         prompt = _compose(layout, line, style)
-        # High consistency may pass the first kept frame as a loose style reference.
+        # Later shots can follow the first kept frame. The first frame itself is text.
         picture = job._replace(
             prompt=prompt,
             seed=used,
@@ -330,7 +330,8 @@ def adult_content(layout: SimpleLayout) -> bool:
 def _model_reply(window: ShellWindow, prompt: str, adult: bool = False) -> str:
     try:
         rewriter = open_rewriter(
-            load_catalog(), window.tier, models_dir(), busy_progress(window), max_new_tokens=SCENARIO_TOKENS,
+            load_catalog(), window.tier, models_dir(), busy_progress(window),
+            max_new_tokens=tokens_for_request(prompt),
         )
     except (SnapshotError, OSError) as exc:
         raise _Halt(str(exc), unavailable=True) from exc

@@ -7,13 +7,13 @@ from pathlib import Path
 import pytest
 
 from canvas.app.main import _parser, main
-from canvas.app.photoshoot_cli import model_generate, reject_frames, run_command
+from canvas.app.photoshoot_cli import model_generate, model_rewrite, reject_frames, run_command
 from canvas.app.platform import GpuCheck, OsCheck
 from canvas.app.shell_run import RunStopped, ShellRunner
 from canvas.infra.gpu import GpuInfo
 from canvas.models.modes import Mode, Tier
 from canvas.pipeline.adult_direction import ADULT_ANCHOR
-from canvas.pipeline.photoshoot import SYSTEM_PROMPT
+from canvas.pipeline.photoshoot import SYSTEM_PROMPT, scenario_request, scenario_token_budget
 from canvas.pipeline.series import REFERENCE_STRENGTH, SeriesResult
 from canvas.safety.constants import IMAGE_MINOR_SEXUAL
 from canvas.safety.gate import StylisedBlocked
@@ -21,7 +21,7 @@ from canvas.safety.image import RawImage
 from canvas.safety.inputs import ImageRole
 from canvas.ui.shell_layout import PictureJob
 from tests.fakes import World, avif_file, rgb
-from tests.test_photoshoot import IDEA, _frame, _payload
+from tests.test_photoshoot import IDEA, PERSON, _frame, _payload, fixed_appearance
 
 
 def _series_line(prompt: str) -> str:
@@ -201,6 +201,70 @@ def test_ten_frames_vary_pose_camera_and_seed(monkeypatch, tmp_path: Path) -> No
         assert mode is Mode.RESTYLE
         assert strength == REFERENCE_STRENGTH
         assert roles == (ImageRole.INIT,)
+
+
+def test_a_person_series_anchors_by_default(monkeypatch, tmp_path: Path) -> None:
+    calls: list[tuple[str, Mode, int, float | None, tuple[ImageRole, ...]]] = []
+
+    class _Runner:
+        def __init__(self, *, gate: object, tier: object, enlarge: object) -> None:
+            del gate, tier, enlarge
+            self.img2img_strength: float | None = None
+
+        def __call__(self, job: PictureJob, inputs: tuple[object, ...]) -> object:
+            roles = tuple(item.role for item in inputs if isinstance(item.role, ImageRole))
+            calls.append((job.prompt, job.mode, job.seed, self.img2img_strength, roles))
+            return _frame()
+
+    monkeypatch.setattr("canvas.app.photoshoot_cli.ShellRunner", _Runner)
+    gate = World().gate()
+    payload, code = run_command(
+        idea=PERSON,
+        folder=tmp_path,
+        frames=5,
+        seed=3,
+        style="photo",
+        places="same",
+        adult=False,
+        age_gate=gate,
+        rewrite=_rewrite,
+        generate=model_generate(gate, Tier.GB16, "photo", False),
+    )
+    look = fixed_appearance(PERSON, 3)
+    assert code == 0 and payload["made"] == 5
+    assert look
+    lines = Path(str(payload["scenario"])).read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 5
+    assert all(line.count(look) == 1 and PERSON in line for line in lines)
+    assert calls[0][1] is Mode.TEXT and calls[0][3] is None and calls[0][4] == ()
+    assert look in calls[0][0]
+    for prompt, mode, _seed, strength, roles in calls[1:]:
+        assert look in prompt
+        assert mode is Mode.RESTYLE
+        assert strength == REFERENCE_STRENGTH
+        assert roles == (ImageRole.INIT,)
+
+
+def test_model_rewrite_caps_tokens_at_the_requested_frame_count(monkeypatch) -> None:
+    seen: dict[str, int] = {}
+
+    class _Rewriter:
+        def complete(self, prompt: str, *, system: str) -> str:
+            del prompt, system
+            return "{}"
+
+        def close(self) -> None:
+            return None
+
+    def open_rewriter(*_args: object, **kwargs: object) -> _Rewriter:
+        seen["tokens"] = int(kwargs["max_new_tokens"])  # type: ignore[arg-type]
+        return _Rewriter()
+
+    monkeypatch.setattr("canvas.app.photoshoot_cli.open_rewriter", open_rewriter)
+    request = scenario_request(PERSON, 5, "photo", "same")
+    assert request is not None
+    model_rewrite(Tier.GB16, False)(request)
+    assert seen["tokens"] == scenario_token_budget(5)
 
 
 def test_a_stopped_frame_is_not_produced(monkeypatch, capsys, tmp_path: Path) -> None:

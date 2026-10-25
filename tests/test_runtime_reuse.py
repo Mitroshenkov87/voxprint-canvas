@@ -20,7 +20,7 @@ from canvas.pipeline.series import REFERENCE_MIN, REFERENCE_STRENGTH, run_series
 from canvas.safety.image import RawImage
 from canvas.safety.inputs import ImageRole, PendingInput
 from tests.fakes import World
-from tests.test_photoshoot import IDEA, _payload
+from tests.test_photoshoot import IDEA, PERSON, _payload
 
 _GB32 = 32 * 1024**3
 _GB64 = 64 * 1024**3
@@ -34,6 +34,10 @@ class _Pipe:
     def __call__(self, **kwargs):
         image = Image.new("RGB", (kwargs["width"], kwargs["height"]), (40, 90, 120))
         return types.SimpleNamespace(images=[image])
+
+    def to(self, device: str):
+        self.device = device
+        return self
 
 
 def _install(monkeypatch, *, fail_on_call: int | None = None) -> tuple[list[int], list[Tier]]:
@@ -141,6 +145,51 @@ def test_a_ten_frame_series_loads_the_pipeline_once(tmp_path: Path, monkeypatch)
     assert len(result.kept) == 10
     assert loads[0] == 1
     assert places == [Tier.GB16]
+
+
+def test_a_person_series_loads_and_casts_once(tmp_path: Path, monkeypatch) -> None:
+    real_place = runtime._place
+    loads, _places = _install(monkeypatch)
+    casts: list[str] = []
+
+    def cast(pipe: object, torch: object, apply: object) -> tuple[str, ...]:
+        del pipe, torch, apply
+        casts.append("fp8")
+        return ("transformer",)
+
+    monkeypatch.setattr(runtime, "_place", real_place)
+    monkeypatch.setattr(runtime, "install_fp8_storage", cast)
+    monkeypatch.setattr(runtime, "_free_vram_bytes", lambda: 20 * 1024**3)
+    monkeypatch.setattr(runtime, "resident_fits", lambda pipe, free: True)
+    gate = World().gate()
+    heroes: list[object] = []
+
+    def draw(line: str, seed: int, hero, strength: float):
+        del seed, strength
+        heroes.append(hero)
+        found = hero if isinstance(hero, RawImage) else None
+        return _render(gate, tmp_path / "weights", line, found)
+
+    result = run_series(
+        idea=PERSON,
+        count=6,
+        style="photo",
+        place_mode="same",
+        seed=3,
+        strength=None,
+        include_camera=lambda: True,
+        rewrite=lambda _prompt: _payload(PERSON),
+        age_gate=gate,
+        draw_frame=draw,
+        cancelled=lambda: False,
+        folder=tmp_path / "series",
+    )
+    assert result.stopped == ""
+    assert len(result.kept) == 6
+    assert heroes[0] is None
+    assert all(isinstance(hero, RawImage) for hero in heroes[1:])
+    assert loads[0] == 1
+    assert casts == ["fp8"]
 
 
 def test_a_run_releases_the_pipeline_below_64gb(tmp_path: Path, monkeypatch) -> None:

@@ -28,6 +28,7 @@ from canvas.pipeline.photoshoot import (
     Shot,
     accept_shot,
     assemble_line,
+    fixed_appearance,
     planned_shots,
     read_drafts,
     reply_declined,
@@ -129,8 +130,14 @@ def _run_series(
         return _stop("idea", reason, "idea.policy")
     if adult and not ages_allowed(idea):
         return _stop("idea", "", "idea.minor")
+    appearance = fixed_appearance(idea, seed)
+    # None is the caller's default. A person series then follows the first frame
+    # loosely enough that the pose can still change.
+    series_strength = REFERENCE_STRENGTH if strength is None and appearance else strength
     with clock.measure("scenario"):
-        scenario, fail_code, source = _scenario(idea, count, style, mode, rewrite, adult=adult)
+        scenario, fail_code, source = _scenario(
+            idea, count, style, mode, rewrite, adult=adult, appearance=appearance,
+        )
     if scenario is None or len(scenario.shots) < count:
         return _stop("scenario", "", fail_code if scenario is None else "scenario.count")
     lines = [assemble_line(scenario.subject_block, shot, include_camera=True) for shot in scenario.shots]
@@ -189,6 +196,7 @@ def _run_series(
             return _store_frame(folder, index, released, container), None
 
     try:
+        # Every frame of the series shares this scope, so the pipeline and its weight cast load once.
         with pipeline_scope():
             for index, shot in enumerate(scenario.shots):
                 if cancelled():
@@ -230,7 +238,7 @@ def _run_series(
                             folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept,
                         )
                     continue
-                active = style_reference(strength)
+                active = style_reference(series_strength)
                 if active is not None:
                     # A style reference must be a frame whose output check already passed.
                     stop = settle()
@@ -466,11 +474,14 @@ def _scenario(
     rewrite: Callable[[str], str],
     *,
     adult: bool,
+    appearance: str = "",
 ) -> tuple[Scenario | None, str, Source]:
     """Shots from the writer, then planned shots for any frame it did not cover."""
     subject = idea.strip()
     if not subject:
         return None, "scenario.format", ""
+    if appearance:
+        subject = f"{subject}, {appearance}"
     collected: list[Shot] = []
     place = ""
     replies: list[str] = []
@@ -492,7 +503,7 @@ def _scenario(
     if len(collected) < count:
         return None, "scenario.count", ""
     source: Source = "writer" if written >= count else ("planned" if written == 0 else "mixed")
-    return Scenario(subject, (subject,), place, tuple(collected[:count])), "", source
+    return Scenario(subject, (subject,), place, tuple(collected[:count]), appearance), "", source
 
 
 def _read_chunk(
@@ -566,6 +577,7 @@ def _write_meta(
         "lines": lines,
         "seeds": seeds,
         "blocked": blocked,
+        "appearance": scenario.appearance,
     }
     (folder / "series.json").write_text(json.dumps(document, ensure_ascii=False, indent=2), encoding="utf-8")
     if not kept or any(path.suffix.lower() != ".png" for path in kept):

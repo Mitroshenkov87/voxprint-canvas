@@ -2,20 +2,31 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import replace
 from pathlib import Path
 
 from canvas.pipeline.enhance import stated_ages
 from canvas.pipeline.photoshoot import (
     FORMAT_REMINDER,
+    SCENARIO_TOKENS,
+    TOKENS_PER_FRAME,
     Shot,
+    _BUILD,
+    _ETHNICITY,
+    _EYES,
+    _FACE,
+    _HAIR,
     _object,
     assemble_line,
+    fixed_appearance,
     planned_shots,
     scenario_request,
+    scenario_token_budget,
+    tokens_for_request,
     validate_scenario,
 )
-from canvas.pipeline.series import ages_allowed, run_series
+from canvas.pipeline.series import REFERENCE_STRENGTH, ages_allowed, run_series
 from canvas.safety.denylist import scan
 from canvas.safety.gate import AgeGate, GenerationBlocked, SafetyUnavailable, StylisedBlocked
 from tests.fakes import World
@@ -23,6 +34,13 @@ from tests.fakes import World
 
 IDEA = "Yellow ceramic teapot with a blue handle"
 AGED = "a woman, 34 years old, in a red coat"
+PERSON = "invented adult woman, 25 years old"
+_BANNED_LOOK = re.compile(
+    r"\b(?:young|youthful|youth|teen|teenage|child|girl|boy|kid|kids|petite|baby|infant|"
+    r"smooth|round|mature|older|elderly|aged|aging|ageing|wrinkle|wrinkles|grey|gray|"
+    r"year|years|old|toddler|minor|school|student)\b",
+    re.IGNORECASE,
+)
 
 
 def _shots(count: int, place: str, *, scene_age: str = "", start: int = 0) -> list[dict[str, str]]:
@@ -539,6 +557,8 @@ def test_numbered_lines_are_read_as_shots(tmp_path: Path) -> None:
     document = json.loads((tmp_path / "series.json").read_text(encoding="utf-8"))
     assert result.stopped == "" and result.source == "writer"
     assert len(result.kept) == 6
+    assert document["appearance"] == ""
+    assert document["subject_block"] == IDEA
     assert document["lines"][0] == f"still, 50 mm, eye level, view 0, soft light, {IDEA}, kitchen table"
 
 
@@ -666,3 +686,100 @@ def test_a_three_part_line_is_read_by_its_last_part(tmp_path: Path) -> None:
     still = _run(tmp_path / "same", rewrite=lambda _prompt: "\n".join(
         f"{index + 1}. view {index} | still | 85 mm lens" for index in range(6)))
     assert still.source == "writer"
+
+
+def test_fixed_appearance_is_stable_and_names_a_concrete_look() -> None:
+    assert fixed_appearance(IDEA, 3) == ""
+    assert fixed_appearance("a manual camera", 1) == ""
+    assert fixed_appearance("the manager of the shop", 1) == ""
+    assert fixed_appearance("personal computer", 1) == ""
+    assert fixed_appearance("humanoid robot", 1) == ""
+    assert fixed_appearance(PERSON, 3) == fixed_appearance(f"  {PERSON}  ", 3)
+    assert fixed_appearance("a man in a wool coat", 1)
+    assert fixed_appearance("женщина в красном пальто", 2)
+    for table in (_ETHNICITY, _HAIR, _EYES, _FACE, _BUILD):
+        for item in table:
+            assert _BANNED_LOOK.search(item) is None
+            assert stated_ages(item) == ()
+    for seed in range(400):
+        look = fixed_appearance(PERSON, seed)
+        assert look == fixed_appearance(PERSON, seed)
+        assert _BANNED_LOOK.search(look) is None
+        assert stated_ages(look) == ()
+        assert len([part for part in look.split(",") if part.strip()]) == 5
+
+
+def test_a_person_series_repeats_one_appearance_and_anchors_the_hero(tmp_path: Path) -> None:
+    seen: list[tuple[str, object | None, float | None]] = []
+
+    def generate(line: str, seed: int, hero: object | None, strength: float | None) -> object:
+        del seed
+        seen.append((line, hero, strength))
+        return _frame()
+
+    result = _run(tmp_path, idea=PERSON, generate=generate)
+    look = fixed_appearance(PERSON, 3)
+    document = json.loads((tmp_path / "series.json").read_text(encoding="utf-8"))
+    assert result.stopped == ""
+    assert len(result.kept) == 6
+    assert look
+    assert document["appearance"] == look
+    assert document["subject_block"] == f"{PERSON}, {look}"
+    assert all(line.count(look) == 1 and PERSON in line for line in document["lines"])
+    assert all(sorted(stated_ages(line)) == [25] for line in document["lines"])
+    assert seen[0][1] is None
+    assert all(item[1] is not None for item in seen[1:])
+    assert [item[2] for item in seen] == [REFERENCE_STRENGTH] * 6
+
+
+def test_a_planned_person_series_shares_the_same_appearance(tmp_path: Path) -> None:
+    prompts: list[str] = []
+    strengths: list[float | None] = []
+
+    def generate(line: str, seed: int, hero: object | None, strength: float | None) -> object:
+        del seed, hero
+        prompts.append(line)
+        strengths.append(strength)
+        return _frame()
+
+    result = _run(tmp_path, idea=PERSON, rewrite=lambda _prompt: "no lines here", generate=generate)
+    look = fixed_appearance(PERSON, 3)
+    assert result.source == "planned"
+    assert len(prompts) == 6
+    assert all(line.count(look) == 1 for line in prompts)
+    assert strengths == [REFERENCE_STRENGTH] * 6
+
+
+def test_an_explicit_strength_is_kept_for_a_person(tmp_path: Path) -> None:
+    seen: list[float | None] = []
+
+    def generate(line: str, seed: int, hero: object | None, strength: float | None) -> object:
+        del line, seed, hero
+        seen.append(strength)
+        return _frame()
+
+    def once(folder: Path, strength: float) -> None:
+        seen.clear()
+        run_series(
+            idea=PERSON, count=2, style="photo", place_mode="same", seed=3, strength=strength,
+            include_camera=lambda: True, rewrite=lambda _prompt: _payload(PERSON, 2),
+            age_gate=World().gate(), draw_frame=generate, cancelled=lambda: False, folder=folder,
+        )
+
+    once(tmp_path / "kept", 0.9)
+    assert seen == [0.9, 0.9]
+    once(tmp_path / "text", 0.5)
+    assert seen == [None, None]
+
+
+def test_scenario_token_budget_follows_the_frame_count() -> None:
+    assert scenario_token_budget(1) == TOKENS_PER_FRAME
+    assert scenario_token_budget(5) == 5 * TOKENS_PER_FRAME
+    assert scenario_token_budget(5) < SCENARIO_TOKENS
+    assert scenario_token_budget(99) == SCENARIO_TOKENS
+    assert scenario_token_budget(True) == TOKENS_PER_FRAME
+    request = scenario_request(PERSON, 5, "photo", "same")
+    assert request is not None
+    assert tokens_for_request(request) == scenario_token_budget(5)
+    assert tokens_for_request(f"{request}\n{FORMAT_REMINDER}") == scenario_token_budget(5)
+    assert tokens_for_request("ping") == scenario_token_budget(1)

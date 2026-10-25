@@ -18,11 +18,18 @@ from canvas.infra.stage_timer import log_stage, note_tag, timed
 from canvas.infra.vram_trace import drop_model, hold_model, note_vram
 from canvas.models.modes import Tier
 from canvas.pipeline.bf16_schedule import VramRefused
-from canvas.pipeline.device_guard import DeviceRefused, place_on_cuda, require_cuda
+from canvas.pipeline.device_guard import (
+    DeviceRefused,
+    place_on_cuda,
+    pretrained_attempts,
+    require_cuda,
+    weights_on_cuda,
+)
 from canvas.pipeline.offload import cast_module_fp8
 from canvas.models.registry import Catalog, ModelSpec
 from canvas.models.runtime import release_pipeline
 from canvas.models.snapshots import SnapshotError, download_snapshot, snapshot_ready
+from canvas.models.verified import flush_process_cache, process_cache
 from canvas.safety.gate import SafetyError
 
 AGING_DESCRIPTOR_MIN_AGE = 45
@@ -275,11 +282,13 @@ def open_rewriter(
     if stage not in {"writer", "enhancer"}:
         raise ValueError(f"unknown stage {stage}")
     spec = writer_spec(catalog)
-    folder = snapshot_ready(spec, root)
+    folder = snapshot_ready(spec, root, process_cache())
     if folder is None:
         if progress is not None:
             progress(text("writer.download"))
         folder = download_snapshot(spec, root, progress)
+    else:
+        flush_process_cache()
     return QwenRewriter(
         folder,
         folder,
@@ -377,13 +386,10 @@ class QwenRewriter:
                 self.tokenizer_dir, local_files_only=True,
             )
             try:
-                # The 16 GB card stages the weights on the CPU only to cast them.
-                # Moving the full BF16 copy onto CUDA asks for the model twice and
-                # runs out of memory even when the cast model would fit. An out-of-
-                # memory error stops the series. Generation does not continue on the CPU.
-                model = _causal_model(
-                    transformers, torch, self.encoder_dir, "cpu" if self.tier is Tier.GB16 else device,
-                )
+                # Safetensors are mapped onto CUDA. A later ``to`` of the whole
+                # module would keep the CPU copy alive until the copy finished.
+                # FP8 is cast on the card. An out-of-memory error stops the series.
+                model = _causal_model(transformers, torch, self.encoder_dir, device)
                 if device != "cpu" and self.tier is Tier.GB16:
                     with timed("cast"):
                         if not cast_module_fp8(model, torch):
@@ -391,7 +397,8 @@ class QwenRewriter:
                     if cuda:
                         torch.cuda.empty_cache()
                     with timed("place"):
-                        model = place_on_cuda(model)
+                        if not weights_on_cuda(model):
+                            model = place_on_cuda(model)
                 if device != "cpu":
                     require_cuda(model, "writer.device", torch)
             except DeviceRefused:
@@ -460,30 +467,29 @@ class QwenRewriter:
 def _causal_model(transformers: Any, torch: Any, folder: Path, device: str) -> Any:
     """Load the causal LM in BF16. ``device`` is ``cuda`` or ``cpu``.
 
-    BF16 is what fits a 16 GB card. A full-precision load does not.
-    ``device_map`` stays unset so the loader does not pin the weights to the CPU.
+    CUDA maps the safetensors file onto the card. Parameters that are still on
+    the CPU move one tensor at a time, so the module is not copied twice.
     """
-    common = {"local_files_only": True, "low_cpu_mem_usage": True}
     loader = transformers.AutoModelForCausalLM.from_pretrained
-    model = _open_causal(loader, folder, torch, common)
-    if device != "cpu":
-        model = model.to(device)
+    model = _open_causal(loader, folder, torch, device)
+    if device != "cpu" and not weights_on_cuda(model):
+        model = place_on_cuda(model)
     return model.eval()
 
 
-def _open_causal(loader: Any, folder: Path, torch: Any, common: dict[str, Any]) -> Any:
+def _open_causal(loader: Any, folder: Path, torch: Any, device: str) -> Any:
     """Open the causal LM. A build that rejects ``device_map`` is tried without it."""
-    attempts = (
-        {**common, "dtype": torch.bfloat16, "device_map": None},
-        {**common, "torch_dtype": torch.bfloat16, "device_map": None},
-        {**common, "dtype": torch.bfloat16},
-        {**common, "torch_dtype": torch.bfloat16},
-    )
-    error: TypeError | None = None
-    for kwargs in attempts:
+    attempts = pretrained_attempts(torch.bfloat16, device if device == "cuda" else "cpu")
+    error: Exception | None = None
+    last = len(attempts) - 1
+    for index, kwargs in enumerate(attempts):
         try:
             return loader(folder, **kwargs)
         except TypeError as exc:
+            error = exc
+        except (ValueError, ImportError) as exc:
+            if index == last:
+                raise
             error = exc
     if error is None:
         raise SnapshotError("the text encoder cannot be loaded")

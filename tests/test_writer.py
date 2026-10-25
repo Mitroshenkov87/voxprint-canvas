@@ -13,6 +13,7 @@ from canvas.models.modes import Tier
 from canvas.models.pins import TEXT_ENCODER
 from canvas.models.registry import load_catalog
 from canvas.models.snapshots import _urls
+from canvas.models.verified import process_cache
 from canvas.infra import vram_trace
 from canvas.infra.stage_timer import StageTimes, set_current
 from canvas.pipeline.device_guard import DeviceRefused
@@ -80,6 +81,24 @@ def test_open_rewriter_downloads_the_writer_and_reuses_one_folder(tmp_path: Path
     assert seen["encoder"] == seen["tokenizer"] == tmp_path / "writer"
     assert notes[0] == text("writer.download", "en")
     assert writer_spec(load_catalog()).id == WRITER_ID
+
+
+def test_open_rewriter_reuses_the_process_hash_cache(tmp_path: Path, monkeypatch) -> None:
+    seen: dict[str, object] = {}
+
+    def ready(spec: object, root: object, cache: object = None) -> Path:
+        del spec, root
+        seen["cache"] = cache
+        return tmp_path
+
+    class Fake:
+        def __init__(self, encoder_dir: Path, tokenizer_dir: Path, **kwargs: object) -> None:
+            del encoder_dir, tokenizer_dir, kwargs
+
+    monkeypatch.setattr("canvas.pipeline.enhance.snapshot_ready", ready)
+    monkeypatch.setattr("canvas.pipeline.enhance.QwenRewriter", Fake)
+    open_rewriter(load_catalog(), Tier.GB16, tmp_path)
+    assert seen["cache"] is process_cache()
 
 
 def test_scenario_and_enhance_use_the_writer_id(tmp_path: Path, monkeypatch) -> None:
@@ -301,7 +320,7 @@ def test_a_16gb_enhancer_logs_bf16_when_fp8_is_missing(tmp_path: Path, monkeypat
         rewriter.close()
         vram_trace._holders.clear()
     assert reply.startswith("1.")
-    assert devices[0] == "cpu"
+    assert devices[0] == "cuda"
     assert "to:cuda" in devices
     assert any(code.startswith("enhancer.bf16") for code in codes)
 

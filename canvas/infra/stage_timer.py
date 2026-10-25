@@ -20,6 +20,8 @@ from canvas.infra.vram_trace import note_vram
 _NAME = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
 # A long stage prints this often so a stall is visible without waiting for the end line.
 HEARTBEAT_S = 30.0
+_LOG_LOCK = threading.Lock()
+_LOG_TRIES = 5
 
 
 class StageTimes:
@@ -158,12 +160,27 @@ def log_stage(
 
 
 def _heartbeat(stage: str, stop: threading.Event) -> None:
-    """Print and log a line every ``HEARTBEAT_S`` until the stage ends."""
+    """Write a heartbeat to the log every ``HEARTBEAT_S`` until the stage ends.
+
+    ``pythonw`` has no stderr. A print there used to kill this thread after the
+    first wait, so the log never grew. A Windows sharing violation on the log
+    file is retried inside ``_write_stage``.
+    """
     delay = HEARTBEAT_S if HEARTBEAT_S > 0 else 30.0
     while not stop.wait(delay):
         device, vram = _device_and_vram()
-        _write_stage(stage, "beat", device, vram)
-        print(f"stage {stage} beat device={device} vram_mib={vram}", file=sys.stderr, flush=True)
+        _write_stage(stage, "heartbeat", device, vram)
+        _echo_heartbeat(stage, device, vram)
+
+
+def _echo_heartbeat(stage: str, device: str, vram: int) -> None:
+    stream = sys.stderr
+    if stream is None:
+        return
+    try:
+        print(f"stage {stage} heartbeat device={device} vram_mib={vram}", file=stream, flush=True)
+    except (AttributeError, OSError, ValueError, RuntimeError):
+        return
 
 
 def _write_stage(stage: str, event: str, device: str, vram: int, suffix: str = "") -> None:
@@ -173,13 +190,21 @@ def _write_stage(stage: str, event: str, device: str, vram: int, suffix: str = "
     line = f"stage {stage} {event} device={kind} vram_mib={max(0, int(vram))}"
     if suffix:
         line = f"{line} {suffix}"
-    try:
-        folder = logs_dir()
-        folder.mkdir(parents=True, exist_ok=True)
-        with (folder / "voxprint.log").open("a", encoding="utf-8") as handle:
-            handle.write(line + "\n")
-    except OSError:
-        return
+    for attempt in range(_LOG_TRIES):
+        try:
+            with _LOG_LOCK:
+                folder = logs_dir()
+                folder.mkdir(parents=True, exist_ok=True)
+                with (folder / "voxprint.log").open("a", encoding="utf-8") as handle:
+                    handle.write(line + "\n")
+                    handle.flush()
+            return
+        except PermissionError:
+            if attempt + 1 == _LOG_TRIES:
+                return
+            time.sleep(0.02 * (attempt + 1))
+        except OSError:
+            return
 
 
 def _device_and_vram() -> tuple[str, int]:

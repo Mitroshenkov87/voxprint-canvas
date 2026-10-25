@@ -168,8 +168,13 @@ def open_module(name: str, loader: Callable[[], Any], *, size_bytes: int | None 
     return module
 
 
-def activate(name: str, device: str) -> bool:
-    """Copy the RAM weights onto ``device``. The RAM tensors stay put."""
+def activate(name: str, device: str, *, blocking: bool = False) -> bool:
+    """Copy the RAM weights onto ``device``. The RAM tensors stay put.
+
+    ``blocking`` waits for the copy. The VAE uses it. A non-blocking copy of a
+    pinned CPU tensor stays in flight, and the next ``.cpu()`` on the decoder
+    output was where that fault surfaced.
+    """
     resident = _cache.get(name)
     if resident is None or resident.hooked:
         return False
@@ -178,7 +183,7 @@ def activate(name: str, device: str) -> bool:
         deactivate(name)
         return True
     started = time.perf_counter()
-    moved = resident.parked.to(device, non_blocking=True)
+    moved = resident.parked.to(device, non_blocking=not blocking)
     _assign(resident.module, moved if isinstance(moved, dict) else {})
     _log_move("unpark", name, kind, resident.nbytes, started)
     return True

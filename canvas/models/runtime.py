@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, assert_never
 
+import numpy
 import psutil
 from PIL import Image
 
@@ -1121,15 +1122,23 @@ def _first_output(result: Any) -> Any:
     return images
 
 
-def _decode_latents(pipe: Any, latents: Any, torch: Any) -> Any:
-    """Decode one latent on the VAE, then return CPU float32 pixels.
+# Z-Image ships sample_size 1024, so the stock latent tile is 128. A 1024 frame's
+# latent is also 128, and ``decode`` only calls ``tiled_decode`` when the latent
+# is strictly larger than that tile. The flag was on and the frame still decoded
+# in one piece (~12 GB). 256 px tiles stay under that.
+_VAE_TILE_SAMPLE = 256
 
-    On CUDA the transformer is parked first, and the VAE decodes in tiles so the
-    activation peak stays on the card. ``decode`` is synchronized before the
-    weights move. An empty ``RuntimeError`` from that sync is the CUDA error
-    that used to surface later in ``pt_to_numpy``.
+
+def _decode_latents(pipe: Any, latents: Any, torch: Any) -> Any:
+    """Decode one latent with ``tiled_decode`` on the VAE that holds the weights.
+
+    The hot-tier module is that VAE when it differs from ``pipe.vae``. Tiling is
+    armed on the same object the call uses. Pixels are scaled, synchronized, and
+    copied to CPU float32 here. ``image_processor.postprocess`` is not used: its
+    ``.cpu()`` raised an empty ``RuntimeError``, and the previous helper swallowed
+    that error, so no ``stage vae_decode error`` line was written.
     """
-    vae = getattr(pipe, "vae", None)
+    vae = _decoding_vae(pipe)
     if vae is None:
         raise InferenceUnavailable("the generator has no vae")
     cuda = _cuda_is_up(torch)
@@ -1137,38 +1146,94 @@ def _decode_latents(pipe: Any, latents: Any, torch: Any) -> Any:
         for name in ("transformer", "text_encoder", "controlnet"):
             hot.deactivate(name)
     device = "cuda" if cuda else "cpu"
-    hot.activate("vae", device)
+    stripped, saw_non_blocking = _strip_casting_hooks(vae)
+    hot.activate("vae", device, blocking=True)
+    _sync_cuda(torch)
+    decoded: Any = None
+    scaled: Any = None
     sample: Any = None
+    watched: list[Any] = [None]
+    array: Any = None
     try:
         vae = _vae_for_decode(pipe, vae, torch)
-        if cuda:
-            _enable_vae_tiles(vae)
-        config = getattr(vae, "config", None)
-        scaling = getattr(config, "scaling_factor", 0.3611) if config is not None else 0.3611
-        shift = getattr(config, "shift_factor", 0.1159) if config is not None else 0.1159
-        try:
-            scaled = (latents / scaling) + shift
-        except TypeError:
-            scaled = latents
-        scaled = _latents_like_vae(vae, scaled)
-        try:
-            decoded = vae.decode(scaled)
-            _sync_cuda(torch)
-        except RuntimeError as exc:
-            _log_decode_error(torch, exc)
-            raise
-        held = getattr(decoded, "sample", None)
-        sample = _cpu_float(held if held is not None else decoded, torch)
-        del decoded, held
+        extra, extra_non_blocking = _strip_casting_hooks(vae)
+        stripped += extra
+        saw_non_blocking = saw_non_blocking or extra_non_blocking
+        _sync_cuda(torch)
+        _arm_vae_tiles(vae)
+        _log_vae_tiles(vae, cuda, stripped, saw_non_blocking)
+        scaled = _scale_latents(vae, latents)
+        watched[0] = scaled
+        decoded = _invoke_tiled_decode(vae, scaled)
+        sample = _decoder_sample(decoded)
+        watched[0] = sample
+        if isinstance(sample, Image.Image) or not _is_image_tensor(sample):
+            array = sample
+        else:
+            array = _pixels_from_decoder(sample, torch, watched)
+    except Exception as exc:
+        _log_decode_error(torch, exc, watched[0], cuda)
+        raise
     finally:
+        del decoded, scaled, sample
+        watched[0] = None
         hot.deactivate("vae")
         gc.collect()
         _release_cuda_cache(torch)
-    return sample
+    return array
 
 
-def _enable_vae_tiles(vae: Any) -> None:
-    """Decode in tiles and slices. A full 1024 frame otherwise holds about 11 GB."""
+def _decoding_vae(pipe: Any) -> Any:
+    """The VAE ``activate`` moves. A hot-tier copy replaces a different ``pipe.vae``."""
+    live = getattr(pipe, "vae", None)
+    cached = hot.cached("vae")
+    if cached is None or cached is live:
+        return live
+    try:
+        pipe.vae = cached
+    except (AttributeError, TypeError):
+        return live
+    return cached
+
+
+def _scale_latents(vae: Any, latents: Any) -> Any:
+    config = getattr(vae, "config", None)
+    scaling = getattr(config, "scaling_factor", 0.3611) if config is not None else 0.3611
+    shift = getattr(config, "shift_factor", 0.1159) if config is not None else 0.1159
+    try:
+        scaled = (latents / scaling) + shift
+    except TypeError:
+        scaled = latents
+    return _latents_like_vae(vae, scaled)
+
+
+def _invoke_tiled_decode(vae: Any, scaled: Any) -> Any:
+    """``tiled_decode`` on this instance. ``decode`` ignores the tiling flag at the stock tile size."""
+    tiled = getattr(vae, "tiled_decode", None)
+    if callable(tiled):
+        try:
+            return tiled(scaled, return_dict=True)
+        except TypeError:
+            return tiled(scaled)
+    decode = getattr(vae, "decode", None)
+    if not callable(decode):
+        raise InferenceUnavailable("the vae has no decoder")
+    return decode(scaled)
+
+
+def _decoder_sample(decoded: Any) -> Any:
+    if isinstance(decoded, (tuple, list)):
+        return decoded[0] if decoded else decoded
+    sample = getattr(decoded, "sample", None)
+    return decoded if sample is None else sample
+
+
+def _is_image_tensor(value: Any) -> bool:
+    return callable(getattr(value, "clamp", None)) and callable(getattr(value, "to", None))
+
+
+def _arm_vae_tiles(vae: Any) -> None:
+    """Turn tiling and slicing on, then shrink a full-frame tile to 256 px."""
     for name in ("enable_tiling", "enable_slicing"):
         toggle = getattr(vae, name, None)
         if not callable(toggle):
@@ -1177,6 +1242,80 @@ def _enable_vae_tiles(vae: Any) -> None:
             toggle()
         except (TypeError, RuntimeError, AttributeError):
             continue
+    _set_flag(vae, "use_tiling", True)
+    _set_flag(vae, "use_slicing", True)
+    _shrink_vae_tiles(vae)
+
+
+def _set_flag(vae: Any, name: str, value: Any) -> None:
+    try:
+        setattr(vae, name, value)
+    except (AttributeError, TypeError):
+        return
+
+
+def _shrink_vae_tiles(vae: Any) -> None:
+    """A stock Z-Image tile equals a 1024 frame. Smaller tiles are what ``tiled_decode`` splits."""
+    sample = getattr(vae, "tile_sample_min_size", None)
+    latent = getattr(vae, "tile_latent_min_size", None)
+    if isinstance(sample, bool) or not isinstance(sample, int):
+        return
+    if isinstance(latent, bool) or not isinstance(latent, int) or latent <= 0:
+        return
+    if sample <= _VAE_TILE_SAMPLE:
+        return
+    scale = sample / latent
+    new_latent = max(4, int(round(_VAE_TILE_SAMPLE / scale)))
+    if int(new_latent * 0.75) < 1:
+        new_latent = 4
+    _set_flag(vae, "tile_latent_min_size", new_latent)
+    _set_flag(vae, "tile_sample_min_size", max(1, int(round(new_latent * scale))))
+
+
+def _log_vae_tiles(vae: Any, cuda: bool, stripped: int, saw_non_blocking: bool) -> None:
+    """``vae tiling=1 slicing=1 id=...`` for the instance ``tiled_decode`` is about to use."""
+    tiling = 1 if getattr(vae, "use_tiling", False) else 0
+    slicing = 1 if getattr(vae, "use_slicing", False) else 0
+    _device, dtype = _parameter_placement(vae)
+    pinned = _param_pinned(vae)
+    hooks = _casting_hook_count(vae)
+    kind = "cuda" if cuda else "cpu"
+    log_detail(
+        "vae_decode", "tiles", kind,
+        f"vae tiling={tiling} slicing={slicing} id={id(vae)} "
+        f"hooks={hooks} stripped={stripped} dtype={dtype} "
+        f"pinned={int(pinned)} casting_non_blocking={int(saw_non_blocking)}",
+    )
+
+
+def _pixels_from_decoder(sample: Any, torch: Any, watched: list[Any]) -> Any:
+    """``(x / 2 + 0.5).clamp(0, 1)``, synchronize, CPU float32, then numpy NHWC."""
+    scaled = (sample / 2) + 0.5
+    watched[0] = scaled
+    scaled = scaled.clamp(0, 1)
+    watched[0] = scaled
+    _sync_cuda(torch)
+    dtype = getattr(torch, "float32", None)
+    if dtype is None:
+        raise InferenceUnavailable("the vae output cannot move to cpu")
+    cpu = scaled.to("cpu", dtype)
+    watched[0] = cpu
+    permute = getattr(cpu, "permute", None)
+    if callable(permute):
+        cpu = permute(0, 2, 3, 1)
+        watched[0] = cpu
+    contiguous = getattr(cpu, "contiguous", None)
+    if callable(contiguous):
+        cpu = contiguous()
+        watched[0] = cpu
+    detach = getattr(cpu, "detach", None)
+    if callable(detach):
+        cpu = detach()
+        watched[0] = cpu
+    to_numpy = getattr(cpu, "numpy", None)
+    if not callable(to_numpy):
+        raise InferenceUnavailable("the vae output cannot become an array")
+    return to_numpy()
 
 
 def _sync_cuda(torch: Any) -> None:
@@ -1189,39 +1328,70 @@ def _sync_cuda(torch: Any) -> None:
     sync()
 
 
-def _log_decode_error(torch: Any, exc: BaseException) -> None:
-    """Write the exception type and the CUDA memory summary to the suite log."""
+def _log_decode_error(torch: Any, exc: BaseException, tensor: Any, cuda: bool) -> None:
+    """Write the exception, its cause, the tensor, and the CUDA memory summary."""
     summary = ""
-    cuda = getattr(torch, "cuda", None)
-    report = getattr(cuda, "memory_summary", None) if cuda is not None else None
+    cuda_mod = getattr(torch, "cuda", None)
+    report = getattr(cuda_mod, "memory_summary", None) if cuda_mod is not None else None
     if callable(report):
         try:
             summary = " ".join(str(report()).split())
-        except (TypeError, RuntimeError, AttributeError):
+        except (TypeError, RuntimeError, AttributeError, KeyError, ValueError):
             summary = ""
     kind = type(exc).__name__
-    message = " ".join(str(exc).split())
+    message = " ".join(repr(exc).split())
+    cause = " ".join(repr(exc.__cause__).split())
+    context = " ".join(repr(exc.__context__).split())
     log_detail(
-        "vae_decode", "error", "cuda",
-        f"type={kind} message={message[:180]} summary={summary[:1200]}",
+        "vae_decode", "error", "cuda" if cuda else "cpu",
+        f"type={kind} repr={message[:240]} cause={cause[:240]} context={context[:240]} "
+        f"{_tensor_brief(tensor)} summary={summary[:1200]}",
     )
 
 
-def _cpu_float(value: Any, torch: Any) -> Any:
-    """The decode output on CPU in float32, before postprocess touches it."""
-    dtype = getattr(torch, "float32", None)
-    mover = getattr(value, "to", None)
-    if dtype is None or not callable(mover):
-        return value
+def _tensor_brief(tensor: Any) -> str:
+    if tensor is None:
+        return "dtype=none device=none shape=none contiguous=none pinned=0"
+    dtype = getattr(tensor, "dtype", None)
+    device = getattr(tensor, "device", None)
+    shape = getattr(tensor, "shape", None)
     try:
-        return mover(device="cpu", dtype=dtype)
+        shape_text = tuple(shape) if shape is not None else None
     except TypeError:
+        shape_text = shape
+    flag = getattr(tensor, "is_contiguous", None)
+    contiguous: Any = flag
+    if callable(flag):
         try:
-            return mover("cpu", dtype)
-        except (TypeError, RuntimeError, AttributeError):
-            return value
-    except (RuntimeError, AttributeError):
-        return value
+            contiguous = flag()
+        except (TypeError, RuntimeError):
+            contiguous = None
+    return (
+        f"dtype={dtype} device={device} shape={shape_text} "
+        f"contiguous={contiguous} pinned={int(_pinned(tensor))}"
+    )
+
+
+def _pinned(tensor: Any) -> bool:
+    probe = getattr(tensor, "is_pinned", None)
+    if callable(probe):
+        try:
+            return bool(probe())
+        except (TypeError, RuntimeError):
+            return False
+    return bool(getattr(tensor, "pinned", False))
+
+
+def _param_pinned(module: Any) -> bool:
+    parameters = getattr(module, "parameters", None)
+    if not callable(parameters):
+        return False
+    try:
+        for param in parameters():
+            return _pinned(param)
+    except (TypeError, RuntimeError):
+        return False
+    return False
 
 
 def _release_cuda_cache(torch: Any) -> None:
@@ -1236,7 +1406,7 @@ def _release_cuda_cache(torch: Any) -> None:
 
 
 def _vae_for_decode(pipe: Any, vae: Any, torch: Any) -> Any:
-    """Put the VAE on CUDA in BF16 when CUDA is up. Otherwise leave it where it is."""
+    """Put this VAE on CUDA in BF16. A replacement object becomes ``pipe.vae``."""
     if not _cuda_is_up(torch):
         return vae
     dtype = getattr(torch, "bfloat16", None)
@@ -1259,6 +1429,87 @@ def _vae_for_decode(pipe: Any, vae: Any, torch: Any) -> Any:
     except (AttributeError, TypeError):
         pass
     return moved
+
+
+def _strip_casting_hooks(vae: Any) -> tuple[int, bool]:
+    """Drop FP8 layerwise-casting hooks. The VAE stays a plain BF16 module.
+
+    ``LayerwiseCastingHook`` refuses deinitialization, so the hook is removed
+    without that call and ``forward`` is put back. Returns how many hooks were
+    removed and whether any of them copied with ``non_blocking``.
+    """
+    modules = getattr(vae, "modules", None)
+    found = list(modules()) if callable(modules) else [vae]
+    removed = 0
+    saw_non_blocking = False
+    for module in found:
+        registry = getattr(module, "_diffusers_hook", None)
+        hooks = getattr(registry, "hooks", None)
+        if isinstance(hooks, dict) and "layerwise_casting" in hooks:
+            hook = hooks.get("layerwise_casting")
+            if bool(getattr(hook, "non_blocking", False)):
+                saw_non_blocking = True
+            _drop_layerwise_hook(module, registry, hook)
+            removed += 1
+        hf_hook = getattr(module, "_hf_hook", None)
+        if hf_hook is not None and _is_casting_hook(hf_hook):
+            if bool(getattr(hf_hook, "non_blocking", False)):
+                saw_non_blocking = True
+            _clear_attr(module, "_hf_hook")
+            removed += 1
+    return removed, saw_non_blocking
+
+
+def _drop_layerwise_hook(module: Any, registry: Any, hook: Any) -> None:
+    hooks = registry.hooks
+    hooks.pop("layerwise_casting", None)
+    order = getattr(registry, "_hook_order", None)
+    refs = getattr(registry, "_fn_refs", None)
+    if isinstance(order, list) and "layerwise_casting" in order:
+        index = order.index("layerwise_casting")
+        order.pop(index)
+        if isinstance(refs, list) and index < len(refs):
+            refs.pop(index)
+    fn_ref = getattr(hook, "fn_ref", None)
+    original = getattr(fn_ref, "original_forward", None) if fn_ref is not None else None
+    if not callable(original) and fn_ref is not None:
+        original = getattr(fn_ref, "forward", None)
+    if callable(original) and not order:
+        try:
+            module.forward = original
+        except (AttributeError, TypeError):
+            return
+
+
+def _is_casting_hook(hook: Any) -> bool:
+    if getattr(hook, "storage_dtype", None) is not None:
+        return True
+    name = type(hook).__name__
+    return "Cast" in name or "Layerwise" in name
+
+
+def _clear_attr(module: Any, name: str) -> None:
+    try:
+        delattr(module, name)
+    except (AttributeError, TypeError):
+        try:
+            setattr(module, name, None)
+        except (AttributeError, TypeError):
+            return
+
+
+def _casting_hook_count(vae: Any) -> int:
+    modules = getattr(vae, "modules", None)
+    found = list(modules()) if callable(modules) else [vae]
+    count = 0
+    for module in found:
+        registry = getattr(module, "_diffusers_hook", None)
+        hooks = getattr(registry, "hooks", None)
+        if isinstance(hooks, dict) and "layerwise_casting" in hooks:
+            count += 1
+        if _is_casting_hook(getattr(module, "_hf_hook", None)):
+            count += 1
+    return count
 
 
 def _latents_like_vae(vae: Any, latents: Any) -> Any:
@@ -1304,17 +1555,25 @@ def _cast_latents(value: Any, device: Any, dtype: Any) -> Any:
 
 
 def _latents_to_pil(pipe: Any, decoded: Any, torch: Any) -> Image.Image:
-    decoded = _cpu_float(decoded, torch)
-    _release_cuda_cache(torch)
-    processor = getattr(pipe, "image_processor", None)
-    post = getattr(processor, "postprocess", None) if processor is not None else None
-    if callable(post):
-        images = post(decoded, output_type="pil")
-        image = images[0] if isinstance(images, (list, tuple)) else images
-        if isinstance(image, Image.Image):
-            return image.convert("RGB")
+    """A PIL image from the numpy frame ``_decode_latents`` already moved to CPU."""
+    del pipe, torch
     if isinstance(decoded, Image.Image):
         return decoded.convert("RGB")
+    return _array_to_image(decoded)
+
+
+def _array_to_image(array: Any) -> Image.Image:
+    frame = numpy.asarray(array)
+    if frame.ndim == 4:
+        frame = frame[0]
+    if frame.dtype != numpy.uint8:
+        frame = numpy.clip(numpy.rint(frame * 255.0), 0, 255).astype(numpy.uint8)
+    if frame.ndim == 3 and frame.shape[-1] == 1:
+        frame = numpy.squeeze(frame, axis=-1)
+    if frame.ndim == 2:
+        return Image.fromarray(frame, mode="L").convert("RGB")
+    if frame.ndim == 3:
+        return Image.fromarray(frame).convert("RGB")
     raise InferenceUnavailable("the vae did not return an image")
 
 

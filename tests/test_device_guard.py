@@ -362,18 +362,11 @@ def test_a_latent_is_decoded_on_cuda_in_bf16(monkeypatch) -> None:
 
         def decode(self, latents: object) -> types.SimpleNamespace:
             self.calls.append(("decode", latents))
-            return types.SimpleNamespace(sample="decoded")
+            return types.SimpleNamespace(sample=Image.new("RGB", (4, 4), (1, 2, 3)))
 
     calls: list[object] = []
     vae = _Vae()
-    image = Image.new("RGB", (4, 4), (1, 2, 3))
-
-    def postprocess(decoded: object, output_type: str) -> list[Image.Image]:
-        assert decoded == "decoded"
-        assert output_type == "pil"
-        return [image]
-
-    pipe = types.SimpleNamespace(vae=vae, image_processor=types.SimpleNamespace(postprocess=postprocess))
+    pipe = types.SimpleNamespace(vae=vae, image_processor=None)
     monkeypatch.setattr(runtime, "allocated_bytes", lambda: 13 * 1024**3)
     monkeypatch.setattr(runtime, "_free_vram_bytes", lambda: 1024**3)
     torch = types.SimpleNamespace(bfloat16="bf16", cuda=types.SimpleNamespace(is_available=lambda: True))

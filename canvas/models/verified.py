@@ -6,6 +6,7 @@ the record and hashes the file again.
 """
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -75,3 +76,23 @@ class VerifiedCache:
         except (ManifestError, OSError):
             return
         self.dirty = False
+
+
+_process_lock = threading.Lock()
+_process: VerifiedCache | None = None
+
+
+def process_cache() -> VerifiedCache:
+    """One cache for this process, so a series hashes each weight file once."""
+    global _process
+    with _process_lock:
+        if _process is None:
+            _process = VerifiedCache.open(False)
+        return _process
+
+
+def flush_process_cache() -> None:
+    """Write the process cache when a check changed it."""
+    with _process_lock:
+        if _process is not None:
+            _process.flush()

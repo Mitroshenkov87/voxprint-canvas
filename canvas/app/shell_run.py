@@ -22,7 +22,9 @@ from canvas.models.registry import load_catalog
 from canvas.models.runtime import InferenceUnavailable, prepare_series_embeds
 from canvas.models.sizes import frame_size
 from canvas.models.snapshots import SnapshotError, snapshot_ready
+from canvas.models.verified import flush_process_cache, process_cache
 from canvas.pipeline.bf16_schedule import VramRefused
+from canvas.pipeline.device_guard import DeviceRefused
 from canvas.pipeline.adult_direction import improve_adult
 from canvas.pipeline.enhance import SYSTEM_PROMPT as ENHANCE_SYSTEM
 from canvas.pipeline.enhance import open_rewriter, resolve_prompt, rewrite_text
@@ -77,13 +79,14 @@ class ShellRunner:
         try:
             plan = build_plan(catalog, screened, self.tier)
             spec = plan_specs(catalog, plan)[0]
-            folder = snapshot_ready(spec, models_dir())
+            folder = snapshot_ready(spec, models_dir(), process_cache())
             if folder is None:
                 raise ModelNotReady(plan)
             prepare_series_embeds(
                 folder, self.tier, prompts, lora=self.bound_lora, lora_strength=self.lora_strength,
             )
         finally:
+            flush_process_cache()
             screened.wipe()
 
     def __call__(self, job: PictureJob, inputs: tuple[PendingInput, ...]) -> RawImage:
@@ -104,6 +107,8 @@ class ShellRunner:
                 else:
                     reviewed = self._through_pipeline(job, inputs)
                     width, height, pixels = reviewed.width, reviewed.height, reviewed.data
+            except DeviceRefused as exc:
+                _halt(str(exc), exc, exc.code, unavailable=True)
             except SafetyUnavailable as exc:
                 _halt(exc.user_message, exc, f"check.{exc.code}", unavailable=True)
             except GpuLockTimeout as exc:

@@ -128,6 +128,7 @@
   "photoshoot.code.scenario.minor": "The scenario cannot be used.",
   "photoshoot.code.not_produced": "No shot was kept.",
   "photoshoot.code.internal": "Something went wrong. The series stopped.",
+  "photoshoot.code.device.cpu": "The model did not stay on the GPU. The series stopped.",
   "photoshoot.subject.missing": "This line is missing the subject. This shot will be skipped.",
   "photoshoot.shot.dropped": "This shot was left out of the scenario.",
   "photoshoot.folder": "Open the series folder",

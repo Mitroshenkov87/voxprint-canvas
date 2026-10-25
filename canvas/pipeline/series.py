@@ -20,9 +20,10 @@ from canvas.app.i18n import text
 from canvas.app.shell_run import RunStopped
 from canvas.core.formats import OutputFormat, extension, save_image
 from canvas.infra.errors import note_crash, note_debug, note_error, note_timing
-from canvas.infra.stage_timer import StageTimes, note_peak_mib, set_current
+from canvas.infra.stage_timer import StageTimes, note_peak_mib, set_current, timed
 from canvas.infra.vram import peak_allocated_bytes
 from canvas.models.runtime import clear_series_embeds, pipeline_scope, release_pipeline
+from canvas.pipeline.device_guard import DeviceRefused
 from canvas.pipeline.enhance import mask_numbers, stated_ages
 from canvas.pipeline.gpu_release import release_gate_weights
 from canvas.pipeline.adult_direction import ages_allowed, with_adult_anchor, youth_cues
@@ -129,13 +130,20 @@ def run_series(
     """
     clock = timings if timings is not None else StageTimes()
     previous_clock = set_current(clock)
+    noted: list[bool] = []
     try:
         return _run_series(
             idea=idea, count=count, style=style, place_mode=place_mode, seed=seed, strength=strength,
             include_camera=include_camera, rewrite=rewrite, age_gate=age_gate, draw_frame=draw_frame,
             cancelled=cancelled, folder=folder, on_scenario=on_scenario, line_for=line_for,
             on_status=on_status, adult=adult, container=container, clock=clock, own_clock=timings is None,
+            noted=noted,
         )
+    except DeviceRefused as exc:
+        note_error(exc.code)
+        if timings is None and not noted:
+            note_timing(clock.log_line())
+        return SeriesResult("error", str(exc), (), None, exc.code)
     finally:
         set_current(previous_clock)
 
@@ -147,6 +155,7 @@ def _run_series(
     cancelled: Callable[[], bool], folder: Path, on_scenario: Callable[[Scenario], None] | None,
     line_for: Callable[[int], str] | None, on_status: Callable[[int, str], None] | None,
     adult: bool, container: OutputFormat | None, clock: StageTimes, own_clock: bool,
+    noted: list[bool],
 ) -> SeriesResult:
     gate = SerialGate.wrap(age_gate)
     if place_mode == "same":
@@ -254,6 +263,7 @@ def _run_series(
     finally:
         if own_clock:
             note_timing(clock.log_line())
+            noted.append(True)
 
 
 def _remember_vram_peak() -> None:
@@ -383,7 +393,8 @@ def _review_frames(
     ending: str | None = None
     for item in drawn:
         with clock.measure("output_check"):
-            released, refusal = _released_frame(gate, item.image, item.line)
+            with timed("check"):
+                released, refusal = _released_frame(gate, item.image, item.line)
         if released is None:
             blocked.append(item.index)
             _status(on_status, item.index, "blocked")
@@ -554,13 +565,14 @@ def _released_frame(
 
 
 def _store_frame(folder: Path, index: int, released: _Released, container: OutputFormat | None) -> Path:
-    if container is None or released.safe is None:
-        path = folder / f"{index + 1:02}.png"
-        _write_png(path, released.width, released.height, released.data)
+    with timed("encode"):
+        if container is None or released.safe is None:
+            path = folder / f"{index + 1:02}.png"
+            _write_png(path, released.width, released.height, released.data)
+            return path
+        path = folder / f"{index + 1:02}{extension(container)}"
+        save_image(released.safe, path, container)
         return path
-    path = folder / f"{index + 1:02}{extension(container)}"
-    save_image(released.safe, path, container)
-    return path
 
 
 def _status(callback: Callable[[int, str], None] | None, index: int, status: str) -> None:

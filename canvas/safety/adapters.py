@@ -6,6 +6,7 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 from PIL import Image
 
+from canvas.infra.stage_timer import log_stage, note_tag
 from canvas.models.pins import REPO_AGE, REPO_AGE_FINE, REPO_GUARD, REPO_NSFW, REPO_SIGLIP, REPO_YUNET
 from canvas.safety.classifiers import Face, GuardVerdict
 from canvas.safety.gate import SafetyUnavailable
@@ -87,6 +88,7 @@ class _Placed:
         device = gate_device(need) if forced is None else forced
         if device == "cpu":
             self.device = "cpu"
+            _remember_check_device("cpu")
             return model
         try:
             moved = model.to(device)
@@ -95,10 +97,12 @@ class _Placed:
                 raise
             self.device = "cpu"
             _empty_cuda_cache()
+            _remember_check_device("cpu")
             return model.to("cpu")
         self.device = device
         self._cuda_bytes = need
         _gate_cuda_bytes += need
+        _remember_check_device(device)
         return moved
 
     def _to_cpu(self) -> None:
@@ -124,6 +128,13 @@ class _Placed:
                 raise
         self._to_cpu()
         return run()
+
+
+def _remember_check_device(device: str) -> None:
+    """Record the device this placement chose."""
+    kind = "cuda" if "cuda" in str(device) else "cpu"
+    note_tag("check_device", kind)
+    log_stage("check", "place", kind)
 
 
 def _empty_cuda_cache() -> None:

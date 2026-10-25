@@ -133,6 +133,7 @@
   "photoshoot.code.scenario.minor": "Сценарий нельзя использовать.",
   "photoshoot.code.not_produced": "Ни один кадр не сохранён.",
   "photoshoot.code.internal": "Что-то пошло не так. Серия остановлена.",
+  "photoshoot.code.device.cpu": "Модель не осталась на видеокарте. Серия остановлена.",
   "photoshoot.subject.missing": "В строке нет описания предмета. Этот кадр будет пропущен.",
   "photoshoot.shot.dropped": "Этот кадр не вошёл в сценарий.",
   "photoshoot.folder": "Открыть папку серии",

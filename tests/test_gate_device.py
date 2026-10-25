@@ -230,3 +230,136 @@ def test_a_non_device_error_is_not_retried(monkeypatch, tmp_path: Path) -> None:
     with pytest.raises(ValueError):
         check.sexual_score(_PICTURE)
     assert model.calls == ["cuda"]
+
+
+def test_weights_already_on_cuda_are_not_copied_again(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setitem(sys.modules, "torch", _fake_torch(free=15 * GB))
+    monkeypatch.setattr(adapters, "gate_device", lambda _need: "cuda")
+    adapters._gate_cuda_bytes = 0
+
+    class _Tensor:
+        device = types.SimpleNamespace(type="cuda")
+
+        def numel(self) -> int:
+            return 4
+
+        def element_size(self) -> int:
+            return 2
+
+    class _Ready:
+        def __init__(self) -> None:
+            self.copied: list[str] = []
+
+        def to(self, device: str) -> _Ready:
+            self.copied.append(device)
+            return self
+
+        def parameters(self):
+            yield _Tensor()
+
+        def buffers(self):
+            return iter(())
+
+    try:
+        model = _Ready()
+        check = NsfwViT(tmp_path)
+        check._park_name = "gate_nsfw"
+        check._place(model)
+        check._place(model)
+        assert model.copied == []
+        assert check.device == "cuda"
+        assert adapters._gate_cuda_bytes == 16
+    finally:
+        adapters._gate_cuda_bytes = 0
+
+
+def test_a_retained_check_parks_the_pinned_copy(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setitem(sys.modules, "torch", _fake_torch(free=15 * GB))
+    monkeypatch.setattr(adapters, "gate_device", lambda _need: "cuda")
+    moves: list[str] = []
+    monkeypatch.setattr(adapters, "retained", lambda name: name == "gate_nsfw")
+
+    def activate(name: str, device: str, blocking: bool = False) -> bool:
+        del blocking
+        moves.append(f"unpark:{name}:{device}")
+        return True
+
+    monkeypatch.setattr(adapters, "activate", activate)
+    monkeypatch.setattr(adapters, "deactivate", lambda name: moves.append(f"park:{name}"))
+    adapters._gate_cuda_bytes = 0
+
+    class _Tensor:
+        def __init__(self) -> None:
+            self.device = types.SimpleNamespace(type="cpu")
+
+        def numel(self) -> int:
+            return 4
+
+        def element_size(self) -> int:
+            return 2
+
+    class _Ready:
+        def __init__(self) -> None:
+            self.copied: list[str] = []
+            self.tensor = _Tensor()
+
+        def to(self, device: str) -> _Ready:
+            self.copied.append(device)
+            return self
+
+        def parameters(self):
+            yield self.tensor
+
+        def buffers(self):
+            return iter(())
+
+    try:
+        model = _Ready()
+        check = NsfwViT(tmp_path)
+        check._park_name = "gate_nsfw"
+        check._model = check._place(model)
+        check.release()
+        assert model.copied == []
+        assert moves == ["unpark:gate_nsfw:cuda", "park:gate_nsfw"]
+        assert check.device == "cpu"
+        assert check._model is model
+        assert adapters._gate_cuda_bytes == 0
+    finally:
+        adapters._gate_cuda_bytes = 0
+
+
+def test_siglip_text_embeddings_are_reused_for_the_same_labels() -> None:
+    calls: list[object] = []
+
+    class _Embed:
+        def norm(self, dim: int = -1, keepdim: bool = False) -> _Embed:
+            del dim, keepdim
+            return self
+
+        def __truediv__(self, _other: object) -> _Embed:
+            return self
+
+        def to(self, _device: str) -> _Embed:
+            return self
+
+    class _Model:
+        dtype = "bf16"
+
+        def get_text_features(self, **kwargs: object) -> _Embed:
+            calls.append(kwargs)
+            return _Embed()
+
+    class _Processor:
+        def __call__(self, **_kwargs: object) -> dict[str, _Embed]:
+            return {"input_ids": _Embed()}
+
+    torch = types.SimpleNamespace(no_grad=nullcontext)
+    model = _Model()
+    adapters._siglip_text.clear()
+    try:
+        adapters._siglip_text_embeds(torch, model, _Processor(), ["minor", "adult"], "cuda")
+        adapters._siglip_text_embeds(torch, model, _Processor(), ["minor", "adult"], "cuda")
+        adapters._siglip_text_embeds(torch, model, _Processor(), ["minor", "adult"], "cpu")
+        assert len(calls) == 2
+    finally:
+        adapters._siglip_text.clear()

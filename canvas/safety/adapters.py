@@ -8,9 +8,9 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 from PIL import Image
 
-from canvas.infra.stage_timer import log_stage, note_tag
+from canvas.infra.stage_timer import log_detail, log_stage, note_tag
 from canvas.infra.vram_trace import on_cuda
-from canvas.models.hot_tier import cached, deactivate, note_ssd, remember, retained
+from canvas.models.hot_tier import activate, cached, deactivate, note_ssd, remember, retained
 from canvas.models.pins import REPO_AGE, REPO_AGE_FINE, REPO_GUARD, REPO_NSFW, REPO_SIGLIP, REPO_YUNET
 from canvas.safety.classifiers import Face, GuardVerdict
 from canvas.safety.gate import SafetyUnavailable
@@ -104,8 +104,9 @@ class _Placed:
             _remember_check_device("cpu")
             parked = self._model if self._model is not None else model
             return parked
+        started = time.perf_counter()
         try:
-            moved = model.to(device)
+            moved = self._to_device(model, device)
         except Exception as exc:
             if not _device_error(exc):
                 raise
@@ -113,15 +114,30 @@ class _Placed:
             _empty_cuda_cache()
             _remember_check_device("cpu")
             return model.to("cpu")
+        _log_check_move(device, need, started)
         self.device = device
         self._cuda_bytes = need
+        # The same byte count as a real copy, including when the weights were
+        # already on the device. Later gate_device choices stay the same.
         _gate_cuda_bytes += need
         _remember_check_device(device)
         return moved
 
+    def _to_device(self, model: Any, device: str) -> Any:
+        """Copy onto ``device``. A model already there, or a pinned RAM copy, skips the pageable path."""
+        if _fully_on_device(model, device):
+            return model
+        name = getattr(self, "_park_name", "")
+        if isinstance(name, str) and retained(name) and activate(name, device, blocking=True):
+            return model
+        return model.to(device)
+
     def _to_cpu(self) -> None:
         global _gate_cuda_bytes
-        if self._model is not None:
+        name = getattr(self, "_park_name", "")
+        if isinstance(name, str) and retained(name):
+            deactivate(name)
+        elif self._model is not None:
             self._model = self._model.to("cpu")
         _gate_cuda_bytes = max(0, _gate_cuda_bytes - self._cuda_bytes)
         self._cuda_bytes = 0
@@ -132,13 +148,14 @@ class _Placed:
         """Drop the VRAM copy so the picture model can use the GPU.
 
         A tier that keeps this check leaves the RAM weights, in their current
-        dtype, for the rest of the session.
+        dtype, for the rest of the session. The pinned park is the copy that
+        stays; a pageable ``.to("cpu")`` is not taken on that path.
         """
         name = getattr(self, "_park_name", "")
         self._to_cpu()
-        if isinstance(name, str) and name:
-            deactivate(name)
         if not isinstance(name, str) or not retained(name):
+            if isinstance(name, str) and name:
+                deactivate(name)
             self._model = None
 
     def _held(self, name: str) -> bool:
@@ -162,13 +179,49 @@ class _Placed:
 
     def _checked(self, run: Any) -> Any:
         """Run one check. A device error moves the model to the CPU and runs the same check again."""
+        started = time.perf_counter()
         try:
+            try:
+                return run()
+            except Exception as exc:
+                if self.device == "cpu" or not _device_error(exc):
+                    raise
+            self._to_cpu()
             return run()
-        except Exception as exc:
-            if self.device == "cpu" or not _device_error(exc):
-                raise
-        self._to_cpu()
-        return run()
+        finally:
+            elapsed = max(0, int((time.perf_counter() - started) * 1000))
+            kind = "cuda" if "cuda" in str(self.device) else "cpu"
+            log_detail("check", "infer", kind, f"ms={elapsed}")
+
+
+def _log_check_move(device: str, need: int, started: float) -> None:
+    """One placement, in milliseconds. This is the cost the output check was paying."""
+    elapsed = max(0, int((time.perf_counter() - started) * 1000))
+    kind = "cuda" if "cuda" in str(device) else "cpu"
+    log_detail("check", "move", kind, f"ms={elapsed} bytes={max(0, int(need))}")
+
+
+def _fully_on_device(model: Any, device: str) -> bool:
+    """True when every parameter and buffer is already on ``device``."""
+    found = False
+    want_cuda = "cuda" in device
+    for getter in ("parameters", "buffers"):
+        items = getattr(model, getter, None)
+        if not callable(items):
+            continue
+        try:
+            tensors = list(items())
+        except (TypeError, RuntimeError):
+            return False
+        for tensor in tensors:
+            found = True
+            dev = getattr(tensor, "device", None)
+            kind = getattr(dev, "type", None)
+            text = kind if isinstance(kind, str) else str(dev)
+            on_cuda_tensor = "cuda" in text
+            if want_cuda != on_cuda_tensor:
+                return False
+    return found
 
 
 def _remember_check_device(device: str) -> None:
@@ -312,6 +365,23 @@ def _rgb(image: RawImage) -> Image.Image:
     return Image.frombytes("RGB", (image.width, image.height), image.to_bytes())
 
 
+_siglip_text: dict[tuple[Any, ...], Any] = {}
+
+
+def _siglip_text_embeds(torch: Any, model: Any, processor: Any, labels: Sequence[str], device: str) -> Any:
+    """Normalised label embeddings. The labels do not change between frames."""
+    key = (id(model), tuple(labels), str(device), str(getattr(model, "dtype", None)))
+    cached = _siglip_text.get(key)
+    if cached is not None:
+        return cached
+    text_inputs = _inputs_to(processor(text=list(labels), padding="max_length", return_tensors="pt"), device)
+    with torch.no_grad():
+        embeds = _pooled_features(model.get_text_features(**text_inputs))
+        embeds = embeds / embeds.norm(dim=-1, keepdim=True)
+    _siglip_text[key] = embeds
+    return embeds
+
+
 def _pooled_features(out: Any) -> Any:
     """Tensor from ``get_*_features``."""
     if hasattr(out, "norm"):
@@ -416,10 +486,8 @@ class SiglipZeroShot(_Placed):
     ) -> Any:
         model = self._model
         device = self.device
-        text_inputs = _inputs_to(processor(text=label_list, padding="max_length", return_tensors="pt"), device)
         with torch.no_grad():
-            text_embeds = _pooled_features(model.get_text_features(**text_inputs))
-            text_embeds = text_embeds / text_embeds.norm(dim=-1, keepdim=True)
+            text_embeds = _siglip_text_embeds(torch, model, processor, label_list, device)
             if image is not None:
                 image_inputs = _inputs_to(processor(images=_rgb(image), return_tensors="pt"), device)
                 image_embeds = _pooled_features(model.get_image_features(**image_inputs))

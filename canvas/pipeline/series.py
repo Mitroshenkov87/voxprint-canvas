@@ -401,9 +401,13 @@ def _review_frames(
     check_reason = ""
     ending: str | None = None
     for item in drawn:
-        with clock.measure("output_check"):
-            with timed("check"):
-                released, refusal = _released_frame(gate, item.image, item.line)
+        try:
+            with clock.measure("output_check"):
+                with timed("check"):
+                    released, refusal = _released_frame(gate, item.image, item.line)
+        finally:
+            # The check has finished. Its weights leave VRAM before this frame is written.
+            release_gate_weights(gate)
         if released is None:
             blocked.append(item.index)
             _status(on_status, item.index, "blocked")

@@ -162,6 +162,29 @@ def test_cuda_decode_tiles_and_returns_cpu_float32(monkeypatch, tmp_path) -> Non
     assert f"vae tiling=1 slicing=1 id={id(vae)}" in log
 
 
+def test_a_latent_tile_that_covers_the_frame_is_split() -> None:
+    class _Vae:
+        tile_sample_min_size = 256
+        tile_latent_min_size = 128
+
+    vae = _Vae()
+    runtime._fit_vae_tiles(vae, types.SimpleNamespace(shape=(1, 16, 128, 128)))
+    assert vae.tile_latent_min_size <= 32
+    assert vae.tile_latent_min_size < 128
+    assert vae.tile_sample_min_size < 256
+
+
+def test_a_tiny_latent_keeps_its_tile() -> None:
+    class _Vae:
+        tile_sample_min_size = 8
+        tile_latent_min_size = 8
+
+    vae = _Vae()
+    runtime._fit_vae_tiles(vae, types.SimpleNamespace(shape=(1, 4, 8, 8)))
+    assert vae.tile_sample_min_size == 8
+    assert vae.tile_latent_min_size == 8
+
+
 def test_custom_postprocess_maps_the_vae_range_on_cpu() -> None:
     torch = pytest.importorskip("torch")
     sample = torch.tensor([[[[-1.0, 0.0], [1.0, 3.0]]]], dtype=torch.float32)

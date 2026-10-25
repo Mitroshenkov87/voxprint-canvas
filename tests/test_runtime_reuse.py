@@ -324,11 +324,11 @@ def test_a_release_from_another_thread_waits_for_the_picture(tmp_path: Path, mon
     seen: list[str] = []
     real_timed = runtime._timed
 
-    def slow_timed(pipe, **kwargs):
+    def slow_timed(pipe, torch, **kwargs):
         started.set()
         go_on.wait(5)
         seen.append("drawn")
-        return real_timed(pipe, **kwargs)
+        return real_timed(pipe, torch, **kwargs)
 
     monkeypatch.setattr(runtime, "_timed", slow_timed)
 

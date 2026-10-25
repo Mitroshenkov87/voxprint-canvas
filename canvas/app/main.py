@@ -44,6 +44,7 @@ from canvas.app.photoshoot_cli import model_generate, model_rewrite, reject_fram
 from canvas.pipeline.photoshoot import DEFAULT_FRAMES, MAX_FRAMES
 from canvas.ui.styles import LOOKS
 from canvas.pipeline.bf16_schedule import VramRefused
+from canvas.pipeline.gpu_release import release_gate_weights
 from canvas.infra.stage_timer import StageTimes
 from canvas.pipeline.series import SerialGate
 from canvas.pipeline.enhance import EnhanceResult, fallback_message, open_rewriter, resolve_prompt, rewrite_text
@@ -222,7 +223,10 @@ def _callback(tier: Tier, window_box: list[MainWindow | None], enlarge: EnlargeC
         stack = load_catalog_stack(models_dir(), catalog)
         gate = AgeGate(stack)
         gate.review_prompt(text)
-        rewritten = rewrite_text(open_rewriter(catalog, tier, models_dir(), progress), text)
+        release_gate_weights(gate)
+        rewritten = rewrite_text(
+            open_rewriter(catalog, tier, models_dir(), progress, stage="enhancer"), text,
+        )
         outcome = resolve_prompt(gate, text, rewritten)
         return EnhanceReply(outcome.prompt, fallback_message(outcome))
 
@@ -393,7 +397,10 @@ def _generate(args: argparse.Namespace) -> int:
         gate.warm()
         if args.enhance:
             gate.review_prompt(prompt)
-            rewritten = rewrite_text(open_rewriter(catalog, gpu.tier, root, progress), prompt)
+            release_gate_weights(gate)
+            rewritten = rewrite_text(
+                open_rewriter(catalog, gpu.tier, root, progress, stage="enhancer"), prompt,
+            )
             outcome = resolve_prompt(gate, prompt, rewritten)
             active = outcome.prompt
         screened = gate.release_request(active, mode.value, source)

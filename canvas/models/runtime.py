@@ -14,13 +14,26 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, assert_never
+from typing import Any, Literal, assert_never
 
 import psutil
 from PIL import Image
 
 from canvas.app.i18n import text
+from canvas.infra.errors import note_error
 from canvas.infra.stage_timer import note_peak_mib, note_stage, note_tag, timed
+from canvas.infra.stage_guard import (
+    PEAK_LIMIT_BYTES,
+    StageBlocked,
+    admit,
+    allocated_bytes,
+    begin_stage,
+    choose_encoder_storage,
+    cosine,
+    finish_stage,
+    guard_peak,
+    register_release,
+)
 from canvas.infra.vram_trace import drop_model, hold_model, note_vram
 from canvas.infra.vram import peak_allocated_bytes, reset_peak_allocated
 from canvas.models.modes import Tier
@@ -33,8 +46,10 @@ from canvas.models.pins import (
 )
 from canvas.models.plan import CallPlan
 from canvas.models.user_lora import UserLora, apply_lora, unload_lora
+from canvas.pipeline.bf16_schedule import VramRefused
 from canvas.pipeline.offload import (
     OffloadUnavailable,
+    cast_module_fp8,
     install_low_vram_offload,
     install_fp8_storage,
     install_model_offload,
@@ -135,6 +150,7 @@ def release_pipeline() -> None:
     Waits for a picture another thread is drawing, so no pipeline is dropped mid-call.
     """
     global _slot
+    tier: Tier | None = None
     with _lock:
         held = _slot
         _slot = None
@@ -146,6 +162,9 @@ def release_pipeline() -> None:
         for name in ("transformer", "vae", "text_encoder"):
             drop_model(name)
         note_vram("pipeline_release", "after")
+        tier = held.tier
+    if tier is Tier.GB16:
+        _leave("cook", tier)
 
 
 def reset_pipeline_cache() -> None:
@@ -257,27 +276,55 @@ def _is_dtype(value: object) -> bool:
 _prompt_embeds: dict[str, Any] | None = None
 
 
-def encode_series_prompts(pipe: Any, prompts: tuple[str, ...]) -> dict[str, Any]:
-    """Prompt embeddings for every line. The text encoder runs here, in prep."""
-    encoded: dict[str, Any] = {}
-    for prompt in prompts:
-        encoded[prompt] = _encode_prompt(pipe, prompt)
-    return encoded
+# A few neutral lines. FP8 stays when each embedding is within cosine 0.99 of BF16.
+_PROBE_PROMPTS = (
+    "a red ceramic cup on a wooden table",
+    "a mountain lake in the morning",
+    "a quiet city street after rain",
+)
 
 
-def park_text_encoder(pipe: Any) -> None:
-    """Move the text encoder off the GPU. Cook keeps the transformer and the VAE."""
-    for name in ("text_encoder", "text_encoder_2"):
-        module = getattr(pipe, name, None)
-        if module is None:
-            continue
-        mover = getattr(module, "to", None)
-        if callable(mover):
-            try:
-                mover("cpu")
-            except (TypeError, RuntimeError, AttributeError):
-                continue
-    note_vram("text_encoder", "after", pipe)
+def prepare_series_embeds(
+    folder: Path, tier: Tier, prompts: tuple[str, ...], *,
+    lora: UserLora | None = None, lora_strength: float | None = None,
+) -> None:
+    """Encode every prompt with the text encoder alone, keep the embeddings on the CPU, and unload it.
+
+    The transformer and the VAE stay on disk until cook. On a 16 GB card the encoder
+    runs in FP8 when those embeddings stay close to BF16. ``lora`` binds to the
+    transformer at cook.
+    """
+    del lora, lora_strength
+    with _lock:
+        _prepare_locked(folder, tier, prompts)
+
+
+def _prepare_locked(folder: Path, tier: Tier, prompts: tuple[str, ...]) -> None:
+    global _prompt_embeds
+    torch = _import_torch()
+    _enter("text_encoder", tier)
+    tokenizer: Any = None
+    encoder: Any = None
+    try:
+        score = _encoder_cosine(folder, tier, torch)
+        storage = choose_encoder_storage(tier, _fp8_ready(torch), score, _free_vram_bytes())
+        tokenizer, encoder = _load_text_pair(folder, torch)
+        _place_encoder(encoder, storage, torch, tier)
+        _keep("text_encoder", encoder, tier)
+        note_vram("text_encoder", "before", encoder)
+        encoded: dict[str, Any] = {}
+        for prompt in prompts:
+            encoded[prompt] = _to_cpu(_encode_prompt_text(tokenizer, encoder, prompt, torch))
+        _prompt_embeds = encoded
+    finally:
+        _release_text_encoder(encoder, tokenizer, torch)
+        encoder = None
+        tokenizer = None
+        gc.collect()
+        if getattr(torch, "cuda", None) is not None and torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        note_vram("text_encoder", "after")
+        _leave("text_encoder", tier)
 
 
 def text_encoder_on_cuda(pipe: Any) -> bool:
@@ -304,35 +351,238 @@ def _module_on_cuda(module: Any) -> bool:
     return device is not None and "cuda" in str(getattr(device, "type", device))
 
 
-def _encode_prompt(pipe: Any, prompt: str) -> Any:
-    encode = getattr(pipe, "encode_prompt", None)
-    if not callable(encode):
-        raise InferenceUnavailable("the pipeline cannot encode a prompt")
+def _keep(name: str, module: Any, tier: Tier) -> None:
     try:
-        result = encode(prompt, do_classifier_free_guidance=False, max_sequence_length=512)
-    except TypeError:
-        result = encode(prompt)
-    if isinstance(result, tuple):
-        return result[0]
-    return result
+        admit(name, module, tier)
+    except StageBlocked as exc:
+        raise VramRefused() from exc
 
 
-def prepare_series_embeds(
-    folder: Path, tier: Tier, prompts: tuple[str, ...], *,
-    lora: UserLora | None = None, lora_strength: float | None = None,
-) -> None:
-    """Load the picture pipeline, encode every prompt, then park the text encoder."""
-    global _prompt_embeds
-    torch = _import_torch()
-    diffusers = _import_diffusers()
-    with _lock:
-        pipe = _pipeline_for(
-            diffusers, torch, PIPELINE_TEXT, folder, torch.bfloat16, tier, lora, lora_strength, None,
+def _peak(stage: str, tier: Tier) -> None:
+    try:
+        guard_peak(stage, tier)
+    except StageBlocked as exc:
+        raise VramRefused() from exc
+
+
+def _enter(name: str, tier: Tier) -> None:
+    try:
+        begin_stage(name, tier)
+    except StageBlocked as exc:
+        raise VramRefused() from exc
+
+
+def _leave(name: str, tier: Tier) -> None:
+    try:
+        finish_stage(name, tier)
+    except StageBlocked as exc:
+        raise VramRefused() from exc
+
+
+def _fp8_ready(torch: Any) -> bool:
+    return getattr(torch, "float8_e4m3fn", None) is not None and _layerwise_casting() is not None
+
+
+def _encoder_cosine(folder: Path, tier: Tier, torch: Any) -> float | None:
+    """Minimum cosine of FP8 embeddings against a CPU BF16 pass. None outside 16 GB."""
+    if tier is not Tier.GB16 or not _fp8_ready(torch):
+        return None
+    try:
+        reference = _probe_vectors(folder, torch, "cpu")
+        candidate = _probe_vectors(folder, torch, "fp8")
+    except (OSError, RuntimeError, ValueError, TypeError, AttributeError, WeightsLoadError):
+        return 0.0
+    if len(reference) != len(candidate) or not reference:
+        return 0.0
+    scores = [cosine(left, right) for left, right in zip(reference, candidate, strict=True)]
+    return min(scores) if scores else 0.0
+
+
+def _probe_vectors(folder: Path, torch: Any, storage: Literal["cpu", "fp8"]) -> list[list[float]]:
+    tokenizer, encoder = _load_text_pair(folder, torch)
+    try:
+        if storage == "cpu":
+            encoder.to("cpu")
+        elif storage == "fp8":
+            if not cast_module_fp8(encoder, torch):
+                raise RuntimeError("fp8 cast failed")
+            if torch.cuda.is_available():
+                encoder.to("cuda")
+        else:
+            assert_never(storage)
+        vectors: list[list[float]] = []
+        for prompt in _PROBE_PROMPTS:
+            encoded = _to_cpu(_encode_prompt_text(tokenizer, encoder, prompt, torch))
+            vectors.append(_vector(encoded))
+        return vectors
+    finally:
+        _release_text_encoder(encoder, tokenizer, torch)
+
+
+def _load_text_pair(folder: Path, torch: Any) -> tuple[Any, Any]:
+    """The tokenizer and the text encoder. The picture pipeline stays unloaded."""
+    transformers = _import_transformers()
+    tokenizer = _load(
+        transformers.AutoTokenizer.from_pretrained, folder / "tokenizer", local_files_only=True,
+    )
+    try:
+        encoder = _load(
+            transformers.AutoModel.from_pretrained,
+            folder / "text_encoder",
+            torch_dtype=torch.bfloat16,
+            local_files_only=True,
         )
-        note_vram("text_encoder", "before", pipe)
-        _prompt_embeds = encode_series_prompts(pipe, prompts)
-        park_text_encoder(pipe)
-        _remember_components(pipe)
+    except TypeError:
+        encoder = _load(
+            transformers.AutoModel.from_pretrained,
+            folder / "text_encoder",
+            dtype=torch.bfloat16,
+            local_files_only=True,
+        )
+    return tokenizer, encoder
+
+
+def _place_encoder(encoder: Any, storage: Literal["fp8", "bf16", "cpu"], torch: Any, tier: Tier) -> None:
+    if storage == "fp8":
+        if not cast_module_fp8(encoder, torch) or not torch.cuda.is_available():
+            note_error("encoder.fp8_missing")
+            storage = "cpu" if _free_vram_bytes() is None else "bf16"
+        else:
+            encoder.to("cuda")
+            _peak("text_encoder", tier)
+            return
+    if storage == "bf16":
+        if torch.cuda.is_available():
+            encoder.to("cuda")
+            _peak("text_encoder", tier)
+            return
+        encoder.to("cpu")
+        return
+    if storage == "cpu":
+        encoder.to("cpu")
+        return
+    assert_never(storage)
+
+
+def _encode_prompt_text(tokenizer: Any, encoder: Any, prompt: str, torch: Any) -> Any:
+    """One Z-Image prompt embedding: chat template, then the penultimate hidden state."""
+    messages = [{"role": "user", "content": prompt}]
+    try:
+        templated = tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True, enable_thinking=True,
+        )
+    except TypeError:
+        templated = tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True,
+        )
+    if not isinstance(templated, str):
+        raise InferenceUnavailable("the tokenizer did not render a prompt")
+    text_inputs = tokenizer(
+        [templated], padding="max_length", max_length=512, truncation=True, return_tensors="pt",
+    )
+    device = _module_device(encoder)
+    input_ids = text_inputs.input_ids.to(device)
+    mask = text_inputs.attention_mask.to(device).bool()
+    inference = getattr(torch, "inference_mode", None)
+    context = inference() if callable(inference) else _null_context()
+    with context:
+        hidden = encoder(
+            input_ids=input_ids, attention_mask=mask, output_hidden_states=True,
+        ).hidden_states[-2]
+    return [hidden[0][mask[0]]]
+
+
+def _release_text_encoder(encoder: Any, tokenizer: Any, torch: Any) -> None:
+    """Drop the text encoder, collect it, and return CUDA blocks to the driver."""
+    drop_model("text_encoder")
+    if encoder is not None:
+        mover = getattr(encoder, "to", None)
+        if callable(mover):
+            try:
+                mover("cpu")
+            except (TypeError, RuntimeError, AttributeError):
+                pass
+    del encoder, tokenizer
+    gc.collect()
+    if getattr(torch, "cuda", None) is not None and torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
+def _to_cpu(value: Any) -> Any:
+    return _moved(value, "cpu")
+
+
+def _moved(value: Any, device: str) -> Any:
+    if isinstance(value, list):
+        return [_moved(item, device) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_moved(item, device) for item in value)
+    detach = getattr(value, "detach", None)
+    if callable(detach):
+        try:
+            value = detach()
+        except (TypeError, RuntimeError):
+            pass
+    mover = getattr(value, "to", None)
+    if not callable(mover):
+        return value
+    try:
+        return mover(device)
+    except (TypeError, RuntimeError, AttributeError):
+        return value
+
+
+def _vector(value: Any) -> list[float]:
+    if isinstance(value, list):
+        if not value:
+            return []
+        if isinstance(value[0], (int, float)):
+            return [float(item) for item in value]
+        flat: list[float] = []
+        for item in value:
+            flat.extend(_vector(item))
+        return flat
+    detach = getattr(value, "detach", None)
+    if callable(detach):
+        try:
+            value = detach()
+        except (TypeError, RuntimeError):
+            pass
+    cpu = getattr(value, "cpu", None)
+    if callable(cpu):
+        try:
+            value = cpu()
+        except (TypeError, RuntimeError):
+            pass
+    reshape = getattr(value, "reshape", None)
+    if callable(reshape):
+        try:
+            value = reshape(-1)
+        except (TypeError, RuntimeError):
+            pass
+    listed = getattr(value, "tolist", None)
+    if callable(listed):
+        try:
+            return _vector(listed())
+        except (TypeError, RuntimeError, ValueError):
+            return []
+    return []
+
+
+def _module_device(encoder: Any) -> str:
+    device = getattr(encoder, "device", None)
+    if device is None:
+        return "cpu"
+    kind = getattr(device, "type", None)
+    if isinstance(kind, str):
+        return kind
+    text = str(device)
+    return "cuda" if "cuda" in text else "cpu"
+
+
+@contextmanager
+def _null_context() -> Iterator[None]:
+    yield
 
 
 def clear_series_embeds() -> None:
@@ -341,11 +591,15 @@ def clear_series_embeds() -> None:
     _prompt_embeds = None
 
 
-def _remember_components(pipe: Any) -> None:
+def _remember_components(pipe: Any, tier: Tier) -> None:
     for name in ("transformer", "vae", "text_encoder"):
         module = getattr(pipe, name, None)
-        if module is not None:
+        if module is None:
+            continue
+        if name == "vae":
             hold_model(name, module)
+        else:
+            _keep(name, module, tier)
 
 
 def _bind_lora(pipe: Any, lora: UserLora | None, lora_strength: float | None) -> None:
@@ -360,8 +614,63 @@ def _bind_lora(pipe: Any, lora: UserLora | None, lora_strength: float | None) ->
 
 def _open_pipeline(
     diffusers: Any, pipeline_name: str, folder: Path, dtype: object, control_file: Path | None,
+    *, drop_text: bool,
 ) -> tuple[Any, Any]:
-    """Load one pipeline from disk."""
+    """Load the transformer and the VAE. The text encoder stays out of this pipeline."""
+    cooked = _open_cook(diffusers, pipeline_name, folder, dtype, control_file)
+    if cooked is not None:
+        return cooked
+    pipe, controlnet = _open_full(diffusers, pipeline_name, folder, dtype, control_file)
+    if drop_text:
+        _detach_text_encoder(pipe)
+    return pipe, controlnet
+
+
+def _open_cook(
+    diffusers: Any, pipeline_name: str, folder: Path, dtype: object, control_file: Path | None,
+) -> tuple[Any, Any] | None:
+    """Build a pipeline from the transformer, VAE, and scheduler subfolders."""
+    transformer_cls = getattr(diffusers, "ZImageTransformer2DModel", None)
+    vae_cls = getattr(diffusers, "AutoencoderKL", None)
+    scheduler_cls = getattr(diffusers, "FlowMatchEulerDiscreteScheduler", None)
+    if transformer_cls is None or vae_cls is None or scheduler_cls is None:
+        return None
+    if not all(callable(getattr(cls, "from_pretrained", None)) for cls in (transformer_cls, vae_cls, scheduler_cls)):
+        return None
+    kind = _pipeline_type(diffusers, pipeline_name)
+    if not isinstance(kind, type):
+        return None
+    transformer = _load(
+        transformer_cls.from_pretrained, folder / "transformer", torch_dtype=dtype, local_files_only=True,
+    )
+    vae = _load(vae_cls.from_pretrained, folder / "vae", torch_dtype=dtype, local_files_only=True)
+    scheduler = _load(scheduler_cls.from_pretrained, folder / "scheduler", local_files_only=True)
+    controlnet = None
+    try:
+        if pipeline_name == PIPELINE_CONTROL or pipeline_name == PIPELINE_CONTROL_INPAINT:
+            if control_file is None:
+                raise InferenceUnavailable("control weights are missing")
+            control_cls = getattr(diffusers, "ZImageControlNetModel", None)
+            if control_cls is None or not callable(getattr(control_cls, "from_single_file", None)):
+                return None
+            controlnet = control_cls.from_single_file(control_file, torch_dtype=dtype)
+            pipe = kind(
+                scheduler=scheduler, vae=vae, text_encoder=None, tokenizer=None,
+                transformer=transformer, controlnet=controlnet,
+            )
+        else:
+            pipe = kind(
+                scheduler=scheduler, vae=vae, text_encoder=None, tokenizer=None, transformer=transformer,
+            )
+    except TypeError:
+        return None
+    return pipe, controlnet
+
+
+def _open_full(
+    diffusers: Any, pipeline_name: str, folder: Path, dtype: object, control_file: Path | None,
+) -> tuple[Any, Any]:
+    """Load one pipeline from disk. Tests use this when the component classes are absent."""
     if pipeline_name == PIPELINE_TEXT:
         pipe = _load(diffusers.ZImagePipeline.from_pretrained, folder, torch_dtype=dtype, local_files_only=True)
         return pipe, None
@@ -379,6 +688,52 @@ def _open_pipeline(
         pipe = _load(kind.from_pretrained, folder, controlnet=controlnet, torch_dtype=dtype, local_files_only=True)
         return pipe, controlnet
     raise InferenceUnavailable(f"unknown pipeline {pipeline_name}")
+
+
+def _detach_text_encoder(pipe: Any) -> None:
+    """Move the text encoder to CPU and drop it from the cook pipeline."""
+    components = getattr(pipe, "components", None)
+    for name in ("text_encoder", "text_encoder_2"):
+        module = getattr(pipe, name, None)
+        if module is not None:
+            mover = getattr(module, "to", None)
+            if callable(mover):
+                try:
+                    mover("cpu")
+                except (TypeError, RuntimeError, AttributeError):
+                    pass
+        try:
+            setattr(pipe, name, None)
+        except (AttributeError, TypeError):
+            pass
+        if isinstance(components, dict):
+            components.pop(name, None)
+
+
+def _ensure_prompt_embed(
+    folder: Path, tier: Tier, prompt: str, lora: UserLora | None, lora_strength: float | None,
+) -> None:
+    """Encode one prompt before cook. A 16 GB card keeps the full pipeline unloaded."""
+    if _prompt_embeds is not None and prompt in _prompt_embeds:
+        return
+    if not _cook_classes_ready() and not _transformers_importable():
+        return
+    try:
+        prepare_series_embeds(folder, tier, (prompt,), lora=lora, lora_strength=lora_strength)
+    except (WeightsLoadError, ImportError, OSError, RuntimeError, ValueError, AttributeError, TypeError) as exc:
+        if _cook_classes_ready():
+            note_error("encoder.standalone")
+            raise InferenceUnavailable("the text encoder could not be loaded on its own") from exc
+        return
+
+
+def _cook_classes_ready() -> bool:
+    try:
+        diffusers = _import_diffusers()
+    except ImportError:
+        return False
+    transformer_cls = getattr(diffusers, "ZImageTransformer2DModel", None)
+    return callable(getattr(transformer_cls, "from_pretrained", None))
 
 
 def _pipeline_for(
@@ -408,17 +763,27 @@ def _pipeline_for(
             held.pipe = converted
             held.pipeline_name = pipeline_name
     if held is None:
+        _enter("cook", tier)
         note_vram("pipeline_load", "before")
-        with timed("pipeline_load"):
-            pipe, controlnet = _open_pipeline(diffusers, pipeline_name, folder, dtype, control_file)
-        note_vram("pipeline_load", "after", pipe)
-        held = _Held(
-            folder=key[0], tier=tier, dtype=dtype, control=key[3], pipeline_name=pipeline_name,
-            lora_key=None, pipe=pipe, controlnet=controlnet, torch=torch,
-        )
-        _slot = held
-        with timed("pipeline_place"):
-            _place_and_bind(pipe, tier, lora, lora_strength)
+        try:
+            with timed("pipeline_load"):
+                pipe, controlnet = _open_pipeline(
+                    diffusers, pipeline_name, folder, dtype, control_file,
+                    drop_text=tier is Tier.GB16 or _prompt_embeds is not None,
+                )
+            note_vram("pipeline_load", "after", pipe)
+            held = _Held(
+                folder=key[0], tier=tier, dtype=dtype, control=key[3], pipeline_name=pipeline_name,
+                lora_key=None, pipe=pipe, controlnet=controlnet, torch=torch,
+            )
+            _slot = held
+            with timed("pipeline_place"):
+                _place_and_bind(pipe, tier, lora, lora_strength)
+            _remember_components(pipe, tier)
+            _peak("cook", tier)
+        except Exception:
+            release_pipeline()
+            raise
         held.lora_key = _lora_key(lora, lora_strength)
         return pipe
     lora_key = _lora_key(lora, lora_strength)
@@ -474,9 +839,12 @@ def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, he
         "output_type": "pil",
     }
     embed = None if _prompt_embeds is None else _prompt_embeds.get(screened.prompt)
+    if embed is None:
+        _ensure_prompt_embed(folder, tier, screened.prompt, lora, lora_strength)
+        embed = None if _prompt_embeds is None else _prompt_embeds.get(screened.prompt)
     if embed is not None:
         common["prompt"] = None
-        common["prompt_embeds"] = embed
+        common["prompt_embeds"] = _moved(embed, "cuda" if torch.cuda.is_available() else "cpu")
     common.update(guidance)
     common.update(_negative_argument(negative))
     pipeline_name = plan.pipeline_class
@@ -625,22 +993,29 @@ def _place(pipe: Any, tier: Tier) -> None:
     if tier is Tier.GB16:
         torch = _import_torch()
         cast = install_fp8_storage(pipe, torch, _layerwise_casting())
+        if "transformer" not in cast:
+            note_error("weights.bf16")
         note_tag("tier", "gb16")
         note_tag("weights", "fp8" if cast else "bf16")
         free = _free_vram_bytes()
-        if resident_fits(pipe, free):
+        room = max(0, PEAK_LIMIT_BYTES - allocated_bytes())
+        budget = room if free is None else min(int(free), room)
+        if resident_fits(pipe, budget):
             note_tag("placement", "resident")
             pipe.to("cuda")
+            _peak("cook", tier)
             return
-        if model_offload_fits(pipe, free):
+        if model_offload_fits(pipe, budget):
             note_tag("placement", "model_offload")
             install_model_offload(pipe)
+            _peak("cook", tier)
             return
         try:
             install_low_vram_offload(pipe)
         except OffloadUnavailable as exc:
             raise InferenceUnavailable("this pipeline cannot offload weights") from exc
         note_tag("placement", "group_offload")
+        _peak("cook", tier)
         return
     if tier is Tier.GB24:
         note_tag("tier", "gb24")
@@ -698,3 +1073,19 @@ def _import_torch() -> Any:
 def _import_diffusers() -> Any:
     import diffusers
     return diffusers
+
+
+def _import_transformers() -> Any:
+    import transformers
+    return transformers
+
+
+def _transformers_importable() -> bool:
+    try:
+        _import_transformers()
+    except ImportError:
+        return False
+    return True
+
+
+register_release(release_pipeline)

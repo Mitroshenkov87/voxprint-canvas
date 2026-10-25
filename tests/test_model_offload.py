@@ -94,10 +94,20 @@ def test_16_gb_stays_resident_when_the_pipeline_is_small(monkeypatch) -> None:
 
 
 def test_place_uses_model_offload_when_it_fits(monkeypatch) -> None:
-    pipe = _Pipe(6 * GB)
+    pipe = _Pipe(5 * GB)  # 10 GB in BF16, plus headroom, stays under the 14 GB cap
     _arm(monkeypatch, 15, cast=False)
     runtime._place(pipe, Tier.GB16)
     assert pipe.installed == ["model"]
+
+
+def test_a_bf16_transformer_past_the_cap_streams_blocks(monkeypatch) -> None:
+    pipe = _Pipe(6 * GB)  # 12 GB in BF16 plus headroom passes 14 GB
+    codes: list[str] = []
+    _arm(monkeypatch, 15, cast=False)
+    monkeypatch.setattr(runtime, "note_error", codes.append)
+    runtime._place(pipe, Tier.GB16)
+    assert pipe.installed == ["group"]
+    assert codes == ["weights.bf16"]
 
 
 def test_place_streams_blocks_when_vram_is_short(monkeypatch) -> None:

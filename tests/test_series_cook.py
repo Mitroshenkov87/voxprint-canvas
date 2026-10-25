@@ -28,7 +28,8 @@ class _Device:
 
 class _Encoder:
     def __init__(self) -> None:
-        self.device = _Device("cuda")
+        self.device = _Device("cpu")
+        self.history: list[str] = []
 
     def parameters(self):
         yield self
@@ -36,6 +37,7 @@ class _Encoder:
     def to(self, *args: object, **kwargs: object) -> _Encoder:
         if kwargs or len(args) != 1 or not isinstance(args[0], str):
             raise AssertionError("the text encoder was recast")
+        self.history.append(args[0])
         self.device = _Device(args[0])
         return self
 
@@ -52,6 +54,10 @@ class _Module:
         return self
 
 
+_caches = {"n": 0}
+_loaded: list[str] = []
+
+
 def _torch() -> types.SimpleNamespace:
     class _Generator:
         def __init__(self, device: object = None) -> None:
@@ -61,12 +67,17 @@ def _torch() -> types.SimpleNamespace:
             self.seed = seed
             return self
 
+    def empty_cache() -> None:
+        _caches["n"] += 1
+
     cuda = types.SimpleNamespace(
-        is_available=lambda: False,
-        empty_cache=lambda: None,
+        is_available=lambda: True,
+        empty_cache=empty_cache,
         memory_allocated=lambda: 0,
+        max_memory_allocated=lambda: 0,
         memory_reserved=lambda: 0,
-        mem_get_info=lambda: (0, 0),
+        mem_get_info=lambda: (15 * 1024**3, 16 * 1024**3),
+        reset_peak_memory_stats=lambda: None,
     )
     return types.SimpleNamespace(bfloat16="bf16", Generator=_Generator, cuda=cuda)
 
@@ -75,6 +86,7 @@ def _pipelines(encoder: _Encoder, transformer: _Module, vae: _Module, seen: list
     class TextPipe:
         @classmethod
         def from_pretrained(cls, *_args: object, **_kwargs: object) -> TextPipe:
+            _loaded.append("pipeline")
             return cls()
 
         def __init__(self) -> None:
@@ -117,11 +129,20 @@ def _pipelines(encoder: _Encoder, transformer: _Module, vae: _Module, seen: list
 
 
 def _install(monkeypatch, encoder: _Encoder, transformer: _Module, vae: _Module, seen: list[str]) -> None:
+    _caches["n"] = 0
+    _loaded.clear()
     monkeypatch.setattr(runtime, "_import_torch", _torch)
     monkeypatch.setattr(runtime, "_import_diffusers", lambda: _pipelines(encoder, transformer, vae, seen))
     monkeypatch.setattr(runtime, "_place", lambda _pipe, _tier: None)
     monkeypatch.setattr(runtime, "reset_peak_allocated", lambda: None)
     monkeypatch.setattr(runtime, "system_ram_bytes", lambda: _GB32)
+    monkeypatch.setattr(runtime, "_load_text_pair", lambda _folder, _torch: (object(), encoder))
+    monkeypatch.setattr(
+        runtime, "_encode_prompt_text", lambda _tokenizer, _encoder, prompt, _torch: f"embed:{prompt}",
+    )
+    monkeypatch.setattr(runtime, "_encoder_cosine", lambda _folder, _tier, _torch: 1.0)
+    monkeypatch.setattr(runtime, "_fp8_ready", lambda _torch: True)
+    monkeypatch.setattr(runtime, "cast_module_fp8", lambda *_args, **_kwargs: True)
 
 
 def _plan(pipeline: str) -> CallPlan:
@@ -138,9 +159,11 @@ def test_the_text_encoder_is_not_on_cuda_during_cook(tmp_path: Path, monkeypatch
     try:
         with runtime.pipeline_scope():
             runtime.prepare_series_embeds(tmp_path / "weights", Tier.GB16, ("one frame", "two frame"))
-            held = runtime._slot
-            assert held is not None
-            assert runtime.text_encoder_on_cuda(held.pipe) is False
+            assert _loaded == []
+            assert _caches["n"] >= 1
+            assert encoder.history[:2] == ["cuda", "cpu"]
+            assert runtime.text_encoder_on_cuda(types.SimpleNamespace(text_encoder=encoder)) is False
+            assert runtime._slot is None
             first = issue_input("one frame", "text", ())
             try:
                 runtime.render(_plan(PIPELINE_TEXT), tmp_path / "weights", first, 8, 8, Tier.GB16, seed=1)
@@ -265,6 +288,7 @@ def test_vram_trace_records_the_stage(monkeypatch, tmp_path: Path) -> None:
     assert "vram pipeline_load before " in log
     assert "vram pipeline_load after " in log
     assert "allocated=" in log and "reserved=" in log and "free=" in log and "total=" in log
+    assert "peak=" in log
     assert "models=" in log
 
 

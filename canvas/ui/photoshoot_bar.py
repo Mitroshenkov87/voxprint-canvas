@@ -37,6 +37,20 @@ if TYPE_CHECKING:
     from canvas.ui.shell_screen import ShellWindow
 
 
+FRAMES_PAD = 12
+
+
+def fit_frames(spin: QSpinBox) -> None:
+    """Give the frame count room for its widest value, the border and some air.
+
+    Args:
+        spin: The Frames spin box.
+    """
+    spin.ensurePolished()
+    widest = max(spin.fontMetrics().horizontalAdvance(str(value)) for value in (spin.minimum(), spin.maximum()))
+    spin.setMinimumWidth(widest + 2 * FRAMES_PAD)
+
+
 @dataclass
 class ShotRow:
     """One read-only shot line."""
@@ -150,6 +164,15 @@ class PhotoshootBar:
         self.frames.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
         self.frames.setCorrectionMode(QAbstractSpinBox.CorrectionMode.CorrectToNearestValue)
         self.frames.setAccelerated(True)
+        # Under a stylesheet, NoButtons with right-hand step buttons collapses the
+        # edit field to 1 px (Qt 6.12), so the digits never showed. Empty buttons
+        # on the left give the field the whole box.
+        self.frames.setStyleSheet(
+            "QSpinBox#photoshootFrames::up-button, QSpinBox#photoshootFrames::down-button"
+            " { subcontrol-position: top left; width: 0; border: none; image: none; }"
+        )
+        self.frames.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        fit_frames(self.frames)
         self.frames_label.setBuddy(self.frames)
         if improve is not None:
             layout = _layout_containing(improve)

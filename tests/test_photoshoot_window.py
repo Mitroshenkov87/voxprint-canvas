@@ -65,6 +65,25 @@ def test_the_frame_count_starts_at_six(app, home: Path) -> None:
     set_language("en")
 
 
+@pytest.mark.parametrize("language", ["en", "ru"])
+def test_the_frame_count_shows_its_widest_value(app, home: Path, language: str) -> None:
+    set_language(language)
+    window = _window(home, lambda job, inputs: rgb())
+    window.setFixedSize(1920, 1080)
+    window.show()
+    window.findChild(QCheckBox, "photoshootMode").click()
+    frames = window.findChild(QSpinBox, "photoshootFrames")
+    frames.setValue(frames.maximum())
+    for _ in range(3):
+        app.processEvents()
+    need = frames.fontMetrics().horizontalAdvance(frames.text())
+    edit = frames.findChild(QLineEdit)
+    room = edit.contentsRect().width() - edit.textMargins().left() - edit.textMargins().right()
+    # The box border and the edit field both have to leave the digits whole.
+    assert frames.width() >= need + 2 * 8
+    assert room >= need
+
+
 def test_progress_uses_the_chosen_frame_count(app, home: Path, monkeypatch) -> None:
     def runner(job, inputs):
         del job, inputs

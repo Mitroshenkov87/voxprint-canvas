@@ -83,19 +83,20 @@ class PhotoshootBar:
         """
         return self.rows[index].full
 
-    def show_scenario(self, subject: str, shots: tuple[Shot, ...]) -> None:
-        """Fill the read-only list before the first frame.
+    def show_scenario(self, subject: str, shots: tuple[Shot, ...], *, seed: int = 0) -> None:
+        """Fill the read-only list before the first photograph.
 
         Args:
             subject: Verbatim subject block.
             shots: Accepted shots.
+            seed: Series seed. Each row keeps one item from a choice list.
         """
         self.subject = subject
         self._clear_rows()
-        for shot in shots:
+        for index, shot in enumerate(shots):
             self._add_row(
-                assemble_line(subject, shot, include_camera=False),
-                assemble_line(subject, shot, include_camera=True),
+                assemble_line(subject, shot, include_camera=False, index=index, seed=seed),
+                assemble_line(subject, shot, include_camera=True, index=index, seed=seed),
             )
         self.frame.setText("")
         self._showing = True

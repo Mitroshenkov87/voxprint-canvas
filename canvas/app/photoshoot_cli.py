@@ -240,7 +240,10 @@ def _run_command(
             False, error, _series_message(result.code), (), None, frames, 0, (),
             result.code, result.source,
         ), 1
-    lines = [assemble_line(scenario.subject_block, shot, include_camera=True) for shot in scenario.shots]
+    lines = [
+        assemble_line(scenario.subject_block, shot, include_camera=True, index=index, seed=seed)
+        for index, shot in enumerate(scenario.shots)
+    ]
     scenario_path = result.folder / "scenario.txt"
     scenario_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     shots = _shot_rows(

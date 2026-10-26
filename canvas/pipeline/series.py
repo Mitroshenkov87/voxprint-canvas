@@ -31,7 +31,7 @@ from canvas.pipeline.device_guard import DeviceRefused
 from canvas.pipeline.enhance import mask_numbers, stated_ages
 from canvas.pipeline.gpu_release import release_cuda_cache, release_gate_weights
 from canvas.pipeline.adult_direction import ages_allowed, with_adult_anchor, youth_cues
-from canvas.pipeline.frame_prompt import log_frame_prompt, strip_series_words
+from canvas.pipeline.frame_prompt import frame_identity, log_frame_prompt, strip_series_words, with_choices
 from canvas.pipeline.photoshoot import (
     FORMAT_REMINDER,
     SCENARIO_CHUNK,
@@ -195,7 +195,7 @@ def _run_series(
     with clock.measure("scenario"):
         try:
             scenario, fail_code, source = _scenario(
-                idea, count, style, mode, rewrite, adult=adult, appearance=appearance,
+                idea, count, style, mode, rewrite, adult=adult, appearance=appearance, seed=seed,
             )
         except Exception:
             preload.close()
@@ -206,8 +206,10 @@ def _run_series(
         preload.close()
         return _stop("scenario", "", fail_code if scenario is None else "scenario.count")
     lines = [
-        single_frame(assemble_line(scenario.subject_block, shot, include_camera=True))
-        for shot in scenario.shots
+        single_frame(strip_series_words(assemble_line(
+            scenario.subject_block, shot, include_camera=True, index=index, seed=seed,
+        )))
+        for index, shot in enumerate(scenario.shots)
     ]
     try:
         with clock.measure("prompt_check"):
@@ -332,14 +334,16 @@ def _accepted_shots(
         if cancelled():
             return accepted, None, True
         line = (
-            assemble_line(scenario.subject_block, shot, include_camera=include_camera())
+            assemble_line(
+                scenario.subject_block, shot, include_camera=include_camera(), index=index, seed=seed,
+            )
             if line_for is None
-            else single_frame(strip_series_words(line_for(index)))
+            else single_frame(strip_series_words(with_choices(line_for(index), index, seed)))
         )
         line = single_frame(strip_series_words(line))
-        # The stored subject can still name the series. The frame only has to
-        # keep the appearance and the idea once those words are gone.
-        identity = strip_series_words(scenario.subject_block)
+        # The stored subject can still name the series and list every outfit.
+        # The photograph only has to keep the appearance once those words are gone.
+        identity = frame_identity(scenario.subject_block)
         if (identity and identity not in line) or (adult and youth_cues(line)):
             blocked.append(index)
             _status(on_status, index, "blocked")
@@ -772,8 +776,9 @@ def _scenario(
     *,
     adult: bool,
     appearance: str = "",
+    seed: int = 0,
 ) -> tuple[Scenario | None, str, Source]:
-    """Shots from the writer, then planned shots for any frame it did not cover."""
+    """Shots from the writer, then planned shots for any shot it did not cover."""
     subject = idea.strip()
     if not subject:
         return None, "scenario.format", ""
@@ -784,7 +789,10 @@ def _scenario(
     replies: list[str] = []
     while len(collected) < count:
         ask = min(SCENARIO_CHUNK, count - len(collected))
-        previous = tuple(assemble_line(subject, shot, include_camera=True) for shot in collected)
+        previous = tuple(
+            assemble_line(subject, shot, include_camera=True, index=index, seed=seed)
+            for index, shot in enumerate(collected)
+        )
         request = scenario_request(idea, ask, style, mode, adult=adult, previous=previous)
         if request is None:
             return None, "scenario.format", ""

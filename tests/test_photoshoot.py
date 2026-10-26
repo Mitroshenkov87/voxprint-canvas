@@ -10,7 +10,13 @@ from canvas.infra.stage_timer import StageTimes
 from canvas.pipeline.enhance import stated_ages
 from canvas.pipeline.photoshoot import (
     FORMAT_REMINDER,
+    PLAN_CAMERAS,
+    PLAN_FRAMINGS,
+    PLAN_LIGHTS,
+    PLAN_PLACES,
+    PLAN_POSES,
     SCENARIO_TOKENS,
+    SINGLE_FRAME,
     SYSTEM_PROMPT,
     TOKENS_PER_FRAME,
     Draft,
@@ -875,7 +881,8 @@ def test_a_frame_prompt_has_no_series_words(tmp_path: Path) -> None:
     assert result.stopped == ""
     assert prompts
     banned = re.compile(
-        r"\b(?:every\s+frames?|series|shots|angles|panels|grids?|collages?|sheets?|sequences?|multiple|sets?)\b",
+        r"\b(?:frames?|borders?|photoshoots?|photo[-\s]+shoots?|panels?|sheets?|series|shots|angles|"
+        r"grids?|collages?|sequences?|multiple|sets?|every\s+shots?)\b",
         re.IGNORECASE,
     )
     joined = "\n".join(prompts)
@@ -887,6 +894,82 @@ def test_a_frame_prompt_has_no_series_words(tmp_path: Path) -> None:
         assert line.count("A single photograph of") == 1
     assert prepared and prepared[0] == prompts
     assert joined not in prepared[0]
+
+
+_PROMPT_DENY = re.compile(
+    r"\b(?:frames?|borders?|photoshoots?|photo[-\s]+shoots?|panels?|sheets?|series)\b",
+    re.IGNORECASE,
+)
+_LIST = re.compile(r"\([^)]*(?:,|\bor\b)[^)]*\)", re.IGNORECASE)
+_OUTFITS = ("jeans and sweater", "summer dress", "business suit", "sportswear", "winter coat")
+_LIGHTS = ("window light", "golden hour", "overcast daylight")
+_PLACES = ("loft", "rooftop", "courtyard")
+
+
+def test_shot_templates_say_shot_and_keep_the_photograph_lead() -> None:
+    for text in (*PLAN_POSES, *PLAN_FRAMINGS, *PLAN_LIGHTS, *PLAN_CAMERAS, *PLAN_PLACES, SINGLE_FRAME):
+        assert _PROMPT_DENY.search(text) is None, text
+        assert re.search(r"\bframes?\b", text, re.IGNORECASE) is None, text
+    assert SINGLE_FRAME == "A single photograph of"
+    shot = Shot("white border, photo shoot panel", "filling the frame", "50 mm", "sheet series")
+    line = assemble_line("a red coat", shot, include_camera=True)
+    assert line.startswith("A single photograph of a red coat,")
+    assert "photograph" in line
+    assert "filling the shot" in line
+    assert _PROMPT_DENY.search(line) is None
+    assert re.search(r"\bframes?\b", line, re.IGNORECASE) is None
+
+
+def test_each_frame_keeps_one_listed_outfit_and_covers_the_list(tmp_path: Path) -> None:
+    idea = (
+        "a woman (jeans and sweater, summer dress, business suit, sportswear, winter coat), "
+        "different lighting, various outfits, (window light or golden hour or overcast daylight), "
+        "(loft, rooftop, courtyard), photo shoot, wide frames, white borders, panel, sheet, series"
+    )
+    prompts: list[str] = []
+
+    def generate(line: str, seed: int, hero: object | None, strength: float | None) -> object:
+        del seed, hero, strength
+        prompts.append(line)
+        return _frame()
+
+    def rewrite(prompt: str) -> str:
+        count = int(json.loads(prompt)["count"])
+        return "\n".join(
+            f"{index + 1}. wide FRAME {index}, white Borders, Photo-Shoot, sheets, series"
+            f" | still | 50 mm | studio"
+            for index in range(count)
+        )
+
+    result = _run(tmp_path, idea=idea, generate=generate, count=5, rewrite=rewrite)
+    look = fixed_appearance(idea, 3)
+    assert result.stopped == ""
+    assert result.source == "writer"
+    assert len(prompts) == 5
+    seen_outfits: set[str] = set()
+    seen_lights: set[str] = set()
+    seen_places: set[str] = set()
+    for index, line in enumerate(prompts):
+        assert line.startswith(f"A single photograph of {look},")
+        assert line.count("A single photograph of") == 1
+        assert "photograph" in line
+        assert _PROMPT_DENY.search(line) is None
+        assert re.search(r"\bframes?\b", line, re.IGNORECASE) is None
+        assert _LIST.search(line) is None
+        assert re.search(r"\b(?:different|various)\b", line, re.IGNORECASE) is None
+        outfits = [item for item in _OUTFITS if item in line]
+        lights = [item for item in _LIGHTS if item in line]
+        places = [item for item in _PLACES if item in line]
+        assert outfits == [_OUTFITS[(3 + index) % len(_OUTFITS)]]
+        assert lights == [_LIGHTS[(3 + index) % len(_LIGHTS)]]
+        assert places == [_PLACES[(3 + index) % len(_PLACES)]]
+        assert f"wide shot {index}" in line
+        seen_outfits.add(outfits[0])
+        seen_lights.add(lights[0])
+        seen_places.add(places[0])
+    assert seen_outfits == set(_OUTFITS)
+    assert seen_lights == set(_LIGHTS)
+    assert seen_places == set(_PLACES)
 
 
 def test_scenario_token_budget_follows_the_frame_count() -> None:

@@ -16,7 +16,7 @@ from typing import Literal, assert_never
 
 from canvas.pipeline.adult_direction import LIGHT_SETUPS, POSE_FAMILIES, shot_plan
 from canvas.pipeline.enhance import AGING_DESCRIPTOR_MIN_AGE, added_aging_terms, quoted_spans, stated_ages
-from canvas.pipeline.frame_prompt import strip_series_words
+from canvas.pipeline.frame_prompt import frame_identity, strip_series_words, with_choices
 
 PlaceMode = Literal["same", "different"]
 MAX_FRAMES = 99
@@ -258,25 +258,33 @@ def frame_negative(negative: str) -> str:
     return ", ".join(part for part in (negative.strip(), COLLAGE_NEGATIVE) if part)
 
 
-def assemble_line(subject: str, shot: Shot, *, include_camera: bool) -> str:
+def assemble_line(
+    subject: str, shot: Shot, *, include_camera: bool, index: int = 0, seed: int = 0,
+) -> str:
     """The line sent for one shot.
 
-    Appearance leads, then this shot's pose, camera, scene, and place. Series
-    wording is removed so the picture model does not draw a grid. The line
-    starts with one photograph and stays inside the text encoder's token cap.
+    Appearance leads, then this shot's pose, camera, scene, and place. Each
+    parenthesized list in the subject contributes one item, chosen from the
+    seed. Series wording is removed. The line starts with one photograph and
+    stays inside the text encoder's token cap.
 
     Args:
-        subject: Appearance, then the idea. Series instructions are stripped.
-        shot: Scene, pose, camera, and place for this frame only.
+        subject: Appearance, then the idea. Lists and series instructions are stripped.
+        shot: Scene, pose, camera, and place for this shot only.
         include_camera: When true, the lens and angle stay on the line.
+        index: Which shot this is. Alternative lists walk forward from here.
+        seed: Series seed. The same seed and index always pick the same item.
     """
     parts = [
-        strip_series_words(subject),
-        strip_series_words(shot.pose),
+        strip_series_words(with_choices(subject, index, seed)),
+        strip_series_words(with_choices(shot.pose, index, seed)),
     ]
     if include_camera:
-        parts.append(strip_series_words(shot.camera))
-    parts.extend((strip_series_words(shot.scene), strip_series_words(shot.place)))
+        parts.append(strip_series_words(with_choices(shot.camera, index, seed)))
+    parts.extend((
+        strip_series_words(with_choices(shot.scene, index, seed)),
+        strip_series_words(with_choices(shot.place, index, seed)),
+    ))
     return truncate_for_encoder(single_frame(", ".join(part for part in parts if part)))
 
 
@@ -329,7 +337,7 @@ def _keep_shots(idea: str, subject: str, shots: tuple[Shot, ...]) -> tuple[Shot,
     required = [piece for piece in quoted_spans(idea) if piece in subject]
     for shot in shots:
         line = assemble_line(subject, shot, include_camera=True)
-        identity = strip_series_words(subject)
+        identity = frame_identity(subject)
         if identity and identity not in line:
             continue
         if sorted(stated_ages(line)) != ages:
@@ -574,9 +582,9 @@ PLAN_LIGHTS = (
     "hard spotlight with a crisp shadow", "warm light from practical lamps",
 )
 PLAN_POSES = (
-    "subject centred in the frame", "subject on the left third of the frame", "subject on the right third of the frame",
-    "subject turned three-quarters to the camera", "subject framed through a soft foreground",
-    "subject against a plain background", "subject filling the frame", "subject seen at a slight angle",
+    "subject centred in the shot", "subject on the left third of the shot", "subject on the right third of the shot",
+    "subject turned three-quarters to the camera", "subject seen through a soft foreground",
+    "subject against a plain background", "subject filling the shot", "subject seen at a slight angle",
 )
 PLAN_CAMERAS = (
     "35 mm lens, eye level", "50 mm lens, slightly above eye level", "85 mm lens, eye level",

@@ -133,7 +133,7 @@ def run_photoshoot(window: ShellWindow) -> None:
 
     def on_scenario(scenario: Scenario) -> None:
         def show(scenario: Scenario = scenario) -> None:
-            bar.show_scenario(scenario.subject_block, scenario.shots)
+            bar.show_scenario(scenario.subject_block, scenario.shots, seed=base_seed)
             window.view.refresh()
             bar.sync()
 

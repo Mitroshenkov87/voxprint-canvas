@@ -1,8 +1,9 @@
-"""One frame's picture prompt.
+"""One photograph's picture prompt.
 
-The diffusion prompt is the appearance and that frame's own shot. Series
-wording (a grid, a sheet, "every frame") is removed before the text encoder
-sees it. The log records the length and a hash, not the words.
+The diffusion prompt is the appearance and that shot's own pose, camera,
+scene, and place. Series wording (a grid, a sheet, "every shot") is removed
+before the text encoder sees it. A parenthesized list contributes one item.
+The log records the length and a hash, not the words.
 """
 from __future__ import annotations
 
@@ -11,11 +12,18 @@ import re
 
 from canvas.infra.stage_timer import log_detail
 
-# Phrases that make a 1024 frame come back as a contact sheet.
+# ``frame`` is replaced with ``shot`` before this runs, so ``frames`` becomes
+# ``shots`` and is removed, while a singular ``shot`` stays. ``photograph``
+# has no word boundary around ``frame`` and is left as the lead.
+_FRAME_WORD = re.compile(r"\bframes?\b", re.IGNORECASE)
 _SERIES_WORDS = re.compile(
-    r"\b(?:every\s+frames?|series|shots|angles|panels|grids?|collages?|sheets?|sequences?|multiple|sets?)\b",
+    r"\b(?:every\s+(?:shots?|frames?)|series|shots|angles|panels?|grids?|collages?|sheets?|sequences?"
+    r"|multiple|sets?|borders?|photoshoots?|photo[-\s]+shoots?)\b",
     re.IGNORECASE,
 )
+_DIFFERENT = re.compile(r"\b(?:different|various)\s+[A-Za-z][\w'-]*\b", re.IGNORECASE)
+_CHOICE = re.compile(r"\(([^()]*)\)")
+_CHOICE_SPLIT = re.compile(r"\s*(?:,|\bor\b)\s*", re.IGNORECASE)
 _SPACES = re.compile(r"[ \t]{2,}")
 _COMMA_GAP = re.compile(r"\s+,")
 _COMMA_RUN = re.compile(r"(?:,\s*){2,}")
@@ -24,12 +32,66 @@ _NUMBERED = re.compile(r"^\s*\d{1,2}\s*[.)]\s*")
 
 
 def strip_series_words(text: str) -> str:
-    """Drop series and plural wording. The subject and the shot stay."""
-    cleaned = _SERIES_WORDS.sub(" ", text)
-    cleaned = _COMMA_GAP.sub(",", cleaned)
-    cleaned = _COMMA_RUN.sub(", ", cleaned)
-    cleaned = _SPACES.sub(" ", cleaned)
-    return cleaned.strip(" ,")
+    """Drop series wording. ``frame`` becomes ``shot``. The subject stays.
+
+    ``A single photograph of`` is unchanged: ``frame`` is a whole word, so it
+    does not match inside ``photograph``.
+    """
+    cleaned = _FRAME_WORD.sub(_as_shot, text)
+    cleaned = _DIFFERENT.sub(" ", cleaned)
+    cleaned = _SERIES_WORDS.sub(" ", cleaned)
+    return _tidy(cleaned)
+
+
+def choice_lists(text: str) -> tuple[tuple[str, tuple[str, ...]], ...]:
+    """Parentheses that hold a comma or ``or``, and their items.
+
+    A bare comma list, such as an appearance, is not a choice. ``and`` does
+    not split an item.
+    """
+    found: list[tuple[str, tuple[str, ...]]] = []
+    for match in _CHOICE.finditer(text):
+        items = tuple(
+            part for part in (piece.strip(" ,") for piece in _CHOICE_SPLIT.split(match.group(1))) if part
+        )
+        if len(items) >= 2:
+            found.append((match.group(0), items))
+    return tuple(found)
+
+
+def with_choices(text: str, index: int, seed: int) -> str:
+    """Remove each choice list and append one item, ``(seed + index)`` along the list.
+
+    The same seed and index always pick the same item. Consecutive indexes
+    cover the list. Appearance commas outside parentheses stay.
+    """
+    groups = choice_lists(text)
+    offset = index if isinstance(index, int) and not isinstance(index, bool) else 0
+    base = seed if isinstance(seed, int) and not isinstance(seed, bool) else 0
+    picks: list[str] = []
+    for raw, items in groups:
+        picks.append(items[(base + offset) % len(items)])
+        text = text.replace(raw, " ", 1)
+    text = _tidy(text)
+    if not picks:
+        return text
+    extra = ", ".join(picks)
+    return f"{text}, {extra}" if text else extra
+
+
+def frame_identity(text: str) -> str:
+    """Subject text with choice lists and series words removed.
+
+    The chosen item is appended after this text, so the result stays inside
+    the assembled line.
+    """
+    for raw, _items in choice_lists(text):
+        text = text.replace(raw, " ", 1)
+    return strip_series_words(text)
+
+
+def _as_shot(match: re.Match[str]) -> str:
+    return "shots" if match.group(0).casefold().endswith("s") else "shot"
 
 
 def split_frame_prompts(prompts: tuple[str, ...]) -> tuple[str, ...]:
@@ -44,6 +106,13 @@ def log_frame_prompt(prompt: str) -> None:
     """Record the length and hash of one final frame prompt. The words stay out of the log."""
     digest = hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:16]
     log_detail("frame", "prompt", "cpu", f"chars={len(prompt)} sha={digest}")
+
+
+def _tidy(text: str) -> str:
+    cleaned = _COMMA_GAP.sub(",", text)
+    cleaned = _COMMA_RUN.sub(", ", cleaned)
+    cleaned = _SPACES.sub(" ", cleaned)
+    return cleaned.strip(" ,")
 
 
 def _split_one(prompt: str) -> tuple[str, ...]:

@@ -16,6 +16,7 @@ from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
     QBoxLayout,
+    QCheckBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -135,11 +136,9 @@ class PhotoshootBar:
 
     def _mount_mode(self) -> None:
         improve = self.window.view.root.findChild(QPushButton, "improvePrompt")
-        self.mode = QPushButton(tr("photoshoot.button"))
+        # A checkbox, so it reads as "this run will be a photoshoot", not as an action.
+        self.mode = QCheckBox(tr("photoshoot.button"))
         self.mode.setObjectName("photoshootMode")
-        self.mode.setCheckable(True)
-        self.mode.setAutoDefault(False)
-        self.mode.setProperty("chip", True)
         self.mode.setToolTip(tr("photoshoot.tooltip"))
         self.mode.clicked.connect(self._toggle)
         self.frames_label = QLabel(tr("photoshoot.frames"))

@@ -10,7 +10,7 @@ import pytest
 pytest.importorskip("PySide6")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QAbstractSpinBox, QApplication, QLabel, QLineEdit, QPushButton, QSpinBox
+from PySide6.QtWidgets import QAbstractSpinBox, QApplication, QCheckBox, QLabel, QLineEdit, QPushButton, QSpinBox
 
 from canvas.models.modes import Mode, Tier
 from canvas.safety.gate import SafetyUnavailable
@@ -53,7 +53,7 @@ def test_the_frame_count_starts_at_six(app, home: Path) -> None:
     assert frames.buttonSymbols() == QAbstractSpinBox.ButtonSymbols.NoButtons
     assert label.text() == "Frames"
     assert window.photoshoot.count == 6
-    window.findChild(QPushButton, "photoshootMode").click()
+    window.findChild(QCheckBox, "photoshootMode").click()
     app.processEvents()
     assert frames.isVisible()
     assert label.isVisible()
@@ -79,7 +79,7 @@ def test_progress_uses_the_chosen_frame_count(app, home: Path, monkeypatch) -> N
     window.photoshoot.writer = writer
     window.view.set_prompt_text(IDEA)
     window.show()
-    window.findChild(QPushButton, "photoshootMode").click()
+    window.findChild(QCheckBox, "photoshootMode").click()
     window.findChild(QSpinBox, "photoshootFrames").setValue(4)
     window.findChild(QPushButton, "generate").click()
     app.processEvents()
@@ -92,8 +92,9 @@ def test_the_option_leaves_the_shell_create_button_in_place(app, home: Path) -> 
     window = _window(home, lambda job, inputs: rgb())
     window.show()
     app.processEvents()
-    mode = window.findChild(QPushButton, "photoshootMode")
+    mode = window.findChild(QCheckBox, "photoshootMode")
     assert mode is not None and mode.text() == "Photoshoot"
+    assert window.findChild(QPushButton, "photoshootMode") is None
     generate = window.findChild(QPushButton, "generate")
     assert generate is not None and generate.isVisible()
     mode.click()
@@ -120,7 +121,7 @@ def test_generate_writes_a_read_only_series(app, home: Path, monkeypatch) -> Non
     window.photoshoot.writer = lambda _prompt: _payload(IDEA)
     window.view.set_prompt_text(IDEA)
     window.show()
-    window.findChild(QPushButton, "photoshootMode").click()
+    window.findChild(QCheckBox, "photoshootMode").click()
     window.findChild(QPushButton, "generate").click()
     app.processEvents()
     assert len(prompts) == 6
@@ -157,7 +158,7 @@ def test_expert_does_not_add_a_camera_control(app, home: Path, monkeypatch) -> N
     window.view.set_prompt_text(IDEA)
     window.set_expert(True)
     window.show()
-    window.findChild(QPushButton, "photoshootMode").click()
+    window.findChild(QCheckBox, "photoshootMode").click()
     window.findChild(QPushButton, "generate").click()
     app.processEvents()
     assert prompts and all("50 mm" in prompt for prompt in prompts)
@@ -187,7 +188,7 @@ def test_a_blocked_frame_is_labelled_and_is_not_the_hero(app, home: Path, monkey
     window.photoshoot.writer = lambda _prompt: _payload(IDEA)
     window.view.set_prompt_text(IDEA)
     window.show()
-    window.findChild(QPushButton, "photoshootMode").click()
+    window.findChild(QCheckBox, "photoshootMode").click()
     window.findChild(QPushButton, "generate").click()
     app.processEvents()
     labels = [label.text() for label in window.findChildren(QLabel, "photoshootLine")]
@@ -214,7 +215,7 @@ def test_cancel_keeps_the_frames_already_finished(app, home: Path, monkeypatch) 
     window.photoshoot.writer = lambda _prompt: _payload(IDEA)
     window.view.set_prompt_text(IDEA)
     window.show()
-    window.findChild(QPushButton, "photoshootMode").click()
+    window.findChild(QCheckBox, "photoshootMode").click()
     window.findChild(QPushButton, "generate").click()
     app.processEvents()
     assert len(prompts) == 1

@@ -18,7 +18,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PIL import Image, ImageDraw, ImageFont
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QColor, QPainter
-from PySide6.QtWidgets import QApplication, QPushButton, QRadioButton
+from PySide6.QtWidgets import QApplication, QCheckBox, QPushButton, QRadioButton
 
 from canvas.app.i18n import text
 from canvas.models.modes import Tier
@@ -234,7 +234,7 @@ def _photoshoot(app: QApplication, state: Path, idea: str, folder: Path) -> None
     window.setFixedSize(SHOT)
     window.show()
     app.processEvents()
-    mode = window.findChild(QPushButton, "photoshootMode")
+    mode = window.findChild(QCheckBox, "photoshootMode")
     if mode is None:
         raise SystemExit("missing Photoshoot")
     mode.click()
@@ -263,7 +263,7 @@ def _finish_series(app: QApplication, window: ShellWindow, idea: str, path: Path
     photoshoot_run.selectable = _ready
     window.photoshoot.writer = lambda _prompt: _scenario(idea)
     window.photoshoot.enabled = True
-    mode = window.findChild(QPushButton, "photoshootMode")
+    mode = window.findChild(QCheckBox, "photoshootMode")
     if mode is not None:
         mode.setChecked(True)
 

@@ -10,7 +10,7 @@ import pytest
 pytest.importorskip("PySide6")
 
 from PIL import Image
-from PySide6.QtWidgets import QApplication, QPushButton
+from PySide6.QtWidgets import QApplication, QCheckBox, QPushButton
 
 from canvas.models import runtime
 from canvas.pipeline.series import REFERENCE_MIN, REFERENCE_STRENGTH
@@ -106,7 +106,7 @@ def test_hero_frame_feeds_img2img_at_045_and_the_series_is_one_history_entry(app
     window.photoshoot.strength = "high"
     window.view.set_prompt_text(IDEA)
     window.show()
-    window.findChild(QPushButton, "photoshootMode").click()
+    window.findChild(QCheckBox, "photoshootMode").click()
     window.findChild(QPushButton, "generate").click()
     QApplication.processEvents()
 
@@ -147,7 +147,7 @@ def test_a_person_series_anchors_at_the_default_strength(app, home: Path, tmp_pa
     assert window.photoshoot.strength == "medium"
     window.view.set_prompt_text(PERSON)
     window.show()
-    window.findChild(QPushButton, "photoshootMode").click()
+    window.findChild(QCheckBox, "photoshootMode").click()
     window.findChild(QPushButton, "generate").click()
     QApplication.processEvents()
 

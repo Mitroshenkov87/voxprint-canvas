@@ -64,11 +64,21 @@ def test_the_action_row_is_one_line_at_1280(window):
     for button in _shown(window._action_row, QPushButton) + _shown(window._lora_picker, QPushButton):
         assert QFontInfo(button.font()).family() == FAMILY, button.objectName()
     row = window._action_row
-    buttons = _shown(row, QPushButton)
+    options = window._action_options
+    buttons = _shown(options, QPushButton)
     centres = {b.mapTo(row, b.rect().center()).y() for b in buttons}
     sizes = [(b.objectName(), b.width(), b.minimumWidth(), b.sizeHint().width(), b.property("flowFloor"),
               b.fontMetrics().horizontalAdvance(b.text()), b.font().family()) for b in buttons]
     assert max(centres) - min(centres) <= 4, (row.width(), sizes)
+    # The line is centred, and the large Generate sits centred under it.
+    left = min(b.mapTo(row, b.rect().topLeft()).x() for b in buttons)
+    right = max(b.mapTo(row, b.rect().topRight()).x() for b in buttons)
+    assert abs((left + right) / 2 - row.rect().center().x()) <= 4, (left, right, row.width())
+    generate = row.findChild(QPushButton, "generate")
+    top = generate.mapTo(row, generate.rect().topLeft())
+    assert top.y() > max(b.mapTo(row, b.rect().bottomLeft()).y() for b in buttons)
+    assert abs(generate.mapTo(row, generate.rect().center()).x() - row.rect().center().x()) <= 2
+    assert generate.height() > max(b.height() for b in buttons)
 
 
 def test_the_lora_row_is_one_line_and_flush_with_the_prompt(window):

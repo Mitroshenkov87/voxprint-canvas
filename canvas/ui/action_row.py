@@ -1,14 +1,19 @@
-"""The action row under the prompt: Improve with its back segment, Photoshoot,
-Proportions, Image size and Generate. The row wraps when the panel is narrow."""
+"""The action block under the prompt.
+
+Improve with its back segment, Proportions and Image size share a centred
+line that wraps when the panel is narrow. The large Generate button sits
+centred under them, and the Photoshoot option is centred under Generate with
+Frames beside it."""
 from __future__ import annotations
 
-from PySide6.QtCore import QSize
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QAction, QActionGroup
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QMenu,
     QPushButton,
     QSizePolicy,
+    QVBoxLayout,
     QWidget,
 )
 from voxprint_common.i18n import tr
@@ -18,43 +23,78 @@ from canvas.app.i18n import text
 from canvas.ui.theme import BUTTON_RADIUS
 
 HEIGHT = 36
-GENERATE_HEIGHT = 40
-GENERATE_MIN = 180
-GENERATE_COMPACT = 96
+GENERATE_HEIGHT = 52
+GENERATE_FONT = 20
+GENERATE_MIN = 300
+GENERATE_PAD = 32
 
 
 def build(window, parts) -> QWidget:
-    """Make the row and keep the shared size and output chips as hidden state holders."""
+    """Make the block and keep the shared size and output chips as hidden state holders."""
     from canvas.ui.shell_chrome import _Flow
 
     host = QWidget()
     host.setObjectName("actionRow")
+    column = QVBoxLayout(host)
+    column.setContentsMargins(0, 0, 0, 0)
+    column.setSpacing(10)
+    options = QWidget()
+    options.setObjectName("actionOptions")
     flow = _Flow()
     flow.setSpacing(8)
-    host.setLayout(flow)
+    flow.centre = True
+    options.setLayout(flow)
     policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
     policy.setHeightForWidth(True)
-    host.setSizePolicy(policy)
+    options.setSizePolicy(policy)
     flow.addWidget(_improve_split(window, parts["improve"], parts["revert"]))
-    mode = parts["mode"]
-    if mode is not None:
-        mode.setProperty("chip", False)
-        mode.setFixedHeight(HEIGHT)
-        flow.addWidget(mode)
-        for key in ("frames_label", "frames"):
-            if parts[key] is not None:
-                parts[key].setFixedHeight(HEIGHT if key == "frames" else parts[key].sizeHint().height())
-                flow.addWidget(parts[key])
     flow.addWidget(_proportions(window))
     flow.addWidget(_image_size(window))
+    column.addWidget(options)
     generate = parts["generate"]
     generate.setMinimumSize(GENERATE_MIN, GENERATE_HEIGHT)
-    generate.setProperty("flowFill", True)
-    # The flow may trim Generate down to this floor so the row keeps one line.
-    generate.setProperty("flowFloor", GENERATE_COMPACT)
-    flow.addWidget(generate)
+    generate.setFixedHeight(GENERATE_HEIGHT)
+    generate.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+    # Over the shared theme: only the size changes, the colours stay.
+    generate.setStyleSheet(
+        f"QPushButton#generate {{ font-size: {GENERATE_FONT}px; padding: 8px {GENERATE_PAD}px; }}"
+    )
+    column.addWidget(generate, 0, Qt.AlignmentFlag.AlignHCenter)
+    mode = parts["mode"]
+    if mode is not None:
+        column.addWidget(_photoshoot_line(mode, parts["frames_label"], parts["frames"]))
     window._action_row = host
+    window._action_options = options
     return host
+
+
+def _photoshoot_line(mode, label, frames) -> QWidget:
+    """The Photoshoot checkbox centred on Generate, with Frames on its right."""
+    line = QWidget()
+    line.setObjectName("photoshootOption")
+    row = QHBoxLayout(line)
+    row.setContentsMargins(0, 0, 0, 0)
+    row.setSpacing(8)
+    mode.setProperty("chip", False)
+    mode.setFixedHeight(HEIGHT)
+    side = QWidget()
+    side.setObjectName("photoshootFramesBox")
+    beside = QHBoxLayout(side)
+    beside.setContentsMargins(0, 0, 0, 0)
+    beside.setSpacing(8)
+    for widget in (label, frames):
+        if widget is not None:
+            widget.setFixedHeight(HEIGHT if widget is frames else widget.sizeHint().height())
+            beside.addWidget(widget)
+    beside.addStretch(1)
+    # Two equal sides keep the checkbox on the centre line whether Frames shows or not.
+    balance = QWidget()
+    for widget in (balance, side):
+        widget.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+    row.addWidget(balance, 1)
+    row.addWidget(mode)
+    row.addWidget(side, 1)
+    return line
 
 
 def _improve_split(window, improve, revert) -> QWidget:
@@ -208,8 +248,8 @@ def _fill_image_size(window, menu) -> None:
 
 
 def sync(window) -> None:
-    """Hide the old rows, refresh the two menu labels and the row height."""
-    host = getattr(window, "_action_row", None)
+    """Hide the old rows, refresh the two menu labels, Generate's width and the row height."""
+    host = getattr(window, "_action_options", None)
     if host is None:
         return
     root = window.view.root
@@ -254,17 +294,17 @@ def sync(window) -> None:
             button.setAccessibleName(name)
             advance = button.fontMetrics().horizontalAdvance(button.text())
             button.setMinimumWidth(advance + 36)
-        generate = host.findChild(QPushButton, "generate")
-        if generate is not None:
-            generate.ensurePolished()
-            floor = max(GENERATE_COMPACT, generate.fontMetrics().horizontalAdvance(generate.text()) + 32)
-            floor = floor if compact else GENERATE_MIN
-            generate.setProperty("flowFloor", floor)
-            generate.setMinimumWidth(floor)
         _allow_trim(host, compact)
         if one_line(host, width):
             break
     host.setMinimumHeight(host.layout().heightForWidth(width))
+    generate = window._action_row.findChild(QPushButton, "generate")
+    if generate is not None:
+        generate.ensurePolished()
+        # As with Improve, the shared stylesheet resets the height on polish.
+        generate.setFixedHeight(GENERATE_HEIGHT)
+        need = generate.fontMetrics().horizontalAdvance(generate.text()) + 2 * GENERATE_PAD + 4
+        generate.setFixedWidth(min(width, max(GENERATE_MIN, need)))
 
 
 TRIM_PAD = 12
@@ -281,7 +321,7 @@ def _allow_trim(host: QWidget, allowed: bool) -> None:
     for index in range(flow.count()):
         item = flow.itemAt(index)
         widget = item.widget() if item is not None else None
-        if widget is None or widget.isHidden() or widget.objectName() == "generate":
+        if widget is None or widget.isHidden():
             continue
         if not allowed:
             widget.setProperty("flowFloor", None)

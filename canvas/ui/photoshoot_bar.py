@@ -1,6 +1,6 @@
 """Photoshoot option on the shared simple screen.
 
-The option sits beside Improve prompt. The shell Create button stays the
+The option sits centred under the Create button, which stays the
 primary action and runs the series while the option is on. The shot list is
 read-only. Cancel stops after the frame that already finished.
 """

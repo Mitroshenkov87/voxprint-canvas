@@ -84,6 +84,38 @@ def test_the_frame_count_shows_its_widest_value(app, home: Path, language: str) 
     assert room >= need
 
 
+@pytest.mark.parametrize("language", ["en", "ru"])
+def test_the_option_sits_centred_under_generate(app, home: Path, language: str) -> None:
+    set_language(language)
+    window = _window(home, lambda job, inputs: rgb())
+    window.setFixedSize(1920, 1080)
+    window.show()
+    for _ in range(3):
+        app.processEvents()
+    mode = window.findChild(QCheckBox, "photoshootMode")
+    generate = window.findChild(QPushButton, "generate")
+    panel = window._action_row
+
+    def box(widget):
+        return widget.geometry().translated(widget.parentWidget().mapTo(panel, widget.parentWidget().rect().topLeft()))
+
+    for ticked in (False, True):
+        if mode.isChecked() != ticked:
+            mode.click()
+            for _ in range(3):
+                app.processEvents()
+        button = box(generate)
+        option = box(mode)
+        assert option.top() >= button.bottom(), (ticked, option, button)
+        assert abs(option.center().x() - button.center().x()) <= 2, (ticked, option, button)
+        # Generate is centred in the panel and keeps its whole label.
+        assert abs(button.center().x() - panel.rect().center().x()) <= 2
+        assert generate.fontMetrics().horizontalAdvance(generate.text()) + 16 <= generate.width()
+    frames = box(window.findChild(QSpinBox, "photoshootFrames"))
+    assert frames.left() > option.right() and frames.right() <= panel.width()
+    assert abs(frames.center().y() - option.center().y()) <= 2
+
+
 def test_progress_uses_the_chosen_frame_count(app, home: Path, monkeypatch) -> None:
     def runner(job, inputs):
         del job, inputs

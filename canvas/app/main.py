@@ -20,7 +20,7 @@ from canvas.app.info import APP_NAME, APP_VERSION, ENLARGE_NAME
 from canvas.app.platform import GpuCheck, check_gpu, current_os_check
 from canvas.app.selftest import selftest_report
 from canvas.app.updates import check_for_update
-from canvas.core.formats import OutputFormat, parse_format
+from canvas.core.formats import OutputFormat, parse_export_format, parse_format
 from canvas.safety.image import RawImage
 from canvas.safety.inputs import ImageRole, PendingInput
 from canvas.infra.enlarge import EnlargeClient, EnlargeError
@@ -169,6 +169,12 @@ def _parser() -> argparse.ArgumentParser:
         "--vram-trace",
         action="store_true",
         help="write a VRAM line to voxprint.log before and after each load, unload, and stage",
+    )
+    photoshoot.add_argument(
+        "--export-format",
+        default="png",
+        choices=("png", "jpg", "jpeg", "webp", "avif"),
+        help="frame file for Forge: png (default), jpg, webp, or avif",
     )
     photoshoot.add_argument("--json", action="store_true")
     return parser
@@ -511,6 +517,7 @@ def _photoshoot(args: argparse.Namespace) -> int:
                 0.7 if chosen is None else chosen[1],
             ),
             timings=clock,
+            container=parse_export_format(str(args.export_format)),
         )
     except (
         SafetyError, SnapshotError, DownloadDeclined, InferenceUnavailable, ModelNotReady,

@@ -4,7 +4,16 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from canvas.core.formats import DEFAULT_FORMAT, OutputFormat, UnsupportedFormat, parse_format, save_image
+from canvas.core.formats import (
+    DEFAULT_FORMAT,
+    EXPORT_FORMAT,
+    OutputFormat,
+    UnsupportedFormat,
+    parse_export_format,
+    parse_format,
+    save_image,
+)
+from canvas.core.exchange import handoff_image
 from canvas.safety.gate import issue
 from canvas.safety.image import RawImage
 from tests.fakes import avif_file, rgb
@@ -70,6 +79,26 @@ def test_default_2k_encodes_stay_above_the_size_floor(tmp_path: Path):
         save_image(image, path, fmt)
         size = path.stat().st_size
         assert size > _DETAIL_FLOOR, f"{fmt.value} default encode is {size} bytes"
+
+
+def test_forge_export_defaults_to_png_and_still_accepts_avif(tmp_path: Path):
+    image = issue(rgb(8, 8))
+    assert EXPORT_FORMAT is OutputFormat.PNG
+    assert parse_export_format("png") is OutputFormat.PNG
+    assert parse_export_format("jpg") is OutputFormat.JPEG
+    assert parse_export_format("JPEG") is OutputFormat.JPEG
+    assert parse_export_format("webp") is OutputFormat.WEBP
+    assert parse_export_format("avif") is OutputFormat.AVIF
+    with pytest.raises(UnsupportedFormat):
+        parse_export_format("jxl")
+    png = tmp_path / "frame.png"
+    handoff_image(image, png)
+    assert png.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+    avif = tmp_path / "frame.avif"
+    handoff_image(image, avif, OutputFormat.AVIF)
+    assert avif_file(avif.read_bytes())
+    with pytest.raises(UnsupportedFormat):
+        handoff_image(image, tmp_path / "frame.jxl", OutputFormat.JXL)
 
 
 def test_webp_jpeg_xl_and_jpeg_are_real_files(tmp_path: Path):

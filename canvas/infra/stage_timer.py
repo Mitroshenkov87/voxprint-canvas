@@ -151,13 +151,22 @@ def note_peak_mib(mib: int) -> None:
 
 def log_stage(
     stage: str, event: str, device: str, *, tokens: int | None = None, tok_s: int | None = None,
+    dtype: str = "", kv_cache: str = "",
 ) -> None:
-    """Write one ``stage`` line. ``device`` is ``cuda``, ``cpu``, or ``none``."""
-    suffix = ""
+    """Write one ``stage`` line. ``device`` is ``cuda``, ``cpu``, or ``none``.
+
+    A writer line carries ``tokens``, ``tok_s``, ``dtype`` and ``kv_cache`` so
+    a slow generate can be told from a resident cache-on generate.
+    """
+    parts: list[str] = []
     if tokens is not None and tok_s is not None:
-        suffix = f"tokens={int(tokens)} tok_s={int(tok_s)}"
+        parts.append(f"tokens={int(tokens)} tok_s={int(tok_s)}")
+    if dtype:
+        parts.append(f"dtype={dtype}")
+    if kv_cache:
+        parts.append(f"kv_cache={kv_cache}")
     _device, vram = _device_and_vram()
-    _write_stage(stage, event, device, vram, suffix)
+    _write_stage(stage, event, device, vram, " ".join(parts))
 
 
 def log_detail(stage: str, event: str, device: str, suffix: str = "") -> None:

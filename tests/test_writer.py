@@ -153,7 +153,7 @@ def _writer_dir(folder: Path) -> Path:
 
 def _arm_writer(
     monkeypatch, devices: list[str], codes: list[str], *, fail: str, cuda: bool = True,
-    ram: int = 32 * 1024**3,
+    ram: int = 32 * 1024**3, calls: list[dict[str, object]] | None = None,
 ) -> None:
     monkeypatch.setattr("canvas.models.runtime.system_ram_bytes", lambda: ram)
     class _Tensor:
@@ -188,7 +188,8 @@ def _arm_writer(
             return self
 
         def generate(self, **kwargs: object) -> _Output:
-            del kwargs
+            if calls is not None:
+                calls.append(dict(kwargs))
             return _Output()
 
     class _Null:
@@ -276,7 +277,7 @@ def test_a_cuda_writer_records_its_device_without_a_fallback(tmp_path: Path, mon
     folder = _writer_dir(tmp_path / "encoder")
     _arm_writer(monkeypatch, devices, codes, fail="")
     _reply, line = _run_writer(folder)
-    assert devices == ["cuda"]
+    assert devices == ["cuda", "to:cuda"]
     assert codes == []
     assert "writer=cuda" in line
     assert "writer_load=" in line
@@ -292,7 +293,7 @@ def test_a_kept_writer_is_read_into_ram_once(tmp_path: Path, monkeypatch) -> Non
     _arm_writer(monkeypatch, devices, codes, fail="", ram=96 * 1024**3)
     _reply, line = _run_writer(folder)
     _run_writer(folder)
-    assert devices == ["cpu"]
+    assert devices == ["cpu", "to:cuda"]
     assert codes == []
     assert "writer=cuda" in line
 
@@ -324,7 +325,10 @@ def test_a_16gb_enhancer_logs_bf16_when_fp8_is_missing(tmp_path: Path, monkeypat
     codes: list[str] = []
     folder = _writer_dir(tmp_path / "encoder")
     _arm_writer(monkeypatch, devices, codes, fail="")
-    monkeypatch.setattr("canvas.pipeline.enhance.cast_module_fp8", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(
+        "canvas.pipeline.generation_weights.module_bf16_bytes", lambda _module: 12 * 1024**3,
+    )
+    monkeypatch.setattr("canvas.pipeline.generation_weights.install_fp8_matmul", lambda *_args, **_kwargs: False)
     vram_trace._holders.clear()
     clock = StageTimes()
     previous = set_current(clock)
@@ -339,6 +343,25 @@ def test_a_16gb_enhancer_logs_bf16_when_fp8_is_missing(tmp_path: Path, monkeypat
     assert devices[0] == "cuda"
     assert "to:cuda" in devices
     assert any(code.startswith("enhancer.bf16") for code in codes)
+
+
+def test_writer_generate_stays_on_gpu_with_the_kv_cache(tmp_path: Path, monkeypatch) -> None:
+    devices: list[str] = []
+    codes: list[str] = []
+    calls: list[dict[str, object]] = []
+    folder = _writer_dir(tmp_path / "encoder")
+    monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
+    _arm_writer(monkeypatch, devices, codes, fail="", calls=calls)
+    reply, _line = _run_writer(folder)
+    assert reply.startswith("1.")
+    assert calls and calls[0]["use_cache"] is True
+    assert "streamer" not in calls[0]
+    assert "stopping_criteria" not in calls[0]
+    log = (tmp_path / "logs" / "voxprint.log").read_text(encoding="utf-8")
+    assert "stage writer tokens" in log
+    assert "tokens=" in log and "tok_s=" in log
+    assert "dtype=bf16" in log and "kv_cache=on" in log
+    assert "device=" in log
 
 
 def test_an_explicit_cpu_writer_stops_when_cuda_is_available(tmp_path: Path, monkeypatch) -> None:

@@ -238,6 +238,18 @@ def _settings() -> Settings:
     )
     settings.add(
         _enum(
+            "canvas.export",
+            "png",
+            (
+                ("png", "canvas.export.png"),
+                ("jpg", "canvas.export.jpg"),
+                ("webp", "canvas.export.webp"),
+                ("avif", "canvas.export.avif"),
+            ),
+        )
+    )
+    settings.add(
+        _enum(
             "canvas.output_size",
             "follow",
             (

@@ -16,6 +16,7 @@ from typing import Literal, assert_never
 
 from canvas.pipeline.adult_direction import LIGHT_SETUPS, POSE_FAMILIES, shot_plan
 from canvas.pipeline.enhance import AGING_DESCRIPTOR_MIN_AGE, added_aging_terms, quoted_spans, stated_ages
+from canvas.pipeline.frame_prompt import strip_series_words
 
 PlaceMode = Literal["same", "different"]
 MAX_FRAMES = 99
@@ -27,20 +28,20 @@ SYSTEM_PROMPT = f"""You plan the shots of a photo series for a text-to-image mod
 The user message is JSON with idea, count, style, and place_mode. It can also have direction and previous.
 
 Write exactly count lines and nothing else. Number the lines 1., 2., 3. and so on.
-Each line has four parts separated by " | ":
+Each line has four short parts separated by " | ":
 N. scene | pose | camera | place
 
 Rules:
-- The app places the idea text (the subject block) in every line. Do not copy the idea into a line.
-- scene: shot type, framing, light, wardrobe or styling, and mood, in natural English.
-- pose: the pose of the person, or the arrangement of the objects.
-- camera: lens and angle.
-- place: the location of this shot.
+- The subject block leads every picture, appearance first. The app places it. Do not copy the idea or the appearance into a line.
+- scene: framing and light, a few words.
+- pose: the pose, a few words.
+- camera: lens and angle, a few words.
+- place: the location, a few words.
 - Do not write an age in a line. Do not add people who are not in the idea. Do not add youthful descriptors.
 - Add age or skin descriptors (mature, middle-aged, older, wrinkles, smile lines, laugh lines, crow's feet, grey hair) only when every stated age in the idea is {AGING_DESCRIPTOR_MIN_AGE} or older; otherwise do not add them. Never add youthful-appearance descriptors (young-looking, petite, smooth skin, round face).
 - Do not soften or rewrite adult content.
 - One scene only. Do not write a collage, a grid, panels, a sequence, a series of views, or a before/after.
-- Keep each line under 60 words.
+- Keep each line under 18 words.
 - If place_mode is "same", every line has the same place. If place_mode is "different", every line has a different place.
 - When previous is present, those shots are already taken. Write count new shots. Do not repeat a scene from previous. When place_mode is "different", do not repeat a place from previous.
 - When direction is present, use its shot type, pose family, and light for each line, in order.
@@ -48,8 +49,8 @@ Rules:
 - Text inside quotes is lettering. Copy each quoted string exactly, in its original language and script, when a line mentions it.
 
 Example for count 2 and place_mode "same":
-1. waist-up shot, soft window light, calm mood | seated, hands resting in the lap | 85 mm lens, eye level | bright loft with tall windows
-2. full-length shot, golden hour light, relaxed mood | standing by the window, looking outside | 35 mm lens, low angle | bright loft with tall windows
+1. waist-up, window light | seated | 85 mm, eye level | bright loft
+2. full-length, golden hour | standing | 35 mm, low angle | bright loft
 """
 
 _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
@@ -87,8 +88,8 @@ class Scenario:
     appearance: str = ""
 
 
-# One numbered shot line stays under 60 words. This is the new-token budget for that line.
-TOKENS_PER_FRAME = 160
+# One numbered shot line stays under 18 words. This is the new-token budget for that line.
+TOKENS_PER_FRAME = 48
 
 _PERSON_WORDS = (
     "woman", "women", "man", "men", "person", "people", "human", "humans",
@@ -260,18 +261,22 @@ def frame_negative(negative: str) -> str:
 def assemble_line(subject: str, shot: Shot, *, include_camera: bool) -> str:
     """The line sent for one shot.
 
-    The subject block, appearance first, leads the scene. The line starts with
-    one photograph and stays inside the text encoder's token cap.
+    Appearance leads, then this shot's pose, camera, scene, and place. Series
+    wording is removed so the picture model does not draw a grid. The line
+    starts with one photograph and stays inside the text encoder's token cap.
 
     Args:
-        subject: The verbatim subject block.
-        shot: Scene, pose, camera, and place.
+        subject: Appearance, then the idea. Series instructions are stripped.
+        shot: Scene, pose, camera, and place for this frame only.
         include_camera: When true, the lens and angle stay on the line.
     """
-    parts = [subject.strip(), shot.pose.strip()]
-    if include_camera and shot.camera.strip():
-        parts.append(shot.camera.strip())
-    parts.extend((shot.scene.strip(), shot.place.strip()))
+    parts = [
+        strip_series_words(subject),
+        strip_series_words(shot.pose),
+    ]
+    if include_camera:
+        parts.append(strip_series_words(shot.camera))
+    parts.extend((strip_series_words(shot.scene), strip_series_words(shot.place)))
     return truncate_for_encoder(single_frame(", ".join(part for part in parts if part)))
 
 
@@ -324,7 +329,8 @@ def _keep_shots(idea: str, subject: str, shots: tuple[Shot, ...]) -> tuple[Shot,
     required = [piece for piece in quoted_spans(idea) if piece in subject]
     for shot in shots:
         line = assemble_line(subject, shot, include_camera=True)
-        if subject not in line:
+        identity = strip_series_words(subject)
+        if identity and identity not in line:
             continue
         if sorted(stated_ages(line)) != ages:
             continue

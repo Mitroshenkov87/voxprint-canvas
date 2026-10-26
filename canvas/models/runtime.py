@@ -23,6 +23,7 @@ from PIL import Image
 from canvas.app.i18n import text
 from canvas.infra.errors import note_error
 from canvas.infra.stage_timer import log_detail, note_peak_mib, note_stage, note_tag, timed
+from canvas.pipeline.frame_prompt import log_frame_prompt, split_frame_prompts
 from canvas.infra.stage_guard import (
     PEAK_LIMIT_BYTES,
     StageBlocked,
@@ -358,7 +359,9 @@ def _prepare_locked(folder: Path, tier: Tier, prompts: tuple[str, ...]) -> None:
             _keep("text_encoder", encoder, tier)
             note_vram("text_encoder", "before", encoder)
             encoded: dict[str, Any] = {}
-            for prompt in prompts:
+            # One vector per frame. A joined scenario is split before the encoder.
+            for prompt in split_frame_prompts(tuple(prompts)):
+                log_frame_prompt(prompt)
                 encoded[prompt] = _to_cpu(_encode_prompt_text(tokenizer, encoder, prompt, torch))
             if _prompt_embeds is None:
                 _prompt_embeds = encoded

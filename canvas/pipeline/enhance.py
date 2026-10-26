@@ -25,7 +25,11 @@ from canvas.pipeline.device_guard import (
     require_cuda,
     weights_on_cuda,
 )
-from canvas.pipeline.offload import cast_module_fp8
+from canvas.pipeline.generation_weights import (
+    dtype_label,
+    kv_cache_label,
+    prepare_generation,
+)
 from canvas.models.registry import Catalog, ModelSpec
 from canvas.models import hot_tier as hot
 from canvas.models.runtime import park_pipeline
@@ -322,6 +326,7 @@ class QwenRewriter:
         self.closed = False
         self._model: Any = None
         self._tokenizer: Any = None
+        self._dtype = "bf16"
 
     def rewrite(self, prompt: str) -> str:
         """Generate a rewrite, then unload. The caller can close again."""
@@ -419,21 +424,27 @@ class QwenRewriter:
                 started_ssd = time.perf_counter()
                 model = _causal_model(transformers, torch, self.encoder_dir, load_on)
                 hot.note_ssd("writer", model, started_ssd)
+                # Layerwise FP8 upcasts every linear on every token. A ~4 GB
+                # FP8 model fits the 16 GB rule as resident BF16. A larger one
+                # gets a real FP8 matmul. Either way the weights sit on the GPU.
                 if device != "cpu" and self.tier is Tier.GB16:
                     with timed("cast"):
-                        if not cast_module_fp8(model, torch):
-                            note_error(f"{self.stage}.bf16")
+                        chosen, fell_back = prepare_generation(model, torch)
+                    self._dtype = chosen
+                    if fell_back:
+                        note_error(f"{self.stage}.bf16")
                     if cuda:
                         torch.cuda.empty_cache()
+                elif device != "cpu":
+                    self._dtype = "bf16"
                 if hot.remember("writer", model):
                     hot.remember_bundle("writer", tokenizer)
                 if device != "cpu" and hot.retained("writer"):
                     with timed("place"):
-                        hot.activate("writer", "cuda")
-                elif device != "cpu" and self.tier is Tier.GB16:
+                        hot.activate("writer", "cuda", blocking=True)
+                if device != "cpu" and not weights_on_cuda(model):
                     with timed("place"):
-                        if not weights_on_cuda(model):
-                            model = place_on_cuda(model)
+                        model = place_on_cuda(model)
                 if device != "cpu":
                     require_cuda(model, "writer.device", torch)
             except DeviceRefused:
@@ -480,13 +491,18 @@ class QwenRewriter:
         encoded = {key: value.to(device) for key, value in encoded.items()}
         elapsed = 0.0
         count = 0
+        kv_cache = kv_cache_label(model)
         with timed("writer_generate"):
             started = time.perf_counter()
             with torch.inference_mode():
+                # use_cache keeps the KV cache on the GPU. No streamer and no
+                # stopping criterion: those call .item() and stall the card
+                # between tokens. inference_mode keeps autograd off.
                 output = model.generate(
                     **encoded,
                     max_new_tokens=self.max_new_tokens,
                     do_sample=False,
+                    use_cache=kv_cache == "on",
                 )
             elapsed = time.perf_counter() - started
             start = int(encoded["input_ids"].shape[-1])
@@ -495,7 +511,10 @@ class QwenRewriter:
         rate = 0 if elapsed <= 0 else min(1_000_000, int(count / elapsed))
         note_tag("writer_tps", f"tps{rate}")
         logged = device if device in {"cpu", "cuda"} else "none"
-        log_stage("writer", "tokens", logged, tokens=count, tok_s=rate)
+        resident = dtype_label(model, self._dtype)
+        log_stage(
+            "writer", "tokens", logged, tokens=count, tok_s=rate, dtype=resident, kv_cache=kv_cache,
+        )
         return _visible_reply(reply)
 
 

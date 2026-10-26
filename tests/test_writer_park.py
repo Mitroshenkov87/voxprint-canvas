@@ -160,7 +160,6 @@ def _arm(monkeypatch, tmp_path: Path, *, fail: bool) -> tuple[_Tensor, list[str]
             return _Output()
 
     monkeypatch.setattr("canvas.pipeline.enhance.snapshot_ready", lambda *_args, **_kwargs: folder)
-    monkeypatch.setattr("canvas.pipeline.enhance.cast_module_fp8", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(
         "canvas.pipeline.enhance._generation_libs", lambda: (_Torch(), _Transformers()),
     )

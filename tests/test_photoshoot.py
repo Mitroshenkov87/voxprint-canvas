@@ -11,6 +11,7 @@ from canvas.pipeline.enhance import stated_ages
 from canvas.pipeline.photoshoot import (
     FORMAT_REMINDER,
     SCENARIO_TOKENS,
+    SYSTEM_PROMPT,
     TOKENS_PER_FRAME,
     Draft,
     Shot,
@@ -855,11 +856,46 @@ def test_an_explicit_strength_is_kept_for_a_person(tmp_path: Path) -> None:
     assert seen == [None, None]
 
 
+def test_a_frame_prompt_has_no_series_words(tmp_path: Path) -> None:
+    idea = "same woman in every frame, varied shots and angles, a woman in a red coat"
+    prompts: list[str] = []
+    prepared: list[list[str]] = []
+
+    def generate(line: str, seed: int, hero: object | None, strength: float | None) -> object:
+        del seed, hero, strength
+        prompts.append(line)
+        return _frame()
+
+    def prepare(lines: list[str]) -> None:
+        prepared.append(list(lines))
+
+    generate.prepare = prepare  # type: ignore[attr-defined]
+    result = _run(tmp_path, idea=idea, generate=generate, count=3)
+    look = fixed_appearance(idea, 3)
+    assert result.stopped == ""
+    assert prompts
+    banned = re.compile(
+        r"\b(?:every\s+frames?|series|shots|angles|panels|grids?|collages?|sheets?|sequences?|multiple|sets?)\b",
+        re.IGNORECASE,
+    )
+    joined = "\n".join(prompts)
+    for line in prompts:
+        assert banned.search(line) is None
+        assert line.startswith(f"A single photograph of {look},")
+        assert "red coat" in line
+        assert "woman" in line
+        assert line.count("A single photograph of") == 1
+    assert prepared and prepared[0] == prompts
+    assert joined not in prepared[0]
+
+
 def test_scenario_token_budget_follows_the_frame_count() -> None:
     assert scenario_token_budget(1) == TOKENS_PER_FRAME
     assert scenario_token_budget(5) == 5 * TOKENS_PER_FRAME
     assert scenario_token_budget(5) < SCENARIO_TOKENS
-    assert scenario_token_budget(99) == SCENARIO_TOKENS
+    assert scenario_token_budget(99) == min(SCENARIO_TOKENS, 99 * TOKENS_PER_FRAME)
+    assert "under 18 words" in SYSTEM_PROMPT
+    assert "appearance first" in SYSTEM_PROMPT
     assert scenario_token_budget(True) == TOKENS_PER_FRAME
     request = scenario_request(PERSON, 5, "photo", "same")
     assert request is not None

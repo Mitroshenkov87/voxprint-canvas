@@ -231,6 +231,64 @@ def test_a_picture_check_that_cannot_load_draws_no_frame(tmp_path: Path) -> None
     assert result.code == "check.classifier_error"
 
 
+def test_picture_checks_load_while_a_frame_is_drawn(tmp_path: Path, monkeypatch) -> None:
+    gate = World().gate()
+    drawing = threading.Event()
+    started = threading.Event()
+    order: list[str] = []
+
+    def load(name: str) -> None:
+        def _load() -> None:
+            order.append(f"start:{name}")
+            started.set()
+            order.append("overlapped" if drawing.wait(2) else "missed")
+
+        return _load
+
+    for name in ("nsfw", "zeroshot", "faces", "ages", "fine"):
+        setattr(getattr(gate._stack, name), "load", load(name))
+
+    def generate(line: str, seed: int, hero: object | None, strength: float | None) -> object:
+        del line, seed, hero, strength
+        assert started.wait(2)
+        drawing.set()
+        order.append("draw")
+        return _frame()
+
+    monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
+    result = _run(tmp_path / "out", age_gate=gate, rewrite=lambda _prompt: _payload(IDEA, 2), generate=generate, count=2)
+    assert result.stopped == ""
+    assert result.kept
+    assert order[0].startswith("start:")
+    assert "overlapped" in order
+    assert "missed" not in order
+    assert order.index("draw") > 0
+    assert [name for name in ("nsfw", "zeroshot", "faces", "ages", "fine") if f"start:{name}" in order] == [
+        "nsfw", "zeroshot", "faces", "ages", "fine",
+    ]
+    log = (tmp_path / "logs" / "voxprint.log").read_text(encoding="utf-8")
+    assert "stage check_load preload" in log
+    assert "stage frame prompt" in log
+    assert "chars=" in log and "sha=" in log
+    assert IDEA not in log
+
+
+def test_a_background_check_load_that_fails_saves_nothing(tmp_path: Path) -> None:
+    gate = World().gate()
+
+    def load() -> None:
+        raise SafetyUnavailable("classifier_error")
+
+    for name in ("nsfw", "zeroshot", "faces", "ages", "fine"):
+        setattr(getattr(gate._stack, name), "load", load)
+    result = _run(tmp_path, age_gate=gate, rewrite=lambda _prompt: _payload(IDEA, 2), count=2)
+    assert result.stopped == "error"
+    assert result.code == "check.classifier_error"
+    assert result.kept == ()
+    assert list(tmp_path.glob("*.png")) == []
+    assert list(tmp_path.glob("*.avif")) == []
+
+
 def test_stage_times_report_names_and_seconds_only() -> None:
     times = StageTimes()
     with times.measure("render"):

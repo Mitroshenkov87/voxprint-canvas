@@ -137,7 +137,7 @@ def _arm(monkeypatch, tmp_path: Path, *, fail: bool) -> tuple[_Tensor, list[str]
     vram_trace._holders.clear()
     folder = _writer_dir(tmp_path / "writer")
     seen: list[str] = []
-    weight = _Tensor()
+    weight = _Tensor("cuda")
 
     class _Model:
         def named_parameters(self):
@@ -195,8 +195,8 @@ def test_unpark_puts_every_tensor_on_cuda_and_recaptures(monkeypatch, tmp_path: 
     hot_tier.reset()
     vram_trace._holders.clear()
     folder = _writer_dir(tmp_path / "writer")
-    weight = _Tensor("cpu")
-    buffer = _Tensor("cpu")
+    weight = _Tensor("cuda")
+    buffer = _Tensor("cuda")
     caches: list[int] = []
 
     class _Cache:

@@ -17,8 +17,17 @@ from voxprint_common.mdl.catalog import load_manifest
 from canvas.infra import vram_trace
 from canvas.infra.stage_guard import PEAK_LIMIT_BYTES, StageBlocked
 from canvas.infra.stage_timer import StageTimes, set_current
-from canvas.pipeline.device_guard import DeviceRefused
-from canvas.pipeline.enhance import WRITER_ID, QwenRewriter, encoder_names, open_rewriter, turbo_spec, writer_spec
+from canvas.models import hot_tier as hot
+from canvas.pipeline.device_guard import DeviceRefused, require_writer_materialized
+from canvas.pipeline.enhance import (
+    WRITER_ID,
+    QwenRewriter,
+    _causal_model,
+    encoder_names,
+    open_rewriter,
+    turbo_spec,
+    writer_spec,
+)
 from tests.fakes import World
 from tests.test_photoshoot import IDEA
 
@@ -287,7 +296,7 @@ def test_oom_on_cuda_stops_instead_of_generating_on_cpu(tmp_path: Path, monkeypa
         set_current(previous)
     assert caught.value.code == "device.cpu"
     assert str(caught.value) == text("error.device")
-    assert devices == ["cpu", "to:cuda"]
+    assert devices == ["cuda"]
     assert codes == ["writer.oom"]
     line = clock.log_line()
     assert "writer_fallback" not in line
@@ -301,7 +310,7 @@ def test_a_cuda_writer_records_its_device_without_a_fallback(tmp_path: Path, mon
     folder = _writer_dir(tmp_path / "encoder")
     _arm_writer(monkeypatch, devices, codes, fail="")
     _reply, line = _run_writer(folder)
-    assert devices == ["cpu", "to:cuda"]
+    assert devices == ["cuda"]
     assert codes == []
     assert "writer=cuda" in line
     assert "writer_load=" in line
@@ -317,7 +326,7 @@ def test_a_kept_writer_is_read_into_ram_once(tmp_path: Path, monkeypatch) -> Non
     _arm_writer(monkeypatch, devices, codes, fail="", ram=96 * 1024**3)
     _reply, line = _run_writer(folder)
     _run_writer(folder)
-    assert devices == ["cpu", "to:cuda"]
+    assert devices == ["cuda"]
     assert codes == []
     assert "writer=cuda" in line
 
@@ -360,8 +369,8 @@ def test_a_16gb_enhancer_stays_bf16(tmp_path: Path, monkeypatch) -> None:
         rewriter.close()
         vram_trace._holders.clear()
     assert reply.startswith("1.")
-    assert devices[0] == "cpu"
-    assert devices.count("to:cuda") == 1
+    assert devices[0] == "cuda"
+    assert "to:cuda" not in devices
     assert not any(code.startswith("enhancer.bf16") for code in codes)
 
 
@@ -392,7 +401,8 @@ def test_a_16gb_load_reclaims_the_reserved_peak_before_admit(tmp_path: Path, mon
         rewriter.close()
         vram_trace._holders.clear()
     assert reply.startswith("1.")
-    assert devices[0] == "cpu"
+    assert devices[0] == "cuda"
+    assert "to:cuda" not in devices
     assert seen
     assert seen[0] <= PEAK_LIMIT_BYTES
     assert codes == []
@@ -430,3 +440,138 @@ def test_an_explicit_cpu_writer_stops_when_cuda_is_available(tmp_path: Path, mon
     assert devices == []
     assert codes == ["writer.device"]
     assert "writer.oom" not in codes
+
+
+def test_the_writer_loads_bf16_straight_onto_cuda(tmp_path: Path) -> None:
+    seen: list[dict[str, object]] = []
+
+    class _Loaded:
+        def eval(self) -> _Loaded:
+            return self
+
+    class _Auto:
+        @staticmethod
+        def from_pretrained(folder: Path, **kwargs: object) -> _Loaded:
+            del folder
+            seen.append(dict(kwargs))
+            return _Loaded()
+
+    torch = type("Torch", (), {"bfloat16": "bf16"})()
+    transformers = type("T", (), {"AutoModelForCausalLM": _Auto})()
+    model = _causal_model(transformers, torch, tmp_path, "cuda")
+    assert model is not None
+    assert seen == [{
+        "local_files_only": True,
+        "low_cpu_mem_usage": False,
+        "device_map": "cuda",
+        "torch_dtype": "bf16",
+    }]
+
+
+def test_a_meta_or_fp32_writer_is_refused_before_park(tmp_path: Path, monkeypatch) -> None:
+    folder = _writer_dir(tmp_path / "encoder")
+    monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
+    monkeypatch.setattr("canvas.models.runtime.system_ram_bytes", lambda: 96 * 1024**3)
+    parked: list[str] = []
+
+    def remember(name: str, module: object, *, size_bytes: int | None = None) -> bool:
+        del module, size_bytes
+        parked.append(name)
+        return True
+
+    class _Weight:
+        def __init__(self, kind: str, dtype: str) -> None:
+            self.device = type("Device", (), {"type": kind})()
+            self.dtype = dtype
+
+    class _Model:
+        def __init__(self, kind: str, dtype: str) -> None:
+            self.weight = _Weight(kind, dtype)
+
+        def parameters(self):
+            yield self.weight
+
+        def buffers(self):
+            return iter(())
+
+        def to(self, device: str) -> _Model:
+            del device
+            return self
+
+        def eval(self) -> _Model:
+            return self
+
+        def generate(self, **kwargs: object) -> object:
+            del kwargs
+            raise AssertionError("generated")
+
+    class _Null:
+        def __enter__(self) -> None:
+            return None
+
+        def __exit__(self, *args: object) -> bool:
+            del args
+            return False
+
+    class _Cuda:
+        @staticmethod
+        def is_available() -> bool:
+            return True
+
+        @staticmethod
+        def empty_cache() -> None:
+            return None
+
+        @staticmethod
+        def reset_peak_memory_stats() -> None:
+            return None
+
+    class _Torch:
+        bfloat16 = "bf16"
+        cuda = _Cuda
+
+        @staticmethod
+        def inference_mode() -> _Null:
+            return _Null()
+
+    class _Tokenizer:
+        @staticmethod
+        def from_pretrained(*args: object, **kwargs: object) -> _Tokenizer:
+            del args, kwargs
+            return _Tokenizer()
+
+        def apply_chat_template(self, *args: object, **kwargs: object) -> str:
+            del args, kwargs
+            return "ready"
+
+        def __call__(self, text: str, return_tensors: str = "pt") -> dict[str, object]:
+            del text, return_tensors
+            return {"input_ids": type("Ids", (), {"shape": (1, 2), "to": lambda self, device: self})()}
+
+        def decode(self, tokens: object, skip_special_tokens: bool = True) -> str:
+            del tokens, skip_special_tokens
+            return "ok"
+
+    class _Transformers:
+        class AutoTokenizer:
+            @staticmethod
+            def from_pretrained(*args: object, **kwargs: object) -> _Tokenizer:
+                del args, kwargs
+                return _Tokenizer()
+
+    monkeypatch.setattr("canvas.pipeline.enhance._generation_libs", lambda: (_Torch(), _Transformers()))
+    monkeypatch.setattr("canvas.pipeline.enhance.hot.remember", remember)
+    cases = (("meta", "bfloat16", "writer.meta"), ("cuda", "float32", "writer.fp32"))
+    for kind, dtype, code in cases:
+        parked.clear()
+        monkeypatch.setattr(
+            "canvas.pipeline.enhance._causal_model",
+            lambda *_args, _kind=kind, _dtype=dtype, **_kwargs: _Model(_kind, _dtype),
+        )
+        with pytest.raises(DeviceRefused):
+            QwenRewriter(folder, folder, device="cuda", tier=Tier.GB16).complete("ping", system="sys")
+        assert parked == []
+        assert code in (tmp_path / "logs" / "voxprint.log").read_text(encoding="utf-8")
+    bf16 = _Model("cuda", "bfloat16")
+    require_writer_materialized(bf16)
+    hot.reset()

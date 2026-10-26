@@ -21,9 +21,9 @@ from canvas.pipeline.bf16_schedule import VramRefused
 from canvas.pipeline.device_guard import (
     DeviceRefused,
     place_on_cuda,
-    pretrained_attempts,
     reclaim_cuda,
     require_cuda,
+    require_writer_materialized,
     weights_on_cuda,
 )
 from canvas.pipeline.generation_weights import (
@@ -423,12 +423,11 @@ class QwenRewriter:
                 self.tokenizer_dir, local_files_only=True,
             )
             try:
-                # Read the file on the CPU and move one tensor at a time. A
-                # device_map load reserved a second full copy (~16 GB on nvidia-smi)
-                # and the 14 GB check then refused the writer.
-                load_on = "cpu"
+                # Straight onto the GPU in bf16, the load bench G measured at
+                # 7.75 GB. A CPU load with low_cpu_mem_usage builds meta
+                # tensors (and an fp32 copy) and model_park cannot copy them.
                 started_ssd = time.perf_counter()
-                model = _causal_model(transformers, torch, self.encoder_dir, load_on)
+                model = _causal_model(transformers, torch, self.encoder_dir, device)
                 hot.note_ssd("writer", model, started_ssd)
                 # One BF16 copy. FP8 is not installed: it kept the original
                 # weights alive next to the cast copy.
@@ -438,14 +437,14 @@ class QwenRewriter:
                     self._dtype = chosen
                 elif device != "cpu":
                     self._dtype = "bf16"
+                require_writer_materialized(model)
+                if device != "cpu":
+                    require_cuda(model, "writer.device", torch)
                 if hot.remember("writer", model):
                     hot.remember_bundle("writer", tokenizer)
                 if device != "cpu" and hot.retained("writer"):
                     with timed("place"):
                         hot.activate("writer", "cuda", blocking=True)
-                if device != "cpu" and not weights_on_cuda(model):
-                    with timed("place"):
-                        model = place_on_cuda(model)
                 if device != "cpu":
                     require_cuda(model, "writer.device", torch)
                 reclaim_cuda(torch)
@@ -600,22 +599,36 @@ def _has_resident_tensors(module: Any) -> bool:
     return False
 
 
-def _causal_model(transformers: Any, torch: Any, folder: Path, device: str) -> Any:
-    """Load the causal LM in BF16. ``device`` is ``cuda`` or ``cpu``.
+def _writer_load_attempts(dtype: object, device: str) -> tuple[dict[str, Any], ...]:
+    """``from_pretrained`` kwargs for the writer.
 
-    CUDA maps the safetensors file onto the card. Parameters that are still on
-    the CPU move one tensor at a time, so the module is not copied twice.
+    CUDA is ``device_map="cuda"`` and ``low_cpu_mem_usage=False``, so the
+    weights are a real bf16 tensor on the card. The flag is set explicitly
+    because transformers turns the meta-device loader on when it is omitted.
+    A CPU machine gets the same bf16 load with no device map. There is no
+    per-tensor copy off the CPU afterwards.
     """
+    if device != "cuda" and device != "cpu":
+        raise ValueError(f"unknown device {device}")
+    common: dict[str, Any] = {"local_files_only": True, "low_cpu_mem_usage": False}
+    if device == "cuda":
+        common["device_map"] = "cuda"
+    return (
+        {**common, "torch_dtype": dtype},
+        {**common, "dtype": dtype},
+    )
+
+
+def _causal_model(transformers: Any, torch: Any, folder: Path, device: str) -> Any:
+    """Load the writer in bf16. CUDA goes straight to ``device_map="cuda"``."""
     loader = transformers.AutoModelForCausalLM.from_pretrained
     model = _open_causal(loader, folder, torch, device)
-    if device != "cpu" and not weights_on_cuda(model):
-        model = place_on_cuda(model)
     return model.eval()
 
 
 def _open_causal(loader: Any, folder: Path, torch: Any, device: str) -> Any:
-    """Open the causal LM. A build that rejects ``device_map`` is tried without it."""
-    attempts = pretrained_attempts(torch.bfloat16, device if device == "cuda" else "cpu")
+    """Open the writer. A build that rejects ``torch_dtype`` is tried with ``dtype``."""
+    attempts = _writer_load_attempts(torch.bfloat16, device if device == "cuda" else "cpu")
     error: Exception | None = None
     last = len(attempts) - 1
     for index, kwargs in enumerate(attempts):

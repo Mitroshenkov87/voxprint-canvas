@@ -41,6 +41,27 @@ def require_cuda(module: Any, reason: str, torch: Any | None = None) -> None:
             raise DeviceRefused()
 
 
+def require_writer_materialized(module: Any) -> None:
+    """Refuse a writer weight that is still meta or fp32.
+
+    ``low_cpu_mem_usage`` leaves parameters on the meta device. Parking one of
+    those copies raises ``Cannot copy out of meta tensor``. An fp32 load of
+    this 4B model is about four times the bf16 file. Either one stops the load
+    before ``model_park`` sees it.
+    """
+    for tensor in _parameters_only(module):
+        if _is_meta(tensor):
+            note_error("writer.meta")
+            raise DeviceRefused()
+        if _is_fp32(tensor):
+            note_error("writer.fp32")
+            raise DeviceRefused()
+    for tensor in _buffers_only(module):
+        if _is_meta(tensor):
+            note_error("writer.meta")
+            raise DeviceRefused()
+
+
 def weights_on_cuda(module: Any) -> bool:
     """True when every parameter and buffer already lives on CUDA.
 
@@ -148,6 +169,41 @@ def place_on_cuda(module: Any) -> Any:
             except (AttributeError, TypeError, RuntimeError):
                 continue
     return module
+
+
+def _is_meta(tensor: Any) -> bool:
+    if _device_type(tensor) == "meta":
+        return True
+    data = getattr(tensor, "data", None)
+    return data is not None and data is not tensor and _device_type(data) == "meta"
+
+
+def _is_fp32(tensor: Any) -> bool:
+    dtype = getattr(tensor, "dtype", None)
+    if dtype is None:
+        return False
+    text = str(dtype).lower().replace("torch.", "")
+    return text in {"fp32", "float32"} or text.endswith(".float32")
+
+
+def _parameters_only(module: Any) -> list[Any]:
+    method = getattr(module, "parameters", None)
+    if not callable(method):
+        return []
+    try:
+        return list(method())
+    except (TypeError, RuntimeError):
+        return []
+
+
+def _buffers_only(module: Any) -> list[Any]:
+    method = getattr(module, "buffers", None)
+    if not callable(method):
+        return []
+    try:
+        return list(method())
+    except (TypeError, RuntimeError):
+        return []
 
 
 def _resident_tensors(module: Any) -> list[Any]:

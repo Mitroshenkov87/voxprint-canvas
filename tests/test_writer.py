@@ -462,9 +462,8 @@ def test_the_writer_loads_bf16_straight_onto_cuda(tmp_path: Path) -> None:
     assert model is not None
     assert seen == [{
         "local_files_only": True,
-        "low_cpu_mem_usage": False,
         "device_map": "cuda",
-        "torch_dtype": "bf16",
+        "dtype": "bf16",
     }]
 
 

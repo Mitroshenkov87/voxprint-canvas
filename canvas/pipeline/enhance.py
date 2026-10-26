@@ -13,8 +13,9 @@ from typing import Any, Protocol, assert_never
 
 from canvas.app.i18n import text
 from canvas.infra.errors import note_error
+from canvas.infra.load_lock import pretrained_lock
 from canvas.infra.stage_guard import StageBlocked, admit, begin_stage, finish_stage
-from canvas.infra.stage_timer import log_stage, note_tag, timed
+from canvas.infra.stage_timer import log_detail, log_stage, note_tag, timed
 from canvas.infra.vram_trace import drop_model, hold_model, note_vram
 from canvas.models.modes import Tier
 from canvas.pipeline.bf16_schedule import VramRefused
@@ -346,14 +347,26 @@ class QwenRewriter:
         return self._complete(prompt, system)
 
     def close(self) -> None:
-        """Park the writer and drop its VRAM copy. RAM stays when the tier keeps it."""
+        """Park the writer and release every VRAM byte it held. RAM stays when the tier keeps it.
+
+        The graph, its private pool, and the StaticCache go first. The park then
+        points the weights at RAM, and a tensor still on CUDA is moved off one at
+        a time. The residual is logged after the allocator is emptied.
+        """
         note_vram(self.stage, "before", self._model)
         try:
-            if self._graph is not None:
-                self._graph.invalidate()
+            graph = self._graph
+            self._graph = None
+            if graph is not None:
+                graph.release()
+            del graph
+            if self._model is not None:
+                _drop_generation_cache(self._model)
             if self._model is not None and not hot.retained("writer"):
                 hot.remember("writer", self._model)
             hot.deactivate("writer")
+            if self._model is not None:
+                _evict_cuda(self._model)
             if not hot.retained("writer") and self._model is not None:
                 mover = getattr(self._model, "to", None)
                 if callable(mover):
@@ -367,10 +380,7 @@ class QwenRewriter:
             drop_model(self.stage)
             drop_model("writer")
             self.closed = True
-            gc.collect()
-            torch = _optional_torch()
-            if torch is not None and torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            _release_cuda(_optional_torch(), self.stage)
             note_vram(self.stage, "after")
             if self.tier is Tier.GB16:
                 try:
@@ -600,34 +610,73 @@ def _has_resident_tensors(module: Any) -> bool:
 
 
 def _writer_load_attempts(dtype: object, device: str) -> tuple[dict[str, Any], ...]:
-    """``from_pretrained`` kwargs for the writer.
+    """``from_pretrained`` kwargs for the writer, as in the Proving Ground bench G load.
 
-    CUDA is ``device_map="cuda"`` and ``low_cpu_mem_usage=False``, so the
-    weights are a real bf16 tensor on the card. The flag is set explicitly
-    because transformers turns the meta-device loader on when it is omitted.
-    A CPU machine gets the same bf16 load with no device map. There is no
-    per-tensor copy off the CPU afterwards.
+    CUDA is ``dtype=bfloat16`` with ``device_map="cuda"``, so the weights are
+    one real bf16 copy on the card. transformers 5 reads ``dtype``, and
+    ``torch_dtype`` is the retry for a build that rejects it.
+    ``low_cpu_mem_usage`` is not passed: transformers 5 drops it, and 4.x
+    refuses ``False`` next to a device map. A CPU machine gets the same bf16
+    load with no device map.
     """
     if device != "cuda" and device != "cpu":
         raise ValueError(f"unknown device {device}")
-    common: dict[str, Any] = {"local_files_only": True, "low_cpu_mem_usage": False}
+    common: dict[str, Any] = {"local_files_only": True}
     if device == "cuda":
         common["device_map"] = "cuda"
     return (
-        {**common, "torch_dtype": dtype},
         {**common, "dtype": dtype},
+        {**common, "torch_dtype": dtype},
     )
 
 
 def _causal_model(transformers: Any, torch: Any, folder: Path, device: str) -> Any:
-    """Load the writer in bf16. CUDA goes straight to ``device_map="cuda"``."""
+    """Load the writer in bf16. CUDA goes straight to ``device_map="cuda"``.
+
+    The build holds the process load lock, so a check loading on the side
+    thread cannot change torch's default dtype under it.
+    """
     loader = transformers.AutoModelForCausalLM.from_pretrained
-    model = _open_causal(loader, folder, torch, device)
+    with pretrained_lock():
+        model = _open_causal(loader, folder, torch, device)
+    settle_bf16(model, torch, device)
     return model.eval()
 
 
+def settle_bf16(model: Any, torch: Any, device: str) -> int:
+    """Log the loaded parameter dtype and cast any fp32 parameter to bf16.
+
+    The load lock is the fix. This is the backstop: a stray fp32 parameter is
+    cast in place, one tensor at a time, so the card never holds a second
+    copy of the model. Returns how many parameters were cast.
+    """
+    fp32 = getattr(torch, "float32", None)
+    target = getattr(torch, "bfloat16", None)
+    params = _module_parameters(model)
+    found = [param for param in params if fp32 is not None and getattr(param, "dtype", None) == fp32]
+    loaded = dtype_label(model, "bf16")
+    cast = 0
+    for param in found:
+        caster = getattr(getattr(param, "data", None), "to", None)
+        if target is None or not callable(caster):
+            continue
+        try:
+            param.data = caster(target)
+        except (TypeError, RuntimeError, AttributeError):
+            continue
+        cast += 1
+    kind = device if device in {"cpu", "cuda"} else "cpu"
+    log_detail(
+        "writer", "dtype", kind,
+        f"loaded={loaded} params={len(params)} fp32={len(found)} cast={cast} now={dtype_label(model, 'bf16')}",
+    )
+    if found:
+        note_error("writer.fp32_cast")
+    return cast
+
+
 def _open_causal(loader: Any, folder: Path, torch: Any, device: str) -> Any:
-    """Open the writer. A build that rejects ``torch_dtype`` is tried with ``dtype``."""
+    """Open the writer. A build that rejects ``dtype`` is tried with ``torch_dtype``."""
     attempts = _writer_load_attempts(torch.bfloat16, device if device == "cuda" else "cpu")
     error: Exception | None = None
     last = len(attempts) - 1
@@ -643,6 +692,112 @@ def _open_causal(loader: Any, folder: Path, torch: Any, device: str) -> Any:
     if error is None:
         raise SnapshotError("the text encoder cannot be loaded")
     raise error
+
+
+# A writer close that leaves more than this allocated on the card is logged as a leak.
+WRITER_RESIDUAL_LIMIT_BYTES = 512 * 1024**2
+
+
+def _module_parameters(module: Any) -> list[Any]:
+    method = getattr(module, "parameters", None)
+    if not callable(method):
+        return []
+    try:
+        return list(method())
+    except (TypeError, RuntimeError):
+        return []
+
+
+def _drop_generation_cache(model: Any) -> None:
+    """Forget a cache ``generate`` stored on the model for reuse."""
+    for name in ("_cache", "_static_cache"):
+        if getattr(model, name, None) is None:
+            continue
+        try:
+            setattr(model, name, None)
+        except (AttributeError, TypeError):
+            continue
+
+
+def _evict_cuda(module: Any) -> int:
+    """Move each parameter or buffer still on CUDA to the CPU, one at a time.
+
+    The park reassigns the tensors it holds. Anything it does not hold, such
+    as a buffer missing from the park dict, would otherwise keep its VRAM.
+    Returns how many tensors moved.
+    """
+    moved = 0
+    for name in ("parameters", "buffers"):
+        method = getattr(module, name, None)
+        if not callable(method):
+            continue
+        try:
+            tensors = list(method())
+        except (TypeError, RuntimeError):
+            continue
+        for tensor in tensors:
+            if not _tensor_on_cuda(tensor):
+                continue
+            mover = getattr(getattr(tensor, "data", None), "to", None)
+            if not callable(mover):
+                continue
+            try:
+                tensor.data = mover("cpu")
+            except (TypeError, RuntimeError, AttributeError):
+                continue
+            moved += 1
+    return moved
+
+
+def _tensor_on_cuda(tensor: Any) -> bool:
+    device = getattr(tensor, "device", None)
+    kind = getattr(device, "type", None)
+    text = kind if isinstance(kind, str) else str(device or "")
+    return "cuda" in text
+
+
+def _release_cuda(torch: Any, stage: str) -> int:
+    """Collect, sync, empty the allocator, and log what is still allocated.
+
+    Returns the allocated bytes, or 0 when there is no CUDA.
+    """
+    gc.collect()
+    cuda = getattr(torch, "cuda", None) if torch is not None else None
+    if cuda is None:
+        return 0
+    try:
+        if not bool(cuda.is_available()):
+            return 0
+    except (TypeError, RuntimeError, AttributeError):
+        return 0
+    for name in ("synchronize", "empty_cache", "ipc_collect"):
+        fn = getattr(cuda, name, None)
+        if not callable(fn):
+            continue
+        try:
+            fn()
+        except (TypeError, RuntimeError):
+            continue
+    allocated = _cuda_counter(cuda, "memory_allocated")
+    reserved = _cuda_counter(cuda, "memory_reserved")
+    over = allocated > WRITER_RESIDUAL_LIMIT_BYTES
+    log_detail(
+        stage if stage in {"writer", "enhancer"} else "writer", "release", "cuda",
+        f"allocated={allocated} reserved={reserved} over={int(over)}",
+    )
+    if over:
+        note_error(f"{stage}.residual")
+    return allocated
+
+
+def _cuda_counter(cuda: Any, name: str) -> int:
+    fn = getattr(cuda, name, None)
+    if not callable(fn):
+        return 0
+    try:
+        return max(0, int(fn()))
+    except (TypeError, ValueError, RuntimeError):
+        return 0
 
 
 def _generated_count(output: Any, start: int) -> int:

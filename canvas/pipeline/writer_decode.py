@@ -63,6 +63,23 @@ class GraphDecode:
         self.reason = "moved"
         self._ptr = -1
 
+    def release(self) -> None:
+        """Drop the graph, its private pool, the StaticCache, and the model.
+
+        ``invalidate`` keeps the cache and the static buffers for a recapture.
+        The writer stage ends with this instead, so nothing here holds VRAM
+        when the picture stage starts.
+        """
+        self.invalidate()
+        self.reason = "released"
+        cache = self.cache
+        self.cache = None
+        self.static_input = None
+        self.cache_position = None
+        self.static_logits = None
+        self.model = None
+        _drop_cache(cache)
+
     def capture(self) -> None:
         """Capture the 1-token step. Failure stays on the eager loop."""
         try:
@@ -290,6 +307,26 @@ def _new_cache(model: Any, length: int) -> Any:
     from transformers import StaticCache
 
     return StaticCache(config=model.config, max_cache_len=length)
+
+
+def _drop_cache(cache: Any) -> None:
+    """Let go of each StaticCache layer's key and value tensors.
+
+    The cache object can outlive this call in a traceback or a log, so its
+    layers are emptied rather than relying on the last reference going away.
+    """
+    if cache is None:
+        return
+    layers = getattr(cache, "layers", None)
+    if isinstance(layers, list):
+        for layer in layers:
+            for name in ("keys", "values"):
+                if getattr(layer, name, None) is not None:
+                    try:
+                        setattr(layer, name, None)
+                    except (AttributeError, TypeError):
+                        continue
+        layers.clear()
 
 
 def _cuda_ready(torch: Any) -> bool:

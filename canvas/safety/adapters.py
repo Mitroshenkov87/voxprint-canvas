@@ -8,6 +8,7 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 from PIL import Image
 
+from canvas.infra.load_lock import pretrained_lock
 from canvas.infra.stage_timer import log_detail, log_stage, note_tag
 from canvas.infra.vram_trace import on_cuda
 from canvas.models.hot_tier import activate, cached, deactivate, note_ssd, remember, retained
@@ -196,7 +197,9 @@ class _Placed:
         found = cached(name)
         if found is None:
             started = time.perf_counter()
-            found = build()
+            # The build sets torch's process default dtype. The writer may be building on another thread.
+            with pretrained_lock():
+                found = build()
             note_ssd(name, found, started)
             remember(name, found)
         self._model = self._place(found)
@@ -735,12 +738,14 @@ class FaceAgeRegressor(_Placed):
         state = load_file(str(weights))
         if not state or not all(key.startswith(_REGRESSOR_PREFIX) for key in state):
             raise SafetyUnavailable("model_not_ready")
-        model = EstimatorNet(img_size=int(config["input_size"]), num_classes=int(config["num_classes"]))
         stripped = {key[len(_REGRESSOR_PREFIX):]: value.float() for key, value in state.items()}
-        try:
-            model.load_state_dict(stripped, strict=True)
-        except RuntimeError as exc:
-            raise SafetyUnavailable("model_not_ready") from exc
+        # A bf16 default set by a concurrent writer build would round these weights.
+        with pretrained_lock():
+            model = EstimatorNet(img_size=int(config["input_size"]), num_classes=int(config["num_classes"]))
+            try:
+                model.load_state_dict(stripped, strict=True)
+            except RuntimeError as exc:
+                raise SafetyUnavailable("model_not_ready") from exc
         model = model.to(dtype=torch.float32).eval()
         self._park_name = "gate_regressor"
         remember("gate_regressor", model)

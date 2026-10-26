@@ -171,12 +171,16 @@ def _run_series(
     request = scenario_request(idea, count, style, mode, adult=adult)
     if request is None:
         return _stop("scenario", "", "scenario.format")
-    # The prompt check is the long SSD read. It is measured so a multi-minute
-    # load writes heartbeats, including when pythonw has no stderr.
+    # The prompt check and the picture checks are the long SSD reads. They are
+    # measured so a multi-minute load writes heartbeats, including when pythonw
+    # has no stderr. The picture checks stay in RAM; a frame only moves them.
     with clock.measure("prep"):
         reason = _refuse_prompt(gate, idea)
+        warm_error = None if reason else _warm_image_checks(gate)
         # The writer needs the GPU to itself. Anything the check put on the card is dropped first.
         release_gate_weights(gate)
+    if warm_error is not None:
+        return _stop("error", warm_error.user_message, f"check.{warm_error.code}")
     if reason:
         return _stop("idea", reason, "idea.policy")
     if adult and not ages_allowed(idea):
@@ -493,6 +497,23 @@ def _stop_kept(
 
 def _with_idea(idea: str, line: str) -> str:
     return f"{idea}\n{line}"
+
+
+def _warm_image_checks(gate: AgeGate) -> SafetyUnavailable | None:
+    """Load the picture checks into RAM. A frame then only moves them.
+
+    The first output check was paying the SSD read. These models stay in the
+    RAM tier, so prep does that read once. A load that fails stops the series
+    before a frame is drawn: the check would have stopped it later.
+    """
+    warm = getattr(gate, "warm", None)
+    if not callable(warm):
+        return None
+    try:
+        warm()
+    except SafetyUnavailable as exc:
+        return exc
+    return None
 
 
 def _refuse_prompt(age_gate: AgeGate, prompt: str) -> str | None:

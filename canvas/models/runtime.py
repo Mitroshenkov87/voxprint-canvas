@@ -1006,6 +1006,88 @@ def _shelter(pipe: Any) -> None:
             hot.remember(name, module)
 
 
+_LATENT_MODULES = ("vae", "transformer", "unet", "controlnet", "text_encoder", "text_encoder_2")
+
+
+def _noise_generator(torch: Any, seed: int, device: str) -> Any:
+    """A generator on the device ``randn_tensor`` will use for the latents."""
+    generator = torch.Generator(device=device)
+    seeded = generator.manual_seed(seed)
+    return generator if seeded is None else seeded
+
+
+def _seat_vae_for_latents(pipe: Any, torch: Any) -> None:
+    """Put the VAE on CUDA before img2img reads the execution device.
+
+    ``prepare_latents`` samples that device, encodes, then draws noise.
+    The transformer is still parked for the read, so every component is on
+    CPU and the noise is requested on CPU. A CUDA generator cannot build it.
+    The VAE is the component encode is about to run.
+    """
+    if not _cuda_is_up(torch):
+        return
+    vae = _decoding_vae(pipe)
+    if vae is None or _component_kind(vae) == "cuda":
+        return
+    seated = _decoding_vae(pipe)
+    if hot.activate("vae", "cuda", blocking=True):
+        seated = _decoding_vae(pipe)
+        if _component_kind(seated) == "cuda":
+            return
+    if seated is None:
+        return
+    _vae_for_decode(pipe, seated, torch)
+
+
+def _latent_device(pipe: Any, torch: Any) -> str:
+    """The device ``prepare_latents`` passes to ``randn_tensor``.
+
+    A component on CUDA wins, which is what ``DiffusionPipeline.device``
+    reports. When every component is on CPU the latents are CPU too.
+    """
+    if not _cuda_is_up(torch):
+        return "cpu"
+    kinds = [_component_kind(getattr(pipe, name, None)) for name in _LATENT_MODULES]
+    if "cuda" in kinds:
+        return "cuda"
+    if "cpu" in kinds:
+        return "cpu"
+    return "cuda"
+
+
+def _component_kind(module: Any) -> str | None:
+    """``cuda``, ``cpu``, or ``meta`` for one pipeline component."""
+    if module is None:
+        return None
+    device = None
+    try:
+        device = getattr(module, "device", None)
+    except (TypeError, RuntimeError, StopIteration, ValueError, AttributeError):
+        device = None
+    kind = _device_kind(device)
+    if kind is not None:
+        return kind
+    placed, _dtype = _parameter_placement(module)
+    return _device_kind(placed)
+
+
+def _device_kind(device: Any) -> str | None:
+    """The device family, including a fake whose device is the string ``cuda``."""
+    if device is None:
+        return None
+    kind = getattr(device, "type", None)
+    if kind in {"cuda", "cpu", "meta"}:
+        return str(kind)
+    text = str(device)
+    if "cuda" in text:
+        return "cuda"
+    if "meta" in text:
+        return "meta"
+    if "cpu" in text:
+        return "cpu"
+    return None
+
+
 def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, height: int, tier: Tier, *,
            seed: int = 0, control_file: Path | None = None,
            strength: float | None = None, lora: UserLora | None = None,
@@ -1020,14 +1102,11 @@ def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, he
     dtype = torch.bfloat16
     steps = plan.steps if plan.steps is not None else 8
     guidance = _call_guidance(plan)
-    generator = torch.Generator(device="cuda" if torch.cuda.is_available() else "cpu")
-    generator.manual_seed(seed)
     common = {
         "prompt": screened.prompt,
         "height": height,
         "width": width,
         "num_inference_steps": steps,
-        "generator": generator,
         "output_type": "latent",
     }
     embed = None if _prompt_embeds is None else _prompt_embeds.get(screened.prompt)
@@ -1046,7 +1125,6 @@ def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, he
             pipe = _pipeline_for(
                 diffusers, torch, pipeline_name, folder, dtype, tier, lora, lora_strength, control_file,
             )
-            call = _accepting(pipe, common)
             _disable_vae_upcast(pipe)
             _install_encode_guard(pipe, torch)
             resident = getattr(pipe, "_canvas_placement", "resident") == "resident"
@@ -1055,6 +1133,10 @@ def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, he
                 hot.activate("transformer", device)
                 if getattr(pipe, "controlnet", None) is not None:
                     hot.activate("controlnet", device)
+            elif pipeline_name in _ENCODES_BEFORE_SAMPLE:
+                _seat_vae_for_latents(pipe, torch)
+            common["generator"] = _noise_generator(torch, seed, _latent_device(pipe, torch))
+            call = _accepting(pipe, common)
             try:
                 if pipeline_name == PIPELINE_TEXT:
                     result = _timed(pipe, torch, **call)
@@ -1296,7 +1378,9 @@ def _vae_session(pipe: Any, torch: Any, stage: str, *, restore: bool) -> Iterato
                 _reset_stage_peak(torch)
             if restore and _cuda_is_up(torch):
                 for name in restored:
-                    hot.activate(name, "cuda", blocking=True)
+                    # The first frame enqueues this copy. Waiting here is the
+                    # whole transfer, and the denoiser reads the weights next.
+                    hot.activate(name, "cuda", blocking=False)
         finally:
             _vae_depth -= 1
 
@@ -1409,7 +1493,12 @@ def _freeze_vae(vae: Any) -> None:
 
 
 def _activate_denoiser(pipe: Any, torch: Any) -> None:
-    """Put the denoiser on CUDA after encode. A model already there stays put."""
+    """Put the denoiser on CUDA after encode. The copy is not waited on.
+
+    The first frame enqueues the same pinned copy and returns. Waiting here
+    made the second frame's unpark the full transfer. The denoiser reads the
+    weights on that stream, so the copy is done before the first step.
+    """
     if not _cuda_is_up(torch):
         return
     if getattr(pipe, "_canvas_placement", "resident") != "resident":
@@ -1418,7 +1507,7 @@ def _activate_denoiser(pipe: Any, torch: Any) -> None:
         module = getattr(pipe, name, None)
         if module is None or _module_on_cuda(module):
             continue
-        hot.activate(name, "cuda", blocking=True)
+        hot.activate(name, "cuda", blocking=False)
 
 
 def _grad_flag(torch: Any) -> int:

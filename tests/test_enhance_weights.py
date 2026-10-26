@@ -18,15 +18,18 @@ if not REQUIRE:
 import torch
 
 from canvas.infra.paths import models_dir
+from canvas.models.mdl_fetch import encoder_view
 from canvas.models.registry import load_catalog
-from canvas.models.snapshots import weight_dir
 from canvas.pipeline.enhance import QwenRewriter, causal_lm_ready
 
 
 @pytest.mark.skipif(not REQUIRE, reason="set VOXPRINT_REQUIRE_ENHANCE=1 to load the text encoder")
 def test_shipped_encoder_rewrites_a_tiny_prompt_on_cpu():
     spec = load_catalog().by_id("z-image-turbo-bf16-16gb")
-    folder = weight_dir(models_dir(), spec.repo)
+    root = models_dir()
+    folder = encoder_view(spec, root)
+    assert folder is not None, "text encoder view is missing"
+    assert folder.parent == root / "views" / "canvas"
     encoder = folder / "text_encoder"
     config = json.loads((encoder / "config.json").read_text(encoding="utf-8"))
     index = json.loads((encoder / "model.safetensors.index.json").read_text(encoding="utf-8"))

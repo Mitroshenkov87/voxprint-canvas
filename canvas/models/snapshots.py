@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import NoReturn
 
 from canvas.app.i18n import text
 from canvas.infra.stage_timer import log_detail
@@ -227,7 +228,7 @@ def download_files(
     return folder
 
 
-def _missing(progress: Callable[[str], None] | None) -> None:
+def _missing(progress: Callable[[str], None] | None) -> NoReturn:
     message = text("model.missing")
     if progress is not None:
         progress(message)

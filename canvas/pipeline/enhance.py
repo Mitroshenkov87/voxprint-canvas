@@ -381,9 +381,8 @@ class QwenRewriter:
     def _load(self) -> None:
         if self._model is not None:
             self.closed = False
-            if self.device == "cuda":
-                hot.activate("writer", "cuda")
-            self._capture_decode()
+            self._seat_cuda(self._model)
+            self._capture_decode(rebuild=True)
             return
         found = hot.cached("writer")
         if found is not None:
@@ -392,9 +391,8 @@ class QwenRewriter:
             if tokenizer is not None:
                 self._tokenizer = tokenizer
             self.closed = False
-            if self.device == "cuda":
-                hot.activate("writer", "cuda")
-            self._capture_decode()
+            self._seat_cuda(found)
+            self._capture_decode(rebuild=True)
             return
         park_pipeline()
         torch, transformers = _generation_libs()
@@ -476,11 +474,42 @@ class QwenRewriter:
                 note_tag("writer", device)
         self._capture_decode()
 
-    def _capture_decode(self) -> None:
-        """Capture the 1-token graph once the weights are on the card."""
+    def _seat_cuda(self, model: Any) -> None:
+        """Unpark onto CUDA. A parameter or buffer left on CPU or meta stops the writer.
+
+        A machine with no CUDA keeps the existing CPU fallback. A CUDA machine
+        never generates with the writer still on the host.
+        """
+        torch, _transformers = _generation_libs()
+        try:
+            cuda = bool(torch.cuda.is_available())
+        except (AttributeError, TypeError, RuntimeError):
+            cuda = False
+        if not cuda:
+            return
+        if self.device == "cpu":
+            note_error("writer.device")
+            raise DeviceRefused()
+        self.device = "cuda"
+        activated = hot.activate("writer", "cuda", blocking=True)
+        if _has_resident_tensors(model):
+            if not weights_on_cuda(model):
+                place_on_cuda(model)
+            require_cuda(model, "writer.device", torch)
+        elif not activated:
+            place_on_cuda(model)
+
+    def _capture_decode(self, *, rebuild: bool = False) -> None:
+        """Capture the 1-token graph once the weights are on the card.
+
+        ``rebuild`` drops the previous graph and its StaticCache. Unpark moves
+        the weights, so the cache has to be allocated on CUDA again.
+        """
         if self.device != "cuda" or self._model is None:
             return
         torch, _transformers = _generation_libs()
+        if rebuild and self._graph is not None:
+            self._graph.invalidate()
         if self._graph is None or self._graph.model is not self._model:
             self._graph = GraphDecode(
                 self._model, torch, cache_len(self.max_new_tokens), stage=self.stage,
@@ -494,6 +523,15 @@ class QwenRewriter:
         model = self._model
         if tokenizer is None or model is None:
             raise SnapshotError("the text encoder is not loaded")
+        try:
+            cuda_up = bool(torch.cuda.is_available())
+        except (AttributeError, TypeError, RuntimeError):
+            cuda_up = False
+        if cuda_up and self.device != "cuda":
+            note_error("writer.device")
+            raise DeviceRefused()
+        if self.device == "cuda":
+            require_cuda(model, "writer.device", torch)
         messages = [
             {"role": "system", "content": system},
             {"role": "user", "content": prompt},
@@ -546,6 +584,20 @@ class QwenRewriter:
             graph=graph_label, dtype=resident, kv_cache=kv_cache,
         )
         return _visible_reply(reply)
+
+
+def _has_resident_tensors(module: Any) -> bool:
+    """True when the module exposes a parameter or a buffer."""
+    for name in ("parameters", "buffers"):
+        method = getattr(module, name, None)
+        if not callable(method):
+            continue
+        try:
+            if any(True for _tensor in method()):
+                return True
+        except (TypeError, RuntimeError):
+            continue
+    return False
 
 
 def _causal_model(transformers: Any, torch: Any, folder: Path, device: str) -> Any:

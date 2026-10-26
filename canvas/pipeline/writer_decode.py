@@ -2,8 +2,11 @@
 
 Prefill stays eager because the prompt length changes. The decode step is
 captured once after the weights are on the card and again if an unpark moves
-those buffers. A failed capture uses the same argmax loop without a graph.
-``generate`` remains the last resort for a stand-in that has no ``forward``.
+those buffers. The decode clock waits for ``torch.cuda.synchronize`` so the
+rate is the tokens that finished, not the replay launches. A failed capture
+uses the same argmax loop without a graph. ``generate`` remains the last
+resort for a stand-in that has no ``forward``. CUDA never falls through to a
+CPU writer.
 """
 from __future__ import annotations
 
@@ -12,6 +15,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from canvas.infra.stage_timer import log_detail
+from canvas.pipeline.device_guard import require_cuda
 
 # Room for the system prompt, the scenario JSON, and the chat wrapper.
 WRITER_MAX_PROMPT_TOKENS = 2048
@@ -101,6 +105,7 @@ class GraphDecode:
                 cache_position=position,
             )
             token = output.logits[:, -1, :].argmax(dim=-1, keepdim=True)
+        _sync(self.torch)
         prefill_ms = _ms(started)
         pieces = [token]
         started = time.perf_counter()
@@ -112,7 +117,8 @@ class GraphDecode:
             token = self.static_logits[:, -1, :].argmax(dim=-1, keepdim=True)
             pieces.append(token)
             position_value += 1
-        return _run(self.torch, pieces, count, prefill_ms, time.perf_counter() - started, "captured")
+        _sync(self.torch)
+        return _run(self.torch, pieces, prefill_ms, time.perf_counter() - started, "captured")
 
     def _capture(self) -> None:
         torch = self.torch
@@ -132,10 +138,19 @@ class GraphDecode:
             raise RuntimeError("decode warmup produced no logits")
         self.static_logits = torch.empty_like(output.logits)
         graph = torch.cuda.CUDAGraph()
+
+        def replay_body() -> None:
+            produced = self._step()
+            self.static_logits.copy_(produced.logits)
+
         with torch.cuda.graph(graph):
             with torch.no_grad():
-                output = self._step()
-                self.static_logits.copy_(output.logits)
+                replay_body()
+        # A real CUDA graph replays the captured kernels. A test double stores
+        # the same body and runs it again, so the tokens stay the eager ones.
+        bind = getattr(graph, "bind_replay", None)
+        if callable(bind):
+            bind(replay_body)
         self.graph = graph
         self.cache.reset()
 
@@ -165,6 +180,7 @@ def try_decode(
     None means the caller should use ``generate``. That is the stand-in path
     and the path taken when the static cache cannot be built.
     """
+    require_cuda(model, "writer.device", torch)
     if graph is not None:
         if graph.stale():
             graph.capture()
@@ -199,6 +215,7 @@ def eager_decode(model: Any, torch: Any, input_ids: Any, new_tokens: int) -> Dec
                 input_ids=input_ids, past_key_values=cache, use_cache=True, cache_position=position,
             )
             token = output.logits[:, -1, :].argmax(dim=-1, keepdim=True)
+        _sync(torch)
         prefill_ms = _ms(started)
         pieces = [token]
         started = time.perf_counter()
@@ -211,9 +228,10 @@ def eager_decode(model: Any, torch: Any, input_ids: Any, new_tokens: int) -> Dec
                 )
                 token = output.logits[:, -1, :].argmax(dim=-1, keepdim=True)
             pieces.append(token)
+        _sync(torch)
     except (AttributeError, RuntimeError, TypeError, ValueError):
         return None
-    return _run(torch, pieces, count, prefill_ms, time.perf_counter() - started, "eager")
+    return _run(torch, pieces, prefill_ms, time.perf_counter() - started, "eager")
 
 
 def cache_len(new_tokens: int) -> int:
@@ -222,12 +240,48 @@ def cache_len(new_tokens: int) -> int:
 
 
 def _run(
-    torch: Any, pieces: list[Any], count: int, prefill_ms: int, decode_s: float, graph: str,
+    torch: Any, pieces: list[Any], prefill_ms: int, decode_s: float, graph: str,
 ) -> DecodeRun:
     ids = pieces[0] if len(pieces) == 1 else torch.cat(pieces, dim=-1)
-    steps = count - 1
+    produced = _produced(ids, len(pieces))
+    # The first id comes from prefill. The rate covers the tokens decoded after it.
+    steps = max(0, produced - 1)
     rate = 0 if steps == 0 or decode_s <= 0 else min(1_000_000, int(steps / decode_s))
-    return DecodeRun(ids, count, prefill_ms, rate, graph)
+    return DecodeRun(ids, produced, prefill_ms, rate, graph)
+
+
+def _produced(ids: Any, fallback: int) -> int:
+    """How many new token ids were actually built."""
+    if isinstance(ids, (list, tuple)):
+        return len(ids)
+    shape = getattr(ids, "shape", None)
+    if shape is not None:
+        try:
+            width = int(shape[-1])
+        except (TypeError, ValueError, IndexError):
+            width = 0
+        if width > 0:
+            return width
+    return fallback if fallback > 0 else 0
+
+
+def _sync(torch: Any) -> None:
+    """Wait until queued CUDA work has finished. A CPU double has nothing to wait for."""
+    cuda = getattr(torch, "cuda", None)
+    if cuda is None:
+        return
+    try:
+        if not bool(cuda.is_available()):
+            return
+    except (TypeError, RuntimeError):
+        return
+    sync = getattr(cuda, "synchronize", None)
+    if not callable(sync):
+        return
+    try:
+        sync()
+    except (TypeError, RuntimeError):
+        return
 
 
 def _new_cache(model: Any, length: int) -> Any:

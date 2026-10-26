@@ -185,6 +185,9 @@ def activate(name: str, device: str, *, blocking: bool = False) -> bool:
     started = time.perf_counter()
     moved = resident.parked.to(device, non_blocking=not blocking)
     _assign(resident.module, moved if isinstance(moved, dict) else {})
+    # The park dict can omit a buffer. Anything still on CPU or meta is moved
+    # here so a later forward cannot keep running on the host.
+    _force_device(resident.module, device, blocking=blocking)
     _log_move("unpark", name, kind, resident.nbytes, started)
     return True
 
@@ -388,6 +391,53 @@ def _tensors(module: Any) -> list[tuple[str, Any]]:
         for name, tensor in pairs:
             found.append((f"{kind}:{name}", tensor))
     return found
+
+
+def _force_device(module: Any, device: str, *, blocking: bool) -> None:
+    """Move any parameter or buffer that did not land on ``device``."""
+    kind = "cuda" if "cuda" in str(device) else "cpu"
+    for _key, tensor in _tensors(module):
+        if _tensor_kind(tensor) == kind or _tensor_kind(getattr(tensor, "data", None)) == kind:
+            continue
+        data = getattr(tensor, "data", None)
+        target = data if data is not None else tensor
+        mover = getattr(target, "to", None)
+        if not callable(mover):
+            continue
+        try:
+            moved = mover(device, non_blocking=not blocking)
+        except TypeError:
+            try:
+                moved = mover(device)
+            except (TypeError, RuntimeError, AttributeError):
+                continue
+        except (RuntimeError, AttributeError):
+            continue
+        if data is None:
+            continue
+        try:
+            tensor.data = moved
+        except (AttributeError, TypeError, RuntimeError):
+            continue
+
+
+def _tensor_kind(tensor: Any) -> str:
+    if tensor is None:
+        return ""
+    device = getattr(tensor, "device", None)
+    if device is None:
+        return ""
+    kind = getattr(device, "type", None)
+    if isinstance(kind, str):
+        return kind
+    text = str(device)
+    if "cuda" in text:
+        return "cuda"
+    if "meta" in text:
+        return "meta"
+    if "cpu" in text:
+        return "cpu"
+    return text
 
 
 def _assign(module: Any, state: dict[str, Any]) -> None:

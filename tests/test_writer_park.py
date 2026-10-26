@@ -189,6 +189,200 @@ def test_the_writer_stage_parks_its_vram_copy(monkeypatch, tmp_path: Path) -> No
     assert "stage park residual" not in log
 
 
+def test_unpark_puts_every_tensor_on_cuda_and_recaptures(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
+    monkeypatch.setenv("VOXPRINT_RAM_MODE", "ram96")
+    hot_tier.reset()
+    vram_trace._holders.clear()
+    folder = _writer_dir(tmp_path / "writer")
+    weight = _Tensor("cpu")
+    buffer = _Tensor("cpu")
+    caches: list[int] = []
+
+    class _Cache:
+        def reset(self) -> None:
+            return None
+
+    def new_cache(model: object, length: int) -> _Cache:
+        del model
+        caches.append(length)
+        return _Cache()
+
+    class _Token:
+        def __init__(self, value: int) -> None:
+            self.value = value
+            self.shape = (1, 1)
+            self.device = "cuda"
+
+        def argmax(self, dim: int = -1, keepdim: bool = True) -> _Token:
+            del dim, keepdim
+            return _Token(self.value)
+
+        def copy_(self, other: object) -> None:
+            self.value = int(getattr(other, "value", 0))
+
+        def fill_(self, value: int) -> None:
+            self.value = int(value)
+
+        def to(self, device: object, non_blocking: bool = False) -> _Token:
+            del device, non_blocking
+            return self
+
+    class _Logits:
+        def __init__(self, value: int) -> None:
+            self.value = value
+
+        def __getitem__(self, key: object) -> _Token:
+            del key
+            return _Token(self.value)
+
+        def copy_(self, other: _Logits) -> None:
+            self.value = other.value
+
+    class _Output:
+        def __init__(self, value: int) -> None:
+            self.logits = _Logits(value)
+
+    class _Model:
+        config = object()
+
+        def named_parameters(self):
+            yield "weight", weight
+
+        def parameters(self):
+            yield weight
+
+        def named_buffers(self):
+            yield "inv_freq", buffer
+
+        def buffers(self):
+            yield buffer
+
+        def forward(self, **kwargs: object) -> _Output:
+            ids = kwargs["input_ids"]
+            last = ids.values[-1] if hasattr(ids, "values") else getattr(ids, "value", 1)
+            assert weight.device.type == "cuda"
+            assert buffer.device.type == "cuda"
+            return _Output(int(last) + 1)
+
+        def __call__(self, **kwargs: object) -> _Output:
+            return self.forward(**kwargs)
+
+    class _Stream:
+        def wait_stream(self, other: object) -> None:
+            del other
+
+    class _Graph:
+        def __init__(self) -> None:
+            self.body = None
+
+        def bind_replay(self, fn: object) -> None:
+            self.body = fn
+
+        def replay(self) -> None:
+            assert self.body is not None
+            self.body()
+
+    class _CM:
+        def __enter__(self) -> _CM:
+            return self
+
+        def __exit__(self, *args: object) -> bool:
+            del args
+            return False
+
+    class _Cuda:
+        @staticmethod
+        def is_available() -> bool:
+            return True
+
+        @staticmethod
+        def empty_cache() -> None:
+            return None
+
+        @staticmethod
+        def synchronize() -> None:
+            return None
+
+        @staticmethod
+        def Stream() -> _Stream:
+            return _Stream()
+
+        @staticmethod
+        def current_stream() -> _Stream:
+            return _Stream()
+
+        @staticmethod
+        def stream(stream: object) -> _CM:
+            del stream
+            return _CM()
+
+        @staticmethod
+        def CUDAGraph() -> _Graph:
+            return _Graph()
+
+        @staticmethod
+        def graph(graph: _Graph) -> _CM:
+            del graph
+            return _CM()
+
+    class _Torch:
+        bfloat16 = "bf16"
+        long = "long"
+        cuda = _Cuda
+
+        @staticmethod
+        def inference_mode() -> _CM:
+            return _CM()
+
+        @staticmethod
+        def no_grad() -> _CM:
+            return _CM()
+
+        @staticmethod
+        def zeros(shape: object, dtype: object = None, device: object = None) -> _Token:
+            del shape, dtype, device
+            return _Token(0)
+
+        @staticmethod
+        def empty_like(logits: _Logits) -> _Logits:
+            return _Logits(logits.value)
+
+        @staticmethod
+        def arange(n: int, device: object = None) -> int:
+            del device
+            return n
+
+        @staticmethod
+        def cat(pieces: list[_Token], dim: int = -1) -> list[int]:
+            del dim
+            return [piece.value for piece in pieces]
+
+    monkeypatch.setattr("canvas.pipeline.enhance._generation_libs", lambda: (_Torch(), _Transformers()))
+    monkeypatch.setattr("canvas.pipeline.enhance._causal_model", lambda *_args, **_kwargs: _Model())
+    monkeypatch.setattr("canvas.pipeline.writer_decode._new_cache", new_cache)
+    try:
+        first = QwenRewriter(folder, folder, tier=Tier.GB16, max_new_tokens=4)
+        assert first.complete("ping", system="sys").startswith("1.")
+        first.close()
+        assert weight.device.type == "cpu"
+        assert buffer.device.type == "cpu"
+        second = QwenRewriter(folder, folder, tier=Tier.GB16, max_new_tokens=4)
+        assert second.complete("ping", system="sys").startswith("1.")
+        second.close()
+    finally:
+        hot_tier.reset()
+        vram_trace._holders.clear()
+    assert weight.device.type == "cpu"
+    assert buffer.device.type == "cpu"
+    assert len(caches) >= 2
+    log = _log(tmp_path)
+    token_lines = [line for line in log.splitlines() if "stage writer tokens" in line]
+    assert len(token_lines) >= 2
+    assert "device=cuda" in token_lines[1]
+    assert "graph=captured" in token_lines[1]
+
+
 def test_a_writer_error_still_parks_the_vram_copy(monkeypatch, tmp_path: Path) -> None:
     weight, seen = _arm(monkeypatch, tmp_path, fail=True)
     folder = tmp_path / "writer"

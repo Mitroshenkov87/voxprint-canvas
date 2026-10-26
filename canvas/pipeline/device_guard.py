@@ -24,32 +24,33 @@ class DeviceRefused(Exception):
 
 
 def require_cuda(module: Any, reason: str, torch: Any | None = None) -> None:
-    """Stop when CUDA is up and a parameter is not on it.
+    """Stop when CUDA is up and a parameter or buffer is not on it.
 
-    A module with no parameters is left alone. The unit-test doubles are built
-    that way and never claim a device.
+    CPU and meta both refuse the load. A module with no parameters and no
+    buffers is left alone. The unit-test doubles are built that way and never
+    claim a device.
     """
     if not _cuda_up(torch):
         return
-    parameters = _parameters(module)
-    if not parameters:
+    tensors = _resident_tensors(module)
+    if not tensors:
         return
-    for param in parameters:
-        if _device_type(param) != "cuda":
+    for tensor in tensors:
+        if _device_type(tensor) != "cuda":
             note_error(reason)
             raise DeviceRefused()
 
 
 def weights_on_cuda(module: Any) -> bool:
-    """True when every parameter already lives on CUDA.
+    """True when every parameter and buffer already lives on CUDA.
 
-    A module with no parameters is not on CUDA. Callers then use ``to``, which
-    is how a test double records the move.
+    A module with no parameters and no buffers is not on CUDA. Callers then
+    use ``to``, which is how a test double records the move.
     """
-    parameters = _parameters(module)
-    if not parameters:
+    tensors = _resident_tensors(module)
+    if not tensors:
         return False
-    return all(_device_type(param) == "cuda" for param in parameters)
+    return all(_device_type(tensor) == "cuda" for tensor in tensors)
 
 
 def pretrained_attempts(dtype: object, device: str) -> tuple[dict[str, Any], ...]:
@@ -107,22 +108,23 @@ def reclaim_cuda(torch: Any) -> None:
 
 
 def place_on_cuda(module: Any) -> Any:
-    """Move parameters onto CUDA one tensor at a time.
+    """Move parameters and buffers onto CUDA one tensor at a time.
 
     Copying the whole module with ``to`` keeps the old storage alive until the
     copy finishes, so a model that would fit is asked for twice the memory.
-    A module with no parameters uses ``to`` so a test double still records it.
+    A module with no parameters and no buffers uses ``to`` so a test double
+    still records it.
     """
-    parameters = _parameters(module)
-    if not parameters:
+    tensors = _resident_tensors(module)
+    if not tensors:
         mover = getattr(module, "to", None)
         if callable(mover):
             return mover("cuda")
         return module
     seen: set[int] = set()
-    for param in parameters:
-        data = getattr(param, "data", None)
-        target = data if data is not None else param
+    for tensor in tensors:
+        data = getattr(tensor, "data", None)
+        target = data if data is not None else tensor
         pointer = getattr(target, "data_ptr", None)
         key = 0
         if callable(pointer):
@@ -142,20 +144,24 @@ def place_on_cuda(module: Any) -> Any:
         moved = mover("cuda")
         if data is not None:
             try:
-                param.data = moved
+                tensor.data = moved
             except (AttributeError, TypeError, RuntimeError):
                 continue
     return module
 
 
-def _parameters(module: Any) -> list[Any]:
-    parameters = getattr(module, "parameters", None)
-    if not callable(parameters):
-        return []
-    try:
-        return list(parameters())
-    except (TypeError, RuntimeError):
-        return []
+def _resident_tensors(module: Any) -> list[Any]:
+    """Parameters and buffers. A missing accessor means that group is empty."""
+    found: list[Any] = []
+    for name in ("parameters", "buffers"):
+        method = getattr(module, name, None)
+        if not callable(method):
+            continue
+        try:
+            found.extend(list(method()))
+        except (TypeError, RuntimeError):
+            continue
+    return found
 
 
 def _device_type(value: Any) -> str:

@@ -1,5 +1,10 @@
 # VOXPrint AI Canvas
 
+> [!WARNING]
+> **⚠️ Deep alpha.** This software is experimental; nothing is guaranteed to work. Use at your own risk.
+>
+> **⚠️ Глубокая альфа.** Программа экспериментальная, работа не гарантируется.
+
 Local text-to-image and image-to-image generation for the VOXPrint AI Suite. Everything runs on your own GPU; no cloud service is required.
 
 > Status: 0.1.0 release candidate.

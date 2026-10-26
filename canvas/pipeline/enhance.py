@@ -30,6 +30,7 @@ from canvas.pipeline.generation_weights import (
     kv_cache_label,
     prepare_generation,
 )
+from canvas.models.adopt import adopt_required
 from canvas.models.registry import Catalog, ModelSpec
 from canvas.models import hot_tier as hot
 from canvas.models.runtime import park_pipeline
@@ -287,6 +288,7 @@ def open_rewriter(
     if stage not in {"writer", "enhancer"}:
         raise ValueError(f"unknown stage {stage}")
     spec = writer_spec(catalog)
+    adopt_required(root, catalog)
     folder = snapshot_ready(spec, root, process_cache())
     if folder is None:
         if progress is not None:

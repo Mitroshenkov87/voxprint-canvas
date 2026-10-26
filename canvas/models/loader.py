@@ -4,10 +4,12 @@ A missing pin, a missing file or a bad hash refuses the stack. Generation runs
 when the pinned snapshot is already on disk. Downloading is a separate call.
 """
 from pathlib import Path
-from typing import assert_never
+from typing import NoReturn, assert_never
 
 from canvas.app.i18n import text
+from canvas.app.preflight import PreflightFailed, Reason, preflight
 from canvas.infra.paths import models_dir
+from canvas.models.adopt import adopt_required
 from canvas.models.modes import Mode, Tier
 from canvas.models.pin import PinError, require_pin, verify_file
 from canvas.models.plan import CallPlan, build_plan
@@ -111,8 +113,25 @@ def _safety_folder(spec: ModelSpec, root: Path) -> Path:
 
 
 def load_catalog_stack(root: Path, catalog: Catalog | None = None) -> SafetyStack:
-    """Open the check stack from the registry after every weight file is verified."""
-    return load_safety_stack(catalog or load_catalog(), root)
+    """Open the check stack after preflight. A failed preflight does not load a model."""
+    chosen = catalog or load_catalog()
+    result = preflight(root, chosen)
+    if not result.ok:
+        _refuse_preflight(result.reason)
+    return load_safety_stack(chosen, root)
+
+
+def _refuse_preflight(reason: Reason) -> NoReturn:
+    """Stop before the stack is constructed. A missing view uses the MDL sentence."""
+    match reason:
+        case "view" | "gate":
+            raise ModelMissing("missing_model")
+        case "disk" | "ram" | "budget":
+            raise PreflightFailed(reason)
+        case "ok":
+            raise RuntimeError("preflight ok")
+        case _ as unexpected:
+            assert_never(unexpected)
 
 
 def request_fp32(spec: ModelSpec) -> bool:
@@ -164,6 +183,7 @@ class ZImageGenerator:
         root = self.models if self.models is not None else models_dir()
         spec = _spec_for(self.catalog, plan)
         cache = process_cache()
+        adopt_required(root, self.catalog)
         try:
             folder = snapshot_ready(spec, root, cache)
             if folder is None:

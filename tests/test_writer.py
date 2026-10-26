@@ -12,8 +12,8 @@ from canvas.app.shell_run import improve_prompt
 from canvas.models.modes import Tier
 from canvas.models.pins import TEXT_ENCODER
 from canvas.models.registry import load_catalog
-from canvas.models.snapshots import _urls
 from canvas.models.verified import process_cache
+from voxprint_common.mdl.catalog import load_manifest
 from canvas.infra import vram_trace
 from canvas.infra.stage_timer import StageTimes, set_current
 from canvas.pipeline.device_guard import DeviceRefused
@@ -41,9 +41,11 @@ def test_writer_catalog_pins_the_upstream_revision() -> None:
         "b248ed21539e354dedbab9d73f06b0b2f633396664121fd0b3e1c17bc560840f"
     )
     assert spec.files["config.json"] == "5443f8ef61f1602830e997f577dc333179cf28240135f13438e750f4fb2fc839"
-    urls = _urls(spec, "config.json", spec.revision, fallback=False)
-    assert urls == (f"{UPSTREAM}/resolve/{REVISION}/config.json",)
-    assert all("voxprint-mirror" not in url for url in urls)
+    manifest = load_manifest(Path(__file__).resolve().parents[1] / "mdl.json")
+    writer = next(model for model in manifest.models if model.id == WRITER_ID)
+    config = next(item for item in writer.files if item.path == "config.json")
+    assert config.urls == (f"{UPSTREAM}/resolve/{REVISION}/config.json",)
+    assert all("voxprint-mirror" not in url for url in config.urls)
     turbo = load_catalog().by_id("z-image-turbo-bf16-16gb")
     assert turbo.text_encoder == TEXT_ENCODER == "Qwen/Qwen3-4B"
     assert any(name.startswith("text_encoder/") for name in encoder_names(turbo))

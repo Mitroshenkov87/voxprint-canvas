@@ -14,7 +14,7 @@ from canvas.infra.enlarge import EnlargeError, declared_vram_gb
 from canvas.infra.stage_timer import timed
 from canvas.infra.gpu_lock import GpuLockTimeout, lock_path, release, try_acquire
 from canvas.infra.thermal import Guard
-from canvas.models.loader import ModelNotReady
+from canvas.models.loader import ModelMissing, ModelNotReady
 from canvas.models.modes import Mode, Tier, required_roles, visible_modes
 from canvas.models.plan import BaseNotSelected, ModeUnavailable
 from canvas.models.registry import Catalog
@@ -164,6 +164,8 @@ class Pipeline:
                     return image
                 return self._upscale(image, probe, prompt, hold)
             except ModelNotReady as exc:
+                if exc.missing:
+                    raise ModelMissing("missing_model") from exc
                 raise SafetyError("model_not_ready") from exc
             finally:
                 screened.wipe()

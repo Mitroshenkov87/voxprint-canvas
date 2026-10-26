@@ -135,6 +135,15 @@ def test_missing_models_do_not_fail_selftest_and_a_bad_hash_does(monkeypatch, tm
     folder.mkdir(parents=True)
     name = next(iter(spec.files))
     (folder / name).write_bytes(b"not-the-model")
+    ignored = selftest_report(tmp_path)
+    row = next(item for item in ignored["models"] if item["id"] == spec.id)
+    assert row["detail"] == "not_downloaded"
+    assert ignored["ok"] is True
+    assert (folder / name).read_bytes() == b"not-the-model"
+    digest = spec.files[name]
+    blob = tmp_path / "blobs" / digest
+    blob.parent.mkdir()
+    blob.write_bytes(b"not-the-model")
     broken = selftest_report(tmp_path)
     row = next(item for item in broken["models"] if item["id"] == spec.id)
     assert row["ok"] is False

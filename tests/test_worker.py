@@ -73,6 +73,6 @@ def test_worker_process_refuses_without_pins(tmp_path, monkeypatch, capsys):
     assert main() == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["ok"] is False
-    assert payload["message"] == "Image generation is unavailable."
+    assert payload["message"] == "Model missing, fetch it with MDL."
     images = [path for path in tmp_path.rglob("*") if path.suffix.lower() in {".avif", ".png", ".jpg", ".webp", ".jxl", ".heic"}]
     assert images == []

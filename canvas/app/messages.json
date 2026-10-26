@@ -200,6 +200,10 @@
       "en": "The model could not be downloaded.",
       "ru": "Не удалось скачать модель."
     },
+    "model.missing": {
+      "en": "Model missing, fetch it with MDL.",
+      "ru": "Модель отсутствует, загрузите её через MDL."
+    },
     "view.link_failed": {
       "en": "{name} could not be linked to the model store. Weights are not copied.",
       "ru": "Не удалось связать {name} с хранилищем моделей. Веса не копируются."

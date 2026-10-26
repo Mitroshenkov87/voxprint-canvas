@@ -17,7 +17,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PIL import Image, ImageDraw
 from PySide6.QtCore import QSize
 from PySide6.QtGui import QColor, QPainter
-from PySide6.QtWidgets import QApplication, QComboBox, QLabel, QProgressBar, QPushButton, QSpinBox, QWidget
+from PySide6.QtWidgets import QApplication, QCheckBox, QComboBox, QLabel, QProgressBar, QPushButton, QSpinBox, QWidget
 
 from canvas.models.mdl_registry import Model
 from canvas.models.modes import Tier
@@ -307,6 +307,13 @@ def _ready_models() -> tuple[Model, ...]:
     return cast(tuple[Model, ...], (object(),))
 
 
+def _mode(window: ShellWindow) -> QCheckBox:
+    mode = window.findChild(QCheckBox, "photoshootMode")
+    if not isinstance(mode, QCheckBox):
+        raise SystemExit("missing photoshootMode")
+    return mode
+
+
 def _button(window: ShellWindow, name: str) -> QPushButton:
     button = window.findChild(QPushButton, name)
     if not isinstance(button, QPushButton):
@@ -329,7 +336,7 @@ def _run_smoke(app: QApplication, window: ShellWindow, idea: str, path: Path) ->
     window.photoshoot.writer = lambda _prompt: _scenario(idea)
     window.setFixedSize(SHOT)
     window.show()
-    _button(window, "photoshootMode").click()
+    _mode(window).click()
     app.processEvents()
     _button(window, "generate").click()
     app.processEvents()
@@ -341,7 +348,7 @@ def _save_smoke(app: QApplication, window: ShellWindow, path: Path) -> bool:
     if path.is_file():
         return True
     app.processEvents()
-    mode = _button(window, "photoshootMode")
+    mode = _mode(window)
     if not mode.isChecked() or mode.text() != "Фотосессия":
         raise SystemExit(f"{path.name} is missing the Photoshoot option")
     cancel = _button(window, "photoshootCancel")

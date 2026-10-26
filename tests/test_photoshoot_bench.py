@@ -6,7 +6,7 @@ from pathlib import Path
 
 from canvas.app.main import _parser, main
 from canvas.app.photoshoot_bench import SERIES_FRAMES, live_generate, live_rewrite, measure_series
-from canvas.pipeline.photoshoot import scenario_request, scenario_token_budget
+from canvas.pipeline.photoshoot import TEST_SERIES_CHARACTER, scenario_request, scenario_token_budget
 from canvas.pipeline.series import REFERENCE_STRENGTH
 from canvas.safety.image import RawImage
 from canvas.app.platform import GpuCheck, OsCheck
@@ -146,6 +146,11 @@ def test_photoshoot_bench_without_a_gpu_prints_no_duration(monkeypatch, capsys, 
     assert code == 2
     assert body["ok"] is False
     assert "seconds" not in body
+
+
+def test_the_bench_prompt_defaults_to_the_fixed_character(tmp_path: Path) -> None:
+    args = _parser().parse_args(["photoshoot-bench", "--out", str(tmp_path)])
+    assert args.prompt == TEST_SERIES_CHARACTER
 
 
 def test_parser_accepts_the_bench_command(tmp_path: Path) -> None:

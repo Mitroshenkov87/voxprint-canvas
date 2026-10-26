@@ -1,12 +1,13 @@
-"""Try each listed source in order and keep a file only when the SHA-256 matches."""
+"""Ask VOXPrint MDL for a model. A plain copy is never written."""
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Callable
 
 from canvas.app.i18n import text
-from canvas.models.pin import PinError, require_pin, verify_bytes
+from canvas.models.pin import PinError, require_pin
 from canvas.models.registry import ModelSpec, Source
+from canvas.models.snapshots import request_download, snapshot_ready
 
 
 class DownloadError(Exception):
@@ -17,6 +18,8 @@ class DownloadError(Exception):
         self.detail = detail
 
     def __str__(self) -> str:
+        if self.detail == "model missing":
+            return text("model.missing")
         return text("error.download")
 
 
@@ -29,23 +32,20 @@ def attempt_sources(spec: ModelSpec) -> tuple[Source, ...]:
 
 
 def download_file(spec: ModelSpec, filename: str, dest_dir: Path, transport: Transport) -> Path:
-    """Fetch ``filename`` from the first source that returns the pinned bytes."""
+    """Queue ``filename`` with MDL and return it from the view.
+
+    ``transport`` is not used. MDL writes the blob. This function does not
+    create ``<org>--<name>`` or copy bytes into it.
+    """
+    del transport
     expected = spec.files.get(filename, "")
     try:
         require_pin(expected)
     except PinError:
         raise DownloadError("unpinned") from None
-    errors: list[str] = []
-    for source in attempt_sources(spec):
-        try:
-            data = transport(source)
-            verify_bytes(data, expected)
-        except (OSError, PinError, DownloadError) as exc:
-            errors.append(f"{source.kind}: {exc}")
-            continue
-        folder = dest_dir / spec.repo.replace("/", "--")
-        folder.mkdir(parents=True, exist_ok=True)
-        path = folder / filename
-        path.write_bytes(data)
-        return path
-    raise DownloadError("; ".join(errors) or "no source")
+    request_download(spec.id)
+    folder = snapshot_ready(spec, dest_dir)
+    path = (folder / filename) if folder is not None else None
+    if path is None or not path.is_file():
+        raise DownloadError("model missing")
+    return path

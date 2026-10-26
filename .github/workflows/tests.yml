@@ -50,9 +50,9 @@ jobs:
         run: |
           python -m pip install -q uv
           mkdir -p wheels
-          curl -fsSL -o wheels/voxprint_common-0.4.2-py3-none-any.whl \
-            https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.4.2/voxprint_common-0.4.2-py3-none-any.whl
-          python -c "import hashlib, pathlib; p=pathlib.Path('wheels/voxprint_common-0.4.2-py3-none-any.whl'); d=hashlib.sha256(p.read_bytes()).hexdigest(); e='c2125adf7f935c99865d437f51dd32cef36a3f3c5b7b251084ef51b6769bea41'; raise SystemExit(None if d==e else 'voxprint-common 0.4.2 failed the SHA-256 check: '+d)"
+          curl -fsSL -o wheels/voxprint_common-0.5.1-py3-none-any.whl \
+            https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.5.1/voxprint_common-0.5.1-py3-none-any.whl
+          python -c "import hashlib, pathlib; p=pathlib.Path('wheels/voxprint_common-0.5.1-py3-none-any.whl'); d=hashlib.sha256(p.read_bytes()).hexdigest(); e='c618239aa2f966608aea17ec108df2d9ed9c4bdc7edd81ef3e6a3fa960ee3939'; raise SystemExit(None if d==e else 'voxprint-common 0.5.1 failed the SHA-256 check: '+d)"
           uv venv .venv
           if [ "${{ runner.os }}" = "Windows" ]; then
             uv pip install --python .venv/Scripts/python.exe --find-links wheels -e ".[dev]"
@@ -81,10 +81,10 @@ jobs:
       - name: Install the pinned voxprint-common
         # The release wheel the installers vendor, checked by sha256; it carries the Model Forge key.
         run: |
-          curl -fsSL -o voxprint_common-0.4.2-py3-none-any.whl \
-            https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.4.2/voxprint_common-0.4.2-py3-none-any.whl
-          echo "c2125adf7f935c99865d437f51dd32cef36a3f3c5b7b251084ef51b6769bea41  voxprint_common-0.4.2-py3-none-any.whl" | sha256sum -c -
-          python -m pip install -q -c constraints.txt voxprint_common-0.4.2-py3-none-any.whl
+          curl -fsSL -o voxprint_common-0.5.1-py3-none-any.whl \
+            https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.5.1/voxprint_common-0.5.1-py3-none-any.whl
+          echo "c618239aa2f966608aea17ec108df2d9ed9c4bdc7edd81ef3e6a3fa960ee3939  voxprint_common-0.5.1-py3-none-any.whl" | sha256sum -c -
+          python -m pip install -q -c constraints.txt voxprint_common-0.5.1-py3-none-any.whl
       - name: Compare mdl.json with the signed model index
         run: python tools/check_model_index.py
   enlarge-release:
@@ -123,9 +123,9 @@ jobs:
         run: |
           python -m pip install -q uv
           mkdir -p wheels
-          curl -fsSL -o wheels/voxprint_common-0.4.2-py3-none-any.whl \
-            https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.4.2/voxprint_common-0.4.2-py3-none-any.whl
-          python -c "import hashlib, pathlib; p=pathlib.Path('wheels/voxprint_common-0.4.2-py3-none-any.whl'); d=hashlib.sha256(p.read_bytes()).hexdigest(); e='c2125adf7f935c99865d437f51dd32cef36a3f3c5b7b251084ef51b6769bea41'; raise SystemExit(None if d==e else 'voxprint-common 0.4.2 failed the SHA-256 check: '+d)"
+          curl -fsSL -o wheels/voxprint_common-0.5.1-py3-none-any.whl \
+            https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.5.1/voxprint_common-0.5.1-py3-none-any.whl
+          python -c "import hashlib, pathlib; p=pathlib.Path('wheels/voxprint_common-0.5.1-py3-none-any.whl'); d=hashlib.sha256(p.read_bytes()).hexdigest(); e='c618239aa2f966608aea17ec108df2d9ed9c4bdc7edd81ef3e6a3fa960ee3939'; raise SystemExit(None if d==e else 'voxprint-common 0.5.1 failed the SHA-256 check: '+d)"
           uv venv .venv
           uv pip install --python .venv/bin/python --find-links wheels -e ".[dev]"
       - name: Check the pinned Enlarge release
@@ -144,9 +144,9 @@ jobs:
         run: |
           python -m pip install -q uv
           mkdir -p wheels
-          curl -fsSL -o wheels/voxprint_common-0.4.2-py3-none-any.whl \
-            https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.4.2/voxprint_common-0.4.2-py3-none-any.whl
-          python -c "import hashlib, pathlib; p=pathlib.Path('wheels/voxprint_common-0.4.2-py3-none-any.whl'); d=hashlib.sha256(p.read_bytes()).hexdigest(); e='c2125adf7f935c99865d437f51dd32cef36a3f3c5b7b251084ef51b6769bea41'; raise SystemExit(None if d==e else 'voxprint-common 0.4.2 failed the SHA-256 check: '+d)"
+          curl -fsSL -o wheels/voxprint_common-0.5.1-py3-none-any.whl \
+            https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.5.1/voxprint_common-0.5.1-py3-none-any.whl
+          python -c "import hashlib, pathlib; p=pathlib.Path('wheels/voxprint_common-0.5.1-py3-none-any.whl'); d=hashlib.sha256(p.read_bytes()).hexdigest(); e='c618239aa2f966608aea17ec108df2d9ed9c4bdc7edd81ef3e6a3fa960ee3939'; raise SystemExit(None if d==e else 'voxprint-common 0.5.1 failed the SHA-256 check: '+d)"
           uv venv .venv
           uv pip install --python .venv/bin/python \
             --index-url https://download.pytorch.org/whl/cpu \
@@ -170,15 +170,15 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /home/runner/.cache/voxprint-gate
-          key: gate-models-v1-${{ hashFiles('canvas/models/catalog.json') }}
-          restore-keys: gate-models-v1-
+          key: gate-models-v2-${{ hashFiles('canvas/models/catalog.json', 'mdl.json') }}
+          restore-keys: gate-models-v2-
       - name: Install the pinned CPU stack
         run: |
           python -m pip install -q uv
           mkdir -p wheels
-          curl -fsSL -o wheels/voxprint_common-0.4.2-py3-none-any.whl \
-            https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.4.2/voxprint_common-0.4.2-py3-none-any.whl
-          python -c "import hashlib, pathlib; p=pathlib.Path('wheels/voxprint_common-0.4.2-py3-none-any.whl'); d=hashlib.sha256(p.read_bytes()).hexdigest(); e='c2125adf7f935c99865d437f51dd32cef36a3f3c5b7b251084ef51b6769bea41'; raise SystemExit(None if d==e else 'voxprint-common 0.4.2 failed the SHA-256 check: '+d)"
+          curl -fsSL -o wheels/voxprint_common-0.5.1-py3-none-any.whl \
+            https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.5.1/voxprint_common-0.5.1-py3-none-any.whl
+          python -c "import hashlib, pathlib; p=pathlib.Path('wheels/voxprint_common-0.5.1-py3-none-any.whl'); d=hashlib.sha256(p.read_bytes()).hexdigest(); e='c618239aa2f966608aea17ec108df2d9ed9c4bdc7edd81ef3e6a3fa960ee3939'; raise SystemExit(None if d==e else 'voxprint-common 0.5.1 failed the SHA-256 check: '+d)"
           uv venv .venv
           uv pip install --python .venv/bin/python \
             --index-url https://download.pytorch.org/whl/cpu \
@@ -190,7 +190,7 @@ jobs:
         env:
           VOXPRINT_HOME: /home/runner/.cache/voxprint-gate
         run: |
-          .venv/bin/python -c 'from canvas.infra.paths import models_dir; from canvas.models.registry import load_catalog; from canvas.models.snapshots import download_snapshot; root = models_dir(); catalog = load_catalog(); roles = ("prompt-guard", "zero-shot", "face-detector", "age", "nsfw", "age-fine"); [download_snapshot(spec, root) for spec in catalog.models if spec.role in roles]'
+          .venv/bin/python -m canvas.models.mdl_fetch gate
       - name: Real-weight checks
         env:
           VOXPRINT_REQUIRE_GATE: "1"
@@ -208,15 +208,15 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /home/runner/.cache/voxprint-enhance
-          key: enhance-encoder-v1-${{ hashFiles('canvas/models/catalog.json') }}
-          restore-keys: enhance-encoder-v1-
+          key: enhance-encoder-v2-${{ hashFiles('canvas/models/catalog.json', 'mdl.json') }}
+          restore-keys: enhance-encoder-v2-
       - name: Install the pinned CPU stack
         run: |
           python -m pip install -q uv
           mkdir -p wheels
-          curl -fsSL -o wheels/voxprint_common-0.4.2-py3-none-any.whl \
-            https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.4.2/voxprint_common-0.4.2-py3-none-any.whl
-          python -c "import hashlib, pathlib; p=pathlib.Path('wheels/voxprint_common-0.4.2-py3-none-any.whl'); d=hashlib.sha256(p.read_bytes()).hexdigest(); e='c2125adf7f935c99865d437f51dd32cef36a3f3c5b7b251084ef51b6769bea41'; raise SystemExit(None if d==e else 'voxprint-common 0.4.2 failed the SHA-256 check: '+d)"
+          curl -fsSL -o wheels/voxprint_common-0.5.1-py3-none-any.whl \
+            https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.5.1/voxprint_common-0.5.1-py3-none-any.whl
+          python -c "import hashlib, pathlib; p=pathlib.Path('wheels/voxprint_common-0.5.1-py3-none-any.whl'); d=hashlib.sha256(p.read_bytes()).hexdigest(); e='c618239aa2f966608aea17ec108df2d9ed9c4bdc7edd81ef3e6a3fa960ee3939'; raise SystemExit(None if d==e else 'voxprint-common 0.5.1 failed the SHA-256 check: '+d)"
           uv venv .venv
           uv pip install --python .venv/bin/python \
             --index-url https://download.pytorch.org/whl/cpu \
@@ -228,7 +228,7 @@ jobs:
         env:
           VOXPRINT_HOME: /home/runner/.cache/voxprint-enhance
         run: |
-          .venv/bin/python -c "from canvas.infra.paths import models_dir; from canvas.models.registry import load_catalog; from canvas.models.snapshots import download_files; from canvas.pipeline.enhance import encoder_names, turbo_spec; from canvas.models.modes import Tier; spec = turbo_spec(load_catalog(), Tier.GB16); download_files(spec, models_dir(), encoder_names(spec), print)"
+          .venv/bin/python -m canvas.models.mdl_fetch encoder
       - name: Rewrite a tiny prompt on CPU
         env:
           VOXPRINT_REQUIRE_ENHANCE: "1"

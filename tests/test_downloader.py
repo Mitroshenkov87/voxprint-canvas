@@ -1,12 +1,12 @@
-"""Source order and SHA-256 failover. An empty pin never calls the transport."""
-import hashlib
+"""Source order. A download is queued with MDL and never written as a plain copy."""
 from dataclasses import replace
 
 import pytest
 
+from canvas.app.i18n import text
 from canvas.models.downloader import DownloadError, attempt_sources, download_file
 from canvas.models.registry import Source, load_catalog
-from canvas.models.snapshots import SnapshotError, _stream
+from canvas.models.snapshots import SnapshotError, download_snapshot
 
 
 def test_source_order_and_unpinned_skip(tmp_path):
@@ -29,36 +29,57 @@ def test_source_order_and_unpinned_skip(tmp_path):
     assert called == []
 
 
-def test_failover_keeps_the_first_matching_body(tmp_path):
+def test_a_download_is_queued_with_mdl_and_writes_no_legacy_copy(tmp_path, monkeypatch):
     catalog = load_catalog()
-    payload = b"abc"
-    digest = hashlib.sha256(payload).hexdigest()
-    spec = replace(
-        catalog.by_id("z-image-turbo-bf16"),
-        files={"weights": digest},
-        sources=(
-            Source("local", ""),
-            Source("huggingface", "https://example.invalid/a"),
-            Source("huggingface-mirror", "https://example.invalid/b"),
-            Source("kaggle", "https://example.invalid/c"),
-        ),
+    spec = catalog.by_id("yunet-face")
+    name = next(iter(spec.files))
+    queued: list[str] = []
+    monkeypatch.setattr(
+        "canvas.models.downloader.request_download", lambda model_id: queued.append(model_id) or True,
     )
-    assert [source.kind for source in attempt_sources(spec)] == ["huggingface", "huggingface-mirror", "kaggle"]
+    monkeypatch.setattr("canvas.models.downloader.snapshot_ready", lambda *_args, **_kwargs: None)
     seen: list[str] = []
 
     def transport(source: Source) -> bytes:
         seen.append(source.kind)
-        if source.kind == "huggingface":
-            raise OSError("down")
-        if source.kind == "huggingface-mirror":
-            return b"nope"
-        return payload
+        return b"abc"
 
-    path = download_file(spec, "weights", tmp_path, transport)
-    assert seen == ["huggingface", "huggingface-mirror", "kaggle"]
-    assert path.read_bytes() == payload
+    with pytest.raises(DownloadError) as caught:
+        download_file(spec, name, tmp_path, transport)
+    assert str(caught.value) == text("model.missing")
+    assert queued == [spec.id]
+    assert seen == []
+    legacy = tmp_path / spec.repo.replace("/", "--")
+    assert not legacy.exists()
+    view = tmp_path / "views" / "canvas" / "yunet"
+    view.mkdir(parents=True)
+    (view / name).write_bytes(b"onnx")
+    monkeypatch.setattr("canvas.models.downloader.snapshot_ready", lambda *_args, **_kwargs: view)
+    path = download_file(spec, name, tmp_path, transport)
+    assert path == view / name
+    assert path.read_bytes() == b"onnx"
+    assert not legacy.exists()
 
 
-def test_snapshot_download_rejects_a_non_https_address(tmp_path):
-    with pytest.raises(SnapshotError):
-        _stream("file:///etc/passwd", tmp_path / "weights", "ab" * 32)
+def test_attempt_sources_skips_an_empty_uri() -> None:
+    spec = replace(
+        load_catalog().by_id("yunet-face"),
+        sources=(Source("local", ""), Source("upstream", "https://example.invalid/a")),
+    )
+    assert [item.kind for item in attempt_sources(spec)] == ["upstream"]
+
+
+def test_snapshot_download_queues_mdl_and_writes_nothing(tmp_path, monkeypatch):
+    spec = load_catalog().by_id("yunet-face")
+    queued: list[str] = []
+    monkeypatch.setattr(
+        "canvas.models.snapshots.request_download", lambda model_id: queued.append(model_id) or True,
+    )
+    monkeypatch.setattr("canvas.models.snapshots.snapshot_ready", lambda *_args, **_kwargs: None)
+    notes: list[str] = []
+    with pytest.raises(SnapshotError) as caught:
+        download_snapshot(spec, tmp_path, notes.append)
+    assert str(caught.value) == text("model.missing")
+    assert queued == [spec.id]
+    assert notes == [text("model.missing")]
+    assert list(tmp_path.iterdir()) == []

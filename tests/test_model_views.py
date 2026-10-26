@@ -207,13 +207,45 @@ def test_a_pinned_name_cannot_escape_the_view(home):
         views.ensure_view(root, "z", {"../escape.json": digest})
 
 
-def test_the_legacy_repo_folder_still_works(home):
+def test_the_legacy_repo_folder_is_ignored(home):
     root = models_dir()
     spec = _spec({"model_index.json": hashlib.sha256(CONFIG).hexdigest()})
     legacy = root / spec.repo.replace("/", "--")
     legacy.mkdir(parents=True)
     (legacy / "model_index.json").write_bytes(CONFIG)
-    assert snapshot_ready(spec, root) == legacy
+    assert snapshot_ready(spec, root) is None
+    assert snapshot_status(spec, root) == "not_downloaded"
+    assert (legacy / "model_index.json").read_bytes() == CONFIG
+
+
+def test_the_loader_returns_only_a_view_and_keeps_the_legacy_copy(home):
+    from canvas.models.loader import _safety_folder
+    from canvas.safety.gate import SafetyUnavailable
+
+    root = models_dir()
+    digest = hashlib.sha256(CONFIG).hexdigest()
+    spec = _spec({"model_index.json": digest})
+    legacy = root / spec.repo.replace("/", "--")
+    legacy.mkdir(parents=True)
+    (legacy / "model_index.json").write_bytes(b"plain copy")
+    with pytest.raises(SafetyUnavailable) as missing:
+        _safety_folder(spec, root)
+    assert str(missing.value) == text("model.missing")
+    assert (legacy / "model_index.json").read_bytes() == b"plain copy"
+    files = {"model_index.json": _blob(root, CONFIG)}
+    ready = _spec(files)
+    _install(ready.id, files)
+    copy = root / ready.repo.replace("/", "--")
+    copy.mkdir(parents=True, exist_ok=True)
+    (copy / "model_index.json").write_bytes(b"plain copy")
+    folder = _safety_folder(ready, root)
+    assert folder is not None and views.is_view(root, folder)
+    assert folder != copy
+    assert (folder / "model_index.json").read_bytes() == CONFIG
+    assert (copy / "model_index.json").read_bytes() == b"plain copy"
+    log = (Path(os.environ["VOXPRINT_HOME"]) / "logs" / "voxprint.log").read_text(encoding="utf-8")
+    assert f"id={ready.id} kind=view" in log
+    assert "kind=legacy" not in log
 
 
 def test_the_default_models_dir_opens_the_mdl_view(home):

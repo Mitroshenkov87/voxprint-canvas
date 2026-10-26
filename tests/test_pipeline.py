@@ -122,7 +122,7 @@ def test_stub_generator_becomes_unavailable_after_the_plan():
     try:
         pipeline.generate("a red boat", Mode.TEXT, ())
     except Exception as exc:
-        assert str(exc) == "Image generation is unavailable."
+        assert str(exc) == "Model missing, fetch it with MDL."
         assert "ZImage" not in str(exc)
     else:
         raise AssertionError("expected an unavailable message")

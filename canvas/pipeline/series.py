@@ -20,7 +20,8 @@ from typing import Literal, Protocol, cast
 
 from canvas.app.i18n import text
 from canvas.app.shell_run import RunStopped
-from canvas.core.formats import OutputFormat, extension, save_image
+from canvas.core.exchange import handoff_image
+from canvas.core.formats import EXPORT_FORMAT, OutputFormat, extension
 from canvas.infra.errors import note_crash, note_debug, note_error, note_timing
 from canvas.infra.stage_timer import StageTimes, log_detail, note_peak_mib, set_current, timed
 from canvas.infra.vram import peak_allocated_bytes
@@ -30,6 +31,7 @@ from canvas.pipeline.device_guard import DeviceRefused
 from canvas.pipeline.enhance import mask_numbers, stated_ages
 from canvas.pipeline.gpu_release import release_cuda_cache, release_gate_weights
 from canvas.pipeline.adult_direction import ages_allowed, with_adult_anchor, youth_cues
+from canvas.pipeline.frame_prompt import frame_identity, log_frame_prompt, strip_series_words, with_choices
 from canvas.pipeline.photoshoot import (
     FORMAT_REMINDER,
     SCENARIO_CHUNK,
@@ -171,20 +173,21 @@ def _run_series(
     request = scenario_request(idea, count, style, mode, adult=adult)
     if request is None:
         return _stop("scenario", "", "scenario.format")
-    # The prompt check and the picture checks are the long SSD reads. They are
-    # measured so a multi-minute load writes heartbeats, including when pythonw
-    # has no stderr. The picture checks stay in RAM; a frame only moves them.
+    # The prompt check is the part of prep that has to finish before the writer.
+    # Picture-check weights are read SSD to RAM on a side thread during the
+    # writer and the sampler. They stay off the GPU until the output check.
     with clock.measure("prep"):
         reason = _refuse_prompt(gate, idea)
-        warm_error = None if reason else _warm_image_checks(gate)
         # The writer needs the GPU to itself. Anything the check put on the card is dropped first.
         release_gate_weights(gate)
-    if warm_error is not None:
-        return _stop("error", warm_error.user_message, f"check.{warm_error.code}")
     if reason:
         return _stop("idea", reason, "idea.policy")
     if adult and not ages_allowed(idea):
         return _stop("idea", "", "idea.minor")
+    preload = _CheckPreload.open(gate)
+    warm_error = preload.ready_error()
+    if warm_error is not None:
+        return _stop("error", warm_error.user_message, f"check.{warm_error.code}")
     appearance = fixed_appearance(idea, seed)
     # None is the caller's default. A person series then follows the first frame
     # loosely enough that the pose can still change.
@@ -192,19 +195,28 @@ def _run_series(
     with clock.measure("scenario"):
         try:
             scenario, fail_code, source = _scenario(
-                idea, count, style, mode, rewrite, adult=adult, appearance=appearance,
+                idea, count, style, mode, rewrite, adult=adult, appearance=appearance, seed=seed,
             )
+        except Exception:
+            preload.close()
+            raise
         finally:
             hot.deactivate("writer")
     if scenario is None or len(scenario.shots) < count:
+        preload.close()
         return _stop("scenario", "", fail_code if scenario is None else "scenario.count")
     lines = [
-        single_frame(assemble_line(scenario.subject_block, shot, include_camera=True))
-        for shot in scenario.shots
+        single_frame(strip_series_words(assemble_line(
+            scenario.subject_block, shot, include_camera=True, index=index, seed=seed,
+        )))
+        for index, shot in enumerate(scenario.shots)
     ]
     try:
         with clock.measure("prompt_check"):
             verdicts = [_prompt_verdict(gate, _with_idea(idea, line)) for line in lines]
+    except Exception:
+        preload.close()
+        raise
     finally:
         # The picture model is next. GPU weights from the check are dropped first.
         release_gate_weights(gate)
@@ -215,8 +227,10 @@ def _run_series(
     ]
     if hard or all(refused):
         code = "scenario.minor" if hard else "scenario.policy"
+        preload.close()
         return _stop("scenario", (hard or refused)[0] or "", code, source)
     if adult and not ages_allowed("\n".join(lines)):
+        preload.close()
         return _stop("scenario", "", "scenario.minor", source)
     if on_scenario is not None:
         on_scenario(scenario)
@@ -231,6 +245,7 @@ def _run_series(
     )
     if cancelled_prep:
         release_gate_weights(gate)
+        preload.close()
         _write_meta(folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept)
         if own_clock:
             note_timing(clock.log_line())
@@ -246,6 +261,11 @@ def _run_series(
             park_pipeline()
             clear_series_embeds()
         release_gate_weights(gate)
+        # Sampling overlapped the SSD read. The check still runs in order, and
+        # nothing is written until it passes.
+        load_error = preload.error()
+        if load_error is not None:
+            return _stop("error", load_error.user_message, f"check.{load_error.code}")
         check_code, check_reason, ending = _review_frames(
             drawn, gate, folder, container, clock, blocked, kept, saved_lines, seeds, on_status,
         )
@@ -275,6 +295,7 @@ def _run_series(
             return SeriesResult("", "", (), folder, "not_produced", source)
         return SeriesResult("", "", tuple(kept), folder, "", source)
     finally:
+        preload.close()
         if own_clock:
             note_timing(clock.log_line())
             noted.append(True)
@@ -313,12 +334,17 @@ def _accepted_shots(
         if cancelled():
             return accepted, None, True
         line = (
-            assemble_line(scenario.subject_block, shot, include_camera=include_camera())
+            assemble_line(
+                scenario.subject_block, shot, include_camera=include_camera(), index=index, seed=seed,
+            )
             if line_for is None
-            else line_for(index)
+            else single_frame(strip_series_words(with_choices(line_for(index), index, seed)))
         )
-        line = single_frame(line)
-        if scenario.subject_block not in line or (adult and youth_cues(line)):
+        line = single_frame(strip_series_words(line))
+        # The stored subject can still name the series and list every outfit.
+        # The photograph only has to keep the appearance once those words are gone.
+        identity = frame_identity(scenario.subject_block)
+        if (identity and identity not in line) or (adult and youth_cues(line)):
             blocked.append(index)
             _status(on_status, index, "blocked")
             continue
@@ -335,6 +361,7 @@ def _accepted_shots(
             if _ends_series(verdict) or scan(line).minor:
                 return accepted, verdict, False
             continue
+        log_frame_prompt(line)
         accepted.append(_CookShot(index, line, seed + index))
     return accepted, None, False
 
@@ -499,6 +526,111 @@ def _with_idea(idea: str, line: str) -> str:
     return f"{idea}\n{line}"
 
 
+_IMAGE_CHECK_NAMES = ("nsfw", "zeroshot", "faces", "ages", "fine")
+
+
+class _CheckPreload:
+    """SSD-to-RAM load of the picture checks, overlapped with the writer.
+
+    Gates whose components have no ``load`` (the unit-test doubles) run
+    ``warm`` on this thread, which is the old prep behaviour. A real stack
+    loads on a side thread and stays on the CPU so the writer keeps the GPU.
+    The output check still places and runs the models itself.
+    """
+
+    def __init__(self) -> None:
+        self._thread: threading.Thread | None = None
+        self._error: SafetyUnavailable | None = None
+        self._crash: Exception | None = None
+        self._joined = False
+
+    @classmethod
+    def open(cls, gate: AgeGate) -> _CheckPreload:
+        """Start the load, or run ``warm`` when this gate cannot load in the background."""
+        job = cls()
+        components = _image_loaders(gate)
+        if not components:
+            job._error = _warm_image_checks(gate)
+            job._joined = True
+            return job
+        job._thread = threading.Thread(
+            target=job._run, args=(components,), name="check-ram", daemon=True,
+        )
+        job._thread.start()
+        return job
+
+    def ready_error(self) -> SafetyUnavailable | None:
+        """A ``warm`` failure. A background load is still running."""
+        if self._thread is not None:
+            return None
+        return self._error
+
+    def error(self) -> SafetyUnavailable | None:
+        """Join, then the load failure. A crash from the thread is raised."""
+        self.close()
+        if self._crash is not None:
+            crash = self._crash
+            self._crash = None
+            raise crash
+        return self._error
+
+    def close(self) -> None:
+        """Join the side thread. A second call does nothing."""
+        if self._joined:
+            return
+        self._joined = True
+        thread = self._thread
+        if thread is not None:
+            thread.join()
+
+    def _run(self, components: tuple[object, ...]) -> None:
+        started = time.perf_counter()
+        # (component, had _forced, previous value). Restored before the output check.
+        saved: list[tuple[object, bool, object]] = []
+        try:
+            for component in components:
+                had = hasattr(component, "_forced")
+                previous = getattr(component, "_forced", None)
+                try:
+                    setattr(component, "_forced", "cpu")
+                except (AttributeError, TypeError):
+                    pass
+                else:
+                    saved.append((component, had, previous))
+                load = getattr(component, "load", None)
+                if callable(load):
+                    load()
+        except SafetyUnavailable as exc:
+            self._error = exc
+        except Exception as exc:
+            self._crash = exc
+        finally:
+            for component, had, previous in saved:
+                try:
+                    if had:
+                        setattr(component, "_forced", previous)
+                    else:
+                        delattr(component, "_forced")
+                except (AttributeError, TypeError):
+                    pass
+            elapsed = max(0, int((time.perf_counter() - started) * 1000))
+            log_detail("check_load", "preload", "cpu", f"ms={elapsed} models={len(components)}")
+
+
+def _image_loaders(gate: AgeGate) -> tuple[object, ...]:
+    """Picture-check components that can read their own weights. Guard stays put."""
+    inner = gate._gate if isinstance(gate, SerialGate) else gate
+    stack = getattr(inner, "_stack", None)
+    if stack is None:
+        return ()
+    found: list[object] = []
+    for name in _IMAGE_CHECK_NAMES:
+        component = getattr(stack, name, None)
+        if component is not None and callable(getattr(component, "load", None)):
+            found.append(component)
+    return tuple(found)
+
+
 def _warm_image_checks(gate: AgeGate) -> SafetyUnavailable | None:
     """Load the picture checks into RAM. A frame then only moves them.
 
@@ -613,13 +745,20 @@ def _released_frame(
 
 
 def _store_frame(folder: Path, index: int, released: _Released, container: OutputFormat | None) -> Path:
+    """Write one frame in the export format. PNG is the Forge default.
+
+    PNG stays a filter-0 file so the contact sheet can read it. AVIF, JPEG and
+    WebP go through the Forge hand-off. Nothing here runs before the check.
+    """
+    fmt = EXPORT_FORMAT if container is None else container
     with timed("encode"):
-        if container is None or released.safe is None:
+        if fmt is OutputFormat.PNG or released.safe is None:
             path = folder / f"{index + 1:02}.png"
             _write_png(path, released.width, released.height, released.data)
             return path
-        path = folder / f"{index + 1:02}{extension(container)}"
-        save_image(released.safe, path, container)
+        path = folder / f"{index + 1:02}{extension(fmt)}"
+        if released.safe is not None:
+            handoff_image(released.safe, path, fmt)
         return path
 
 
@@ -637,19 +776,23 @@ def _scenario(
     *,
     adult: bool,
     appearance: str = "",
+    seed: int = 0,
 ) -> tuple[Scenario | None, str, Source]:
-    """Shots from the writer, then planned shots for any frame it did not cover."""
+    """Shots from the writer, then planned shots for any shot it did not cover."""
     subject = idea.strip()
     if not subject:
         return None, "scenario.format", ""
-    if appearance:
+    if appearance and appearance not in subject:
         subject = f"{appearance}, {subject}"
     collected: list[Shot] = []
     place = ""
     replies: list[str] = []
     while len(collected) < count:
         ask = min(SCENARIO_CHUNK, count - len(collected))
-        previous = tuple(assemble_line(subject, shot, include_camera=True) for shot in collected)
+        previous = tuple(
+            assemble_line(subject, shot, include_camera=True, index=index, seed=seed)
+            for index, shot in enumerate(collected)
+        )
         request = scenario_request(idea, ask, style, mode, adult=adult, previous=previous)
         if request is None:
             return None, "scenario.format", ""

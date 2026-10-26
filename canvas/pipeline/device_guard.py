@@ -4,6 +4,7 @@ A check model is not covered here. Its CPU fallback stays where it is.
 """
 from __future__ import annotations
 
+import gc
 from typing import Any
 
 from canvas.app.i18n import text
@@ -23,32 +24,54 @@ class DeviceRefused(Exception):
 
 
 def require_cuda(module: Any, reason: str, torch: Any | None = None) -> None:
-    """Stop when CUDA is up and a parameter is not on it.
+    """Stop when CUDA is up and a parameter or buffer is not on it.
 
-    A module with no parameters is left alone. The unit-test doubles are built
-    that way and never claim a device.
+    CPU and meta both refuse the load. A module with no parameters and no
+    buffers is left alone. The unit-test doubles are built that way and never
+    claim a device.
     """
     if not _cuda_up(torch):
         return
-    parameters = _parameters(module)
-    if not parameters:
+    tensors = _resident_tensors(module)
+    if not tensors:
         return
-    for param in parameters:
-        if _device_type(param) != "cuda":
+    for tensor in tensors:
+        if _device_type(tensor) != "cuda":
             note_error(reason)
             raise DeviceRefused()
 
 
-def weights_on_cuda(module: Any) -> bool:
-    """True when every parameter already lives on CUDA.
+def require_writer_materialized(module: Any) -> None:
+    """Refuse a writer weight that is still meta or fp32.
 
-    A module with no parameters is not on CUDA. Callers then use ``to``, which
-    is how a test double records the move.
+    ``low_cpu_mem_usage`` leaves parameters on the meta device. Parking one of
+    those copies raises ``Cannot copy out of meta tensor``. An fp32 load of
+    this 4B model is about four times the bf16 file. Either one stops the load
+    before ``model_park`` sees it.
     """
-    parameters = _parameters(module)
-    if not parameters:
+    for tensor in _parameters_only(module):
+        if _is_meta(tensor):
+            note_error("writer.meta")
+            raise DeviceRefused()
+        if _is_fp32(tensor):
+            note_error("writer.fp32")
+            raise DeviceRefused()
+    for tensor in _buffers_only(module):
+        if _is_meta(tensor):
+            note_error("writer.meta")
+            raise DeviceRefused()
+
+
+def weights_on_cuda(module: Any) -> bool:
+    """True when every parameter and buffer already lives on CUDA.
+
+    A module with no parameters and no buffers is not on CUDA. Callers then
+    use ``to``, which is how a test double records the move.
+    """
+    tensors = _resident_tensors(module)
+    if not tensors:
         return False
-    return all(_device_type(param) == "cuda" for param in parameters)
+    return all(_device_type(tensor) == "cuda" for tensor in tensors)
 
 
 def pretrained_attempts(dtype: object, device: str) -> tuple[dict[str, Any], ...]:
@@ -75,23 +98,54 @@ def pretrained_attempts(dtype: object, device: str) -> tuple[dict[str, Any], ...
     return tuple(ordered)
 
 
+def reclaim_cuda(torch: Any) -> None:
+    """Drop a freed reservation and forget the allocator's historical peak.
+
+    A full-module copy can leave a second weight-sized block reserved after
+    the live tensors are the only ones still referenced. The 14 GB check reads
+    that peak, so it is cleared once the reserve is released.
+    """
+    gc.collect()
+    cuda = getattr(torch, "cuda", None)
+    if cuda is None:
+        return
+    try:
+        if not bool(cuda.is_available()):
+            return
+    except (TypeError, RuntimeError):
+        return
+    empty = getattr(cuda, "empty_cache", None)
+    if callable(empty):
+        try:
+            empty()
+        except (TypeError, RuntimeError):
+            pass
+    reset = getattr(cuda, "reset_peak_memory_stats", None)
+    if callable(reset):
+        try:
+            reset()
+        except (TypeError, RuntimeError):
+            pass
+
+
 def place_on_cuda(module: Any) -> Any:
-    """Move parameters onto CUDA one tensor at a time.
+    """Move parameters and buffers onto CUDA one tensor at a time.
 
     Copying the whole module with ``to`` keeps the old storage alive until the
     copy finishes, so a model that would fit is asked for twice the memory.
-    A module with no parameters uses ``to`` so a test double still records it.
+    A module with no parameters and no buffers uses ``to`` so a test double
+    still records it.
     """
-    parameters = _parameters(module)
-    if not parameters:
+    tensors = _resident_tensors(module)
+    if not tensors:
         mover = getattr(module, "to", None)
         if callable(mover):
             return mover("cuda")
         return module
     seen: set[int] = set()
-    for param in parameters:
-        data = getattr(param, "data", None)
-        target = data if data is not None else param
+    for tensor in tensors:
+        data = getattr(tensor, "data", None)
+        target = data if data is not None else tensor
         pointer = getattr(target, "data_ptr", None)
         key = 0
         if callable(pointer):
@@ -103,26 +157,67 @@ def place_on_cuda(module: Any) -> Any:
             continue
         if key:
             seen.add(key)
+        if _device_type(target) == "cuda":
+            continue
         mover = getattr(target, "to", None)
         if not callable(mover):
             continue
         moved = mover("cuda")
         if data is not None:
             try:
-                param.data = moved
+                tensor.data = moved
             except (AttributeError, TypeError, RuntimeError):
                 continue
     return module
 
 
-def _parameters(module: Any) -> list[Any]:
-    parameters = getattr(module, "parameters", None)
-    if not callable(parameters):
+def _is_meta(tensor: Any) -> bool:
+    if _device_type(tensor) == "meta":
+        return True
+    data = getattr(tensor, "data", None)
+    return data is not None and data is not tensor and _device_type(data) == "meta"
+
+
+def _is_fp32(tensor: Any) -> bool:
+    dtype = getattr(tensor, "dtype", None)
+    if dtype is None:
+        return False
+    text = str(dtype).lower().replace("torch.", "")
+    return text in {"fp32", "float32"} or text.endswith(".float32")
+
+
+def _parameters_only(module: Any) -> list[Any]:
+    method = getattr(module, "parameters", None)
+    if not callable(method):
         return []
     try:
-        return list(parameters())
+        return list(method())
     except (TypeError, RuntimeError):
         return []
+
+
+def _buffers_only(module: Any) -> list[Any]:
+    method = getattr(module, "buffers", None)
+    if not callable(method):
+        return []
+    try:
+        return list(method())
+    except (TypeError, RuntimeError):
+        return []
+
+
+def _resident_tensors(module: Any) -> list[Any]:
+    """Parameters and buffers. A missing accessor means that group is empty."""
+    found: list[Any] = []
+    for name in ("parameters", "buffers"):
+        method = getattr(module, name, None)
+        if not callable(method):
+            continue
+        try:
+            found.extend(list(method()))
+        except (TypeError, RuntimeError):
+            continue
+    return found
 
 
 def _device_type(value: Any) -> str:

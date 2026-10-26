@@ -128,7 +128,8 @@ def test_a_missing_upstream_blob_keeps_the_legacy_folder(monkeypatch, tmp_path):
     (root / "blobs" / missing).write_bytes(b"gone")
     _install_upstream(home, f"{spec.id}-upstream", {"transformer/config.json": missing}, 4)
     (root / "blobs" / missing).unlink()
-    assert fallback_ready(small, root) == legacy
+    assert fallback_ready(small, root) is None
+    assert (legacy / "model_index.json").read_bytes() == data
 
 
 def test_fallback_ready_needs_every_fp32_file(tmp_path):
@@ -141,7 +142,8 @@ def test_fallback_ready_needs_every_fp32_file(tmp_path):
     (folder / "transformer" / "config.json").write_bytes(data)
     assert fallback_ready(small, tmp_path) is None
     (folder / "model_index.json").write_bytes(data)
-    assert fallback_ready(small, tmp_path) == folder
+    assert fallback_ready(small, tmp_path) is None
+    assert (folder / "model_index.json").read_bytes() == data
 
 
 def _install_upstream(home: Path, model_id: str, files: dict[str, str], size: int) -> None:

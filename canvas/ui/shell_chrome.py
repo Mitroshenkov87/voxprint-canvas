@@ -5,15 +5,21 @@ Colours come from the shared tokens. This module does not invent a palette.
 from __future__ import annotations
 
 import logging
+import tempfile
+from pathlib import Path
 
 from typing import assert_never
 
 from PySide6.QtCore import QPoint, QRect, QSize, Qt
 from PySide6.QtGui import QAction, QColor, QFont, QFontInfo, QFontMetrics, QIcon, QImage, QPainter, QPixmap
 from PySide6.QtWidgets import (
+    QAbstractSpinBox,
     QComboBox,
+    QFormLayout,
     QLabel,
     QLayout,
+    QLineEdit,
+    QPlainTextEdit,
     QWidgetItem,
     QPushButton,
     QSizePolicy,
@@ -29,11 +35,18 @@ from voxprint_common.ui.theme import (
     CARD_PLAIN,
     CONTROL_BG,
     CONTROL_BORDER,
+    CONTROL_HOVER,
+    GREEN,
     PRIMARY,
     PRIMARY_BORDER,
+    PRIMARY_DISABLED_BG,
+    PRIMARY_DISABLED_TEXT,
+    PRIMARY_HOVER,
+    RED,
     ROOT_PLAIN,
     TEXT,
     TEXT_MUTED,
+    TEXT_ON_PRIMARY,
     build_shell_style,
 )
 
@@ -42,12 +55,15 @@ from canvas.ui.help_menu import add_help_menu
 from canvas.ui.theme import BUTTON_RADIUS
 
 PANEL_WIDTH = 320
+# One height for every one-line field in the expert panel: the shared combo height.
+FIELD_HEIGHT = 34
+_ONE_LINE_TEXT = frozenset({"shell.resolution"})
 SHOT_WIDTH = 1280
 SHOT_HEIGHT = 800
 
 
 from canvas.ui.prompt_row import arrange as arrange_prompt  # noqa: E402
-from canvas.ui.action_row import sync as sync_actions  # noqa: E402
+from canvas.ui.action_row import GENERATE_FONT, GENERATE_PAD, sync as sync_actions  # noqa: E402
 from canvas.ui.result_bar import wrap as wrap_result  # noqa: E402
 
 
@@ -58,6 +74,7 @@ def shell_style() -> str:
 
     register_fonts()
     family = ", ".join(f'"{name}"' for name in UI_FONT)
+    up, down = _chevrons()
     return build_shell_style(False) + f"""
 * {{ font-family: {family}, sans-serif; }}
 QMainWindow#shell, QWidget#shellColumn, QWidget#simpleRoot, QDialog {{
@@ -100,12 +117,73 @@ QSpinBox, QDoubleSpinBox, QComboBox, QLineEdit, QPlainTextEdit {{
 QPushButton[chip="true"]:disabled {{
     color: {TEXT}; background: {CONTROL_BG}; border-color: {CONTROL_BORDER};
 }}
+QLineEdit {{ padding: 2px 8px; min-height: 22px; }}
+QSpinBox::up-button, QDoubleSpinBox::up-button,
+QSpinBox::down-button, QDoubleSpinBox::down-button {{
+    subcontrol-origin: border; width: 18px;
+    background: {CONTROL_BG}; border: none; border-left: 1px solid {CONTROL_BORDER};
+}}
+QSpinBox::up-button, QDoubleSpinBox::up-button {{
+    subcontrol-position: top right; border-top-right-radius: {BUTTON_RADIUS}px;
+}}
+QSpinBox::down-button, QDoubleSpinBox::down-button {{
+    subcontrol-position: bottom right; border-bottom-right-radius: {BUTTON_RADIUS}px;
+}}
+QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,
+QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {{
+    background: {CONTROL_HOVER};
+}}
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{
+    image: url("{up}"); width: 8px; height: 5px;
+}}
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{
+    image: url("{down}"); width: 8px; height: 5px;
+}}
+QLabel[dialogTitle="true"] {{ font-size: 18px; }}
+QDialog QPushButton:checked {{
+    background: {PRIMARY}; color: {TEXT_ON_PRIMARY}; border-color: {PRIMARY_BORDER}; font-weight: 600;
+}}
+QPushButton[primary="true"] {{
+    background: {PRIMARY}; color: {TEXT_ON_PRIMARY}; border: 1px solid {PRIMARY_BORDER}; font-weight: 600;
+}}
+QPushButton[primary="true"]:hover {{ background: {PRIMARY_HOVER}; }}
+QPushButton[primary="true"]:disabled {{
+    background: {PRIMARY_DISABLED_BG}; color: {PRIMARY_DISABLED_TEXT}; border-color: {PRIMARY_DISABLED_BG};
+}}
+QLabel#checkReport[state="ready"] {{
+    border-left: 3px solid {GREEN}; padding: 4px 0 4px 10px;
+}}
+QLabel#checkReport[state="failed"] {{
+    border-left: 3px solid {RED}; padding: 4px 0 4px 10px;
+}}
 QPushButton, QPushButton[chip="true"], QPushButton#generate, QPushButton#overflow,
 QPushButton#expertToggle, QToolButton, QSpinBox, QDoubleSpinBox, QComboBox,
 QLineEdit, QPlainTextEdit {{
     border-radius: {BUTTON_RADIUS}px;
 }}
 """
+
+
+def _chevrons() -> tuple[str, str]:
+    """Write the spin box up and down chevrons once and return their paths.
+
+    The stylesheet replaces the native step buttons, so their arrows have to
+    be images. SVG keeps them sharp at a device pixel ratio of 2.
+    """
+    folder = Path(tempfile.gettempdir()) / "voxprint-canvas-ui"
+    folder.mkdir(parents=True, exist_ok=True)
+    paths = []
+    for name, points in (("up", "1,6 5,2 9,6"), ("down", "1,2 5,6 9,2")):
+        path = folder / f"chevron-{name}-{TEXT_MUTED.lstrip('#')}.svg"
+        if not path.is_file():
+            path.write_text(
+                '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="8" viewBox="0 0 10 8">'
+                f'<polyline points="{points}" fill="none" stroke="{TEXT_MUTED}" stroke-width="1.6" '
+                'stroke-linecap="round" stroke-linejoin="round"/></svg>',
+                encoding="utf-8",
+            )
+        paths.append(path.as_posix())
+    return paths[0], paths[1]
 
 
 def mount(window):
@@ -131,6 +209,8 @@ def mount(window):
     footer = QLabel(text("notice.responsibility"))
     footer.setObjectName("footer")
     footer.setWordWrap(True)
+    # Line the notice up with the prompt column, which sits 16 px inside the root.
+    footer.setContentsMargins(16, 0, 16, 2)
     layout.addWidget(footer)
     split = QSplitter(Qt.Orientation.Horizontal)
     split.setObjectName("shellSplit")
@@ -168,6 +248,7 @@ def fit_panel(window, enabled):
     _reap(window)
     _paint_panel(window)
     _widen_combos(window)
+    _even_rows(window)
     _hide_row_resets(window)
     width = max(1, window.width() - PANEL_WIDTH)
     split.setSizes([width, PANEL_WIDTH])
@@ -193,6 +274,7 @@ def polish(window):
         _reap(window)
         _paint_panel(window)
         _widen_combos(window)
+        _even_rows(window)
     _hide_row_resets(window)
     _labels(window)
     _fit_controls(window)
@@ -651,6 +733,51 @@ def _widen_combos(window):
         combo.updateGeometry()
 
 
+def _even_rows(window):
+    """Give every one-line expert field the same height and centre its label on it.
+
+    The shared form mixes spin boxes, combos, line edits and a one-line text box,
+    each with its own natural height, and leaves the labels at the top of the row.
+    """
+    form = window.findChild(QWidget, "expertForm")
+    if form is None:
+        return
+    for grid in form.findChildren(QFormLayout):
+        grid.setLabelAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        for row in range(grid.rowCount()):
+            label_item = grid.itemAt(row, QFormLayout.ItemRole.LabelRole)
+            field_item = grid.itemAt(row, QFormLayout.ItemRole.FieldRole)
+            field = field_item.widget() if field_item is not None else None
+            if field is None:
+                continue
+            if isinstance(field, QPlainTextEdit):
+                one_line = field.objectName() in _ONE_LINE_TEXT
+                field.setFixedHeight(FIELD_HEIGHT if one_line else 2 * FIELD_HEIGHT)
+                if one_line:
+                    field.setStyleSheet("QPlainTextEdit { padding: 0 2px; }")
+                    field.document().setDocumentMargin(5)
+                    field.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            elif isinstance(field, QAbstractSpinBox | QComboBox | QLineEdit):
+                field.setFixedHeight(FIELD_HEIGHT)
+            if isinstance(field, QAbstractSpinBox):
+                inset_spin(field)
+            label = label_item.widget() if label_item is not None else None
+            if isinstance(label, QLabel):
+                label.setMinimumHeight(FIELD_HEIGHT)
+                label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+
+
+def inset_spin(spin):
+    """Keep spin box digits off the border, level with the combo text.
+
+    Args:
+        spin: A spin box styled by :func:`shell_style`.
+    """
+    edit = spin.findChild(QLineEdit)
+    if edit is not None:
+        edit.setTextMargins(6, 0, 0, 0)
+
+
 def _row_label(layout, widget):
     if layout is None:
         return None
@@ -801,6 +928,8 @@ class _Flow(QLayout):
         # A narrow side panel lets every row wrap, with the row name on its own line.
         self.may_wrap = False
         self.label_above = False
+        # Each line sits in the middle of the row instead of at its left edge.
+        self.centre = False
 
     def addItem(self, item):  # noqa: N802
         self._items.append(item)
@@ -901,11 +1030,10 @@ class _Flow(QLayout):
         y = 0
         for index, (row, row_height) in enumerate(lines):
             x = 0
+            if self.centre:
+                used = sum(entry[1] for entry in row) + spacing * max(0, len(row) - 1)
+                x = max(0, (inner - used) // 2)
             for item, item_width, item_height in row:
-                widget = item.widget()
-                if widget is not None and widget.property("flowFill"):
-                    # The main action takes the rest of its line.
-                    item_width = max(item_width, inner - x)
                 if rect is not None:
                     offset = (row_height - item_height) // 2
                     item.setGeometry(QRect(origin_x + x, origin_y + y + offset, item_width, item_height))
@@ -1031,8 +1159,8 @@ def _fit_text(button):
     font.setWeight(QFont.Weight.DemiBold)
     pad = 16
     if button.objectName() == "generate":
-        font.setPixelSize(16)
-        pad = 22
+        font.setPixelSize(GENERATE_FONT)
+        pad = GENERATE_PAD
     elif button.property("chip"):
         # Padding plus the border, so a checked (weight 600) label is not cut.
         pad = 18

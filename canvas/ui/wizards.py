@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDoubleSpinBox,
     QFileDialog,
+    QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -24,10 +25,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from voxprint_common.i18n import tr
+
 from canvas.app.i18n import text
 from canvas.models.user_lora import LoraIndex, UserLora, clamp_strength
 from canvas.safety.image import RawImage
-from canvas.ui.shell_chrome import shell_style
+from canvas.ui.shell_chrome import inset_spin, shell_style
 
 
 _SETUP_ROWS: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -39,6 +42,8 @@ _SETUP_ROWS: tuple[tuple[str, tuple[str, ...]], ...] = (
 _HINT_WIDTH = 336
 _HINT_GAP = 12
 _GROUP_HINT_WIDTH = 488
+_DIALOG_WIDTH = 440
+_NOTE_WIDTH = 320
 
 
 class SetupWizard(QDialog):
@@ -64,19 +69,20 @@ class SetupWizard(QDialog):
         self.setFixedWidth(520)
         self._on_choose = on_choose
         self._groups: list[QButtonGroup] = []
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 14, 16, 14)
-        layout.setSpacing(10)
-        title = QLabel(text("canvas.setup.title"))
-        title.setObjectName("setupTitle")
-        layout.addWidget(title)
+        layout = _frame(self, "canvas.setup.title", "setupTitle")
         for key, options in _SETUP_ROWS:
             layout.addWidget(self._group(key, options, values.get(key, "")))
+        layout.addSpacing(4)
         done = QPushButton(text("canvas.setup.done"))
         done.setObjectName("setupDone")
+        _primary(done)
         _fit_button(done)
         done.clicked.connect(self.accept)
         layout.addWidget(done, 0, Qt.AlignmentFlag.AlignLeft)
+        # The height-for-width pass undercounts the change grid and cuts its last
+        # button. The width is fixed, so the full hint is the right height.
+        self.ensurePolished()
+        self.setMinimumHeight(self.sizeHint().height())
 
     def _group(self, key: str, options: tuple[str, ...], current: str) -> QWidget:
         suffix = key.rsplit(".", 1)[-1]
@@ -96,13 +102,12 @@ class SetupWizard(QDialog):
             grid.setHorizontalSpacing(_HINT_GAP)
             grid.setVerticalSpacing(8)
             grid.setColumnMinimumWidth(1, _HINT_WIDTH)
-            for index, option in enumerate(options):
-                grid.addWidget(
-                    self._option(group, key, suffix, option, current),
-                    index,
-                    0,
-                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                )
+            buttons = [self._option(group, key, suffix, option, current) for option in options]
+            # One width for the whole column, so the hints start on one line.
+            widest = max(button.minimumWidth() for button in buttons)
+            for index, (option, button) in enumerate(zip(options, buttons, strict=True)):
+                button.setMinimumWidth(widest)
+                grid.addWidget(button, index, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
                 grid.addWidget(
                     self._hint(f"{key}.{option}.hint", f"setup-hint-{option}", _HINT_WIDTH),
                     index,
@@ -177,12 +182,18 @@ class PictureWizard(QDialog):
         use_button = QPushButton(text("canvas.picture.use"))
         use_button.setObjectName("pictureUse")
         use_button.clicked.connect(self._use)
+        _primary(use_button)
         _fit_button(use_button)
+        # Gate: nothing to use until a picture is in the preview.
+        use_button.setEnabled(False)
+        self._use_button = use_button
         row = QHBoxLayout()
+        row.setSpacing(8)
         row.addWidget(open_button)
         row.addWidget(use_button)
-        layout = QVBoxLayout(self)
-        layout.addWidget(self._preview)
+        row.addStretch(1)
+        layout = _frame(self, "canvas.picture.title", "pictureTitle")
+        layout.addWidget(self._preview, 1)
         layout.addLayout(row)
 
     def load_path(self, path: Path) -> None:
@@ -193,6 +204,7 @@ class PictureWizard(QDialog):
         """
         self._path = path
         pixmap = QPixmap(str(path))
+        self._use_button.setEnabled(not pixmap.isNull())
         if pixmap.isNull():
             self._preview.setText(text("canvas.picture.empty"))
             return
@@ -232,17 +244,14 @@ class MaskWizard(QDialog):
         self.setStyleSheet(shell_style())
         self._on_use = on_use
         self._board: _MaskBoard | None = None
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 14, 16, 14)
-        layout.setSpacing(8)
-        title = QLabel(text("canvas.mask.title"))
-        title.setObjectName("maskTitle")
-        layout.addWidget(title)
+        layout = _frame(self, "canvas.mask.title", "maskTitle")
         if picture is None:
+            self.setMinimumWidth(_NOTE_WIDTH)
             note = QLabel(text("canvas.mask.need"))
             note.setObjectName("maskNeed")
             note.setWordWrap(True)
             layout.addWidget(note)
+            layout.addLayout(_close_row(self))
             return
         hint = QLabel(text("canvas.mask.hint"))
         hint.setObjectName("maskHint")
@@ -258,6 +267,7 @@ class MaskWizard(QDialog):
         slider.valueChanged.connect(self._board.set_brush_size)
         self._board.set_brush_size(slider.value())
         size_row = QHBoxLayout()
+        size_row.setSpacing(12)
         size_row.addWidget(size_label)
         size_row.addWidget(slider, 1)
         brush = QPushButton(text("canvas.mask.brush"))
@@ -266,17 +276,27 @@ class MaskWizard(QDialog):
         eraser = QPushButton(text("canvas.mask.eraser"))
         eraser.setObjectName("maskEraser")
         eraser.clicked.connect(lambda: self._board.set_eraser(True) if self._board is not None else None)
+        tools = QButtonGroup(self)
+        tools.setExclusive(True)
+        for tool in (brush, eraser):
+            tool.setCheckable(True)
+            tools.addButton(tool)
+        brush.setChecked(True)
         clear = QPushButton(text("canvas.mask.clear"))
         clear.setObjectName("maskClear")
         clear.clicked.connect(self._board.clear_mask)
         use_button = QPushButton(text("canvas.mask.use"))
         use_button.setObjectName("maskUse")
         use_button.clicked.connect(self._use)
+        _primary(use_button)
         row = QHBoxLayout()
-        for button in (brush, eraser, clear, use_button):
+        row.setSpacing(8)
+        for button in (brush, eraser, clear):
             _fit_button(button)
             row.addWidget(button)
         row.addStretch(1)
+        _fit_button(use_button)
+        row.addWidget(use_button)
         layout.addWidget(self._board, 1)
         layout.addLayout(size_row)
         layout.addLayout(row)
@@ -322,6 +342,8 @@ class AddonsWizard(QDialog):
         notice.setWordWrap(True)
         host = QWidget()
         rows = QVBoxLayout(host)
+        rows.setContentsMargins(0, 4, 0, 4)
+        rows.setSpacing(8)
         group = QButtonGroup(self)
         group.setExclusive(True)
         none = QRadioButton(text("canvas.addons.none"))
@@ -335,6 +357,7 @@ class AddonsWizard(QDialog):
         if not index.available:
             empty = QLabel(text("canvas.addons.empty"))
             empty.setObjectName("addonsEmpty")
+            empty.setProperty("setupHint", True)
             empty.setWordWrap(True)
             rows.addWidget(empty)
             self._empty = empty
@@ -354,8 +377,10 @@ class AddonsWizard(QDialog):
             label.setObjectName("addonsSkipped")
             label.setWordWrap(True)
             rows.addWidget(label)
+        rows.addStretch(1)
         scroll = QScrollArea()
         scroll.setObjectName("addonsList")
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setWidgetResizable(True)
         scroll.setWidget(host)
         self._strength = QDoubleSpinBox()
@@ -369,23 +394,34 @@ class AddonsWizard(QDialog):
         save = QPushButton(text("canvas.addons.save"))
         save.setObjectName("addonsSave")
         save.clicked.connect(self._save)
+        _primary(save)
         _fit_button(save)
         self._group = group
         self._rows = rows
         self._on_import = on_import
-        layout = QVBoxLayout(self)
+        layout = _frame(self, "canvas.addons.title", "addonsTitle")
         layout.addWidget(notice)
         if on_import is not None:
             importer = QPushButton(text("canvas.lora.import"))
             importer.setObjectName("addonsImport")
             importer.clicked.connect(self._import)
             _fit_button(importer)
-            layout.addWidget(importer)
-        layout.addWidget(scroll)
-        layout.addWidget(QLabel(text("canvas.addons.strength")))
-        layout.addWidget(self._strength)
-        layout.addWidget(save)
-        self.setMinimumWidth(420)
+            layout.addWidget(importer, 0, Qt.AlignmentFlag.AlignLeft)
+        scroll.setMinimumHeight(120)
+        layout.addWidget(scroll, 1)
+        strength_row = QHBoxLayout()
+        strength_row.setSpacing(12)
+        strength_label = QLabel(text("canvas.addons.strength"))
+        strength_label.setObjectName("addonsStrengthLabel")
+        strength_row.addWidget(strength_label)
+        self._strength.setMinimumWidth(120)
+        inset_spin(self._strength)
+        strength_row.addWidget(self._strength)
+        strength_row.addStretch(1)
+        layout.addLayout(strength_row)
+        layout.addSpacing(4)
+        layout.addWidget(save, 0, Qt.AlignmentFlag.AlignLeft)
+        self.setMinimumWidth(_DIALOG_WIDTH)
 
     def _import(self) -> None:
         if self._on_import is None:
@@ -463,6 +499,7 @@ class DiagnosticsWizard(QDialog):
         run = QPushButton(text("canvas.check.run"))
         run.setObjectName("checkRun")
         run.clicked.connect(self._run)
+        _primary(run)
         _fit_button(run)
         update = QPushButton(text("canvas.check.update"))
         update.setObjectName("checkUpdate")
@@ -471,13 +508,18 @@ class DiagnosticsWizard(QDialog):
         self._report = QLabel("")
         self._report.setObjectName("checkReport")
         self._report.setWordWrap(True)
-        layout = QVBoxLayout(self)
+        self._report.hide()
+        layout = _frame(self, "canvas.check.title", "checkTitle")
+        self.setMinimumWidth(_DIALOG_WIDTH)
         layout.addWidget(self._deep)
         row = QHBoxLayout()
+        row.setSpacing(8)
         row.addWidget(run)
         row.addWidget(update)
+        row.addStretch(1)
         layout.addLayout(row)
         layout.addWidget(self._report)
+        layout.addLayout(_close_row(self))
 
     def show_report(self, report: str) -> None:
         """Replace the result sentence.
@@ -486,6 +528,12 @@ class DiagnosticsWizard(QDialog):
             report: Already translated text.
         """
         self._report.setText(report)
+        head = report.split("\n", 1)[0]
+        state = {text("canvas.check.ready"): "ready", text("canvas.check.failed"): "failed"}.get(head, "")
+        self._report.setProperty("state", state)
+        self._report.style().unpolish(self._report)
+        self._report.style().polish(self._report)
+        self._report.setVisible(bool(report))
 
     def _run(self) -> None:
         self.show_report(self._on_check(self._deep.isChecked()))
@@ -598,12 +646,48 @@ def _matches(lora: UserLora, selected: str) -> bool:
         return False
 
 
+def _frame(dialog: QDialog, title_key: str, title_name: str) -> QVBoxLayout:
+    """Give a tool screen the shared margins, spacing and title.
+
+    Args:
+        dialog: The tool screen.
+        title_key: Message id of the title.
+        title_name: Object name of the title label.
+    """
+    layout = QVBoxLayout(dialog)
+    layout.setContentsMargins(16, 14, 16, 14)
+    layout.setSpacing(10)
+    title = QLabel(text(title_key))
+    title.setObjectName(title_name)
+    title.setProperty("dialogTitle", True)
+    layout.addWidget(title)
+    return layout
+
+
+def _primary(button: QPushButton) -> None:
+    """Mark the one action that finishes the screen. Call before :func:`_fit_button`."""
+    button.setProperty("primary", True)
+    button.setDefault(True)
+
+
+def _close_row(dialog: QDialog) -> QHBoxLayout:
+    close = QPushButton(tr("mdl.close"))
+    close.setObjectName(f"{dialog.objectName()}Close")
+    close.setAutoDefault(False)
+    close.clicked.connect(dialog.reject)
+    _fit_button(close)
+    row = QHBoxLayout()
+    row.addStretch(1)
+    row.addWidget(close)
+    return row
+
+
 def _fit_button(button: QPushButton) -> None:
     words = button.text()
     if not words:
         return
     font = QFont(button.font())
-    if button.isCheckable():
+    if button.isCheckable() or button.property("primary"):
         font.setWeight(QFont.Weight.DemiBold)
     advance = QFontMetrics(font).horizontalAdvance(words)
     button.setMinimumWidth(advance + 36)

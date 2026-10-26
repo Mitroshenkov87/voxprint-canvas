@@ -12,6 +12,7 @@ from voxprint_common.i18n import tr
 from voxprint_common.ui.simple_image import Phase
 
 from canvas.app.i18n import text
+from canvas.core.formats import EXPORT_FORMAT, OutputFormat, UnsupportedFormat, parse_export_format
 from canvas.app.info import ENLARGE_NAME
 from canvas.app.shell_gate import reviewed_output
 from canvas.app.shell_run import RunStopped, load_rgb
@@ -132,7 +133,7 @@ def run_photoshoot(window: ShellWindow) -> None:
 
     def on_scenario(scenario: Scenario) -> None:
         def show(scenario: Scenario = scenario) -> None:
-            bar.show_scenario(scenario.subject_block, scenario.shots)
+            bar.show_scenario(scenario.subject_block, scenario.shots, seed=base_seed)
             window.view.refresh()
             bar.sync()
 
@@ -174,6 +175,7 @@ def run_photoshoot(window: ShellWindow) -> None:
                 line_for=bar.line_for,
                 on_status=on_status,
                 adult=adult,
+                container=_export_format(layout),
             ),
         )
     except _Halt as exc:
@@ -300,6 +302,17 @@ def _series_map(state_dir: Path) -> dict[str, object]:
     if not isinstance(loaded, dict):
         return {}
     return loaded
+
+
+def _export_format(layout: SimpleLayout) -> OutputFormat:
+    """Forge file type for this series. PNG when the setting is missing."""
+    raw = layout.get("canvas.export")
+    if not isinstance(raw, str) or not raw.strip():
+        return EXPORT_FORMAT
+    try:
+        return parse_export_format(raw)
+    except UnsupportedFormat:
+        return EXPORT_FORMAT
 
 
 def _compose(layout: SimpleLayout, line: str, style: str) -> str:

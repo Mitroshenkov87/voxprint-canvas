@@ -66,15 +66,15 @@ def test_hash_mismatch_and_a_present_file(tmp_path: Path):
     payload = b"weights"
     digest = hashlib.sha256(payload).hexdigest()
     pinned = replace(spec, files={"weights": digest})
-    folder = tmp_path / spec.repo.replace("/", "--")
-    folder.mkdir()
+    folder = tmp_path / "views" / "canvas" / "guard"
+    folder.mkdir(parents=True)
     target = folder / "weights"
     target.write_bytes(b"other")
     with pytest.raises(SafetyUnavailable) as caught:
-        ensure_weights(pinned, tmp_path)
+        ensure_weights(pinned, tmp_path, folder)
     assert caught.value.code == "hash_mismatch"
     target.write_bytes(payload)
-    ensure_weights(pinned, tmp_path)
+    ensure_weights(pinned, tmp_path, folder)
 
 
 def test_release_pins_match_the_frozen_snapshots():
@@ -121,10 +121,9 @@ def test_control_file_follows_the_tier(tmp_path: Path):
         else:
             models.append(spec)
     edited = Catalog(catalog.diffusers, tuple(models), catalog.default_text_base, catalog.text_bases, catalog.sizes)
-    folder = tmp_path / "alibaba-pai--Z-Image-Turbo-Fun-Controlnet-Union-2.1"
-    folder.mkdir()
-    (folder / lite_name).write_bytes(payload)
-    (folder / full_name).write_bytes(payload)
+    blob = tmp_path / "blobs" / digest
+    blob.parent.mkdir(parents=True)
+    blob.write_bytes(payload)
     plan = CallPlan(
         DIFFUSERS_PIN,
         PIPELINE_CONTROL,

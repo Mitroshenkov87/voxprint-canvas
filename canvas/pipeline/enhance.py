@@ -13,19 +13,26 @@ from typing import Any, Protocol, assert_never
 
 from canvas.app.i18n import text
 from canvas.infra.errors import note_error
+from canvas.infra.load_lock import pretrained_lock
 from canvas.infra.stage_guard import StageBlocked, admit, begin_stage, finish_stage
-from canvas.infra.stage_timer import log_stage, note_tag, timed
+from canvas.infra.stage_timer import log_detail, log_stage, note_tag, timed
 from canvas.infra.vram_trace import drop_model, hold_model, note_vram
 from canvas.models.modes import Tier
 from canvas.pipeline.bf16_schedule import VramRefused
 from canvas.pipeline.device_guard import (
     DeviceRefused,
     place_on_cuda,
-    pretrained_attempts,
+    reclaim_cuda,
     require_cuda,
+    require_writer_materialized,
     weights_on_cuda,
 )
-from canvas.pipeline.offload import cast_module_fp8
+from canvas.pipeline.generation_weights import (
+    dtype_label,
+    kv_cache_label,
+    prepare_generation,
+)
+from canvas.pipeline.writer_decode import GraphDecode, cache_len, try_decode
 from canvas.models.registry import Catalog, ModelSpec
 from canvas.models import hot_tier as hot
 from canvas.models.runtime import park_pipeline
@@ -322,6 +329,8 @@ class QwenRewriter:
         self.closed = False
         self._model: Any = None
         self._tokenizer: Any = None
+        self._dtype = "bf16"
+        self._graph: GraphDecode | None = None
 
     def rewrite(self, prompt: str) -> str:
         """Generate a rewrite, then unload. The caller can close again."""
@@ -338,12 +347,26 @@ class QwenRewriter:
         return self._complete(prompt, system)
 
     def close(self) -> None:
-        """Park the writer and drop its VRAM copy. RAM stays when the tier keeps it."""
+        """Park the writer and release every VRAM byte it held. RAM stays when the tier keeps it.
+
+        The graph, its private pool, and the StaticCache go first. The park then
+        points the weights at RAM, and a tensor still on CUDA is moved off one at
+        a time. The residual is logged after the allocator is emptied.
+        """
         note_vram(self.stage, "before", self._model)
         try:
+            graph = self._graph
+            self._graph = None
+            if graph is not None:
+                graph.release()
+            del graph
+            if self._model is not None:
+                _drop_generation_cache(self._model)
             if self._model is not None and not hot.retained("writer"):
                 hot.remember("writer", self._model)
             hot.deactivate("writer")
+            if self._model is not None:
+                _evict_cuda(self._model)
             if not hot.retained("writer") and self._model is not None:
                 mover = getattr(self._model, "to", None)
                 if callable(mover):
@@ -357,10 +380,7 @@ class QwenRewriter:
             drop_model(self.stage)
             drop_model("writer")
             self.closed = True
-            gc.collect()
-            torch = _optional_torch()
-            if torch is not None and torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            _release_cuda(_optional_torch(), self.stage)
             note_vram(self.stage, "after")
             if self.tier is Tier.GB16:
                 try:
@@ -371,8 +391,8 @@ class QwenRewriter:
     def _load(self) -> None:
         if self._model is not None:
             self.closed = False
-            if self.device == "cuda":
-                hot.activate("writer", "cuda")
+            self._seat_cuda(self._model)
+            self._capture_decode(rebuild=True)
             return
         found = hot.cached("writer")
         if found is not None:
@@ -381,10 +401,12 @@ class QwenRewriter:
             if tokenizer is not None:
                 self._tokenizer = tokenizer
             self.closed = False
-            if self.device == "cuda":
-                hot.activate("writer", "cuda")
+            self._seat_cuda(found)
+            self._capture_decode(rebuild=True)
             return
         park_pipeline()
+        torch, transformers = _generation_libs()
+        reclaim_cuda(torch)
         if self.tier is Tier.GB16:
             try:
                 begin_stage(self.stage, self.tier)
@@ -392,7 +414,6 @@ class QwenRewriter:
                 raise VramRefused() from exc
         note_vram("writer_load", "before")
         with timed("writer_load"):
-            torch, transformers = _generation_libs()
             config_path = self.encoder_dir / "config.json"
             index_path = self.encoder_dir / "model.safetensors.index.json"
             config = json.loads(config_path.read_text(encoding="utf-8"))
@@ -412,30 +433,31 @@ class QwenRewriter:
                 self.tokenizer_dir, local_files_only=True,
             )
             try:
-                # The session copy is read onto the CPU and cast there, then one
-                # stage copies it RAM to VRAM. ``ram32`` still maps the file
-                # straight onto the card because that tier does not keep RAM.
-                load_on = "cpu" if device == "cuda" and hot.keeps_main_tier() else device
+                # Straight onto the GPU in bf16, the load bench G measured at
+                # 7.75 GB. A CPU load with low_cpu_mem_usage builds meta
+                # tensors (and an fp32 copy) and model_park cannot copy them.
                 started_ssd = time.perf_counter()
-                model = _causal_model(transformers, torch, self.encoder_dir, load_on)
+                model = _causal_model(transformers, torch, self.encoder_dir, device)
                 hot.note_ssd("writer", model, started_ssd)
+                # One BF16 copy. FP8 is not installed: it kept the original
+                # weights alive next to the cast copy.
                 if device != "cpu" and self.tier is Tier.GB16:
                     with timed("cast"):
-                        if not cast_module_fp8(model, torch):
-                            note_error(f"{self.stage}.bf16")
-                    if cuda:
-                        torch.cuda.empty_cache()
+                        chosen, _fell_back = prepare_generation(model, torch)
+                    self._dtype = chosen
+                elif device != "cpu":
+                    self._dtype = "bf16"
+                require_writer_materialized(model)
+                if device != "cpu":
+                    require_cuda(model, "writer.device", torch)
                 if hot.remember("writer", model):
                     hot.remember_bundle("writer", tokenizer)
                 if device != "cpu" and hot.retained("writer"):
                     with timed("place"):
-                        hot.activate("writer", "cuda")
-                elif device != "cpu" and self.tier is Tier.GB16:
-                    with timed("place"):
-                        if not weights_on_cuda(model):
-                            model = place_on_cuda(model)
+                        hot.activate("writer", "cuda", blocking=True)
                 if device != "cpu":
                     require_cuda(model, "writer.device", torch)
+                reclaim_cuda(torch)
             except DeviceRefused:
                 raise
             except RuntimeError as exc:
@@ -459,6 +481,50 @@ class QwenRewriter:
             note_vram("writer_load", "after", model)
             if device in {"cpu", "cuda"}:
                 note_tag("writer", device)
+        self._capture_decode()
+
+    def _seat_cuda(self, model: Any) -> None:
+        """Unpark onto CUDA. A parameter or buffer left on CPU or meta stops the writer.
+
+        A machine with no CUDA keeps the existing CPU fallback. A CUDA machine
+        never generates with the writer still on the host.
+        """
+        torch, _transformers = _generation_libs()
+        try:
+            cuda = bool(torch.cuda.is_available())
+        except (AttributeError, TypeError, RuntimeError):
+            cuda = False
+        if not cuda:
+            return
+        if self.device == "cpu":
+            note_error("writer.device")
+            raise DeviceRefused()
+        self.device = "cuda"
+        activated = hot.activate("writer", "cuda", blocking=True)
+        if _has_resident_tensors(model):
+            if not weights_on_cuda(model):
+                place_on_cuda(model)
+            require_cuda(model, "writer.device", torch)
+        elif not activated:
+            place_on_cuda(model)
+
+    def _capture_decode(self, *, rebuild: bool = False) -> None:
+        """Capture the 1-token graph once the weights are on the card.
+
+        ``rebuild`` drops the previous graph and its StaticCache. Unpark moves
+        the weights, so the cache has to be allocated on CUDA again.
+        """
+        if self.device != "cuda" or self._model is None:
+            return
+        torch, _transformers = _generation_libs()
+        if rebuild and self._graph is not None:
+            self._graph.invalidate()
+        if self._graph is None or self._graph.model is not self._model:
+            self._graph = GraphDecode(
+                self._model, torch, cache_len(self.max_new_tokens), stage=self.stage,
+            )
+        if self._graph.stale():
+            self._graph.capture()
 
     def _complete(self, prompt: str, system: str) -> str:
         torch, _transformers = _generation_libs()
@@ -466,6 +532,15 @@ class QwenRewriter:
         model = self._model
         if tokenizer is None or model is None:
             raise SnapshotError("the text encoder is not loaded")
+        try:
+            cuda_up = bool(torch.cuda.is_available())
+        except (AttributeError, TypeError, RuntimeError):
+            cuda_up = False
+        if cuda_up and self.device != "cuda":
+            note_error("writer.device")
+            raise DeviceRefused()
+        if self.device == "cuda":
+            require_cuda(model, "writer.device", torch)
         messages = [
             {"role": "system", "content": system},
             {"role": "user", "content": prompt},
@@ -478,43 +553,131 @@ class QwenRewriter:
         encoded = tokenizer(templated, return_tensors="pt")
         device = self.device or "cpu"
         encoded = {key: value.to(device) for key, value in encoded.items()}
-        elapsed = 0.0
         count = 0
+        kv_cache = kv_cache_label(model)
+        graph_label = "eager"
+        prefill_ms = 0
         with timed("writer_generate"):
             started = time.perf_counter()
-            with torch.inference_mode():
-                output = model.generate(
-                    **encoded,
-                    max_new_tokens=self.max_new_tokens,
-                    do_sample=False,
-                )
-            elapsed = time.perf_counter() - started
-            start = int(encoded["input_ids"].shape[-1])
-            count = _generated_count(output, start)
-            reply = str(tokenizer.decode(output[0, start:], skip_special_tokens=True))
-        rate = 0 if elapsed <= 0 else min(1_000_000, int(count / elapsed))
+            decoded = try_decode(model, torch, encoded["input_ids"], self.max_new_tokens, self._graph)
+            if decoded is None:
+                with torch.inference_mode():
+                    # use_cache keeps the KV cache on the GPU. No streamer and no
+                    # stopping criterion: those call .item() and stall the card
+                    # between tokens. inference_mode keeps autograd off.
+                    output = model.generate(
+                        **encoded,
+                        max_new_tokens=self.max_new_tokens,
+                        do_sample=False,
+                        use_cache=kv_cache == "on",
+                    )
+                elapsed = time.perf_counter() - started
+                start = int(encoded["input_ids"].shape[-1])
+                count = _generated_count(output, start)
+                reply = str(tokenizer.decode(output[0, start:], skip_special_tokens=True))
+                rate = 0 if elapsed <= 0 else min(1_000_000, int(count / elapsed))
+                decode_rate = rate
+            else:
+                count = decoded.count
+                prefill_ms = decoded.prefill_ms
+                decode_rate = decoded.decode_tok_s
+                graph_label = decoded.graph
+                reply = str(tokenizer.decode(decoded.ids, skip_special_tokens=True))
+                rate = decode_rate
         note_tag("writer_tps", f"tps{rate}")
         logged = device if device in {"cpu", "cuda"} else "none"
-        log_stage("writer", "tokens", logged, tokens=count, tok_s=rate)
+        resident = dtype_label(model, self._dtype)
+        log_stage(
+            "writer", "tokens", logged,
+            tokens=count, tok_s=rate, prefill_ms=prefill_ms, decode_tok_s=decode_rate,
+            graph=graph_label, dtype=resident, kv_cache=kv_cache,
+        )
         return _visible_reply(reply)
 
 
-def _causal_model(transformers: Any, torch: Any, folder: Path, device: str) -> Any:
-    """Load the causal LM in BF16. ``device`` is ``cuda`` or ``cpu``.
+def _has_resident_tensors(module: Any) -> bool:
+    """True when the module exposes a parameter or a buffer."""
+    for name in ("parameters", "buffers"):
+        method = getattr(module, name, None)
+        if not callable(method):
+            continue
+        try:
+            if any(True for _tensor in method()):
+                return True
+        except (TypeError, RuntimeError):
+            continue
+    return False
 
-    CUDA maps the safetensors file onto the card. Parameters that are still on
-    the CPU move one tensor at a time, so the module is not copied twice.
+
+def _writer_load_attempts(dtype: object, device: str) -> tuple[dict[str, Any], ...]:
+    """``from_pretrained`` kwargs for the writer, as in the Proving Ground bench G load.
+
+    CUDA is ``dtype=bfloat16`` with ``device_map="cuda"``, so the weights are
+    one real bf16 copy on the card. transformers 5 reads ``dtype``, and
+    ``torch_dtype`` is the retry for a build that rejects it.
+    ``low_cpu_mem_usage`` is not passed: transformers 5 drops it, and 4.x
+    refuses ``False`` next to a device map. A CPU machine gets the same bf16
+    load with no device map.
+    """
+    if device != "cuda" and device != "cpu":
+        raise ValueError(f"unknown device {device}")
+    common: dict[str, Any] = {"local_files_only": True}
+    if device == "cuda":
+        common["device_map"] = "cuda"
+    return (
+        {**common, "dtype": dtype},
+        {**common, "torch_dtype": dtype},
+    )
+
+
+def _causal_model(transformers: Any, torch: Any, folder: Path, device: str) -> Any:
+    """Load the writer in bf16. CUDA goes straight to ``device_map="cuda"``.
+
+    The build holds the process load lock, so a check loading on the side
+    thread cannot change torch's default dtype under it.
     """
     loader = transformers.AutoModelForCausalLM.from_pretrained
-    model = _open_causal(loader, folder, torch, device)
-    if device != "cpu" and not weights_on_cuda(model):
-        model = place_on_cuda(model)
+    with pretrained_lock():
+        model = _open_causal(loader, folder, torch, device)
+    settle_bf16(model, torch, device)
     return model.eval()
 
 
+def settle_bf16(model: Any, torch: Any, device: str) -> int:
+    """Log the loaded parameter dtype and cast any fp32 parameter to bf16.
+
+    The load lock is the fix. This is the backstop: a stray fp32 parameter is
+    cast in place, one tensor at a time, so the card never holds a second
+    copy of the model. Returns how many parameters were cast.
+    """
+    fp32 = getattr(torch, "float32", None)
+    target = getattr(torch, "bfloat16", None)
+    params = _module_parameters(model)
+    found = [param for param in params if fp32 is not None and getattr(param, "dtype", None) == fp32]
+    loaded = dtype_label(model, "bf16")
+    cast = 0
+    for param in found:
+        caster = getattr(getattr(param, "data", None), "to", None)
+        if target is None or not callable(caster):
+            continue
+        try:
+            param.data = caster(target)
+        except (TypeError, RuntimeError, AttributeError):
+            continue
+        cast += 1
+    kind = device if device in {"cpu", "cuda"} else "cpu"
+    log_detail(
+        "writer", "dtype", kind,
+        f"loaded={loaded} params={len(params)} fp32={len(found)} cast={cast} now={dtype_label(model, 'bf16')}",
+    )
+    if found:
+        note_error("writer.fp32_cast")
+    return cast
+
+
 def _open_causal(loader: Any, folder: Path, torch: Any, device: str) -> Any:
-    """Open the causal LM. A build that rejects ``device_map`` is tried without it."""
-    attempts = pretrained_attempts(torch.bfloat16, device if device == "cuda" else "cpu")
+    """Open the writer. A build that rejects ``dtype`` is tried with ``torch_dtype``."""
+    attempts = _writer_load_attempts(torch.bfloat16, device if device == "cuda" else "cpu")
     error: Exception | None = None
     last = len(attempts) - 1
     for index, kwargs in enumerate(attempts):
@@ -529,6 +692,112 @@ def _open_causal(loader: Any, folder: Path, torch: Any, device: str) -> Any:
     if error is None:
         raise SnapshotError("the text encoder cannot be loaded")
     raise error
+
+
+# A writer close that leaves more than this allocated on the card is logged as a leak.
+WRITER_RESIDUAL_LIMIT_BYTES = 512 * 1024**2
+
+
+def _module_parameters(module: Any) -> list[Any]:
+    method = getattr(module, "parameters", None)
+    if not callable(method):
+        return []
+    try:
+        return list(method())
+    except (TypeError, RuntimeError):
+        return []
+
+
+def _drop_generation_cache(model: Any) -> None:
+    """Forget a cache ``generate`` stored on the model for reuse."""
+    for name in ("_cache", "_static_cache"):
+        if getattr(model, name, None) is None:
+            continue
+        try:
+            setattr(model, name, None)
+        except (AttributeError, TypeError):
+            continue
+
+
+def _evict_cuda(module: Any) -> int:
+    """Move each parameter or buffer still on CUDA to the CPU, one at a time.
+
+    The park reassigns the tensors it holds. Anything it does not hold, such
+    as a buffer missing from the park dict, would otherwise keep its VRAM.
+    Returns how many tensors moved.
+    """
+    moved = 0
+    for name in ("parameters", "buffers"):
+        method = getattr(module, name, None)
+        if not callable(method):
+            continue
+        try:
+            tensors = list(method())
+        except (TypeError, RuntimeError):
+            continue
+        for tensor in tensors:
+            if not _tensor_on_cuda(tensor):
+                continue
+            mover = getattr(getattr(tensor, "data", None), "to", None)
+            if not callable(mover):
+                continue
+            try:
+                tensor.data = mover("cpu")
+            except (TypeError, RuntimeError, AttributeError):
+                continue
+            moved += 1
+    return moved
+
+
+def _tensor_on_cuda(tensor: Any) -> bool:
+    device = getattr(tensor, "device", None)
+    kind = getattr(device, "type", None)
+    text = kind if isinstance(kind, str) else str(device or "")
+    return "cuda" in text
+
+
+def _release_cuda(torch: Any, stage: str) -> int:
+    """Collect, sync, empty the allocator, and log what is still allocated.
+
+    Returns the allocated bytes, or 0 when there is no CUDA.
+    """
+    gc.collect()
+    cuda = getattr(torch, "cuda", None) if torch is not None else None
+    if cuda is None:
+        return 0
+    try:
+        if not bool(cuda.is_available()):
+            return 0
+    except (TypeError, RuntimeError, AttributeError):
+        return 0
+    for name in ("synchronize", "empty_cache", "ipc_collect"):
+        fn = getattr(cuda, name, None)
+        if not callable(fn):
+            continue
+        try:
+            fn()
+        except (TypeError, RuntimeError):
+            continue
+    allocated = _cuda_counter(cuda, "memory_allocated")
+    reserved = _cuda_counter(cuda, "memory_reserved")
+    over = allocated > WRITER_RESIDUAL_LIMIT_BYTES
+    log_detail(
+        stage if stage in {"writer", "enhancer"} else "writer", "release", "cuda",
+        f"allocated={allocated} reserved={reserved} over={int(over)}",
+    )
+    if over:
+        note_error(f"{stage}.residual")
+    return allocated
+
+
+def _cuda_counter(cuda: Any, name: str) -> int:
+    fn = getattr(cuda, name, None)
+    if not callable(fn):
+        return 0
+    try:
+        return max(0, int(fn()))
+    except (TypeError, ValueError, RuntimeError):
+        return 0
 
 
 def _generated_count(output: Any, start: int) -> int:

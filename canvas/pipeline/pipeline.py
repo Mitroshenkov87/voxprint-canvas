@@ -8,13 +8,13 @@ from pathlib import Path
 
 from canvas.app.i18n import text
 from canvas.app.info import ENLARGE_NAME
-from canvas.core.exchange import read_picture, write_png
-from canvas.core.formats import DEFAULT_FORMAT, OutputFormat, save_image
+from canvas.core.exchange import handoff_image, read_picture, write_png
+from canvas.core.formats import DEFAULT_FORMAT, FORGE_EXPORTS, OutputFormat, save_image
 from canvas.infra.enlarge import EnlargeError, declared_vram_gb
 from canvas.infra.stage_timer import timed
 from canvas.infra.gpu_lock import GpuLockTimeout, lock_path, release, try_acquire
 from canvas.infra.thermal import Guard
-from canvas.models.loader import ModelNotReady
+from canvas.models.loader import ModelMissing, ModelNotReady
 from canvas.models.modes import Mode, Tier, required_roles, visible_modes
 from canvas.models.plan import BaseNotSelected, ModeUnavailable
 from canvas.models.registry import Catalog
@@ -164,6 +164,8 @@ class Pipeline:
                     return image
                 return self._upscale(image, probe, prompt, hold)
             except ModelNotReady as exc:
+                if exc.missing:
+                    raise ModelMissing("missing_model") from exc
                 raise SafetyError("model_not_ready") from exc
             finally:
                 screened.wipe()
@@ -172,6 +174,9 @@ class Pipeline:
                aspect: str = "1:1", output: str = "native", probe: PeakVramProbe | None = None) -> None:
         """Generate and save. A refusal writes nothing."""
         image = self.generate(prompt, mode, inputs, aspect=aspect, output=output, probe=probe)
+        if fmt in FORGE_EXPORTS:
+            handoff_image(image, path, fmt)
+            return
         save_image(image, path, fmt)
 
     def _frame(self, mode: Mode, aspect: str, twok: bool) -> tuple[int | None, int | None]:

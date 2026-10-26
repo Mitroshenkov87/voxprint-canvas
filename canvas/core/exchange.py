@@ -1,7 +1,8 @@
-"""Pictures handed to Enlarge and read back from it.
+"""Pictures handed to Enlarge and to Forge.
 
-The 4K handoff is a lossless PNG. User-facing output is still AVIF, JPEG XL,
-WebP or JPEG. ``write_rgb`` remains for tests that pass a raw buffer.
+The 4K handoff into Enlarge is a lossless PNG. The Forge hand-off defaults to
+PNG and can be AVIF, JPEG or WebP. ``write_rgb`` remains for tests that pass a
+raw buffer.
 """
 from __future__ import annotations
 
@@ -11,7 +12,8 @@ import imagecodecs
 import numpy as np
 from PIL import Image
 
-from canvas.safety.image import RawImage
+from canvas.core.formats import EXPORT_FORMAT, FORGE_EXPORTS, OutputFormat, UnsupportedFormat, save_image
+from canvas.safety.image import RawImage, SafeImage
 
 _PREFIX = b"VOXPRINT rgb "
 
@@ -34,6 +36,16 @@ def read_rgb(path: Path) -> RawImage:
         raise ValueError("the enlarged image could not be read")
     width, height = int(parts[2]), int(parts[3])
     return RawImage(width, height, body)
+
+
+def handoff_image(image: SafeImage, path: Path, fmt: OutputFormat = EXPORT_FORMAT) -> None:
+    """Write one picture for Forge. PNG is the default. AVIF stays available.
+
+    Forge opens PNG, JPEG and WebP. Any other container is refused.
+    """
+    if fmt not in FORGE_EXPORTS:
+        raise UnsupportedFormat("Forge export accepts PNG, JPEG, WebP or AVIF")
+    save_image(image, path, fmt)
 
 
 def write_png(path: Path, width: int, height: int, data: bytes) -> None:

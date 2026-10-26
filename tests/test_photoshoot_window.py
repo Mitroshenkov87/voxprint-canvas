@@ -10,7 +10,7 @@ import pytest
 pytest.importorskip("PySide6")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QAbstractSpinBox, QApplication, QLabel, QLineEdit, QPushButton, QSpinBox
+from PySide6.QtWidgets import QAbstractSpinBox, QApplication, QCheckBox, QLabel, QLineEdit, QPushButton, QSpinBox
 
 from canvas.models.modes import Mode, Tier
 from canvas.safety.gate import SafetyUnavailable
@@ -53,7 +53,7 @@ def test_the_frame_count_starts_at_six(app, home: Path) -> None:
     assert frames.buttonSymbols() == QAbstractSpinBox.ButtonSymbols.NoButtons
     assert label.text() == "Frames"
     assert window.photoshoot.count == 6
-    window.findChild(QPushButton, "photoshootMode").click()
+    window.findChild(QCheckBox, "photoshootMode").click()
     app.processEvents()
     assert frames.isVisible()
     assert label.isVisible()
@@ -63,6 +63,57 @@ def test_the_frame_count_starts_at_six(app, home: Path) -> None:
     app.processEvents()
     assert russian.findChild(QLabel, "photoshootFramesLabel").text() == "Кадров"
     set_language("en")
+
+
+@pytest.mark.parametrize("language", ["en", "ru"])
+def test_the_frame_count_shows_its_widest_value(app, home: Path, language: str) -> None:
+    set_language(language)
+    window = _window(home, lambda job, inputs: rgb())
+    window.setFixedSize(1920, 1080)
+    window.show()
+    window.findChild(QCheckBox, "photoshootMode").click()
+    frames = window.findChild(QSpinBox, "photoshootFrames")
+    frames.setValue(frames.maximum())
+    for _ in range(3):
+        app.processEvents()
+    need = frames.fontMetrics().horizontalAdvance(frames.text())
+    edit = frames.findChild(QLineEdit)
+    room = edit.contentsRect().width() - edit.textMargins().left() - edit.textMargins().right()
+    # The box border and the edit field both have to leave the digits whole.
+    assert frames.width() >= need + 2 * 8
+    assert room >= need
+
+
+@pytest.mark.parametrize("language", ["en", "ru"])
+def test_the_option_sits_centred_under_generate(app, home: Path, language: str) -> None:
+    set_language(language)
+    window = _window(home, lambda job, inputs: rgb())
+    window.setFixedSize(1920, 1080)
+    window.show()
+    for _ in range(3):
+        app.processEvents()
+    mode = window.findChild(QCheckBox, "photoshootMode")
+    generate = window.findChild(QPushButton, "generate")
+    panel = window._action_row
+
+    def box(widget):
+        return widget.geometry().translated(widget.parentWidget().mapTo(panel, widget.parentWidget().rect().topLeft()))
+
+    for ticked in (False, True):
+        if mode.isChecked() != ticked:
+            mode.click()
+            for _ in range(3):
+                app.processEvents()
+        button = box(generate)
+        option = box(mode)
+        assert option.top() >= button.bottom(), (ticked, option, button)
+        assert abs(option.center().x() - button.center().x()) <= 2, (ticked, option, button)
+        # Generate is centred in the panel and keeps its whole label.
+        assert abs(button.center().x() - panel.rect().center().x()) <= 2
+        assert generate.fontMetrics().horizontalAdvance(generate.text()) + 16 <= generate.width()
+    frames = box(window.findChild(QSpinBox, "photoshootFrames"))
+    assert frames.left() > option.right() and frames.right() <= panel.width()
+    assert abs(frames.center().y() - option.center().y()) <= 2
 
 
 def test_progress_uses_the_chosen_frame_count(app, home: Path, monkeypatch) -> None:
@@ -79,7 +130,7 @@ def test_progress_uses_the_chosen_frame_count(app, home: Path, monkeypatch) -> N
     window.photoshoot.writer = writer
     window.view.set_prompt_text(IDEA)
     window.show()
-    window.findChild(QPushButton, "photoshootMode").click()
+    window.findChild(QCheckBox, "photoshootMode").click()
     window.findChild(QSpinBox, "photoshootFrames").setValue(4)
     window.findChild(QPushButton, "generate").click()
     app.processEvents()
@@ -92,8 +143,9 @@ def test_the_option_leaves_the_shell_create_button_in_place(app, home: Path) -> 
     window = _window(home, lambda job, inputs: rgb())
     window.show()
     app.processEvents()
-    mode = window.findChild(QPushButton, "photoshootMode")
+    mode = window.findChild(QCheckBox, "photoshootMode")
     assert mode is not None and mode.text() == "Photoshoot"
+    assert window.findChild(QPushButton, "photoshootMode") is None
     generate = window.findChild(QPushButton, "generate")
     assert generate is not None and generate.isVisible()
     mode.click()
@@ -120,7 +172,7 @@ def test_generate_writes_a_read_only_series(app, home: Path, monkeypatch) -> Non
     window.photoshoot.writer = lambda _prompt: _payload(IDEA)
     window.view.set_prompt_text(IDEA)
     window.show()
-    window.findChild(QPushButton, "photoshootMode").click()
+    window.findChild(QCheckBox, "photoshootMode").click()
     window.findChild(QPushButton, "generate").click()
     app.processEvents()
     assert len(prompts) == 6
@@ -157,7 +209,7 @@ def test_expert_does_not_add_a_camera_control(app, home: Path, monkeypatch) -> N
     window.view.set_prompt_text(IDEA)
     window.set_expert(True)
     window.show()
-    window.findChild(QPushButton, "photoshootMode").click()
+    window.findChild(QCheckBox, "photoshootMode").click()
     window.findChild(QPushButton, "generate").click()
     app.processEvents()
     assert prompts and all("50 mm" in prompt for prompt in prompts)
@@ -187,7 +239,7 @@ def test_a_blocked_frame_is_labelled_and_is_not_the_hero(app, home: Path, monkey
     window.photoshoot.writer = lambda _prompt: _payload(IDEA)
     window.view.set_prompt_text(IDEA)
     window.show()
-    window.findChild(QPushButton, "photoshootMode").click()
+    window.findChild(QCheckBox, "photoshootMode").click()
     window.findChild(QPushButton, "generate").click()
     app.processEvents()
     labels = [label.text() for label in window.findChildren(QLabel, "photoshootLine")]
@@ -214,7 +266,7 @@ def test_cancel_keeps_the_frames_already_finished(app, home: Path, monkeypatch) 
     window.photoshoot.writer = lambda _prompt: _payload(IDEA)
     window.view.set_prompt_text(IDEA)
     window.show()
-    window.findChild(QPushButton, "photoshootMode").click()
+    window.findChild(QCheckBox, "photoshootMode").click()
     window.findChild(QPushButton, "generate").click()
     app.processEvents()
     assert len(prompts) == 1

@@ -200,6 +200,10 @@
       "en": "The model could not be downloaded.",
       "ru": "Не удалось скачать модель."
     },
+    "model.missing": {
+      "en": "Model missing, fetch it with MDL.",
+      "ru": "Модель отсутствует, загрузите её через MDL."
+    },
     "view.link_failed": {
       "en": "{name} could not be linked to the model store. Weights are not copied.",
       "ru": "Не удалось связать {name} с хранилищем моделей. Веса не копируются."
@@ -943,6 +947,30 @@
     "canvas.format.help": {
       "en": "The file type of a saved picture.",
       "ru": "Тип файла сохранённой картинки."
+    },
+    "canvas.export": {
+      "en": "Export",
+      "ru": "Экспорт"
+    },
+    "canvas.export.png": {
+      "en": "PNG",
+      "ru": "PNG"
+    },
+    "canvas.export.jpg": {
+      "en": "JPEG",
+      "ru": "JPEG"
+    },
+    "canvas.export.webp": {
+      "en": "WebP",
+      "ru": "WebP"
+    },
+    "canvas.export.avif": {
+      "en": "AVIF",
+      "ru": "AVIF"
+    },
+    "canvas.export.help": {
+      "en": "The file type handed to Forge. PNG is the default.",
+      "ru": "Тип файла для Forge. По умолчанию PNG."
     },
     "canvas.style": {
       "en": "Look",

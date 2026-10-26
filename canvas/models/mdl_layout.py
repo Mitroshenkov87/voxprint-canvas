@@ -22,8 +22,8 @@ def files_for(model_id: str, root: Path | None = None) -> dict[str, Path] | None
     The installed ``mdl.json`` is read with
     :func:`voxprint_common.mdl.catalog.load_manifest`. The result is ``None``
     when that id has no file list, a blob is missing, or a blob has the wrong
-    size. :func:`has_files` is false only in the first of those cases, which is
-    how a caller tells "not downloaded" from "use the legacy folder".
+    size. :func:`has_files` is false only in the first of those cases. A missing
+    blob is not downloaded from a legacy folder.
 
     Args:
         model_id: A model id from the installed manifest, including ``<id>-upstream``.

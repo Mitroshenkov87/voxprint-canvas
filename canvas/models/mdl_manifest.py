@@ -19,7 +19,6 @@ from pathlib import Path
 
 from canvas.models.provision import OPTIONAL_IDS, default_specs
 from canvas.models.registry import Catalog, ModelSpec, load_catalog
-from canvas.models.snapshots import _urls
 
 ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = ROOT / "mdl.json"
@@ -29,6 +28,52 @@ MANIFEST = ROOT / "mdl.json"
 # original files. The primary rows point at the BF16 repo in catalog.json. The author's
 # FP32 transformer is the optional ``<id>-upstream`` fallback (mirror copy, then upstream);
 # the runtime loads it with torch_dtype=bfloat16, so it is cast at load time.
+
+
+def _uri(spec: ModelSpec, kind: str) -> str:
+    for source in spec.sources:
+        if source.kind == kind and source.uri:
+            return source.uri
+    return ""
+
+
+def _hf(repo_uri: str, revision: str, path: str) -> str:
+    base = repo_uri.rstrip("/")
+    rev = revision or "main"
+    return f"{base}/resolve/{rev}/{path}"
+
+
+def _urls(spec: ModelSpec, name: str, revision: str, *, fallback: bool) -> tuple[str, ...]:
+    """HTTPS addresses MDL should fetch. This does not download or copy a file."""
+    if fallback:
+        remote = name
+        found: list[str] = []
+        mirror_copy = _uri(spec, "huggingface-mirror")
+        if mirror_copy and spec.fallback_mirror_revision:
+            found.append(_hf(mirror_copy, spec.fallback_mirror_revision, remote))
+        for source in spec.sources:
+            if source.kind == "huggingface" and source.uri:
+                found.append(_hf(source.uri, revision, remote))
+        return tuple(found)
+    mirror, upstream = spec.origins.get(name, (name, name))
+    found = []
+    if mirror.startswith("package:"):
+        found.append(mirror)
+    if mirror.startswith("http://") or mirror.startswith("https://"):
+        found.append(mirror)
+    mirror_repo = _uri(spec, "huggingface-mirror")
+    mirror_rev = spec.mirror_revision or revision
+    if mirror and mirror != "-" and not mirror.startswith(("package:", "http://", "https://")) and mirror_repo:
+        found.append(_hf(mirror_repo, mirror_rev, mirror))
+    if upstream.startswith("http://") or upstream.startswith("https://"):
+        found.append(upstream)
+    upstream_repo = _uri(spec, "huggingface")
+    direct = _uri(spec, "upstream")
+    if upstream and upstream != "-" and not upstream.startswith(("http://", "https://")) and upstream_repo:
+        found.append(_hf(upstream_repo, revision, upstream))
+    elif upstream and upstream != "-" and direct.startswith(("http://", "https://")) and name == Path(direct).name:
+        found.append(direct)
+    return tuple(found)
 
 
 def _primary_urls(spec: ModelSpec, name: str) -> list[str]:

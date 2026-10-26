@@ -1,27 +1,23 @@
-"""Place pinned weight files on disk and refuse a bad hash.
+"""Resolve a model through its VOXPrint MDL view and refuse a bad hash.
 
-Downloads happen only when a caller asks. A check that the files are already
+A download is queued with MDL. An incomplete view is not read from a legacy
+folder, and that folder is not deleted. A check that the files are already
 present never opens a network connection.
 """
 from __future__ import annotations
 
-import hashlib
-import shutil
-import time
-import urllib.request
 from collections.abc import Callable
 from pathlib import Path
+from typing import NoReturn
 
 from canvas.app.i18n import text
+from canvas.infra.stage_timer import log_detail
 from canvas.models.features import withheld_from_setup
 from canvas.models.mdl_layout import files_for, has_files
-from canvas.models.pin import PinError, require_pin, verify_file
+from canvas.models.pin import PinError, verify_file
 from canvas.models.registry import ModelSpec
 from canvas.models.verified import VerifiedCache
 from canvas.models.views import ViewError, blob_path, blobs_present, drop_model_views, ensure_view
-
-_PACKAGE = Path(__file__).parent
-_CHUNK = 1024 * 1024
 
 
 class SnapshotError(Exception):
@@ -41,9 +37,9 @@ class SnapshotError(Exception):
 def weight_dir(root: Path, repo: str, *, fallback: bool = False) -> Path:
     """Legacy ``<org>--<repo>`` folder. ``fallback`` selects the ``--upstream`` sibling.
 
-    Loading goes through :func:`snapshot_ready` and :func:`fallback_ready`, which
-    return a view over the MDL blobs first and this folder only while an older
-    tree is still on disk.
+    Loading does not read this folder. :func:`snapshot_ready` and
+    :func:`fallback_ready` return a view over the MDL blobs, or nothing.
+    The folder is left in place. Nothing here deletes it.
     """
     name = repo.replace("/", "--")
     if fallback:
@@ -59,16 +55,15 @@ def snapshot_repo(spec: ModelSpec) -> str:
 def snapshot_status(spec: ModelSpec, root: Path, cache: VerifiedCache | None = None) -> str:
     """``ready``, ``not_downloaded``, ``incomplete``, or ``hash_mismatch``.
 
-    Files in the VOXPrint MDL blob store count first. A missing blob, or a blob of
-    the wrong size, is not downloaded. A legacy repo folder still counts.
+    Only the VOXPrint MDL blob store counts. A missing blob, or a blob of the
+    wrong size, is not downloaded. A legacy ``<org>--<name>`` folder is ignored.
     """
-    primary = _source_status(spec.id, spec.files, weight_dir(root, snapshot_repo(spec)), root, cache)
+    primary = _source_status(spec.id, spec.files, root, cache)
     fallback = "not_downloaded"
     if spec.fallback_files:
         fallback = _source_status(
             f"{spec.id}-upstream",
             spec.fallback_files,
-            weight_dir(root, snapshot_repo(spec), fallback=True),
             root,
             cache,
         )
@@ -83,24 +78,16 @@ def snapshot_status(spec: ModelSpec, root: Path, cache: VerifiedCache | None = N
     return "not_downloaded"
 
 
-def _best(first: str, second: str) -> str:
-    order = ("ready", "hash_mismatch", "incomplete", "not_downloaded")
-    return min(first, second, key=order.index)
-
-
 def _source_status(
-    model_id: str, catalog_files: dict[str, str], legacy: Path, root: Path, cache: VerifiedCache | None,
+    model_id: str, catalog_files: dict[str, str], root: Path, cache: VerifiedCache | None,
 ) -> str:
-    """Blob status for one id, or the legacy folder when the manifest has no file list."""
+    """Blob status for one id. A legacy repo folder is not a source."""
     if has_files(model_id):
         mapped = files_for(model_id, root)
         if mapped is None:
-            blob_state = "not_downloaded"
-        else:
-            blob_state = _verified({path: blob.name for path, blob in mapped.items()}, root, cache)
-    else:
-        blob_state = _blob_status(root, catalog_files, cache)
-    return _best(blob_state, _folder_status(legacy, catalog_files, cache))
+            return "not_downloaded"
+        return _verified({path: blob.name for path, blob in mapped.items()}, root, cache)
+    return _blob_status(root, catalog_files, cache)
 
 
 def _verified(files: dict[str, str], root: Path, cache: VerifiedCache | None) -> str:
@@ -124,52 +111,56 @@ def _blob_status(root: Path, files: dict[str, str], cache: VerifiedCache | None 
     return "ready" if len(present) == len(files) else "incomplete"
 
 
-def _folder_status(folder: Path, files: dict[str, str], cache: VerifiedCache | None = None) -> str:
-    if not files:
-        return "not_downloaded"
-    present = 0
-    for name, digest in files.items():
-        path = folder / name
-        if not path.is_file():
-            continue
-        present += 1
-        if not _matches(path, digest, cache):
-            return "hash_mismatch"
-    if present == 0:
-        return "not_downloaded"
-    if present == len(files):
-        return "ready"
-    return "incomplete"
-
-
 def snapshot_ready(spec: ModelSpec, root: Path, cache: VerifiedCache | None = None) -> Path | None:
-    """The local folder whose files match the pin, or None when none does.
+    """The MDL view whose files match the pin, or None when the view is incomplete.
 
-    A view over the MDL blob store comes first, then the legacy ``<org>--<repo>``
-    folder, then the FP32 ``<id>-upstream`` view and its legacy folder.
+    A legacy ``<org>--<repo>`` folder is not opened. The FP32 ``<id>-upstream``
+    entry is also a view, or nothing.
     """
     found = _open_layout(spec.id, root, spec.files, cache)
     if found is not None:
-        return found
-    primary = weight_dir(root, snapshot_repo(spec))
-    if _complete(primary, spec.files, cache):
-        return primary
+        return _note_view(spec.id, found)
     return fallback_ready(spec, root, cache)
 
 
 def fallback_ready(spec: ModelSpec, root: Path, cache: VerifiedCache | None = None) -> Path | None:
-    """The FP32 ``<id>-upstream`` view, or the legacy ``--upstream`` folder while it remains.
+    """The FP32 ``<id>-upstream`` view, or None when that view is incomplete.
 
-    MDL stores that entry as blobs. The view is opened first. The old
-    ``<repo>--upstream`` tree is only the migration copy.
+    The old ``<repo>--upstream`` tree is not opened and is not deleted.
     """
     if not spec.fallback_files:
         return None
     found = _open_layout(f"{spec.id}-upstream", root, spec.fallback_files, cache)
-    if found is not None:
-        return found
-    other = weight_dir(root, snapshot_repo(spec), fallback=True)
-    return other if _complete(other, spec.fallback_files, cache) else None
+    if found is None:
+        return None
+    return _note_view(f"{spec.id}-upstream", found)
+
+
+def request_download(model_id: str) -> bool:
+    """Queue ``model_id`` with VOXPrint MDL. False when it cannot be queued.
+
+    Resolved at call time: a missing MDL client returns False, and tests patch
+    ``enqueue``. This does not write a file.
+    """
+    try:
+        from voxprint_common.mdl import enqueue
+        from voxprint_common.mdl.catalog import CatalogError
+
+        from canvas.models.mdl_registry import manifest_path
+    except ImportError:
+        return False
+    try:
+        enqueue("canvas", [model_id], manifests=[manifest_path()])
+    except (CatalogError, OSError, ValueError):
+        return False
+    return True
+
+
+def _note_view(model_id: str, folder: Path) -> Path:
+    """Record that ``model_id`` resolved to an MDL view."""
+    safe = "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in model_id)[:80]
+    log_detail("model", "path", "cpu", f"id={safe} kind=view")
+    return folder
 
 
 def _open_layout(
@@ -209,50 +200,39 @@ def _view_or_none(key: str, root: Path, files: dict[str, str], cache: VerifiedCa
 def download_snapshot(
     spec: ModelSpec, root: Path, progress: Callable[[str], None] | None = None,
 ) -> Path:
-    """Fetch the first snapshot whose files can all be verified."""
+    """Queue the model with MDL and return its view.
+
+    An incomplete view raises :class:`SnapshotError` whose message tells the
+    caller to fetch the model with MDL. No ``<org>--<name>`` copy is written.
+    """
     if withheld_from_setup(spec) or spec.status == "disabled":
         raise SnapshotError("this model is not available for download")
-    primary = weight_dir(root, snapshot_repo(spec))
-    try:
-        _fill(spec, primary, spec.files, spec.revision, fallback=False, progress=progress)
-    except SnapshotError as primary_error:
-        if not spec.fallback_files:
-            raise
-        other = weight_dir(root, snapshot_repo(spec), fallback=True)
-        try:
-            _fill(
-                spec, other, spec.fallback_files, spec.fallback_revision or spec.revision,
-                fallback=True, progress=progress,
-            )
-        except SnapshotError as fallback_error:
-            raise SnapshotError(f"{primary_error.detail}; fallback: {fallback_error.detail}") from fallback_error
-        return other
-    return primary
+    request_download(spec.id)
+    folder = snapshot_ready(spec, root)
+    if folder is None:
+        _missing(progress)
+    return folder
 
 
 def download_files(
     spec: ModelSpec, root: Path, names: tuple[str, ...], progress: Callable[[str], None] | None = None,
 ) -> Path:
-    """Fetch and verify named files from one snapshot. Other files stay as they are."""
+    """Queue the model with MDL and return its view when every named file is there."""
     missing = [name for name in names if name not in spec.files]
     if not names or missing:
         raise SnapshotError("a requested file is not pinned")
-    files = {name: spec.files[name] for name in names}
-    folder = weight_dir(root, snapshot_repo(spec))
-    _fill(spec, folder, files, spec.revision, fallback=False, progress=progress)
+    request_download(spec.id)
+    folder = snapshot_ready(spec, root)
+    if folder is None or any(not (folder / name).is_file() for name in names):
+        _missing(progress)
     return folder
 
 
-def _complete(folder: Path, files: dict[str, str], cache: VerifiedCache | None = None) -> bool:
-    if not files:
-        return False
-    for name, digest in files.items():
-        path = folder / name
-        if not path.is_file():
-            return False
-        if not _matches(path, digest, cache):
-            return False
-    return True
+def _missing(progress: Callable[[str], None] | None) -> NoReturn:
+    message = text("model.missing")
+    if progress is not None:
+        progress(message)
+    raise SnapshotError("model missing", user_message=message)
 
 
 def _matches(path: Path, digest: str, cache: VerifiedCache | None) -> bool:
@@ -263,141 +243,3 @@ def _matches(path: Path, digest: str, cache: VerifiedCache | None) -> bool:
     except PinError:
         return False
     return True
-
-
-def _fill(
-    spec: ModelSpec, folder: Path, files: dict[str, str], revision: str, *, fallback: bool,
-    progress: Callable[[str], None] | None = None,
-) -> None:
-    errors: list[str] = []
-    for name, digest in files.items():
-        path = folder / name
-        if path.is_file():
-            try:
-                verify_file(path, digest)
-                continue
-            except PinError:
-                path.unlink()
-        try:
-            _fetch_one(spec, name, digest, path, revision, fallback=fallback, progress=progress)
-        except (OSError, PinError, SnapshotError) as exc:
-            errors.append(f"{name}: {exc}")
-    if errors:
-        raise SnapshotError("; ".join(errors))
-
-
-def _fetch_one(
-    spec: ModelSpec, name: str, digest: str, dest: Path, revision: str, *, fallback: bool,
-    progress: Callable[[str], None] | None = None,
-) -> None:
-    pin = require_pin(digest)
-    last = "no source"
-    for url in _urls(spec, name, revision, fallback=fallback):
-        try:
-            if url.startswith("package:"):
-                if progress is not None:
-                    progress(text("splash.copying", name=name))
-                _copy_package(url, dest, pin)
-            else:
-                _stream(url, dest, pin, progress=progress, label=name)
-            return
-        except (OSError, PinError, SnapshotError) as exc:
-            last = f"{url}: {exc}"
-            if dest.exists():
-                dest.unlink()
-    raise SnapshotError(last)
-
-
-def _urls(spec: ModelSpec, name: str, revision: str, *, fallback: bool) -> tuple[str, ...]:
-    if fallback:
-        # The author's original files: the suite mirror copy first, then upstream.
-        remote = name
-        found: list[str] = []
-        mirror_copy = _uri(spec, "huggingface-mirror")
-        if mirror_copy and spec.fallback_mirror_revision:
-            found.append(_hf(mirror_copy, spec.fallback_mirror_revision, remote))
-        for source in spec.sources:
-            if source.kind == "huggingface" and source.uri:
-                found.append(_hf(source.uri, revision, remote))
-        return tuple(found)
-    mirror, upstream = spec.origins.get(name, (name, name))
-    found = []
-    if mirror.startswith("package:"):
-        found.append(mirror)
-    if mirror.startswith("http://") or mirror.startswith("https://"):
-        found.append(mirror)
-    mirror_repo = _uri(spec, "huggingface-mirror")
-    mirror_rev = spec.mirror_revision or revision
-    if mirror and mirror != "-" and not mirror.startswith(("package:", "http://", "https://")) and mirror_repo:
-        found.append(_hf(mirror_repo, mirror_rev, mirror))
-    if upstream.startswith("http://") or upstream.startswith("https://"):
-        found.append(upstream)
-    upstream_repo = _uri(spec, "huggingface")
-    direct = _uri(spec, "upstream")
-    if upstream and upstream != "-" and not upstream.startswith(("http://", "https://")) and upstream_repo:
-        found.append(_hf(upstream_repo, revision, upstream))
-    elif upstream and upstream != "-" and direct.startswith(("http://", "https://")) and name == Path(direct).name:
-        found.append(direct)
-    return tuple(found)
-
-
-def _uri(spec: ModelSpec, kind: str) -> str:
-    for source in spec.sources:
-        if source.kind == kind and source.uri:
-            return source.uri
-    return ""
-
-
-def _hf(repo_uri: str, revision: str, path: str) -> str:
-    base = repo_uri.rstrip("/")
-    rev = revision or "main"
-    return f"{base}/resolve/{rev}/{path}"
-
-
-def _copy_package(url: str, dest: Path, pin: str) -> None:
-    name = url.split(":", 1)[1]
-    source = _PACKAGE / name
-    if not source.is_file():
-        raise SnapshotError(f"missing package file {name}")
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(source, dest)
-    verify_file(dest, pin)
-
-
-def _stream(
-    url: str, dest: Path, pin: str, progress: Callable[[str], None] | None = None, label: str = "",
-) -> None:
-    if not url.startswith("https://"):
-        raise SnapshotError("unsupported download address")
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    partial = dest.with_name(dest.name + ".partial")
-    request = urllib.request.Request(url, headers={"User-Agent": "voxprint-canvas"})
-    digest = hashlib.sha256()
-    name = label or dest.name
-    try:
-        with urllib.request.urlopen(request, timeout=120) as response, partial.open("wb") as handle:  # nosec B310
-            total = int(response.headers.get("Content-Length") or 0)
-            done = 0
-            started = time.monotonic()
-            if progress is not None:
-                progress(text("splash.starting", name=name))
-            while True:
-                chunk = response.read(_CHUNK)
-                if not chunk:
-                    break
-                handle.write(chunk)
-                digest.update(chunk)
-                done += len(chunk)
-                if progress is not None and total:
-                    elapsed = max(time.monotonic() - started, 0.001)
-                    remaining = max(0, total - done) / (done / elapsed)
-                    progress(text("splash.progress", name=name, percent=done * 100 // total, seconds=int(remaining)))
-    except Exception:
-        partial.unlink(missing_ok=True)
-        raise
-    if digest.hexdigest() != pin:
-        partial.unlink(missing_ok=True)
-        raise PinError("hash_mismatch")
-    partial.replace(dest)
-    if progress is not None:
-        progress(text("splash.ready", name=name))

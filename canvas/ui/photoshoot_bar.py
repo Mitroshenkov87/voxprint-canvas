@@ -1,6 +1,6 @@
 """Photoshoot option on the shared simple screen.
 
-The option sits beside Improve prompt. The shell Create button stays the
+The option sits centred under the Create button, which stays the
 primary action and runs the series while the option is on. The shot list is
 read-only. Cancel stops after the frame that already finished.
 """
@@ -16,6 +16,7 @@ from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
     QBoxLayout,
+    QCheckBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -34,6 +35,20 @@ from canvas.pipeline.photoshoot import DEFAULT_FRAMES, MAX_FRAMES, Shot, assembl
 
 if TYPE_CHECKING:
     from canvas.ui.shell_screen import ShellWindow
+
+
+FRAMES_PAD = 12
+
+
+def fit_frames(spin: QSpinBox) -> None:
+    """Give the frame count room for its widest value, the border and some air.
+
+    Args:
+        spin: The Frames spin box.
+    """
+    spin.ensurePolished()
+    widest = max(spin.fontMetrics().horizontalAdvance(str(value)) for value in (spin.minimum(), spin.maximum()))
+    spin.setMinimumWidth(widest + 2 * FRAMES_PAD)
 
 
 @dataclass
@@ -83,19 +98,20 @@ class PhotoshootBar:
         """
         return self.rows[index].full
 
-    def show_scenario(self, subject: str, shots: tuple[Shot, ...]) -> None:
-        """Fill the read-only list before the first frame.
+    def show_scenario(self, subject: str, shots: tuple[Shot, ...], *, seed: int = 0) -> None:
+        """Fill the read-only list before the first photograph.
 
         Args:
             subject: Verbatim subject block.
             shots: Accepted shots.
+            seed: Series seed. Each row keeps one item from a choice list.
         """
         self.subject = subject
         self._clear_rows()
-        for shot in shots:
+        for index, shot in enumerate(shots):
             self._add_row(
-                assemble_line(subject, shot, include_camera=False),
-                assemble_line(subject, shot, include_camera=True),
+                assemble_line(subject, shot, include_camera=False, index=index, seed=seed),
+                assemble_line(subject, shot, include_camera=True, index=index, seed=seed),
             )
         self.frame.setText("")
         self._showing = True
@@ -134,11 +150,9 @@ class PhotoshootBar:
 
     def _mount_mode(self) -> None:
         improve = self.window.view.root.findChild(QPushButton, "improvePrompt")
-        self.mode = QPushButton(tr("photoshoot.button"))
+        # A checkbox, so it reads as "this run will be a photoshoot", not as an action.
+        self.mode = QCheckBox(tr("photoshoot.button"))
         self.mode.setObjectName("photoshootMode")
-        self.mode.setCheckable(True)
-        self.mode.setAutoDefault(False)
-        self.mode.setProperty("chip", True)
         self.mode.setToolTip(tr("photoshoot.tooltip"))
         self.mode.clicked.connect(self._toggle)
         self.frames_label = QLabel(tr("photoshoot.frames"))
@@ -150,6 +164,15 @@ class PhotoshootBar:
         self.frames.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
         self.frames.setCorrectionMode(QAbstractSpinBox.CorrectionMode.CorrectToNearestValue)
         self.frames.setAccelerated(True)
+        # Under a stylesheet, NoButtons with right-hand step buttons collapses the
+        # edit field to 1 px (Qt 6.12), so the digits never showed. Empty buttons
+        # on the left give the field the whole box.
+        self.frames.setStyleSheet(
+            "QSpinBox#photoshootFrames::up-button, QSpinBox#photoshootFrames::down-button"
+            " { subcontrol-position: top left; width: 0; border: none; image: none; }"
+        )
+        self.frames.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        fit_frames(self.frames)
         self.frames_label.setBuddy(self.frames)
         if improve is not None:
             layout = _layout_containing(improve)

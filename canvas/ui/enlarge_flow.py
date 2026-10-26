@@ -75,6 +75,7 @@ class EnlargeConfirm(QDialog):
         install = QPushButton(tr("simple.output.install"))
         install.setObjectName("enlargeInstall")
         install.setAutoDefault(False)
+        install.setProperty("primary", True)
         install.clicked.connect(self.accept)
         cancel = QPushButton(tr("simple.cancel"))
         cancel.setObjectName("enlargeCancel")
@@ -250,5 +251,8 @@ def _fit_button(button: QPushButton) -> None:
     words = button.text()
     if not words:
         return
-    advance = QFontMetrics(QFont(button.font())).horizontalAdvance(words)
+    font = QFont(button.font())
+    if button.property("primary"):
+        font.setWeight(QFont.Weight.DemiBold)
+    advance = QFontMetrics(font).horizontalAdvance(words)
     button.setMinimumWidth(advance + 36)

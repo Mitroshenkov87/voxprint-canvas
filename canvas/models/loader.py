@@ -4,9 +4,10 @@ A missing pin, a missing file or a bad hash refuses the stack. Generation runs
 when the pinned snapshot is already on disk. Downloading is a separate call.
 """
 from pathlib import Path
-from typing import assert_never
+from typing import NoReturn, assert_never
 
 from canvas.app.i18n import text
+from canvas.app.preflight import PreflightFailed, Reason, preflight
 from canvas.infra.paths import models_dir
 from canvas.models.modes import Mode, Tier
 from canvas.models.pin import PinError, require_pin, verify_file
@@ -14,7 +15,7 @@ from canvas.models.plan import CallPlan, build_plan
 from canvas.models.registry import Catalog, ModelSpec, RegistryError, load_catalog
 from canvas.models.runtime import WeightsLoadError, render
 from canvas.models.user_lora import UserLora, resolve_selected
-from canvas.models.snapshots import SnapshotError, fallback_ready, snapshot_ready, weight_dir
+from canvas.models.snapshots import SnapshotError, fallback_ready, request_download, snapshot_ready
 from canvas.models.verified import VerifiedCache, flush_process_cache, process_cache
 from canvas.pipeline.bf16_schedule import (
     EmbeddingCache,
@@ -35,34 +36,39 @@ _SAFETY_ROLES = ("prompt-guard", "zero-shot", "face-detector", "age", "nsfw", "a
 class ModelNotReady(Exception):
     """The selected pipeline is known, and its weights are not runnable yet."""
 
-    def __init__(self, plan: CallPlan) -> None:
-        super().__init__(text("gate.unavailable"))
+    def __init__(self, plan: CallPlan, *, missing: bool = False) -> None:
         self.plan = plan
+        self.missing = missing
+        super().__init__(text("model.missing") if missing else text("gate.unavailable"))
 
     def __str__(self) -> str:
+        if self.missing:
+            return text("model.missing")
         return text("gate.unavailable")
 
 
-def _weight_path(root: Path, spec: ModelSpec, name: str) -> Path:
-    return root / spec.repo.replace("/", "--") / name
+class ModelMissing(SafetyUnavailable):
+    """The MDL view is incomplete. A legacy copy is not opened."""
+
+    message_key = "model.missing"
 
 
 def ensure_weights(spec: ModelSpec, root: Path, folder: Path | None = None) -> None:
-    """Refuse when any file is unpinned, missing or hashed wrong.
+    """Refuse when any file in ``folder`` is unpinned, missing or hashed wrong.
 
-    ``folder`` is the model folder to check (a view over the MDL blobs or the
-    legacy repo folder); by default the legacy folder under ``root``.
+    ``folder`` is the MDL view. There is no legacy-folder default.
     """
-    if not spec.files:
-        raise SafetyUnavailable("missing_model")
+    del root
+    if not spec.files or folder is None:
+        raise ModelMissing("missing_model")
     for name, digest in spec.files.items():
         try:
             require_pin(digest)
         except PinError as exc:
-            raise SafetyUnavailable("missing_model") from exc
-        path = (folder / name) if folder is not None else _weight_path(root, spec, name)
+            raise ModelMissing("missing_model") from exc
+        path = folder / name
         if not path.is_file():
-            raise SafetyUnavailable("missing_model")
+            raise ModelMissing("missing_model")
         try:
             verify_file(path, digest)
         except PinError as exc:
@@ -90,40 +96,48 @@ def load_safety_stack(catalog: Catalog, root: Path) -> SafetyStack:
 
 
 def _safety_folder(spec: ModelSpec, root: Path) -> Path:
-    """The view over the MDL blobs when it is complete, else the legacy repo folder.
+    """The view over the MDL blobs. An incomplete view is not a legacy folder.
 
-    Either way ``ensure_weights`` checks every file against its pin before use, and
-    a view that cannot be built refuses the stack (fail closed).
+    ``ensure_weights`` checks every file against its pin before use. A view that
+    cannot be built refuses the stack. The ``<org>--<name>`` tree is left as it is.
     """
     try:
         folder = snapshot_ready(spec, root)
     except SnapshotError as exc:
-        raise SafetyUnavailable("missing_model") from exc
-    return folder if folder is not None else weight_dir(root, spec.repo)
+        raise ModelMissing("missing_model") from exc
+    if folder is None:
+        request_download(spec.id)
+        raise ModelMissing("missing_model")
+    return folder
 
 
 def load_catalog_stack(root: Path, catalog: Catalog | None = None) -> SafetyStack:
-    """Open the check stack from the registry after every weight file is verified."""
-    return load_safety_stack(catalog or load_catalog(), root)
+    """Open the check stack after preflight. A failed preflight does not load a model."""
+    chosen = catalog or load_catalog()
+    result = preflight(root, chosen)
+    if not result.ok:
+        _refuse_preflight(result.reason)
+    return load_safety_stack(chosen, root)
+
+
+def _refuse_preflight(reason: Reason) -> NoReturn:
+    """Stop before the stack is constructed. A missing view uses the MDL sentence."""
+    match reason:
+        case "view" | "gate":
+            raise ModelMissing("missing_model")
+        case "disk" | "ram" | "budget":
+            raise PreflightFailed(reason)
+        case "ok":
+            raise RuntimeError("preflight ok")
+        case _ as unexpected:
+            assert_never(unexpected)
 
 
 def request_fp32(spec: ModelSpec) -> bool:
     """Queue the FP32 ``<id>-upstream`` entry with VOXPrint MDL. False when it cannot be queued."""
     if not spec.fallback_files:
         return False
-    # Resolved at call time: a missing MDL client returns False, and tests patch enqueue.
-    try:
-        from voxprint_common.mdl import enqueue
-        from voxprint_common.mdl.catalog import CatalogError
-
-        from canvas.models.mdl_registry import manifest_path
-    except ImportError:
-        return False
-    try:
-        enqueue("canvas", [f"{spec.id}-upstream"], manifests=[manifest_path()])
-    except (CatalogError, OSError, ValueError):
-        return False
-    return True
+    return request_download(f"{spec.id}-upstream")
 
 
 class ZImageGenerator:
@@ -170,7 +184,10 @@ class ZImageGenerator:
         cache = process_cache()
         try:
             folder = snapshot_ready(spec, root, cache)
-            if folder is None or width is None or height is None:
+            if folder is None:
+                request_download(spec.id)
+                raise ModelNotReady(plan, missing=True)
+            if width is None or height is None:
                 raise ModelNotReady(plan)
             control_file = _control_file(self.catalog, plan, root, cache)
             lora, lora_strength = self._selected_lora()
@@ -187,7 +204,7 @@ class ZImageGenerator:
                 fp32 = fallback_ready(spec, root, cache)
                 if fp32 is None or fp32 == folder:
                     request_fp32(spec)
-                    raise ModelNotReady(plan) from None
+                    raise ModelNotReady(plan, missing=True) from None
                 return render(
                     plan, fp32, screened, width, height, self.tier,
                     seed=self.seed, control_file=control_file,

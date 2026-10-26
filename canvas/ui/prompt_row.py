@@ -4,6 +4,7 @@ from __future__ import annotations
 from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtGui import QIntValidator
 from PySide6.QtWidgets import (
+    QCheckBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -61,11 +62,11 @@ def _parts(root):
         "generate": "generate",
         "improve": "improvePrompt",
         "revert": "revertPrompt",
-        "mode": "photoshootMode",
     }
     parts = {key: root.findChild(QPushButton, name) for key, name in names.items()}
     if parts["generate"] is None or parts["improve"] is None or parts["revert"] is None:
         return None
+    parts["mode"] = root.findChild(QCheckBox, "photoshootMode")
     parts["frames_label"] = root.findChild(QLabel, "photoshootFramesLabel")
     parts["frames"] = root.findChild(QWidget, "photoshootFrames")
     return parts

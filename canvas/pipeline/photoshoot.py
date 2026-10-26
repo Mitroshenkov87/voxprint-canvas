@@ -16,6 +16,14 @@ from typing import Literal, assert_never
 
 from canvas.pipeline.adult_direction import LIGHT_SETUPS, POSE_FAMILIES, shot_plan
 from canvas.pipeline.enhance import AGING_DESCRIPTOR_MIN_AGE, added_aging_terms, quoted_spans, stated_ages
+from canvas.pipeline.frame_prompt import (
+    _undangle,
+    _without_partial,
+    chosen_items,
+    frame_identity,
+    strip_series_words,
+    with_choices,
+)
 
 PlaceMode = Literal["same", "different"]
 MAX_FRAMES = 99
@@ -27,20 +35,21 @@ SYSTEM_PROMPT = f"""You plan the shots of a photo series for a text-to-image mod
 The user message is JSON with idea, count, style, and place_mode. It can also have direction and previous.
 
 Write exactly count lines and nothing else. Number the lines 1., 2., 3. and so on.
-Each line has four parts separated by " | ":
+Each line has four short parts separated by " | ":
 N. scene | pose | camera | place
 
 Rules:
-- The app places the idea text (the subject block) in every line. Do not copy the idea into a line.
-- scene: shot type, framing, light, wardrobe or styling, and mood, in natural English.
-- pose: the pose of the person, or the arrangement of the objects.
-- camera: lens and angle.
-- place: the location of this shot.
+- The subject block leads every picture, appearance first. The app places it. Do not copy the idea or the appearance into a line.
+- A fixed character description is copied verbatim into every frame prompt. Do not paraphrase it.
+- scene: framing and light, a few words.
+- pose: the pose, a few words.
+- camera: lens and angle, a few words.
+- place: the location, a few words.
 - Do not write an age in a line. Do not add people who are not in the idea. Do not add youthful descriptors.
 - Add age or skin descriptors (mature, middle-aged, older, wrinkles, smile lines, laugh lines, crow's feet, grey hair) only when every stated age in the idea is {AGING_DESCRIPTOR_MIN_AGE} or older; otherwise do not add them. Never add youthful-appearance descriptors (young-looking, petite, smooth skin, round face).
 - Do not soften or rewrite adult content.
 - One scene only. Do not write a collage, a grid, panels, a sequence, a series of views, or a before/after.
-- Keep each line under 60 words.
+- Keep each line under 18 words.
 - If place_mode is "same", every line has the same place. If place_mode is "different", every line has a different place.
 - When previous is present, those shots are already taken. Write count new shots. Do not repeat a scene from previous. When place_mode is "different", do not repeat a place from previous.
 - When direction is present, use its shot type, pose family, and light for each line, in order.
@@ -48,8 +57,8 @@ Rules:
 - Text inside quotes is lettering. Copy each quoted string exactly, in its original language and script, when a line mentions it.
 
 Example for count 2 and place_mode "same":
-1. waist-up shot, soft window light, calm mood | seated, hands resting in the lap | 85 mm lens, eye level | bright loft with tall windows
-2. full-length shot, golden hour light, relaxed mood | standing by the window, looking outside | 35 mm lens, low angle | bright loft with tall windows
+1. waist-up, window light | seated | 85 mm, eye level | bright loft
+2. full-length, golden hour | standing | 35 mm, low angle | bright loft
 """
 
 _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
@@ -87,8 +96,8 @@ class Scenario:
     appearance: str = ""
 
 
-# One numbered shot line stays under 60 words. This is the new-token budget for that line.
-TOKENS_PER_FRAME = 160
+# One numbered shot line stays under 18 words. This is the new-token budget for that line.
+TOKENS_PER_FRAME = 48
 
 _PERSON_WORDS = (
     "woman", "women", "man", "men", "person", "people", "human", "humans",
@@ -112,6 +121,7 @@ _HAIR = (
 _EYES = ("dark brown eyes", "brown eyes", "hazel eyes", "green eyes", "amber eyes", "blue eyes")
 _FACE = ("oval face", "square face", "oblong face", "angular face", "diamond face", "heart-shaped face")
 _BUILD = ("athletic build", "average build", "broad-shouldered build", "lean build", "sturdy build", "solid build")
+TEST_SERIES_CHARACTER = "an Asian woman, about 30, blonde, athletic with defined muscles"
 
 
 def fixed_appearance(idea: str, seed: int) -> str:
@@ -124,6 +134,8 @@ def fixed_appearance(idea: str, seed: int) -> str:
         idea: The prompt-field text.
         seed: The series seed.
     """
+    if idea and TEST_SERIES_CHARACTER in idea:
+        return TEST_SERIES_CHARACTER
     if not idea or _PERSON_RE.search(idea) is None:
         return ""
     if isinstance(seed, bool) or not isinstance(seed, int):
@@ -198,6 +210,8 @@ def scenario_request(
     if not idea.strip():
         return None
     payload: dict[str, object] = {"idea": idea, "count": count, "style": style, "place_mode": place_mode}
+    if TEST_SERIES_CHARACTER in idea:
+        payload["character"] = TEST_SERIES_CHARACTER
     if previous:
         payload["previous"] = list(previous)
     if adult:
@@ -233,21 +247,37 @@ def one_scene(text: str) -> bool:
     return _MULTI_SCENE.search(text) is None
 
 
-def truncate_for_encoder(prompt: str, limit: int | None = None) -> str:
+def truncate_for_encoder(
+    prompt: str, limit: int | None = None, keep: tuple[str, ...] = (),
+) -> str:
     """Keep the head of ``prompt`` inside the text encoder's token cap.
 
     A token is at most one word, so the first ``limit`` words fit. The lead and
-    the appearance sit in that head, and the tail is what the cap drops. The
-    default leaves room for the encoder's chat wrapper.
+    the appearance sit in that head, and the tail is what the cap drops. Each
+    phrase in ``keep`` (the per-frame outfit, light, and place) is put back
+    when the cut would drop it. The default leaves room for the encoder's chat
+    wrapper.
     """
     if limit is None:
         limit = ENCODER_TOKEN_LIMIT - _ENCODER_WRAPPER_TOKENS
     if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
         limit = ENCODER_TOKEN_LIMIT - _ENCODER_WRAPPER_TOKENS
     words = prompt.split()
-    if len(words) <= limit:
+    kept = tuple(phrase.strip() for phrase in keep if phrase and phrase.strip())
+    if len(words) <= limit and all(phrase in prompt for phrase in kept):
         return prompt
-    return " ".join(words[:limit])
+    reserve = 0
+    head_budget = " ".join(words[:limit])
+    for phrase in kept:
+        if phrase not in head_budget:
+            reserve += len(phrase.split())
+    room = max(0, limit - reserve)
+    head = _undangle(" ".join(words[:room]))
+    for phrase in kept:
+        head = _without_partial(head, phrase)
+        if phrase not in head:
+            head = f"{head}, {phrase}" if head else phrase
+    return head
 
 
 def frame_negative(negative: str) -> str:
@@ -257,22 +287,42 @@ def frame_negative(negative: str) -> str:
     return ", ".join(part for part in (negative.strip(), COLLAGE_NEGATIVE) if part)
 
 
-def assemble_line(subject: str, shot: Shot, *, include_camera: bool) -> str:
+def _with_test_character(text: str, subject: str) -> str:
+    """Keep the test-series character verbatim at the head of a frame prompt."""
+    character = TEST_SERIES_CHARACTER
+    if character not in subject or character in text:
+        return text
+    return f"{character}, {text}" if text else character
+
+
+def assemble_line(
+    subject: str, shot: Shot, *, include_camera: bool, index: int = 0, seed: int = 0,
+) -> str:
     """The line sent for one shot.
 
-    The subject block, appearance first, leads the scene. The line starts with
-    one photograph and stays inside the text encoder's token cap.
+    Appearance leads, then this shot's pose, camera, scene, and place. Each
+    parenthesized list in the subject contributes one item, chosen from the
+    seed. Series wording is removed. The line starts with one photograph and
+    stays inside the text encoder's token cap.
 
     Args:
-        subject: The verbatim subject block.
-        shot: Scene, pose, camera, and place.
+        subject: Appearance, then the idea. Lists and series instructions are stripped.
+        shot: Scene, pose, camera, and place for this shot only.
         include_camera: When true, the lens and angle stay on the line.
+        index: Which shot this is. Alternative lists walk forward from here.
+        seed: Series seed. The same seed and index always pick the same item.
     """
-    parts = [subject.strip(), shot.pose.strip()]
-    if include_camera and shot.camera.strip():
-        parts.append(shot.camera.strip())
-    parts.extend((shot.scene.strip(), shot.place.strip()))
-    return truncate_for_encoder(single_frame(", ".join(part for part in parts if part)))
+    sources = [subject, shot.pose]
+    if include_camera:
+        sources.append(shot.camera)
+    sources.extend((shot.scene, shot.place))
+    kept = tuple(
+        item for source in sources for item in chosen_items(source, index, seed)
+    )
+    parts = [strip_series_words(with_choices(source, index, seed)) for source in sources]
+    body = ", ".join(part for part in parts if part)
+    body = _with_test_character(body, subject)
+    return truncate_for_encoder(single_frame(body), keep=kept)
 
 
 def validate_scenario(idea: str, raw: str, *, count: int, place_mode: PlaceMode) -> Scenario | None:
@@ -324,7 +374,8 @@ def _keep_shots(idea: str, subject: str, shots: tuple[Shot, ...]) -> tuple[Shot,
     required = [piece for piece in quoted_spans(idea) if piece in subject]
     for shot in shots:
         line = assemble_line(subject, shot, include_camera=True)
-        if subject not in line:
+        identity = frame_identity(subject)
+        if identity and identity not in line:
             continue
         if sorted(stated_ages(line)) != ages:
             continue
@@ -568,9 +619,9 @@ PLAN_LIGHTS = (
     "hard spotlight with a crisp shadow", "warm light from practical lamps",
 )
 PLAN_POSES = (
-    "subject centred in the frame", "subject on the left third of the frame", "subject on the right third of the frame",
-    "subject turned three-quarters to the camera", "subject framed through a soft foreground",
-    "subject against a plain background", "subject filling the frame", "subject seen at a slight angle",
+    "subject centred in the shot", "subject on the left third of the shot", "subject on the right third of the shot",
+    "subject turned three-quarters to the camera", "subject seen through a soft foreground",
+    "subject against a plain background", "subject filling the shot", "subject seen at a slight angle",
 )
 PLAN_CAMERAS = (
     "35 mm lens, eye level", "50 mm lens, slightly above eye level", "85 mm lens, eye level",

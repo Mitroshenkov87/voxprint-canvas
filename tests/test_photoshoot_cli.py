@@ -69,6 +69,7 @@ def test_parser_accepts_one_and_ninety_nine_frames(tmp_path: Path) -> None:
     assert default.places == "same"
     assert default.seed == 1
     assert default.adult is False
+    assert default.export_format == "png"
     assert default.command == "photoshoot"
     assert default.vram_trace is False
     assert default.vram_trace is False
@@ -110,13 +111,32 @@ def test_command_writes_scenario_and_frame_files(monkeypatch, capsys, tmp_path: 
     for path in body["frames"]:
         file = Path(path)
         assert file.is_file()
-        assert file.suffix == ".avif"
-        assert avif_file(file.read_bytes())
+        assert file.suffix == ".png"
+        assert file.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
     scenario = Path(body["scenario"])
     assert scenario == tmp_path / "scenario.txt"
     lines = scenario.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 4
     assert all(line.startswith(f"A single photograph of {IDEA}, still, 50 mm, ") for line in lines)
+
+
+def test_export_format_avif_is_still_a_frame_file(monkeypatch, capsys, tmp_path: Path) -> None:
+    _ready(monkeypatch)
+
+    def generate(line: str, seed: int, hero: object | None, strength: float) -> object:
+        del line, seed, hero, strength
+        return _frame()
+
+    _writers(monkeypatch, generate)
+    code = main([
+        "photoshoot", "--prompt", IDEA, "--frames", "1", "--out", str(tmp_path),
+        "--json", "--export-format", "avif",
+    ])
+    body = json.loads(capsys.readouterr().out)
+    assert code == 0
+    file = Path(body["frames"][0])
+    assert file.suffix == ".avif"
+    assert avif_file(file.read_bytes())
 
 
 def test_ten_frames_vary_pose_camera_and_seed(monkeypatch, tmp_path: Path) -> None:

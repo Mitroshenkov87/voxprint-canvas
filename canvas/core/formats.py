@@ -1,8 +1,9 @@
-"""Output containers. AVIF is the default. PNG is not an output format.
+"""Output containers. AVIF is the picture default. Forge export defaults to PNG.
 
-Pillow 11.3 and newer writes AVIF and WebP. Pillow itself is HPND. Its wheels
-include libavif (BSD-2-Clause) for AVIF. JPEG XL goes through imagecodecs
-(BSD-3-Clause). pillow-jxl-plugin is not used.
+Pillow 11.3 and newer writes AVIF, PNG and WebP. Pillow itself is HPND. Its
+wheels include libavif (BSD-2-Clause) for AVIF. JPEG XL goes through imagecodecs
+(BSD-3-Clause). pillow-jxl-plugin is not used. Forge opens PNG, JPEG and WebP.
+AVIF stays available as an export option.
 """
 from __future__ import annotations
 
@@ -25,9 +26,15 @@ class OutputFormat(Enum):
     WEBP = "webp"
     JPEG = "jpeg"  # legacy option
     HEIC = "heic"  # legacy option, system codec only when one is present
+    PNG = "png"
 
 
 DEFAULT_FORMAT = OutputFormat.AVIF
+# Photoshoot series and the Forge hand-off. Forge opens PNG, JPEG and WebP.
+EXPORT_FORMAT = OutputFormat.PNG
+FORGE_EXPORTS = frozenset({
+    OutputFormat.PNG, OutputFormat.JPEG, OutputFormat.WEBP, OutputFormat.AVIF,
+})
 
 # Visually lossless defaults. AVIF stays 4:4:4. JPEG XL distance 1.0 matches that size.
 _AVIF_QUALITY = 80
@@ -43,6 +50,14 @@ _EXTENSION = {
     OutputFormat.WEBP: ".webp",
     OutputFormat.JPEG: ".jpg",
     OutputFormat.HEIC: ".heic",
+    OutputFormat.PNG: ".png",
+}
+_EXPORT_NAMES = {
+    "png": OutputFormat.PNG,
+    "jpg": OutputFormat.JPEG,
+    "jpeg": OutputFormat.JPEG,
+    "webp": OutputFormat.WEBP,
+    "avif": OutputFormat.AVIF,
 }
 
 
@@ -51,14 +66,34 @@ class UnsupportedFormat(ValueError):
 
 
 def parse_format(name: str) -> OutputFormat:
-    """Resolve a user-facing name. ``png`` is rejected."""
+    """Resolve a user-facing picture name. The Forge export parser accepts PNG."""
     key = name.strip().lower()
     if key in {"png", ".png", "image/png"}:
         raise UnsupportedFormat("PNG output is not available")
     for fmt in OutputFormat:
+        if fmt is OutputFormat.PNG:
+            continue
         if key in {fmt.value, _EXTENSION[fmt], _EXTENSION[fmt].lstrip(".")}:
             return fmt
     raise UnsupportedFormat("Choose AVIF, JPEG XL or WebP")
+
+
+def parse_export_format(name: str) -> OutputFormat:
+    """Resolve a Forge export name. PNG is the default when the caller omits it.
+
+    Forge opens PNG, JPEG and WebP. AVIF stays available.
+    """
+    key = name.strip().lower().lstrip(".")
+    if key in {"image/png"}:
+        key = "png"
+    if key in {"image/jpeg"}:
+        key = "jpeg"
+    if key in {"image/webp"}:
+        key = "webp"
+    found = _EXPORT_NAMES.get(key)
+    if found is None:
+        raise UnsupportedFormat("Choose PNG, JPEG, WebP or AVIF")
+    return found
 
 
 def extension(fmt: OutputFormat) -> str:
@@ -73,13 +108,25 @@ def extension(fmt: OutputFormat) -> str:
         return _EXTENSION[fmt]
     if fmt is OutputFormat.HEIC:
         return _EXTENSION[fmt]
+    if fmt is OutputFormat.PNG:
+        return _EXTENSION[fmt]
     assert_never(fmt)
 
 
 def save_image(image: SafeImage, path: Path, fmt: OutputFormat = DEFAULT_FORMAT) -> None:
-    """Write one released image. Any other object is refused, and PNG paths are refused."""
+    """Write one released image. Any other object is refused.
+
+    A PNG path is a Forge export. The picture default is still AVIF, and a PNG
+    path with another format is refused.
+    """
     if type(image) is not SafeImage:
         raise TypeError("only a released image can be saved")
+    if fmt is OutputFormat.PNG:
+        if path.suffix.lower() != extension(fmt):
+            raise UnsupportedFormat("the file extension does not match the format")
+        picture = Image.frombytes("RGB", (image.width, image.height), image.data)
+        picture.save(path, format="PNG")
+        return
     if path.suffix.lower() == ".png":
         raise UnsupportedFormat("PNG output is not available")
     if path.suffix.lower() != extension(fmt):

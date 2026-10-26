@@ -11,7 +11,7 @@ from voxprint_common.ui.safety import adult_prompt_policy
 from canvas.app.i18n import text
 from canvas.app.info import ENLARGE_NAME
 from canvas.app.shell_run import ShellRunner
-from canvas.core.formats import DEFAULT_FORMAT, extension
+from canvas.core.formats import EXPORT_FORMAT, OutputFormat, extension
 from canvas.infra.enlarge import EnlargeClient
 from canvas.infra.paths import models_dir
 from canvas.models.loader import ModelNotReady
@@ -128,7 +128,7 @@ def model_generate(
         negative = frame_negative(", ".join(part for part in (look.negative, policy.negatives) if part))
         mode = Mode.TEXT if hero is None else Mode.RESTYLE
         job = PictureJob(
-            prompt, negative, mode, "1:1", "native", DEFAULT_FORMAT, seed, 8, 0.0, "euler", 1,
+            prompt, negative, mode, "1:1", "native", EXPORT_FORMAT, seed, 8, 0.0, "euler", 1,
             adult_content=adult,
             lora_path="" if lora is None else str(lora.weights),
             lora_weight=lora_scale,
@@ -164,6 +164,7 @@ def run_command(
     generate: Callable[[str, int, SeriesFrame | None, float | None], SeriesFrame | None],
     strength: float | None = None,
     timings: StageTimes | None = None,
+    container: OutputFormat | None = None,
 ) -> tuple[dict[str, object], int]:
     """Run one series into ``folder`` and describe what was written.
 
@@ -180,6 +181,7 @@ def run_command(
         generate: One frame. A stopped frame returns None.
         strength: Loose reference for later frames. None leaves an object series as text
             and follows the first frame for a person series.
+        container: Forge export format. PNG when omitted. AVIF stays available.
     """
     catalogs()
     if frames < 1 or frames > MAX_FRAMES:
@@ -188,6 +190,7 @@ def run_command(
     body, code = _run_command(
         idea=idea, folder=folder, frames=frames, seed=seed, style=style, places=places, adult=adult,
         age_gate=age_gate, rewrite=rewrite, generate=generate, strength=strength, clock=clock,
+        container=container,
     )
     body["timings"] = clock.summary()
     note_timing(clock.log_line())
@@ -198,8 +201,9 @@ def _run_command(
     *, idea: str, folder: Path, frames: int, seed: int, style: str, places: str, adult: bool,
     age_gate: AgeGate, rewrite: Callable[[str], str],
     generate: Callable[[str, int, SeriesFrame | None, float | None], SeriesFrame | None],
-    strength: float | None, clock: StageTimes,
+    strength: float | None, clock: StageTimes, container: OutputFormat | None,
 ) -> tuple[dict[str, object], int]:
+    fmt = EXPORT_FORMAT if container is None else container
     scenario_style = style if style in _SCENARIO_STYLES else "photo"
     held: dict[str, Scenario] = {}
     statuses: dict[int, str] = {}
@@ -226,7 +230,7 @@ def _run_command(
         on_scenario=on_scenario,
         on_status=on_status,
         adult=adult,
-        container=DEFAULT_FORMAT,
+        container=fmt,
         timings=clock,
     )
     scenario = held.get("scenario")
@@ -236,10 +240,17 @@ def _run_command(
             False, error, _series_message(result.code), (), None, frames, 0, (),
             result.code, result.source,
         ), 1
-    lines = [assemble_line(scenario.subject_block, shot, include_camera=True) for shot in scenario.shots]
+    lines = [
+        assemble_line(scenario.subject_block, shot, include_camera=True, index=index, seed=seed)
+        for index, shot in enumerate(scenario.shots)
+    ]
     scenario_path = result.folder / "scenario.txt"
     scenario_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    shots = _shot_rows(scenario, statuses, result.kept, "internal" if result.stopped == "error" and (result.code or "internal") == "internal" else "")
+    shots = _shot_rows(
+        scenario, statuses, result.kept,
+        "internal" if result.stopped == "error" and (result.code or "internal") == "internal" else "",
+        fmt,
+    )
     frame_paths = tuple(str(shot["path"]) for shot in shots if shot["code"] == "ok")
     made = len(frame_paths)
     if result.stopped == "error":
@@ -266,11 +277,12 @@ def _run_command(
 
 
 def _shot_rows(
-    scenario: Scenario, statuses: dict[int, str], kept: tuple[Path, ...], error: str = "",
+    scenario: Scenario, statuses: dict[int, str], kept: tuple[Path, ...],
+    error: str = "", container: OutputFormat = EXPORT_FORMAT,
 ) -> list[dict[str, object]]:
     """One row per shot. After an error stop, unkept shots carry the error code, not ``not_produced``."""
     by_name = {path.name: path for path in kept}
-    suffix = extension(DEFAULT_FORMAT)
+    suffix = extension(container)
     blocked = tr_lang("photoshoot.frame.blocked", "en")
     failed = tr_lang("photoshoot.frame.error", "en")
     rows: list[dict[str, object]] = []

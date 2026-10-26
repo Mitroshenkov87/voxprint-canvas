@@ -77,6 +77,13 @@ def test_pins_licences_and_sources():
         for item in rows[model_id]["files"]:
             assert item["mirrors"][0] == "https://huggingface.co/Mitroshenkov87/" + prefix + item["path"]
             assert len(item["mirrors"]) == 2
+    writer = rows["qwen3-4b-writer"]
+    assert writer["version"] == "c9bd464550d4078c72af0dd22aa18d0437868ce3"
+    mirror = "https://huggingface.co/Mitroshenkov87/voxprint-mirror-huihui-qwen3-4b-instruct-2507-abliterated/resolve/2c219b659d064d24236fd748c19cc2e579cbe3be/"
+    upstream = "https://huggingface.co/huihui-ai/Huihui-Qwen3-4B-Instruct-2507-abliterated/resolve/c9bd464550d4078c72af0dd22aa18d0437868ce3/"
+    for item in writer["files"]:
+        assert item["mirrors"] == [mirror + item["path"], upstream + item["path"]]
+        assert len(item["sha256"]) == 64
     control = "voxprint-mirror-z-image-turbo-controlnet-union-2.1/resolve/34c99d2bcaa323341a4c0df5f867d049f420333a/"
     for model_id in ("z-image-turbo-fun-controlnet-union-bf16", "z-image-turbo-fun-controlnet-union-bf16-lite"):
         (item,) = rows[model_id]["files"]

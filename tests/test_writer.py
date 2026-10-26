@@ -24,13 +24,16 @@ from tests.test_photoshoot import IDEA
 
 
 REVISION = "c9bd464550d4078c72af0dd22aa18d0437868ce3"
+MIRROR_REVISION = "2c219b659d064d24236fd748c19cc2e579cbe3be"
 UPSTREAM = "https://huggingface.co/huihui-ai/Huihui-Qwen3-4B-Instruct-2507-abliterated"
+MIRROR = "https://huggingface.co/Mitroshenkov87/voxprint-mirror-huihui-qwen3-4b-instruct-2507-abliterated"
 
 
 def test_writer_catalog_pins_the_upstream_revision() -> None:
     spec = load_catalog().by_id(WRITER_ID)
     assert spec.repo == "huihui-ai/Huihui-Qwen3-4B-Instruct-2507-abliterated"
     assert spec.revision == REVISION
+    assert spec.mirror_revision == MIRROR_REVISION
     assert spec.licence == "Apache-2.0"
     assert spec.quant == "bf16"
     assert spec.role == "writer"
@@ -45,8 +48,15 @@ def test_writer_catalog_pins_the_upstream_revision() -> None:
     manifest = load_manifest(Path(__file__).resolve().parents[1] / "mdl.json")
     writer = next(model for model in manifest.models if model.id == WRITER_ID)
     config = next(item for item in writer.files if item.path == "config.json")
-    assert config.urls == (f"{UPSTREAM}/resolve/{REVISION}/config.json",)
-    assert all("voxprint-mirror" not in url for url in config.urls)
+    assert config.sha256 == "5443f8ef61f1602830e997f577dc333179cf28240135f13438e750f4fb2fc839"
+    assert config.urls == (
+        f"{MIRROR}/resolve/{MIRROR_REVISION}/config.json",
+        f"{UPSTREAM}/resolve/{REVISION}/config.json",
+    )
+    weight = next(item for item in writer.files if item.path == "model-00001-of-00002.safetensors")
+    assert weight.sha256 == "c6bbaf4d73c46bd9c4ef1a32cd65e6524fe9e71aa28ca63865c1eb6a7ad51a98"
+    assert weight.urls[0].startswith(f"{MIRROR}/resolve/{MIRROR_REVISION}/")
+    assert weight.urls[1].startswith(f"{UPSTREAM}/resolve/{REVISION}/")
     turbo = load_catalog().by_id("z-image-turbo-bf16-16gb")
     assert turbo.text_encoder == TEXT_ENCODER == "Qwen/Qwen3-4B"
     assert any(name.startswith("text_encoder/") for name in encoder_names(turbo))

@@ -17,7 +17,10 @@ def test_series_words_are_stripped_and_a_joined_scenario_splits() -> None:
     assert "shots" not in cleaned
     assert "angles" not in cleaned
     assert "red coat" in cleaned
+    assert " in," not in cleaned
+    assert not cleaned.endswith(" in")
     assert _DENY.search(cleaned) is None
+    assert strip_series_words("a woman in a red coat") == "a woman in a red coat"
     joined = "\n".join(
         f"A single photograph of a red cup, pose {index}, kitchen" for index in range(3)
     )

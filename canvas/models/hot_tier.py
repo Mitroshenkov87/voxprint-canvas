@@ -1,6 +1,6 @@
 """Keep heavy weights in system RAM and copy one model to VRAM per stage.
 
-``voxprint-common`` 0.3.1 has no ``model_park``. Canvas uses 0.4.2, which parks
+``voxprint-common`` 0.3.1 has no ``model_park``. Canvas uses 0.5.1, which parks
 a state dict in pageable or pinned RAM and copies it with a dtype-preserving
 ``.to()``. The RAM copy stays for the session. A stage drops only the VRAM copy.
 

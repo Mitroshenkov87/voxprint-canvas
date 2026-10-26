@@ -727,13 +727,13 @@ function Invoke-Machine {
             Install-SuiteGpuPackages $Py ""
             if (-not (Test-SuiteGpuPackages $Py)) { throw "Setup stopped." }
         }
-        $CommonUrl = "https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.4.2/voxprint_common-0.4.2-py3-none-any.whl"
-        $CommonSha = "c2125adf7f935c99865d437f51dd32cef36a3f3c5b7b251084ef51b6769bea41"
-        $CommonWheel = Join-Path $Fetch "voxprint_common-0.4.2-py3-none-any.whl"
+        $CommonUrl = "https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.5.1/voxprint_common-0.5.1-py3-none-any.whl"
+        $CommonSha = "c618239aa2f966608aea17ec108df2d9ed9c4bdc7edd81ef3e6a3fa960ee3939"
+        $CommonWheel = Join-Path $Fetch "voxprint_common-0.5.1-py3-none-any.whl"
         Assert-NoReparse $CommonWheel
         Invoke-WebRequest -UseBasicParsing -Uri $CommonUrl -OutFile $CommonWheel
         $got = (Get-FileHash -Algorithm SHA256 -Path $CommonWheel).Hash.ToLowerInvariant()
-        if ($got -ne $CommonSha) { throw "voxprint-common 0.4.2 failed the SHA-256 check." }
+        if ($got -ne $CommonSha) { throw "voxprint-common 0.5.1 failed the SHA-256 check." }
         Assert-AdminPath $script:Uv
         Assert-AdminPath $Py
         & $script:Uv pip install --no-config --python $Py $CommonWheel
@@ -848,7 +848,8 @@ function Invoke-User {
         $Mdl = Join-Path $App "mdl.json"
         if (-not (Test-Path -LiteralPath $Mdl)) { throw "mdl.json is missing from the setup. The install cannot continue." }
         Write-Host "Installing the default image pack..."
-        Invoke-Py @("-m", "voxprint_common.mdl", "download", "--app", "canvas", "--manifest", $Mdl)
+        # voxprint-mdl adopt for each legacy folder, then download only what is still missing.
+        Invoke-Py @("-m", "canvas.models.install_fetch", "--app", "canvas", "--manifest", $Mdl)
         $tierDir = Join-Path $dataRoot "Canvas"
         Assert-NoReparse $tierDir
         New-Item -ItemType Directory -Force $tierDir | Out-Null

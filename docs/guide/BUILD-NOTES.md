@@ -32,7 +32,7 @@ Differences you must handle:
 
 | ABB | Canvas guide | What to do |
 |---|---|---|
-| UI labels as `{{key}}`, replaced from `locales/<lang>.json` | UI labels written out in **bold**, exactly as in `canvas/ui/locales/<lang>.json`, `canvas/app/messages.json` and the voxprint-common 0.4.2 catalog (Canvas files override voxprint-common) | Keep them literal, or optionally style `**…**` as `span.ui`. If you switch to `{{key}}`, the substitution must read the merged catalog (voxprint-common `ui/locales` first, then `canvas/ui/locales`, then `messages.json`). |
+| UI labels as `{{key}}`, replaced from `locales/<lang>.json` | UI labels written out in **bold**, exactly as in `canvas/ui/locales/<lang>.json`, `canvas/app/messages.json` and the voxprint-common 0.5.1 catalog (Canvas files override voxprint-common) | Keep them literal, or optionally style `**…**` as `span.ui`. If you switch to `{{key}}`, the substitution must read the merged catalog (voxprint-common `ui/locales` first, then `canvas/ui/locales`, then `messages.json`). |
 | Screenshots `![caption](@name)` | `![caption](screens/<id>.png)` | Change the image regex to `!\[([^\]]*)\]\(screens/([a-z0-9-]+)\.png\)` and resolve `docs/guide/screens/<lang>/<id>.png`, then `screens/en/<id>.png` with the "(screenshot of the English interface)" caption suffix, as ABB does. The capture list is `screens.md`. |
 | Logo is the Voxprint waveform mark, header text "AI Audiobook Builder" | — | Replace the header text with "AI Canvas". Ask the owner whether the waveform mark stays or a Canvas mark is drawn. |
 | Languages en, ru, de | en, ru only | `LANGS = ("en", "ru")`. |

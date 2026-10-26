@@ -1,8 +1,9 @@
 """Fail fast before a heavy model load.
 
-Adoption runs first. Then every picture model and every gate model must already
-have a complete view. Free disk, installed RAM, and this check's own time
-budget are read without hashing weight bytes. One log line records the result.
+Every picture model and every gate model must already have a complete view.
+A legacy folder is not fetched again: the installer adopts it, and a failed
+adopt stays a missing view. Free disk, installed RAM, and this check's own
+time budget are read without hashing weight bytes. One log line records the result.
 """
 from __future__ import annotations
 
@@ -16,9 +17,9 @@ from typing import Literal
 from voxprint_common.ram_probe import total_gib
 
 from canvas.infra.stage_timer import log_detail
-from canvas.models.adopt import adopt_required, gate_specs, required_specs, view_complete
 from canvas.models.registry import Catalog, ModelSpec, load_catalog
-from canvas.models.snapshots import request_download
+from canvas.models.required import gate_specs, required_specs, view_complete
+from canvas.models.snapshots import request_download, weight_dir
 from canvas.safety.gate import SafetyUnavailable
 
 # Working space for a photoshoot's frames. The model bytes are already in the blob store.
@@ -58,9 +59,8 @@ def preflight(
     ram_bytes: Callable[[], int] | None = None,
     clock: Callable[[], float] | None = None,
 ) -> PreflightResult:
-    """Adopt, then refuse a heavy load that is missing a view, disk, RAM, or time."""
+    """Refuse a heavy load that is missing a view, disk, RAM, or time."""
     chosen = catalog or load_catalog()
-    adopt_required(root, chosen)
     now = clock or time.monotonic
     started = now()
 
@@ -73,7 +73,7 @@ def preflight(
     if expired():
         return _finish(False, "budget")
     if picture is not None:
-        request_download(picture)
+        _enqueue(picture, root)
         return _finish(False, "view")
     gates = gate_specs(chosen)
     if not gates:
@@ -82,7 +82,7 @@ def preflight(
     if expired():
         return _finish(False, "budget")
     if gate is not None:
-        request_download(gate)
+        _enqueue(gate, root)
         return _finish(False, "gate")
     free = _disk(root) if disk_free is None else disk_free(root)
     if expired():
@@ -102,10 +102,21 @@ def _pictures(catalog: Catalog) -> tuple[ModelSpec, ...]:
     return tuple(spec for spec in required_specs(catalog) if spec.id not in gates)
 
 
-def _missing(specs: tuple[ModelSpec, ...], root: Path) -> str | None:
+def _enqueue(spec: ModelSpec, root: Path) -> None:
+    """Queue a fetch only when no legacy folder is already on disk.
+
+    A legacy directory means adopt did not finish that model. Downloading it
+    would write a second copy beside the folder the installer left in place.
+    """
+    if weight_dir(root, spec.repo).is_dir():
+        return
+    request_download(spec.id)
+
+
+def _missing(specs: tuple[ModelSpec, ...], root: Path) -> ModelSpec | None:
     for spec in specs:
         if not view_complete(spec, root):
-            return spec.id
+            return spec
     return None
 
 

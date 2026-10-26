@@ -3,12 +3,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from canvas.models.adopt import gate_specs, pins_for, required_specs
+from canvas.app.preflight import MIN_FREE_DISK_BYTES, MIN_RAM_BYTES, preflight
 from canvas.models.loader import load_catalog_stack
 from canvas.models.registry import load_catalog
+from canvas.models.required import gate_specs, pins_for, required_specs
+from canvas.models.snapshots import weight_dir
 from canvas.models.views import blob_path
 from canvas.safety.gate import SafetyUnavailable
-from canvas.app.preflight import MIN_FREE_DISK_BYTES, MIN_RAM_BYTES, preflight
 
 
 def test_a_missing_picture_view_fails_before_the_stack_loads(tmp_path: Path, monkeypatch) -> None:
@@ -30,6 +31,28 @@ def test_a_missing_picture_view_fails_before_the_stack_loads(tmp_path: Path, mon
         line for line in log.splitlines() if "preflight fail reason=view" in line
     ]
     assert len(log.splitlines()) == 1
+
+
+def test_a_legacy_folder_is_not_downloaded_again(tmp_path: Path, monkeypatch) -> None:
+    home = _home(tmp_path, monkeypatch)
+    root = tmp_path / "models"
+    root.mkdir()
+    catalog = load_catalog()
+    gates = {spec.id for spec in gate_specs(catalog)}
+    pictures = [spec for spec in required_specs(catalog) if spec.id not in gates]
+    spec = pictures[0]
+    legacy = weight_dir(root, spec.repo)
+    legacy.mkdir()
+    marker = legacy / "weights.safetensors"
+    marker.write_bytes(b"keep")
+    calls: list[str] = []
+    monkeypatch.setattr("canvas.app.preflight.request_download", calls.append)
+    result = preflight(root, catalog, disk_free=_plenty, ram_bytes=_plenty_ram, clock=_still)
+    assert result.ok is False
+    assert result.reason == "view"
+    assert calls == []
+    assert marker.read_bytes() == b"keep"
+    assert "preflight fail reason=view" in _log(home)
 
 
 def test_a_missing_gate_view_is_its_own_reason(tmp_path: Path, monkeypatch) -> None:

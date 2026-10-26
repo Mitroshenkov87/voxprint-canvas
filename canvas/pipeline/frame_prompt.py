@@ -17,8 +17,13 @@ from canvas.infra.stage_timer import log_detail
 # has no word boundary around ``frame`` and is left as the lead.
 _FRAME_WORD = re.compile(r"\bframes?\b", re.IGNORECASE)
 _SERIES_WORDS = re.compile(
+    r"(?:\b(?:in|of|with|on|for|at|to|from|into|onto)\s+)?"
     r"\b(?:every\s+(?:shots?|frames?)|series|shots|angles|panels?|grids?|collages?|sheets?|sequences?"
     r"|multiple|sets?|borders?|photoshoots?|photo[-\s]+shoots?)\b",
+    re.IGNORECASE,
+)
+_DANGLING = re.compile(
+    r"\b(?:in|of|with|on|for|at|to|from|into|onto|and|or)\b(?=\s*(?:,|$))",
     re.IGNORECASE,
 )
 _DIFFERENT = re.compile(r"\b(?:different|various)\s+[A-Za-z][\w'-]*\b", re.IGNORECASE)
@@ -40,7 +45,7 @@ def strip_series_words(text: str) -> str:
     cleaned = _FRAME_WORD.sub(_as_shot, text)
     cleaned = _DIFFERENT.sub(" ", cleaned)
     cleaned = _SERIES_WORDS.sub(" ", cleaned)
-    return _tidy(cleaned)
+    return _undangle(cleaned)
 
 
 def choice_lists(text: str) -> tuple[tuple[str, tuple[str, ...]], ...]:
@@ -59,18 +64,22 @@ def choice_lists(text: str) -> tuple[tuple[str, tuple[str, ...]], ...]:
     return tuple(found)
 
 
+def chosen_items(text: str, index: int, seed: int) -> tuple[str, ...]:
+    """The one item each choice list contributes for this shot."""
+    groups = choice_lists(text)
+    offset = index if isinstance(index, int) and not isinstance(index, bool) else 0
+    base = seed if isinstance(seed, int) and not isinstance(seed, bool) else 0
+    return tuple(items[(base + offset) % len(items)] for _raw, items in groups)
+
+
 def with_choices(text: str, index: int, seed: int) -> str:
     """Remove each choice list and append one item, ``(seed + index)`` along the list.
 
     The same seed and index always pick the same item. Consecutive indexes
     cover the list. Appearance commas outside parentheses stay.
     """
-    groups = choice_lists(text)
-    offset = index if isinstance(index, int) and not isinstance(index, bool) else 0
-    base = seed if isinstance(seed, int) and not isinstance(seed, bool) else 0
-    picks: list[str] = []
-    for raw, items in groups:
-        picks.append(items[(base + offset) % len(items)])
+    picks = list(chosen_items(text, index, seed))
+    for raw, _items in choice_lists(text):
         text = text.replace(raw, " ", 1)
     text = _tidy(text)
     if not picks:
@@ -113,6 +122,31 @@ def _tidy(text: str) -> str:
     cleaned = _COMMA_RUN.sub(", ", cleaned)
     cleaned = _SPACES.sub(" ", cleaned)
     return cleaned.strip(" ,")
+
+
+def _undangle(text: str) -> str:
+    """Drop a preposition or conjunction left behind when a series phrase goes.
+
+    ``same woman in every frame`` becomes ``same woman``, not ``same woman in,``.
+    ``jeans and sweater`` stays: ``and`` is not sitting against a comma or the end.
+    """
+    cleaned = _tidy(text)
+    for _pass in range(4):
+        nxt = _tidy(_DANGLING.sub(" ", cleaned))
+        if nxt == cleaned:
+            return cleaned
+        cleaned = nxt
+    return cleaned
+
+
+def _without_partial(head: str, phrase: str) -> str:
+    """Remove a cut-off prefix of ``phrase`` from the end of ``head``."""
+    words = head.split()
+    phrase_words = phrase.split()
+    for count in range(len(phrase_words) - 1, 0, -1):
+        if words[-count:] == phrase_words[:count]:
+            return " ".join(words[:-count])
+    return head
 
 
 def _split_one(prompt: str) -> tuple[str, ...]:

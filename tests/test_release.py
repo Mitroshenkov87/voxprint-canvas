@@ -82,12 +82,12 @@ def test_install_sources_do_not_use_git_or_an_unsafe_index_strategy():
         assert "unsafe-best-match" not in text, path
         assert "git+" not in text, path
     pyproject = (root / "pyproject.toml").read_text(encoding="utf-8")
-    assert 'voxprint-common[ui]==0.4.2' in pyproject
-    sha = "c2125adf7f935c99865d437f51dd32cef36a3f3c5b7b251084ef51b6769bea41"
+    assert 'voxprint-common[ui]==0.5.1' in pyproject
+    sha = "c618239aa2f966608aea17ec108df2d9ed9c4bdc7edd81ef3e6a3fa960ee3939"
     for name in ("tests.yml", "audit.yml", "docs.yml"):
         workflow = (root / ".github" / "workflows" / name).read_text(encoding="utf-8")
         assert sha in workflow
-        assert "voxprint_common-0.4.2-py3-none-any.whl" in workflow
+        assert "voxprint_common-0.5.1-py3-none-any.whl" in workflow
     linux = (root / "installer" / "linux" / "install.sh").read_text(encoding="utf-8")
     windows = (root / "installer" / "windows" / "install.ps1").read_text(encoding="utf-8")
     for script in (linux, windows):

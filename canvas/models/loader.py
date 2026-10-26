@@ -9,7 +9,6 @@ from typing import NoReturn, assert_never
 from canvas.app.i18n import text
 from canvas.app.preflight import PreflightFailed, Reason, preflight
 from canvas.infra.paths import models_dir
-from canvas.models.adopt import adopt_required
 from canvas.models.modes import Mode, Tier
 from canvas.models.pin import PinError, require_pin, verify_file
 from canvas.models.plan import CallPlan, build_plan
@@ -183,7 +182,6 @@ class ZImageGenerator:
         root = self.models if self.models is not None else models_dir()
         spec = _spec_for(self.catalog, plan)
         cache = process_cache()
-        adopt_required(root, self.catalog)
         try:
             folder = snapshot_ready(spec, root, cache)
             if folder is None:

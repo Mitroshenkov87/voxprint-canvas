@@ -18,6 +18,7 @@ from canvas.pipeline.photoshoot import (
     SCENARIO_TOKENS,
     SINGLE_FRAME,
     SYSTEM_PROMPT,
+    TEST_SERIES_CHARACTER,
     TOKENS_PER_FRAME,
     Draft,
     Shot,
@@ -119,6 +120,23 @@ def test_a_shot_that_describes_several_views_is_rejected() -> None:
         assert accept_shot(IDEA, IDEA, "same", "kitchen table", (), Draft(scene, "still", "50 mm", "")) is None
     kept = accept_shot(IDEA, IDEA, "same", "kitchen table", (), Draft("close view", "still", "50 mm", ""))
     assert isinstance(kept, Shot)
+
+
+def test_a_long_frame_keeps_its_outfit_and_does_not_end_on_in() -> None:
+    outfits = ("jeans and sweater", "summer dress", "business suit")
+    subject = (
+        "25 years old, same woman in every frame, varied shots and angles, "
+        + ("wide room " * 500)
+        + f"a woman ({', '.join(outfits)})"
+    )
+    shot = Shot("close view", "still", "50 mm", "kitchen table")
+    first = assemble_line(subject, shot, include_camera=True, index=0, seed=0)
+    second = assemble_line(subject, shot, include_camera=True, index=1, seed=0)
+    assert " in," not in first and " in," not in second
+    assert not first.endswith(" in") and not second.endswith(" in")
+    assert outfits[0] in first and outfits[1] not in first and outfits[2] not in first
+    assert outfits[1] in second and outfits[0] not in second
+    assert "every frame" not in first.lower()
 
 
 def test_appearance_stays_inside_the_encoder_head() -> None:
@@ -770,6 +788,30 @@ def test_fixed_appearance_is_stable_and_names_a_concrete_look() -> None:
         assert len([part for part in look.split(",") if part.strip()]) == 5
 
 
+def test_the_test_series_character_is_copied_into_every_frame(tmp_path: Path) -> None:
+    prompts: list[str] = []
+
+    def generate(line: str, seed: int, hero: object | None, strength: float | None) -> object:
+        del seed, hero, strength
+        prompts.append(line)
+        return _frame()
+
+    def rewrite(prompt: str) -> str:
+        count = int(json.loads(prompt)["count"])
+        assert json.loads(prompt)["character"] == TEST_SERIES_CHARACTER
+        return "\n".join(
+            f"{index + 1}. window light | standing | 50 mm | loft" for index in range(count)
+        )
+
+    result = _run(tmp_path, idea=TEST_SERIES_CHARACTER, generate=generate, count=4, rewrite=rewrite)
+    assert result.stopped == ""
+    assert fixed_appearance(TEST_SERIES_CHARACTER, 3) == TEST_SERIES_CHARACTER
+    assert len(prompts) == 4
+    for line in prompts:
+        assert line.startswith(f"A single photograph of {TEST_SERIES_CHARACTER},")
+        assert line.count(TEST_SERIES_CHARACTER) == 1
+
+
 def test_a_person_series_repeats_one_appearance_and_anchors_the_hero(tmp_path: Path) -> None:
     seen: list[tuple[str, object | None, float | None]] = []
 
@@ -889,6 +931,8 @@ def test_a_frame_prompt_has_no_series_words(tmp_path: Path) -> None:
     for line in prompts:
         assert banned.search(line) is None
         assert line.startswith(f"A single photograph of {look},")
+        assert " in," not in line
+        assert not line.endswith(" in")
         assert "red coat" in line
         assert "woman" in line
         assert line.count("A single photograph of") == 1

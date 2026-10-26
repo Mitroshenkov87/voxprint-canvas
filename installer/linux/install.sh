@@ -400,9 +400,9 @@ if [ "$app_ready" -eq 0 ]; then
     exit 1
   fi
 fi
-COMMON_URL="https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.4.2/voxprint_common-0.4.2-py3-none-any.whl"
-COMMON_SHA="c2125adf7f935c99865d437f51dd32cef36a3f3c5b7b251084ef51b6769bea41"
-common_wheel="$WHEELS/voxprint_common-0.4.2-py3-none-any.whl"
+COMMON_URL="https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.5.1/voxprint_common-0.5.1-py3-none-any.whl"
+COMMON_SHA="c618239aa2f966608aea17ec108df2d9ed9c4bdc7edd81ef3e6a3fa960ee3939"
+common_wheel="$WHEELS/voxprint_common-0.5.1-py3-none-any.whl"
 curl -fsSL -o "$common_wheel" "$COMMON_URL"
 echo "$COMMON_SHA  $common_wheel" | sha256sum -c -
 "$UV" pip install --no-config --python "$VENV/bin/python" "$common_wheel"
@@ -437,7 +437,8 @@ echo "Installing the default image pack..."
 refuse_symlink "$DATA"
 refuse_symlink "$DATA/canvas/tier.txt"
 handoff_parents "$DATA"
-as_user "$VENV/bin/python" -m voxprint_common.mdl download --app canvas --manifest "$SRC/mdl.json"
+# voxprint-mdl adopt for each legacy folder, then download only what is still missing.
+as_user "$VENV/bin/python" -m canvas.models.install_fetch --app canvas --manifest "$SRC/mdl.json"
 as_user mkdir -p "$DATA/canvas"
 as_user sh -c '"$1" -m canvas.models.tiers > "$2"' sh "$VENV/bin/python" "$DATA/canvas/tier.txt"
 as_user "$VENV/bin/python" -m canvas.app.main --register-models

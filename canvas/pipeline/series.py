@@ -782,7 +782,7 @@ def _scenario(
     subject = idea.strip()
     if not subject:
         return None, "scenario.format", ""
-    if appearance:
+    if appearance and appearance not in subject:
         subject = f"{appearance}, {subject}"
     collected: list[Shot] = []
     place = ""

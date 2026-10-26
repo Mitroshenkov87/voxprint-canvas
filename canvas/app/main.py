@@ -41,7 +41,7 @@ from canvas.models.registry import load_catalog
 from canvas.models.snapshots import SnapshotError
 from canvas.app.photoshoot_bench import live_generate, live_rewrite, run_bench
 from canvas.app.photoshoot_cli import model_generate, model_rewrite, reject_frames, run_command
-from canvas.pipeline.photoshoot import DEFAULT_FRAMES, MAX_FRAMES
+from canvas.pipeline.photoshoot import DEFAULT_FRAMES, MAX_FRAMES, TEST_SERIES_CHARACTER
 from canvas.ui.styles import LOOKS
 from canvas.pipeline.bf16_schedule import VramRefused
 from canvas.pipeline.device_guard import DeviceRefused
@@ -121,7 +121,11 @@ def _parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=_EXIT_CODES,
     )
-    bench.add_argument("--prompt", required=True, help="idea for the 6-frame series")
+    bench.add_argument(
+        "--prompt",
+        default=TEST_SERIES_CHARACTER,
+        help="idea for the 6-frame series",
+    )
     bench.add_argument("--out", required=True, help="folder for the series")
     bench.add_argument("--seed", type=int, default=1)
     bench.add_argument("--json", action="store_true")

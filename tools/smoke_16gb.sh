@@ -14,8 +14,8 @@ OUT=${1:-smoke-results}
 PASS=${PASS:-16gb}
 PY=${PYTHON:-python3.14}
 TORCH_INDEX="https://download.pytorch.org/whl/cu130"
-COMMON_URL="https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.4.2/voxprint_common-0.4.2-py3-none-any.whl"
-COMMON_SHA="c2125adf7f935c99865d437f51dd32cef36a3f3c5b7b251084ef51b6769bea41"
+COMMON_URL="https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.5.1/voxprint_common-0.5.1-py3-none-any.whl"
+COMMON_SHA="c618239aa2f966608aea17ec108df2d9ed9c4bdc7edd81ef3e6a3fa960ee3939"
 if ! command -v "$PY" >/dev/null 2>&1; then
   echo "$PY is not installed. Set PYTHON to a Python 3.14 interpreter." >&2
   exit 2
@@ -26,7 +26,7 @@ if [ ! -x "$VENV/bin/python" ]; then
 fi
 VPY="$VENV/bin/python"
 mkdir -p "$VENV/wheels"
-WHEEL="$VENV/wheels/voxprint_common-0.4.2-py3-none-any.whl"
+WHEEL="$VENV/wheels/voxprint_common-0.5.1-py3-none-any.whl"
 curl -fsSL -o "$WHEEL" "$COMMON_URL" || exit 2
 echo "$COMMON_SHA  $WHEEL" | sha256sum -c - || exit 2
 "$VPY" -m pip install -q --upgrade pip || exit 2
@@ -34,7 +34,7 @@ echo "$COMMON_SHA  $WHEEL" | sha256sum -c - || exit 2
 "$VPY" -m pip install -q --extra-index-url "$TORCH_INDEX" \
   -c constraints.txt -c constraints-cuda.txt -e ".[gen]" || exit 2
 # A failed download or a hash mismatch stops the run here with exit 5.
-if ! "$VPY" -m voxprint_common.mdl download --app canvas --manifest "$ROOT/mdl.json"; then
+if ! "$VPY" -m canvas.models.install_fetch --app canvas --manifest "$ROOT/mdl.json"; then
   echo "MDL download or hash check failed." >&2
   exit 5
 fi

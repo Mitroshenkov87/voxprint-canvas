@@ -27,7 +27,6 @@ from canvas.infra.runtime import (
     restore_runtime,
     restore_tensorrt,
 )
-from canvas.models.adopt import adopt_required
 from canvas.models.features import withheld_from_setup
 from canvas.models.loader import plan_specs
 from canvas.models.plan import CallPlan
@@ -132,7 +131,6 @@ def install_supporting(catalog: Catalog, progress: Callable[[str], None]) -> Non
 def install_defaults(catalog: Catalog, progress: Callable[[str], None]) -> None:
     """Record default packs that are already on disk. VOXPrint MDL fetches weights."""
     del progress
-    adopt_required(models_dir(), catalog)
     for spec in default_specs(catalog):
         install_spec(spec, lambda _message: None, confirm=None)
 

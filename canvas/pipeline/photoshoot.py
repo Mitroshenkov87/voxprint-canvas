@@ -16,7 +16,14 @@ from typing import Literal, assert_never
 
 from canvas.pipeline.adult_direction import LIGHT_SETUPS, POSE_FAMILIES, shot_plan
 from canvas.pipeline.enhance import AGING_DESCRIPTOR_MIN_AGE, added_aging_terms, quoted_spans, stated_ages
-from canvas.pipeline.frame_prompt import frame_identity, strip_series_words, with_choices
+from canvas.pipeline.frame_prompt import (
+    _undangle,
+    _without_partial,
+    chosen_items,
+    frame_identity,
+    strip_series_words,
+    with_choices,
+)
 
 PlaceMode = Literal["same", "different"]
 MAX_FRAMES = 99
@@ -33,6 +40,7 @@ N. scene | pose | camera | place
 
 Rules:
 - The subject block leads every picture, appearance first. The app places it. Do not copy the idea or the appearance into a line.
+- A fixed character description is copied verbatim into every frame prompt. Do not paraphrase it.
 - scene: framing and light, a few words.
 - pose: the pose, a few words.
 - camera: lens and angle, a few words.
@@ -113,6 +121,7 @@ _HAIR = (
 _EYES = ("dark brown eyes", "brown eyes", "hazel eyes", "green eyes", "amber eyes", "blue eyes")
 _FACE = ("oval face", "square face", "oblong face", "angular face", "diamond face", "heart-shaped face")
 _BUILD = ("athletic build", "average build", "broad-shouldered build", "lean build", "sturdy build", "solid build")
+TEST_SERIES_CHARACTER = "an Asian woman, about 30, blonde, athletic with defined muscles"
 
 
 def fixed_appearance(idea: str, seed: int) -> str:
@@ -125,6 +134,8 @@ def fixed_appearance(idea: str, seed: int) -> str:
         idea: The prompt-field text.
         seed: The series seed.
     """
+    if idea and TEST_SERIES_CHARACTER in idea:
+        return TEST_SERIES_CHARACTER
     if not idea or _PERSON_RE.search(idea) is None:
         return ""
     if isinstance(seed, bool) or not isinstance(seed, int):
@@ -199,6 +210,8 @@ def scenario_request(
     if not idea.strip():
         return None
     payload: dict[str, object] = {"idea": idea, "count": count, "style": style, "place_mode": place_mode}
+    if TEST_SERIES_CHARACTER in idea:
+        payload["character"] = TEST_SERIES_CHARACTER
     if previous:
         payload["previous"] = list(previous)
     if adult:
@@ -234,21 +247,37 @@ def one_scene(text: str) -> bool:
     return _MULTI_SCENE.search(text) is None
 
 
-def truncate_for_encoder(prompt: str, limit: int | None = None) -> str:
+def truncate_for_encoder(
+    prompt: str, limit: int | None = None, keep: tuple[str, ...] = (),
+) -> str:
     """Keep the head of ``prompt`` inside the text encoder's token cap.
 
     A token is at most one word, so the first ``limit`` words fit. The lead and
-    the appearance sit in that head, and the tail is what the cap drops. The
-    default leaves room for the encoder's chat wrapper.
+    the appearance sit in that head, and the tail is what the cap drops. Each
+    phrase in ``keep`` (the per-frame outfit, light, and place) is put back
+    when the cut would drop it. The default leaves room for the encoder's chat
+    wrapper.
     """
     if limit is None:
         limit = ENCODER_TOKEN_LIMIT - _ENCODER_WRAPPER_TOKENS
     if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
         limit = ENCODER_TOKEN_LIMIT - _ENCODER_WRAPPER_TOKENS
     words = prompt.split()
-    if len(words) <= limit:
+    kept = tuple(phrase.strip() for phrase in keep if phrase and phrase.strip())
+    if len(words) <= limit and all(phrase in prompt for phrase in kept):
         return prompt
-    return " ".join(words[:limit])
+    reserve = 0
+    head_budget = " ".join(words[:limit])
+    for phrase in kept:
+        if phrase not in head_budget:
+            reserve += len(phrase.split())
+    room = max(0, limit - reserve)
+    head = _undangle(" ".join(words[:room]))
+    for phrase in kept:
+        head = _without_partial(head, phrase)
+        if phrase not in head:
+            head = f"{head}, {phrase}" if head else phrase
+    return head
 
 
 def frame_negative(negative: str) -> str:
@@ -256,6 +285,14 @@ def frame_negative(negative: str) -> str:
     if COLLAGE_NEGATIVE in negative:
         return negative
     return ", ".join(part for part in (negative.strip(), COLLAGE_NEGATIVE) if part)
+
+
+def _with_test_character(text: str, subject: str) -> str:
+    """Keep the test-series character verbatim at the head of a frame prompt."""
+    character = TEST_SERIES_CHARACTER
+    if character not in subject or character in text:
+        return text
+    return f"{character}, {text}" if text else character
 
 
 def assemble_line(
@@ -275,17 +312,17 @@ def assemble_line(
         index: Which shot this is. Alternative lists walk forward from here.
         seed: Series seed. The same seed and index always pick the same item.
     """
-    parts = [
-        strip_series_words(with_choices(subject, index, seed)),
-        strip_series_words(with_choices(shot.pose, index, seed)),
-    ]
+    sources = [subject, shot.pose]
     if include_camera:
-        parts.append(strip_series_words(with_choices(shot.camera, index, seed)))
-    parts.extend((
-        strip_series_words(with_choices(shot.scene, index, seed)),
-        strip_series_words(with_choices(shot.place, index, seed)),
-    ))
-    return truncate_for_encoder(single_frame(", ".join(part for part in parts if part)))
+        sources.append(shot.camera)
+    sources.extend((shot.scene, shot.place))
+    kept = tuple(
+        item for source in sources for item in chosen_items(source, index, seed)
+    )
+    parts = [strip_series_words(with_choices(source, index, seed)) for source in sources]
+    body = ", ".join(part for part in parts if part)
+    body = _with_test_character(body, subject)
+    return truncate_for_encoder(single_frame(body), keep=kept)
 
 
 def validate_scenario(idea: str, raw: str, *, count: int, place_mode: PlaceMode) -> Scenario | None:

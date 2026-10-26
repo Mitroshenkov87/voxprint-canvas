@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import threading
 import struct
+import time
 import zipfile
 import zlib
 from collections.abc import Callable
@@ -21,13 +22,13 @@ from canvas.app.i18n import text
 from canvas.app.shell_run import RunStopped
 from canvas.core.formats import OutputFormat, extension, save_image
 from canvas.infra.errors import note_crash, note_debug, note_error, note_timing
-from canvas.infra.stage_timer import StageTimes, note_peak_mib, set_current, timed
+from canvas.infra.stage_timer import StageTimes, log_detail, note_peak_mib, set_current, timed
 from canvas.infra.vram import peak_allocated_bytes
 from canvas.models import hot_tier as hot
 from canvas.models.runtime import clear_series_embeds, park_pipeline, pipeline_scope
 from canvas.pipeline.device_guard import DeviceRefused
 from canvas.pipeline.enhance import mask_numbers, stated_ages
-from canvas.pipeline.gpu_release import release_gate_weights
+from canvas.pipeline.gpu_release import release_cuda_cache, release_gate_weights
 from canvas.pipeline.adult_direction import ages_allowed, with_adult_anchor, youth_cues
 from canvas.pipeline.photoshoot import (
     FORMAT_REMINDER,
@@ -404,6 +405,7 @@ def _review_frames(
         try:
             with clock.measure("output_check"):
                 with timed("check"):
+                    _release_check_cache()
                     released, refusal = _released_frame(gate, item.image, item.line)
         finally:
             # The check has finished. Its weights leave VRAM before this frame is written.
@@ -561,6 +563,18 @@ class _Released:
     height: int
     data: bytes
     safe: SafeImage | None
+
+
+def _release_check_cache() -> None:
+    """Return reserved GPU memory before the check asks how much is free.
+
+    A decode that finished with a full reservation makes the device query wait.
+    This is placement: the check still loads the same models and uses the same rule.
+    """
+    started = time.perf_counter()
+    released = release_cuda_cache()
+    elapsed = max(0, int((time.perf_counter() - started) * 1000))
+    log_detail("check_cache", "empty", "cuda" if released else "cpu", f"ms={elapsed}")
 
 
 def _released_frame(

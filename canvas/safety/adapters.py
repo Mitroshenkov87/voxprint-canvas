@@ -38,6 +38,25 @@ def _module_bytes(model: Any) -> int:
     return total
 
 
+def _cached_module_bytes(owner: Any, model: Any) -> tuple[int, int]:
+    """Byte size of ``model``, and how many milliseconds the measurement took.
+
+    The size does not change when the same weights move between CPU and CUDA.
+    A later placement of the same object reuses the first measurement.
+    """
+    started = time.perf_counter()
+    cached = getattr(owner, "_weight_bytes", None)
+    if isinstance(cached, int) and not isinstance(cached, bool) and getattr(owner, "_weight_bytes_id", None) == id(model):
+        return cached, max(0, int((time.perf_counter() - started) * 1000))
+    measured = _module_bytes(model)
+    try:
+        owner._weight_bytes = measured
+        owner._weight_bytes_id = id(model)
+    except (AttributeError, TypeError):
+        pass
+    return measured, max(0, int((time.perf_counter() - started) * 1000))
+
+
 def gate_device(need_bytes: int) -> str:
     """``cuda`` when the weights fit in free VRAM, else ``cpu``.
 
@@ -92,9 +111,14 @@ class _Placed:
 
     def _place(self, model: Any) -> Any:
         global _gate_cuda_bytes
-        need = _module_bytes(model)
+        need, bytes_ms = _cached_module_bytes(self, model)
         forced = getattr(self, "_forced", None)
+        started = time.perf_counter()
         device = gate_device(need) if forced is None else forced
+        if forced is None:
+            query_ms = max(0, int((time.perf_counter() - started) * 1000))
+            kind = "cuda" if "cuda" in str(device) else "cpu"
+            log_detail("check_query", "vram", kind, f"ms={query_ms} bytes_ms={bytes_ms} bytes={need}")
         if device == "cpu":
             if self.device == "cuda" or on_cuda(model):
                 self._model = model
@@ -513,6 +537,7 @@ class YuNetFaces:
     def __init__(self, folder: Path | None = None) -> None:
         self.folder = folder
         self._path: Path | None = None
+        self._detector: Any = None
 
     def load(self) -> None:
         """Load."""
@@ -530,7 +555,12 @@ class YuNetFaces:
         import cv2
         pixels = np.frombuffer(image.to_bytes(), dtype=np.uint8).reshape(image.height, image.width, 3)
         bgr = cv2.cvtColor(pixels, cv2.COLOR_RGB2BGR)
-        detector = cv2.FaceDetectorYN.create(str(self._path), "", (image.width, image.height), 0.9, 0.3, 5000)
+        detector = self._detector
+        if detector is None:
+            detector = cv2.FaceDetectorYN.create(str(self._path), "", (image.width, image.height), 0.9, 0.3, 5000)
+            if detector is None:
+                raise SafetyUnavailable("model_not_ready")
+            self._detector = detector
         cv2.utils.logging.setLogLevel(cv2.utils.logging.LOG_LEVEL_ERROR)
         detector.setInputSize((image.width, image.height))
         _retval, faces = detector.detect(bgr)
@@ -781,7 +811,12 @@ class NsfwViT(_Placed):
         """Sexual score."""
         self.load()
         import torch
-        inputs = self._processor(images=_rgb(image), return_tensors="pt")
+        started = time.perf_counter()
+        try:
+            inputs = self._processor(images=_rgb(image), return_tensors="pt")
+        finally:
+            elapsed = max(0, int((time.perf_counter() - started) * 1000))
+            log_detail("check_prepare", "image", "cpu", f"ms={elapsed}")
 
         def run() -> Any:
             with torch.no_grad():

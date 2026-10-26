@@ -22,16 +22,20 @@ def release_gate_weights(gate: object) -> None:
     note_vram("gate", "after")
 
 
-def release_cuda_cache() -> None:
-    """Collect dropped models and return their CUDA blocks to the driver."""
+def release_cuda_cache() -> bool:
+    """Collect dropped models and return their CUDA blocks to the driver.
+
+    Returns True when a CUDA cache was released.
+    """
     gc.collect()
     torch = _torch()
     if torch is None or not torch.cuda.is_available():
-        return
+        return False
     torch.cuda.empty_cache()
     ipc_collect = getattr(torch.cuda, "ipc_collect", None)
     if ipc_collect is not None:
         ipc_collect()
+    return True
 
 
 def free_vram_gb() -> float | None:

@@ -84,18 +84,18 @@ def test_a_tiny_autoencoder_decodes_both_dtype_pairs_on_cpu(monkeypatch) -> None
     diffusers = pytest.importorskip("diffusers")
     monkeypatch.setattr(runtime, "_cuda_is_up", lambda _torch: False)
     vae = _tiny_vae(diffusers).eval()
-    original = vae.tiled_decode
     seen: dict[str, object] = {}
 
-    def spy(latents: object, *args: object, **kwargs: object) -> object:
+    def hook(_module: object, args: tuple[object, ...]) -> None:
+        latents = args[0]
         param = next(vae.parameters())
         assert latents.dtype == param.dtype
         assert latents.device == param.device
         seen["dtype"] = latents.dtype
         seen["device"] = latents.device
-        return original(latents, *args, **kwargs)
+        seen["grad"] = torch.is_grad_enabled()
 
-    vae.tiled_decode = spy
+    vae.decoder.register_forward_pre_hook(hook)
     pipe = types.SimpleNamespace(vae=vae)
     pairs = ((torch.float32, torch.bfloat16), (torch.bfloat16, torch.float32))
     for vae_dtype, latent_dtype in pairs:
@@ -109,6 +109,7 @@ def test_a_tiny_autoencoder_decodes_both_dtype_pairs_on_cpu(monkeypatch) -> None
         assert float(decoded.max()) <= 1.0
         assert seen["dtype"] == vae_dtype
         assert seen["device"].type == "cpu"
+        assert seen["grad"] is False
 
 
 def test_cuda_decode_tiles_and_returns_cpu_float32(monkeypatch, tmp_path) -> None:
@@ -172,6 +173,113 @@ def test_a_latent_tile_that_covers_the_frame_is_split() -> None:
     assert vae.tile_latent_min_size <= 32
     assert vae.tile_latent_min_size < 128
     assert vae.tile_sample_min_size < 256
+
+
+def test_decode_tracks_no_grad_and_logs_it(monkeypatch, tmp_path) -> None:
+    torch = pytest.importorskip("torch")
+    diffusers = pytest.importorskip("diffusers")
+    monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
+    monkeypatch.setattr(runtime, "_cuda_is_up", lambda _torch: False)
+    vae = _tiny_vae(diffusers).eval()
+    for param in vae.parameters():
+        param.requires_grad_(True)
+    seen: dict[str, object] = {}
+
+    def hook(_module: object, args: tuple[object, ...]) -> None:
+        del args
+        seen["enabled"] = torch.is_grad_enabled()
+
+    vae.decoder.register_forward_pre_hook(hook)
+    latents = torch.zeros(1, 4, 8, 8, requires_grad=True)
+    with torch.enable_grad():
+        decoded = runtime._decode_latents(types.SimpleNamespace(vae=vae), latents, torch)
+    assert seen["enabled"] is False
+    assert torch.is_grad_enabled() is True
+    assert all(not param.requires_grad for param in vae.parameters())
+    assert decoded.dtype == numpy.float32
+    log = (tmp_path / "logs" / "voxprint.log").read_text(encoding="utf-8")
+    assert "grad_enabled=0" in log
+
+
+def test_sampling_and_encode_run_with_grad_disabled(monkeypatch) -> None:
+    torch = pytest.importorskip("torch")
+    monkeypatch.setattr(runtime, "_cuda_is_up", lambda _torch: False)
+    seen: list[bool] = []
+
+    class _Pipe:
+        def __call__(self, **_kwargs: object) -> str:
+            seen.append(torch.is_grad_enabled())
+            return "ok"
+
+    class _Vae:
+        def encode(self, _image: object) -> str:
+            seen.append(torch.is_grad_enabled())
+            return "latent"
+
+        def parameters(self):
+            return iter(())
+
+    hot_tier.reset()
+    try:
+        with torch.enable_grad():
+            assert runtime._timed(_Pipe(), torch) == "ok"
+            vae = _Vae()
+            pipe = types.SimpleNamespace(vae=vae, _canvas_placement="offload")
+            runtime._install_encode_guard(pipe, torch)
+            assert vae.encode(object()) == "latent"
+    finally:
+        hot_tier.reset()
+    assert seen == [False, False]
+    assert torch.is_grad_enabled() is True
+
+
+def test_streamed_tiles_match_the_stock_blend() -> None:
+    torch = pytest.importorskip("torch")
+    diffusers = pytest.importorskip("diffusers")
+    vae = _tiny_vae(diffusers).eval()
+    vae.requires_grad_(False)
+    vae.tile_sample_min_size = 8
+    vae.tile_latent_min_size = 8
+    vae.tile_overlap_factor = 0.25
+    torch.manual_seed(0)
+    latents = torch.randn(1, 4, 20, 18)
+    calls = {"tiled": 0}
+    original = vae.tiled_decode
+
+    def spy(z: object, *args: object, **kwargs: object) -> object:
+        calls["tiled"] += 1
+        return original(z, *args, **kwargs)
+
+    vae.tiled_decode = spy
+    with torch.inference_mode():
+        expected = original(latents).sample
+        streamed = runtime._stream_tiled_decode(vae, latents, torch)
+    assert calls["tiled"] == 0
+    assert torch.equal(expected, streamed)
+
+
+def test_a_large_latent_decodes_without_stock_tiled_decode(monkeypatch, tmp_path) -> None:
+    torch = pytest.importorskip("torch")
+    diffusers = pytest.importorskip("diffusers")
+    monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
+    monkeypatch.setattr(runtime, "_cuda_is_up", lambda _torch: False)
+    vae = _tiny_vae(diffusers).eval()
+    calls = {"tiled": 0}
+    original = vae.tiled_decode
+
+    def spy(z: object, *args: object, **kwargs: object) -> object:
+        calls["tiled"] += 1
+        return original(z, *args, **kwargs)
+
+    vae.tiled_decode = spy
+    latents = torch.randn(1, 4, 20, 18)
+    decoded = runtime._decode_latents(types.SimpleNamespace(vae=vae), latents, torch)
+    assert calls["tiled"] == 0
+    assert decoded.dtype == numpy.float32
+    assert decoded.shape[-1] == 3
+    log = (tmp_path / "logs" / "voxprint.log").read_text(encoding="utf-8")
+    assert "grad_enabled=0" in log
+    assert "stream=1" in log
 
 
 def test_a_tiny_latent_keeps_its_tile() -> None:

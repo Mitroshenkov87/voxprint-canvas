@@ -90,6 +90,10 @@ def _load(loader: Any, *args: Any, **kwargs: Any) -> Any:
 
 
 _BASE_PIPELINES = frozenset({PIPELINE_TEXT, PIPELINE_IMG2IMG, PIPELINE_INPAINT})
+# These pipelines encode an init image before the denoiser. The encode session
+# puts the denoiser on the card when it returns, so loading it earlier is a copy
+# that is parked again immediately.
+_ENCODES_BEFORE_SAMPLE = frozenset({PIPELINE_IMG2IMG, PIPELINE_INPAINT, PIPELINE_CONTROL_INPAINT})
 _scope_depth = 0
 _lock = threading.RLock()
 
@@ -734,6 +738,22 @@ def _null_context() -> Iterator[None]:
     yield
 
 
+@contextmanager
+def _inference(torch: Any) -> Iterator[None]:
+    """``torch.inference_mode`` when this torch has it. A fake torch just runs."""
+    inference = getattr(torch, "inference_mode", None)
+    if not callable(inference):
+        yield
+        return
+    try:
+        context = inference()
+    except (TypeError, RuntimeError):
+        yield
+        return
+    with context:
+        yield
+
+
 def clear_series_embeds() -> None:
     """Drop cached prompt embeddings at the end of a series."""
     global _prompt_embeds, _borrowed_pair
@@ -1031,7 +1051,7 @@ def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, he
             _install_encode_guard(pipe, torch)
             resident = getattr(pipe, "_canvas_placement", "resident") == "resident"
             device = "cuda" if torch.cuda.is_available() else "cpu"
-            if resident:
+            if resident and pipeline_name not in _ENCODES_BEFORE_SAMPLE:
                 hot.activate("transformer", device)
                 if getattr(pipe, "controlnet", None) is not None:
                     hot.activate("controlnet", device)
@@ -1088,7 +1108,8 @@ def _timed(pipe: Any, torch: Any, **kwargs: Any) -> Any:
     """
     _reset_stage_peak(torch)
     started = time.perf_counter()
-    result = pipe(**kwargs)
+    with _inference(torch):
+        result = pipe(**kwargs)
     seconds = time.perf_counter() - started
     note_image_seconds(seconds)
     note_stage("sample", seconds)
@@ -1109,17 +1130,47 @@ def _disable_vae_upcast(pipe: Any) -> None:
 
 
 def _image_from_result(pipe: Any, result: Any, torch: Any) -> RawImage:
-    """Pixels from a pipeline result. A latent is decoded on CUDA in BF16."""
+    """Pixels from a pipeline result. A latent is decoded on CUDA in BF16.
+
+    The pipeline result is dropped before decode. While it still holds the
+    latent, the denoiser graph stays allocated and the decode peak starts there.
+    """
     first = _first_output(result)
     if isinstance(first, Image.Image):
         with timed("to_pil"):
             image = first.convert("RGB")
         return RawImage(image.width, image.height, image.tobytes())
+    held = _detach_tensor(first)
+    _forget_result(result)
+    del result, first
+    gc.collect()
+    _release_cuda_cache(torch)
     with timed("vae_decode"):
-        decoded = _decode_latents(pipe, first, torch)
+        decoded = _decode_latents(pipe, held, torch)
     with timed("to_pil"):
         image = _latents_to_pil(pipe, decoded, torch)
     return RawImage(image.width, image.height, image.tobytes())
+
+
+def _detach_tensor(value: Any) -> Any:
+    """A tensor that does not keep an autograd graph. Other objects pass through."""
+    detach = getattr(value, "detach", None)
+    if not callable(detach):
+        return value
+    try:
+        return detach()
+    except (TypeError, RuntimeError):
+        return value
+
+
+def _forget_result(result: Any) -> None:
+    """Drop the pipeline output's latent so its graph can be freed."""
+    if not hasattr(result, "images"):
+        return
+    try:
+        result.images = None
+    except (AttributeError, TypeError):
+        return
 
 
 def _first_output(result: Any) -> Any:
@@ -1154,12 +1205,14 @@ _vae_depth = 0
 
 
 def _decode_latents(pipe: Any, latents: Any, torch: Any) -> Any:
-    """Decode one latent with ``tiled_decode`` on the VAE that holds the weights.
+    """Decode one latent on the VAE that holds the weights, with autograd off.
 
     The hot-tier module is that VAE when it differs from ``pipe.vae``. Other
     models are parked first, then the VAE is unparked, checked, and parked again
-    when the decode returns. Pixels are scaled, synchronized, and copied to CPU
-    float32 here. ``image_processor.postprocess`` is not used.
+    when the decode returns. A frame larger than the tile is blended one tile at
+    a time into a CPU buffer. Pixels are scaled, synchronized, and copied to CPU
+    float32 here. The CUDA cache is released after those tensors are gone.
+    ``image_processor.postprocess`` is not used.
     """
     decoded: Any = None
     scaled: Any = None
@@ -1167,28 +1220,43 @@ def _decode_latents(pipe: Any, latents: Any, torch: Any) -> Any:
     watched: list[Any] = [None]
     array: Any = None
     cuda = _cuda_is_up(torch)
+    latents = _detach_tensor(latents)
+    gc.collect()
+    _release_cuda_cache(torch)
     try:
         with _vae_session(pipe, torch, "vae_decode", restore=False) as vae:
             try:
                 _fit_vae_tiles(vae, latents)
-                note = getattr(vae, "_canvas_hooks", (0, False))
-                stripped, saw_non_blocking = note if isinstance(note, tuple) else (0, False)
-                _log_vae_tiles(vae, cuda, int(stripped), bool(saw_non_blocking), latents)
-                scaled = _scale_latents(vae, latents)
-                watched[0] = scaled
-                decoded = _invoke_tiled_decode(vae, scaled)
-                sample = _decoder_sample(decoded)
-                watched[0] = sample
-                if isinstance(sample, Image.Image) or not _is_image_tensor(sample):
-                    array = sample
-                else:
-                    array = _pixels_from_decoder(sample, torch, watched)
+                with _inference(torch):
+                    note = getattr(vae, "_canvas_hooks", (0, False))
+                    stripped, saw_non_blocking = note if isinstance(note, tuple) else (0, False)
+                    streaming = _decoder_ready(vae) and _latent_needs_tiles(vae, latents)
+                    _log_vae_tiles(
+                        vae, cuda, int(stripped), bool(saw_non_blocking), latents,
+                        grad_enabled=_grad_flag(torch), stream=int(streaming),
+                    )
+                    scaled = _scale_latents(vae, latents)
+                    watched[0] = scaled
+                    decoded = _invoke_tiled_decode(vae, scaled, torch)
+                    sample = _decoder_sample(decoded)
+                    watched[0] = sample
+                    if isinstance(sample, Image.Image) or not _is_image_tensor(sample):
+                        array = sample
+                    else:
+                        array = _pixels_from_decoder(sample, torch, watched)
+                decoded = None
+                scaled = None
+                sample = None
+                watched[0] = None
             except Exception as exc:
                 _log_decode_error(torch, exc, watched[0], cuda)
                 raise
     finally:
         del decoded, scaled, sample
         watched[0] = None
+    gc.collect()
+    _release_cuda_cache(torch)
+    _log_decode_released(torch)
     return array
 
 
@@ -1249,16 +1317,19 @@ def _install_encode_guard(pipe: Any, torch: Any) -> None:
         return
 
     def guarded(*args: Any, **kwargs: Any) -> Any:
-        with _vae_session(pipe, torch, "vae_encode", restore=True) as live:
-            if live is not vae:
-                other = getattr(live, "encode", None)
-                target = other if callable(other) and other is not guarded else original
-            else:
-                target = original
-            args, kwargs = _cast_encode_call(live, args, kwargs)
-            image = args[0] if args else kwargs.get("x")
-            _fit_vae_tiles(live, image)
-            return target(*args, **kwargs)
+        with _inference(torch):
+            with _vae_session(pipe, torch, "vae_encode", restore=True) as live:
+                if live is not vae:
+                    other = getattr(live, "encode", None)
+                    target = other if callable(other) and other is not guarded else original
+                else:
+                    target = original
+                args, kwargs = _cast_encode_call(live, args, kwargs)
+                image = args[0] if args else kwargs.get("x")
+                _fit_vae_tiles(live, image)
+                encoded = target(*args, **kwargs)
+            _activate_denoiser(pipe, torch)
+            return encoded
 
     try:
         vae._canvas_encode_guard = True
@@ -1300,8 +1371,77 @@ def _prepare_vae(pipe: Any, torch: Any) -> Any:
         vae._canvas_hooks = (stripped + extra, saw_non_blocking or extra_non_blocking)
     except (AttributeError, TypeError):
         pass
+    _freeze_vae(vae)
     _sync_cuda(torch)
     return vae
+
+
+def _freeze_vae(vae: Any) -> None:
+    """VAE weights are inference weights. A parameter that requires grad keeps a graph."""
+    freeze = getattr(vae, "requires_grad_", None)
+    if callable(freeze):
+        try:
+            freeze(False)
+        except (TypeError, RuntimeError, AttributeError):
+            pass
+    parameters = getattr(vae, "parameters", None)
+    if not callable(parameters):
+        return
+    try:
+        listed = list(parameters())
+    except (TypeError, RuntimeError):
+        return
+    for param in listed:
+        if getattr(param, "requires_grad", None) is False:
+            continue
+        try:
+            param.requires_grad = False
+            continue
+        except (AttributeError, TypeError, RuntimeError):
+            pass
+        setter = getattr(param, "requires_grad_", None)
+        if not callable(setter):
+            continue
+        try:
+            setter(False)
+        except (TypeError, RuntimeError, AttributeError):
+            continue
+
+
+def _activate_denoiser(pipe: Any, torch: Any) -> None:
+    """Put the denoiser on CUDA after encode. A model already there stays put."""
+    if not _cuda_is_up(torch):
+        return
+    if getattr(pipe, "_canvas_placement", "resident") != "resident":
+        return
+    for name in ("transformer", "controlnet"):
+        module = getattr(pipe, name, None)
+        if module is None or _module_on_cuda(module):
+            continue
+        hot.activate(name, "cuda", blocking=True)
+
+
+def _grad_flag(torch: Any) -> int:
+    """1 when autograd is recording. Missing probes count as off."""
+    probe = getattr(torch, "is_grad_enabled", None)
+    if not callable(probe):
+        return 0
+    try:
+        return 1 if probe() else 0
+    except (TypeError, RuntimeError):
+        return 0
+
+
+def _log_decode_released(torch: Any) -> None:
+    """Current allocator bytes after the decode tensors have been dropped."""
+    if not _cuda_is_up(torch):
+        return
+    allocated = _cuda_stat(torch, "memory_allocated")
+    reserved = _cuda_stat(torch, "memory_reserved")
+    log_detail(
+        "vae_decode", "released", "cuda",
+        f"allocated={0 if allocated is None else allocated} reserved={0 if reserved is None else reserved}",
+    )
 
 
 def _assert_vae_cuda_bf16(vae: Any, torch: Any) -> None:
@@ -1458,8 +1598,17 @@ def _scale_latents(vae: Any, latents: Any) -> Any:
     return _latents_like_vae(vae, scaled)
 
 
-def _invoke_tiled_decode(vae: Any, scaled: Any) -> Any:
-    """``tiled_decode`` on this instance. ``decode`` ignores the tiling flag at the stock tile size."""
+def _invoke_tiled_decode(vae: Any, scaled: Any, torch: Any) -> Any:
+    """One tile on the device at a time. A VAE with no decoder keeps ``tiled_decode``.
+
+    Stock ``tiled_decode`` keeps every decoded tile, and with grad enabled it
+    keeps every tile's activations. The blend here moves each tile off the
+    device before the next one runs.
+    """
+    if _decoder_ready(vae):
+        if _latent_needs_tiles(vae, scaled):
+            return _stream_tiled_decode(vae, scaled, torch)
+        return _decode_whole(vae, scaled)
     tiled = getattr(vae, "tiled_decode", None)
     if callable(tiled):
         try:
@@ -1470,6 +1619,135 @@ def _invoke_tiled_decode(vae: Any, scaled: Any) -> Any:
     if not callable(decode):
         raise InferenceUnavailable("the vae has no decoder")
     return decode(scaled)
+
+
+def _decoder_ready(vae: Any) -> bool:
+    return callable(getattr(vae, "decoder", None))
+
+
+def _latent_needs_tiles(vae: Any, latents: Any) -> bool:
+    """True when either spatial side is strictly larger than the latent tile."""
+    tile = _pos_int(getattr(vae, "tile_latent_min_size", None))
+    shape = getattr(latents, "shape", None)
+    if tile is None or shape is None:
+        return False
+    try:
+        dims = tuple(int(item) for item in shape)
+    except (TypeError, ValueError):
+        return False
+    if len(dims) < 2:
+        return False
+    return dims[-2] > tile or dims[-1] > tile
+
+
+def _decode_whole(vae: Any, latents: Any) -> Any:
+    """``post_quant_conv`` then ``decoder``, matching ``AutoencoderKL._decode``."""
+    config = getattr(vae, "config", None)
+    use_post = bool(getattr(config, "use_post_quant_conv", False)) if config is not None else False
+    conv = getattr(vae, "post_quant_conv", None)
+    if use_post and callable(conv):
+        latents = conv(latents)
+    decoder = getattr(vae, "decoder", None)
+    if not callable(decoder):
+        raise InferenceUnavailable("the vae has no decoder")
+    decoded = decoder(latents)
+    if isinstance(decoded, (tuple, list)):
+        return decoded[0] if decoded else decoded
+    sample = getattr(decoded, "sample", None)
+    return decoded if sample is None else sample
+
+
+def _stream_tiled_decode(vae: Any, latents: Any, torch: Any) -> Any:
+    """Blend tiles with the stock overlap. Only the tile being decoded is on CUDA.
+
+    The previous row stays on CPU so the vertical blend can see it. Cropped
+    pieces are copied into the output, so the full tiles can be dropped after
+    the next row is blended.
+    """
+    tile_latent = _pos_int(getattr(vae, "tile_latent_min_size", None))
+    tile_sample = _pos_int(getattr(vae, "tile_sample_min_size", None))
+    if tile_latent is None or tile_sample is None:
+        return _decode_whole(vae, latents)
+    try:
+        overlap = float(getattr(vae, "tile_overlap_factor", 0.25))
+    except (TypeError, ValueError):
+        overlap = 0.25
+    overlap_size = int(tile_latent * (1.0 - overlap))
+    if overlap_size < 1:
+        overlap_size = tile_latent
+    blend_extent = int(tile_sample * overlap)
+    row_limit = tile_sample - blend_extent
+    if row_limit < 1:
+        row_limit = tile_sample
+    shape = latents.shape
+    height = int(shape[2])
+    width = int(shape[3])
+    previous: list[Any] | None = None
+    rows_out: list[Any] = []
+    for i in range(0, height, overlap_size):
+        row: list[Any] = []
+        for j in range(0, width, overlap_size):
+            piece = latents[:, :, i:i + tile_latent, j:j + tile_latent]
+            produced = _decode_whole(vae, piece)
+            decoded = _leave_cuda(produced, torch)
+            if decoded is not produced:
+                del produced
+            del piece
+            if previous is not None and blend_extent > 0:
+                decoded = _blend_tile(vae, "blend_v", previous[len(row)], decoded, blend_extent)
+            if row and blend_extent > 0:
+                decoded = _blend_tile(vae, "blend_h", row[-1], decoded, blend_extent)
+            row.append(decoded)
+        rows_out.append(_cat_tiles([_crop_limit(tile, row_limit) for tile in row], torch, 3))
+        previous = row
+    if not rows_out:
+        return _decode_whole(vae, latents)
+    return _cat_tiles(rows_out, torch, 2)
+
+
+def _blend_tile(vae: Any, name: str, other: Any, tile: Any, extent: int) -> Any:
+    """Stock ``blend_v`` / ``blend_h``. They mutate ``tile`` and return it."""
+    blend = getattr(vae, name, None)
+    if not callable(blend):
+        return tile
+    blended = blend(other, tile, extent)
+    return tile if blended is None else blended
+
+
+def _crop_limit(tile: Any, row_limit: int) -> Any:
+    """The non-overlapping piece, copied so the full tile can be freed."""
+    cropped = tile[:, :, :row_limit, :row_limit]
+    contig = getattr(cropped, "contiguous", None)
+    if not callable(contig):
+        return cropped
+    try:
+        return contig()
+    except (TypeError, RuntimeError):
+        return cropped
+
+
+def _cat_tiles(tiles: list[Any], torch: Any, dim: int) -> Any:
+    if len(tiles) == 1:
+        return tiles[0]
+    cat = getattr(torch, "cat", None)
+    if not callable(cat):
+        raise InferenceUnavailable("the vae tiles cannot be joined")
+    return cat(tiles, dim=dim)
+
+
+def _leave_cuda(tensor: Any, torch: Any) -> Any:
+    """A CPU copy of a CUDA tile. A CPU tensor is returned as it is."""
+    device = getattr(tensor, "device", None)
+    kind = getattr(device, "type", None)
+    text = kind if isinstance(kind, str) else str(device)
+    if "cuda" not in text:
+        return tensor
+    mover = getattr(tensor, "to", None)
+    if not callable(mover):
+        return tensor
+    moved = mover("cpu")
+    _sync_cuda(torch)
+    return moved
 
 
 def _decoder_sample(decoded: Any) -> Any:
@@ -1569,8 +1847,11 @@ def _pos_int(value: Any) -> int | None:
     return number
 
 
-def _log_vae_tiles(vae: Any, cuda: bool, stripped: int, saw_non_blocking: bool, latents: Any = None) -> None:
-    """``vae tiling=1 slicing=1 id=...`` for the instance ``tiled_decode`` is about to use."""
+def _log_vae_tiles(
+    vae: Any, cuda: bool, stripped: int, saw_non_blocking: bool, latents: Any = None, *,
+    grad_enabled: int = 0, stream: int = 0,
+) -> None:
+    """``vae tiling=1 slicing=1 id=...`` for the instance decode is about to use."""
     tiling = 1 if getattr(vae, "use_tiling", False) else 0
     slicing = 1 if getattr(vae, "use_slicing", False) else 0
     _device, dtype = _parameter_placement(vae)
@@ -1587,7 +1868,8 @@ def _log_vae_tiles(vae: Any, cuda: bool, stripped: int, saw_non_blocking: bool, 
         f"hooks={hooks} stripped={stripped} dtype={dtype} "
         f"pinned={int(pinned)} casting_non_blocking={int(saw_non_blocking)} "
         f"tile_sample={sample_tile} tile_latent={latent_tile} "
-        f"latent_shape={shape} latent_bytes={nbytes}",
+        f"latent_shape={shape} latent_bytes={nbytes} "
+        f"grad_enabled={int(grad_enabled)} stream={int(stream)}",
     )
 
 
@@ -1615,10 +1897,27 @@ def _pixels_from_decoder(sample: Any, torch: Any, watched: list[Any]) -> Any:
     if callable(detach):
         cpu = detach()
         watched[0] = cpu
+    return _array_from_cpu(cpu)
+
+
+def _array_from_cpu(cpu: Any) -> Any:
+    """NumPy from a CPU float tensor. An inference tensor is cloned when numpy refuses it."""
+    detach = getattr(cpu, "detach", None)
+    if callable(detach):
+        try:
+            cpu = detach()
+        except (TypeError, RuntimeError):
+            pass
     to_numpy = getattr(cpu, "numpy", None)
     if not callable(to_numpy):
         raise InferenceUnavailable("the vae output cannot become an array")
-    return to_numpy()
+    try:
+        return to_numpy()
+    except RuntimeError:
+        clone = getattr(cpu, "clone", None)
+        if not callable(clone):
+            raise
+        return clone().numpy()
 
 
 def _sync_cuda(torch: Any) -> None:

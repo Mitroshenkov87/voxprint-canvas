@@ -1,11 +1,12 @@
 """Gate."""
 import math
 import threading
+import time
 from dataclasses import dataclass
 from typing import Literal, Sequence, assert_never
 
 from canvas.app.i18n import text
-from canvas.infra.stage_timer import beat_while
+from canvas.infra.stage_timer import beat_while, log_detail
 from canvas.infra.vram_trace import on_cuda
 from canvas.safety.classifiers import AgeEstimator, AgeRegressor, FaceDetector, NsfwDetector, PromptGuard, ZeroShot
 from canvas.safety.constants import (
@@ -384,13 +385,22 @@ class AgeGate:
                 self._load_cv.notify_all()
 
     def _load_components(self, names: tuple[str, ...] = _LOAD_ORDER) -> None:
-        """Load each component under its own bound."""
+        """Load each component under its own bound.
+
+        The wall time is the output check's gap: the forward and the weight
+        copy are logged on their own. This line is the rest of ``load``.
+        """
         for name in names:
             component = getattr(self._stack, name)
             load = getattr(component, "load", None)
             if not callable(load):
                 continue
+            started = time.perf_counter()
             _wait(load, timeout=MODEL_LOAD_TIMEOUT_S)
+            elapsed = max(0, int((time.perf_counter() - started) * 1000))
+            flag = getattr(component, "device", "cpu")
+            kind = "cuda" if "cuda" in str(flag) else "cpu"
+            log_detail("check_load", "model", kind, f"name={name} ms={elapsed}")
 
     def review_prompt(self, text: str) -> None:
         """Decide whether a prompt may continue."""

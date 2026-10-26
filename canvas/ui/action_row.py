@@ -213,6 +213,11 @@ def sync(window) -> None:
     if host is None:
         return
     root = window.view.root
+    improve = root.findChild(QPushButton, "improvePrompt")
+    if improve is not None and improve.minimumHeight() != HEIGHT:
+        # The shared stylesheet raises the minimum on polish, which pushes the
+        # bottom border out of its 36 px split.
+        improve.setFixedHeight(HEIGHT)
     label = root.findChild(QWidget, "preset-size")
     if label is not None and label.parentWidget() is not None:
         label.parentWidget().hide()

@@ -10,8 +10,9 @@ import time
 from pathlib import Path
 
 from canvas.infra.stage_timer import StageTimes
+from canvas.pipeline import series
 from canvas.pipeline.series import SerialGate
-from canvas.safety.gate import GenerationBlocked, StylisedBlocked
+from canvas.safety.gate import GenerationBlocked, SafetyUnavailable, StylisedBlocked
 from tests.fakes import World
 from tests.test_photoshoot import IDEA, _frame, _payload, _run
 
@@ -154,6 +155,80 @@ def test_serial_gate_passes_every_call_through_one_at_a_time() -> None:
         thread.join()
     assert sorted(calls) == ["0", "1", "2", "3"]
     assert peak == 1
+
+
+def test_gate_weights_are_parked_before_the_frame_is_saved(tmp_path: Path, monkeypatch) -> None:
+    """The output check drops its VRAM copy before the frame file is written."""
+    order: list[str] = []
+    real_store = series._store_frame
+    real_release = series.release_gate_weights
+
+    def store(folder: Path, index: int, released: object, container: object) -> Path:
+        order.append(f"save{index}")
+        return real_store(folder, index, released, container)  # type: ignore[arg-type]
+
+    def release(gate: object) -> None:
+        order.append("park")
+        real_release(gate)
+
+    monkeypatch.setattr(series, "_store_frame", store)
+    monkeypatch.setattr(series, "release_gate_weights", release)
+    gate = World().gate()
+    real = gate.review_image
+
+    def review_image(raw: object, prompt: str = "") -> object:
+        order.append("check")
+        return real(raw, prompt)
+
+    gate.review_image = review_image
+    result = _run(tmp_path, age_gate=gate, rewrite=lambda _prompt: _payload(IDEA, 2), count=2)
+    assert result.stopped == ""
+    assert len(result.kept) == 2
+    first = order.index("check")
+    assert order[first:] == ["check", "park", "save0", "check", "park", "save1"]
+
+
+def test_prep_loads_the_picture_checks_before_a_frame(tmp_path: Path) -> None:
+    gate = World().gate()
+    order: list[str] = []
+    real = gate.warm
+
+    def warm() -> None:
+        order.append("warm")
+        real()
+
+    gate.warm = warm  # type: ignore[method-assign]
+
+    def generate(line: str, seed: int, hero: object | None, strength: float | None) -> object:
+        del line, seed, hero, strength
+        order.append("draw")
+        return _frame()
+
+    result = _run(tmp_path, age_gate=gate, rewrite=lambda _prompt: _payload(IDEA, 2), generate=generate, count=2)
+    assert result.stopped == ""
+    assert order[0] == "warm"
+    assert order.count("warm") == 1
+    assert order.count("draw") == 2
+
+
+def test_a_picture_check_that_cannot_load_draws_no_frame(tmp_path: Path) -> None:
+    gate = World().gate()
+
+    def warm() -> None:
+        raise SafetyUnavailable("classifier_error")
+
+    gate.warm = warm  # type: ignore[method-assign]
+    drawn: list[int] = []
+
+    def generate(line: str, seed: int, hero: object | None, strength: float | None) -> object:
+        del line, hero, strength
+        drawn.append(seed)
+        return _frame()
+
+    result = _run(tmp_path, age_gate=gate, rewrite=lambda _prompt: _payload(IDEA, 2), generate=generate, count=2)
+    assert drawn == []
+    assert result.stopped == "error"
+    assert result.code == "check.classifier_error"
 
 
 def test_stage_times_report_names_and_seconds_only() -> None:

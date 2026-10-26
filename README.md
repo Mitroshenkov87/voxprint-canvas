@@ -58,7 +58,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File $smoke -Out .\smoke-results       
 
 Without PowerShell 7, run the same lines with `powershell` instead of `pwsh`. A silent Setup uses PowerShell 7 when it is installed and Windows PowerShell 5.1 otherwise; an interactive Setup offers to install PowerShell 7 from Microsoft first.
 
-The script uses the Python the Setup installed (`-Python <python.exe>` picks another one). It verifies the voxprint-common 0.3.1 wheel, downloads the models through VOXPrint MDL, generates five neutral 1024x1024 pictures through the content gate, and times the gate by stage. The results are `smoke-results\result-16gb.json` and `smoke-results\result-24gb.json`. Exit codes: 0 pass, 1 a picture failed, 2 setup (no Python, wheel hash, wrong tier), 3 no GPU, 4 gate unavailable, 5 an MDL download or hash check failed.
+The script uses the Python the Setup installed (`-Python <python.exe>` picks another one). It verifies the voxprint-common 0.4.2 wheel, downloads the models through VOXPrint MDL, generates five neutral 1024x1024 pictures through the content gate, and times the gate by stage. The results are `smoke-results\result-16gb.json` and `smoke-results\result-24gb.json`. Exit codes: 0 pass, 1 a picture failed, 2 setup (no Python, wheel hash, wrong tier), 3 no GPU, 4 gate unavailable, 5 an MDL download or hash check failed.
 
 ## License
 

@@ -11,8 +11,10 @@ from collections.abc import Callable, Sequence
 from typing import Any, Literal, assert_never
 
 from canvas.infra.errors import note_error
+from canvas.infra.stage_timer import log_detail
 from canvas.infra.vram_trace import drop_model, held_modules, hold_model, on_cuda, park_module, resident_summary
-from canvas.models.modes import Tier
+from canvas.models import hot_tier as hot
+from canvas.models.modes import Tier, headroom_gb
 
 # Qwen3-4B is about 8 GB in BF16 and about 4 GB in FP8. The cook budget is the
 # FP8 transformer (about 6.15 GB) plus the VAE (about 0.4 GB). The card stops at 14 GB.
@@ -21,7 +23,9 @@ NEAR_ZERO_BYTES = 512 * 1024**2
 ENCODER_BF16_BYTES = 8 * 1024**3
 ENCODER_FP8_BYTES = 4 * 1024**3
 ENCODER_HEADROOM_BYTES = 1024**3
-COOK_BUDGET_BYTES = int(6.15 * 1024**3) + int(0.4 * 1024**3)
+TRANSFORMER_FP8_BYTES = int(6.15 * 1024**3)
+VAE_WEIGHT_BYTES = int(0.4 * 1024**3)
+COOK_BUDGET_BYTES = TRANSFORMER_FP8_BYTES + VAE_WEIGHT_BYTES
 QUALITY_COSINE = 0.99
 
 HEAVY_STAGES = frozenset({"text_encoder", "cook", "writer", "enhancer", "captioner"})
@@ -85,12 +89,17 @@ def choose_encoder_storage(
 
 
 def begin_stage(name: str, tier: Tier) -> None:
-    """Open a heavy stage. On 16 GB the card is clear and under the cook budget."""
+    """Open a heavy stage. On 16 GB a leftover model is parked, then the budget is checked."""
     _known(name)
     if tier is not Tier.GB16:
         return
+    residual = _snapshot_residual()
+    fits = False
+    if residual:
+        clear_residual(name)
+        fits = _image_fits(residual)
     code = _block_code(name, allocated_bytes(), _other_heavy(name))
-    if code is None:
+    if code is None or (code == "vram.residual" and fits):
         return
     _log(code, name)
     release_residents()
@@ -98,18 +107,111 @@ def begin_stage(name: str, tier: Tier) -> None:
 
 
 def finish_stage(name: str, tier: Tier) -> None:
-    """Close a heavy stage. On 16 GB the card is near zero and the peak stayed at or under 14 GB."""
+    """Close a heavy stage. On 16 GB the stage's VRAM copy is parked before the budget is checked."""
     _known(name)
     if tier is not Tier.GB16:
         return
-    gc.collect()
-    _empty_cache()
+    residual = _snapshot_residual()
+    fits = False
+    if residual:
+        clear_residual(name)
+        fits = _image_fits(residual)
+    else:
+        gc.collect()
+        _empty_cache()
     code = _block_code(name, allocated_bytes(), _other_heavy(""))
-    if code is None:
+    if code is None or (code == "vram.residual" and fits):
         return
     _log(code, name)
     release_residents()
     raise StageBlocked(code)
+
+
+def clear_residual(stage: str) -> None:
+    """Park every VRAM copy left by the previous stage and log what moved.
+
+    A model that is cached in RAM is deactivated even when the trace lost its
+    name. The RAM copy stays.
+    """
+    before = allocated_bytes()
+    named = _snapshot_residual()
+    hot.park_loaded()
+    for _name, module in held_modules():
+        if on_cuda(module):
+            park_module(module)
+    if allocated_bytes() > NEAR_ZERO_BYTES:
+        hot.park_loaded(force=True)
+    gc.collect()
+    _empty_cache()
+    after = allocated_bytes()
+    shown = ",".join(f"{name}:{size}" for name, size in named) or "none"
+    log_detail(
+        "park", "residual", "cpu",
+        f"stage={_token(stage)} before={before} after={after} models={shown}",
+    )
+
+
+def note_image_fit() -> bool:
+    """Log the picture budget on the render path. The line is written even when the card is clear.
+
+    ``begin_stage`` only reached this check when a residual was already on the card,
+    so a clean render logged nothing. This uses the same log writer as the other
+    ``stage`` lines.
+    """
+    span = _cuda_span()
+    free, total = span if span is not None else (0, 0)
+    return decide_image_fit(
+        free_bytes=free,
+        total_bytes=total,
+        models=(
+            ("transformer", TRANSFORMER_FP8_BYTES, "float8_e4m3fn"),
+            ("vae", VAE_WEIGHT_BYTES, "bfloat16"),
+        ),
+        residuals=_snapshot_residual(),
+    )
+
+
+def decide_image_fit(
+    *,
+    free_bytes: int,
+    total_bytes: int,
+    models: Sequence[tuple[str, int, str]],
+    residuals: Sequence[tuple[str, int]] = (),
+    park: Callable[[], int] | None = None,
+) -> bool:
+    """True when the FP8 transformer and the VAE fit in free VRAM after residuals are parked.
+
+    ``free_bytes`` is driver free memory, not the reserved pool and not
+    ``14 GB - allocated``. A BF16 byte count for the transformer or the text
+    encoder is billed at its FP8 size. A residual is parked first and is not
+    added to the bytes the image needs. Models that stay in RAM are omitted
+    by the caller. The line records free, total, each billed model and its
+    dtype, the residuals, and the headroom.
+    """
+    leftover = tuple((str(name), max(0, int(size))) for name, size in residuals)
+    free = max(0, int(free_bytes))
+    if park is not None and leftover:
+        refreshed = park()
+        if isinstance(refreshed, int) and not isinstance(refreshed, bool):
+            free = max(0, refreshed)
+    parked_names = {name for name, _size in leftover}
+    billed: list[tuple[str, int, str]] = []
+    for name, nbytes, dtype in models:
+        if name in parked_names:
+            continue
+        size, assumed = _assumed_storage(name, int(nbytes), str(dtype))
+        billed.append((_token(name), size, assumed))
+    needed = sum(size for _name, size, _dtype in billed)
+    total = max(0, int(total_bytes))
+    headroom = int(headroom_gb(total / (1024**3)) * (1024**3)) if total else 0
+    ok = needed > 0 and needed + headroom <= free
+    needed_text = ",".join(f"{name}:{size}:{dtype}" for name, size, dtype in billed) or "none"
+    residual_text = ",".join(f"{name}:{size}" for name, size in leftover) or "none"
+    log_detail(
+        "fit", "budget", "cuda" if free else "cpu",
+        f"free={free} total={total} needed={needed_text} residual={residual_text} headroom={headroom}",
+    )
+    return ok
 
 
 def admit(name: str, module: object, tier: Tier) -> None:
@@ -182,6 +284,90 @@ def peak_bytes() -> int:
         return int(fn())
     except (TypeError, RuntimeError):
         return allocated_bytes()
+
+
+def _snapshot_residual() -> tuple[tuple[str, int], ...]:
+    """CUDA models still resident, or one untracked allocation past the idle line."""
+    found: list[tuple[str, int]] = list(hot.cuda_residents())
+    seen = {name for name, _size in found}
+    for name, module in held_modules():
+        if name in seen or not on_cuda(module):
+            continue
+        found.append((name, _module_nbytes(module)))
+        seen.add(name)
+    if not found and allocated_bytes() > NEAR_ZERO_BYTES:
+        found.append(("untracked", allocated_bytes()))
+    return tuple(found)
+
+
+def _image_fits(residuals: Sequence[tuple[str, int]]) -> bool:
+    """Whether an FP8 transformer and the VAE fit in free VRAM. False when free is unknown."""
+    span = _cuda_span()
+    if span is None:
+        return False
+    free, total = span
+    return decide_image_fit(
+        free_bytes=free,
+        total_bytes=total,
+        models=(
+            ("transformer", TRANSFORMER_FP8_BYTES, "float8_e4m3fn"),
+            ("vae", VAE_WEIGHT_BYTES, "bfloat16"),
+        ),
+        residuals=residuals,
+        park=None,
+    )
+
+
+def _assumed_storage(name: str, nbytes: int, dtype: str) -> tuple[int, str]:
+    """FP8 storage for the transformer and text encoder. Other models keep the given size."""
+    label = dtype.lower()
+    fp8 = "float8" in label or "fp8" in label
+    wide = "bf16" in label or "bfloat16" in label or label in {"float16", "fp16"}
+    if name in {"transformer", "text_encoder"} and wide and not fp8:
+        return max(1, nbytes // 2), "float8_e4m3fn"
+    return max(0, nbytes), _dtype_token(dtype)
+
+
+def _dtype_token(dtype: str) -> str:
+    cleaned = "".join(char if char.isalnum() or char in "._" else "_" for char in dtype)
+    return cleaned[:40] or "unknown"
+
+
+def _token(name: str) -> str:
+    cleaned = "".join(char if char.isalnum() or char == "_" else "_" for char in name.lower())
+    if not cleaned or not cleaned[0].isalpha():
+        cleaned = "model"
+    return cleaned[:32]
+
+
+def _module_nbytes(module: object) -> int:
+    total = 0
+    for getter in ("parameters", "buffers"):
+        items = getattr(module, getter, None)
+        if not callable(items):
+            continue
+        try:
+            for tensor in items():
+                total += int(getattr(tensor, "nbytes", 0) or 0)
+        except (TypeError, RuntimeError):
+            continue
+    return total
+
+
+def _cuda_span() -> tuple[int, int] | None:
+    """Driver free and total bytes. None when this process cannot ask the card."""
+    torch = _torch()
+    if torch is None:
+        return None
+    cuda = getattr(torch, "cuda", None)
+    info = getattr(cuda, "mem_get_info", None)
+    if not callable(info):
+        return None
+    try:
+        free, total = info()
+    except (TypeError, RuntimeError):
+        return None
+    return int(free), int(total)
 
 
 def _weights_or_cpu(free_bytes: int | None, need: int) -> Literal["bf16", "cpu"]:

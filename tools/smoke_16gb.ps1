@@ -8,7 +8,7 @@
 #   (no cap, or 0) 24 GB pass: uncapped, on the 24 GB tier path.
 #
 # Steps: find Python (the one the Canvas installer ships, or -Python), fetch and
-# verify the voxprint-common 0.3.1 wheel, download the models through VOXPrint MDL
+# verify the voxprint-common 0.4.2 wheel, download the models through VOXPrint MDL
 # (mdl.json), generate five neutral 1024x1024 pictures through the content gate,
 # then time the gate by stage. Writes <Out>\result-16gb.json or result-24gb.json.
 #
@@ -29,9 +29,9 @@ if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction Sile
 }
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 $Root = Split-Path -Parent $PSScriptRoot
-$CommonVersion = "0.3.1"
-$CommonUrl = "https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.3.1/voxprint_common-0.3.1-py3-none-any.whl"
-$CommonSha = "f14036fc70db07e40e5e5376427cea28c3173a94f1d031997a3259ed0afc91fd"
+$CommonVersion = "0.4.2"
+$CommonUrl = "https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.4.2/voxprint_common-0.4.2-py3-none-any.whl"
+$CommonSha = "c2125adf7f935c99865d437f51dd32cef36a3f3c5b7b251084ef51b6769bea41"
 $Installed = Join-Path $env:ProgramFiles "VOXPrint AI Suite\Canvas\venv\Scripts\python.exe"
 
 if ($Python -eq "") { $Python = $Installed }
@@ -48,11 +48,11 @@ $Out = (Resolve-Path -LiteralPath $Out).Path
 Write-Host "Python: $Python"
 Write-Host "Pass: $Pass"
 
-# voxprint-common 0.3.1: fetch, verify, and use it when the interpreter has another version.
+# voxprint-common 0.4.2: fetch, verify, and use it when the interpreter has another version.
 $Work = Join-Path $Out ".smoke-work"
 $Lib = Join-Path $Work "lib"
 New-Item -ItemType Directory -Force -Path $Work | Out-Null
-$Wheel = Join-Path $Work "voxprint_common-0.3.1-py3-none-any.whl"
+$Wheel = Join-Path $Work "voxprint_common-0.4.2-py3-none-any.whl"
 try {
     Invoke-WebRequest -Uri $CommonUrl -OutFile $Wheel -UseBasicParsing
 } catch {

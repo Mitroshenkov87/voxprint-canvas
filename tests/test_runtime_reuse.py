@@ -242,7 +242,7 @@ def test_a_tier_or_model_change_loads_again(tmp_path: Path, monkeypatch) -> None
     assert places == [Tier.GB16, Tier.GB24, Tier.GB24]
 
 
-def test_an_error_releases_the_pipeline(tmp_path: Path, monkeypatch) -> None:
+def test_an_error_keeps_the_ram_copy(tmp_path: Path, monkeypatch) -> None:
     loads, _places = _install(monkeypatch, fail_on_call=2)
     monkeypatch.setattr(runtime, "system_ram_bytes", lambda: _GB64)
     gate = World().gate()
@@ -252,10 +252,10 @@ def test_an_error_releases_the_pipeline(tmp_path: Path, monkeypatch) -> None:
         with pytest.raises(RuntimeError):
             _render(gate, folder, IDEA, None)
         _render(gate, folder, IDEA, None)
-    assert loads[0] == 2
+    assert loads[0] == 1
 
 
-def test_the_writer_load_releases_the_pipeline(tmp_path: Path, monkeypatch) -> None:
+def test_the_writer_drops_vram_and_keeps_the_ram_copy(tmp_path: Path, monkeypatch) -> None:
     loads, _places = _install(monkeypatch)
     monkeypatch.setattr(runtime, "system_ram_bytes", lambda: _GB64)
     gate = World().gate()
@@ -267,7 +267,36 @@ def test_the_writer_load_releases_the_pipeline(tmp_path: Path, monkeypatch) -> N
     with pytest.raises((FileNotFoundError, ImportError, SnapshotError)):
         rewriter._load()
     _render(gate, folder, IDEA, None)
-    assert loads[0] == 2
+    assert loads[0] == 1
+
+
+def test_a_second_series_does_not_read_parked_weights(tmp_path: Path, monkeypatch) -> None:
+    loads, _places = _install(monkeypatch)
+    monkeypatch.setattr(runtime, "system_ram_bytes", lambda: _GB64)
+    gate = World().gate()
+
+    def draw(line: str, seed: int, hero, strength: float):
+        del seed, strength
+        found = hero if isinstance(hero, RawImage) else None
+        return _render(gate, tmp_path / "weights", line, found)
+
+    for _series in range(2):
+        result = run_series(
+            idea=IDEA,
+            count=1,
+            style="photo",
+            place_mode="same",
+            seed=3,
+            strength=None,
+            include_camera=lambda: True,
+            rewrite=lambda _prompt: _payload(IDEA, 1),
+            age_gate=gate,
+            draw_frame=draw,
+            cancelled=lambda: False,
+            folder=tmp_path / "series",
+        )
+        assert result.stopped == ""
+    assert loads[0] == 1
 
 
 def test_the_window_does_not_keep_the_pipeline_between_runs(tmp_path: Path, monkeypatch) -> None:
@@ -295,11 +324,11 @@ def test_a_release_from_another_thread_waits_for_the_picture(tmp_path: Path, mon
     seen: list[str] = []
     real_timed = runtime._timed
 
-    def slow_timed(pipe, **kwargs):
+    def slow_timed(pipe, torch, **kwargs):
         started.set()
         go_on.wait(5)
         seen.append("drawn")
-        return real_timed(pipe, **kwargs)
+        return real_timed(pipe, torch, **kwargs)
 
     monkeypatch.setattr(runtime, "_timed", slow_timed)
 

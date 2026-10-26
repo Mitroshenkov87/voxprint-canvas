@@ -2,7 +2,7 @@
 
 The index is fetched with its detached ``index.json.sig`` and accepted only when
 the Ed25519 signature verifies against the Model Forge key bundled in
-voxprint-common 0.3.1 and its serial is not older than the index bundled there
+voxprint-common 0.4.2 and its serial is not older than the index bundled there
 (no rollback). Each descriptor is then checked against the signed index digest,
 and every file in mdl.json must match its descriptor by path, size and SHA-256.
 mdl.json keeps those explicit hashes. In the FP32 ``-upstream`` fallback rows, the

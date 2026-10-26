@@ -1,14 +1,16 @@
 """Run one Photoshoot series: prep every frame, cook them, then check them.
 
-Prep writes the scenario and reviews every prompt, then unloads those models.
-Cook loads the picture pipeline once and draws every frame. The output check
-runs after that pipeline is gone. A frame is written only after it passes.
+Prep writes the scenario and reviews every prompt, then drops those models
+from VRAM. Cook loads the picture pipeline once and draws every frame. The
+output check runs after the pipeline leaves the GPU. RAM copies stay when the
+tier keeps them. A frame is written only after it passes.
 """
 from __future__ import annotations
 
 import json
 import threading
 import struct
+import time
 import zipfile
 import zlib
 from collections.abc import Callable
@@ -20,12 +22,13 @@ from canvas.app.i18n import text
 from canvas.app.shell_run import RunStopped
 from canvas.core.formats import OutputFormat, extension, save_image
 from canvas.infra.errors import note_crash, note_debug, note_error, note_timing
-from canvas.infra.stage_timer import StageTimes, note_peak_mib, set_current, timed
+from canvas.infra.stage_timer import StageTimes, log_detail, note_peak_mib, set_current, timed
 from canvas.infra.vram import peak_allocated_bytes
-from canvas.models.runtime import clear_series_embeds, pipeline_scope, release_pipeline
+from canvas.models import hot_tier as hot
+from canvas.models.runtime import clear_series_embeds, park_pipeline, pipeline_scope
 from canvas.pipeline.device_guard import DeviceRefused
 from canvas.pipeline.enhance import mask_numbers, stated_ages
-from canvas.pipeline.gpu_release import release_gate_weights
+from canvas.pipeline.gpu_release import release_cuda_cache, release_gate_weights
 from canvas.pipeline.adult_direction import ages_allowed, with_adult_anchor, youth_cues
 from canvas.pipeline.photoshoot import (
     FORMAT_REMINDER,
@@ -157,6 +160,7 @@ def _run_series(
     adult: bool, container: OutputFormat | None, clock: StageTimes, own_clock: bool,
     noted: list[bool],
 ) -> SeriesResult:
+    hot.note_tier()
     gate = SerialGate.wrap(age_gate)
     if place_mode == "same":
         mode: PlaceMode = "same"
@@ -167,9 +171,16 @@ def _run_series(
     request = scenario_request(idea, count, style, mode, adult=adult)
     if request is None:
         return _stop("scenario", "", "scenario.format")
-    reason = _refuse_prompt(gate, idea)
-    # The writer needs the GPU to itself. Anything the check put on the card is dropped first.
-    release_gate_weights(gate)
+    # The prompt check and the picture checks are the long SSD reads. They are
+    # measured so a multi-minute load writes heartbeats, including when pythonw
+    # has no stderr. The picture checks stay in RAM; a frame only moves them.
+    with clock.measure("prep"):
+        reason = _refuse_prompt(gate, idea)
+        warm_error = None if reason else _warm_image_checks(gate)
+        # The writer needs the GPU to itself. Anything the check put on the card is dropped first.
+        release_gate_weights(gate)
+    if warm_error is not None:
+        return _stop("error", warm_error.user_message, f"check.{warm_error.code}")
     if reason:
         return _stop("idea", reason, "idea.policy")
     if adult and not ages_allowed(idea):
@@ -179,9 +190,12 @@ def _run_series(
     # loosely enough that the pose can still change.
     series_strength = REFERENCE_STRENGTH if strength is None and appearance else strength
     with clock.measure("scenario"):
-        scenario, fail_code, source = _scenario(
-            idea, count, style, mode, rewrite, adult=adult, appearance=appearance,
-        )
+        try:
+            scenario, fail_code, source = _scenario(
+                idea, count, style, mode, rewrite, adult=adult, appearance=appearance,
+            )
+        finally:
+            hot.deactivate("writer")
     if scenario is None or len(scenario.shots) < count:
         return _stop("scenario", "", fail_code if scenario is None else "scenario.count")
     lines = [
@@ -229,7 +243,7 @@ def _run_series(
                 accepted, series_strength, draw_frame, cancelled, clock, blocked, on_status,
             )
         finally:
-            release_pipeline()
+            park_pipeline()
             clear_series_embeds()
         release_gate_weights(gate)
         check_code, check_reason, ending = _review_frames(
@@ -392,9 +406,14 @@ def _review_frames(
     check_reason = ""
     ending: str | None = None
     for item in drawn:
-        with clock.measure("output_check"):
-            with timed("check"):
-                released, refusal = _released_frame(gate, item.image, item.line)
+        try:
+            with clock.measure("output_check"):
+                with timed("check"):
+                    _release_check_cache()
+                    released, refusal = _released_frame(gate, item.image, item.line)
+        finally:
+            # The check has finished. Its weights leave VRAM before this frame is written.
+            release_gate_weights(gate)
         if released is None:
             blocked.append(item.index)
             _status(on_status, item.index, "blocked")
@@ -480,6 +499,23 @@ def _with_idea(idea: str, line: str) -> str:
     return f"{idea}\n{line}"
 
 
+def _warm_image_checks(gate: AgeGate) -> SafetyUnavailable | None:
+    """Load the picture checks into RAM. A frame then only moves them.
+
+    The first output check was paying the SSD read. These models stay in the
+    RAM tier, so prep does that read once. A load that fails stops the series
+    before a frame is drawn: the check would have stopped it later.
+    """
+    warm = getattr(gate, "warm", None)
+    if not callable(warm):
+        return None
+    try:
+        warm()
+    except SafetyUnavailable as exc:
+        return exc
+    return None
+
+
 def _refuse_prompt(age_gate: AgeGate, prompt: str) -> str | None:
     """Refuse prompt."""
     return _verdict_message(_prompt_verdict(age_gate, prompt))
@@ -548,6 +584,18 @@ class _Released:
     height: int
     data: bytes
     safe: SafeImage | None
+
+
+def _release_check_cache() -> None:
+    """Return reserved GPU memory before the check asks how much is free.
+
+    A decode that finished with a full reservation makes the device query wait.
+    This is placement: the check still loads the same models and uses the same rule.
+    """
+    started = time.perf_counter()
+    released = release_cuda_cache()
+    elapsed = max(0, int((time.perf_counter() - started) * 1000))
+    log_detail("check_cache", "empty", "cuda" if released else "cpu", f"ms={elapsed}")
 
 
 def _released_frame(

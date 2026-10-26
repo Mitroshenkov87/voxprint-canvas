@@ -13,6 +13,7 @@ import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 
+import psutil
 from voxprint_common.paths import logs_dir
 
 from canvas.infra.vram_trace import note_vram
@@ -20,6 +21,8 @@ from canvas.infra.vram_trace import note_vram
 _NAME = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
 # A long stage prints this often so a stall is visible without waiting for the end line.
 HEARTBEAT_S = 30.0
+_LOG_LOCK = threading.Lock()
+_LOG_TRIES = 5
 
 
 class StageTimes:
@@ -157,29 +160,95 @@ def log_stage(
     _write_stage(stage, event, device, vram, suffix)
 
 
+def log_detail(stage: str, event: str, device: str, suffix: str = "") -> None:
+    """Write one stage line with an extra suffix. RAM and VRAM are included."""
+    _device, vram = _device_and_vram()
+    _write_stage(stage, event, device, vram, suffix)
+
+
+@contextmanager
+def beat_while(stage: str) -> Iterator[None]:
+    """Write heartbeats for one block, including when no ``StageTimes`` is current.
+
+    The Photoshoot entry loads the prompt check before it opens a measured
+    stage, and the window warms the same models on a side thread. Both run
+    under ``pythonw``, whose stderr is ``None``. This uses the same log writer
+    as ``StageTimes.measure``.
+    """
+    if not _NAME.match(stage):
+        yield
+        return
+    stop = threading.Event()
+    beater = threading.Thread(target=_heartbeat, args=(stage, stop), name=f"stage-{stage}", daemon=True)
+    beater.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        beater.join(timeout=1)
+
+
 def _heartbeat(stage: str, stop: threading.Event) -> None:
-    """Print and log a line every ``HEARTBEAT_S`` until the stage ends."""
+    """Write a heartbeat to the log every ``HEARTBEAT_S`` until the stage ends.
+
+    ``pythonw`` has no stderr. A print there used to kill this thread after the
+    first wait, so the log never grew. A Windows sharing violation on the log
+    file is retried inside ``_write_stage``. A later failure in the device read
+    must not kill the thread either: the next wait still writes.
+    """
     delay = HEARTBEAT_S if HEARTBEAT_S > 0 else 30.0
     while not stop.wait(delay):
-        device, vram = _device_and_vram()
-        _write_stage(stage, "beat", device, vram)
-        print(f"stage {stage} beat device={device} vram_mib={vram}", file=sys.stderr, flush=True)
+        try:
+            device, vram = _device_and_vram()
+            _write_stage(stage, "heartbeat", device, vram)
+            _echo_heartbeat(stage, device, vram)
+        except Exception:
+            continue
+
+
+def _echo_heartbeat(stage: str, device: str, vram: int) -> None:
+    stream = sys.stderr
+    if stream is None:
+        return
+    try:
+        print(f"stage {stage} heartbeat device={device} vram_mib={vram}", file=stream, flush=True)
+    except (AttributeError, OSError, ValueError, RuntimeError):
+        return
 
 
 def _write_stage(stage: str, event: str, device: str, vram: int, suffix: str = "") -> None:
     if not _NAME.match(stage) or not _NAME.match(event):
         return
     kind = device if device in {"cuda", "cpu", "none"} else "none"
-    line = f"stage {stage} {event} device={kind} vram_mib={max(0, int(vram))}"
+    line = (
+        f"stage {stage} {event} device={kind} "
+        f"vram_mib={max(0, int(vram))} ram_mib={_ram_mib()}"
+    )
     if suffix:
         line = f"{line} {suffix}"
+    for attempt in range(_LOG_TRIES):
+        try:
+            with _LOG_LOCK:
+                folder = logs_dir()
+                folder.mkdir(parents=True, exist_ok=True)
+                with (folder / "voxprint.log").open("a", encoding="utf-8") as handle:
+                    handle.write(line + "\n")
+                    handle.flush()
+            return
+        except PermissionError:
+            if attempt + 1 == _LOG_TRIES:
+                return
+            time.sleep(0.02 * (attempt + 1))
+        except OSError:
+            return
+
+
+def _ram_mib() -> int:
+    """RAM in use, in MiB. A failed read logs zero."""
     try:
-        folder = logs_dir()
-        folder.mkdir(parents=True, exist_ok=True)
-        with (folder / "voxprint.log").open("a", encoding="utf-8") as handle:
-            handle.write(line + "\n")
-    except OSError:
-        return
+        return max(0, int(psutil.virtual_memory().used) // (1024 * 1024))
+    except (OSError, AttributeError, ValueError, TypeError):
+        return 0
 
 
 def _device_and_vram() -> tuple[str, int]:

@@ -39,6 +39,42 @@ def require_cuda(module: Any, reason: str, torch: Any | None = None) -> None:
             raise DeviceRefused()
 
 
+def weights_on_cuda(module: Any) -> bool:
+    """True when every parameter already lives on CUDA.
+
+    A module with no parameters is not on CUDA. Callers then use ``to``, which
+    is how a test double records the move.
+    """
+    parameters = _parameters(module)
+    if not parameters:
+        return False
+    return all(_device_type(param) == "cuda" for param in parameters)
+
+
+def pretrained_attempts(dtype: object, device: str) -> tuple[dict[str, Any], ...]:
+    """``from_pretrained`` keyword sets, first match wins.
+
+    CUDA uses an explicit device map so safetensors can map the file onto the
+    card. ``device_map="auto"`` is not one of them: that map left the weights
+    on the CPU. ``low_cpu_mem_usage`` keeps the loader from copying the whole
+    file into a second buffer. A loader that rejects ``device_map`` is retried
+    without it.
+    """
+    if device != "cuda" and device != "cpu":
+        raise ValueError(f"unknown device {device}")
+    common: dict[str, Any] = {"local_files_only": True, "low_cpu_mem_usage": True}
+    ordered: list[dict[str, Any]] = []
+    if device == "cuda":
+        cuda_map = {"": "cuda"}
+        ordered.append({**common, "torch_dtype": dtype, "device_map": cuda_map})
+        ordered.append({**common, "dtype": dtype, "device_map": cuda_map})
+    ordered.append({**common, "torch_dtype": dtype, "device_map": None})
+    ordered.append({**common, "dtype": dtype, "device_map": None})
+    ordered.append({**common, "torch_dtype": dtype})
+    ordered.append({**common, "dtype": dtype})
+    return tuple(ordered)
+
+
 def place_on_cuda(module: Any) -> Any:
     """Move parameters onto CUDA one tensor at a time.
 

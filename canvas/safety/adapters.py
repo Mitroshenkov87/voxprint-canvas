@@ -1,12 +1,16 @@
 """Classifier adapters."""
 import math
+import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 import numpy as np
 from PIL import Image
 
-from canvas.infra.stage_timer import log_stage, note_tag
+from canvas.infra.stage_timer import log_detail, log_stage, note_tag
+from canvas.infra.vram_trace import on_cuda
+from canvas.models.hot_tier import activate, cached, deactivate, note_ssd, remember, retained
 from canvas.models.pins import REPO_AGE, REPO_AGE_FINE, REPO_GUARD, REPO_NSFW, REPO_SIGLIP, REPO_YUNET
 from canvas.safety.classifiers import Face, GuardVerdict
 from canvas.safety.gate import SafetyUnavailable
@@ -17,6 +21,10 @@ from canvas.safety.image import RawImage
 # any other error still stops the request.
 GENERATOR_RESERVE_BYTES = 12 * 1024**3
 GATE_HEADROOM_BYTES = 768 * 1024**2
+# Allocator slack past the bytes this process already counted for its own
+# check weights. A few hundred MiB is not the picture generator, and treating
+# it as one applies the 12 GB reserve to a card that only holds the check.
+RESERVE_SLACK_BYTES = 512 * 1024**2
 _gate_cuda_bytes = 0
 
 
@@ -28,6 +36,25 @@ def _module_bytes(model: Any) -> int:
             for tensor in items():
                 total += int(tensor.numel()) * int(tensor.element_size())
     return total
+
+
+def _cached_module_bytes(owner: Any, model: Any) -> tuple[int, int]:
+    """Byte size of ``model``, and how many milliseconds the measurement took.
+
+    The size does not change when the same weights move between CPU and CUDA.
+    A later placement of the same object reuses the first measurement.
+    """
+    started = time.perf_counter()
+    cached = getattr(owner, "_weight_bytes", None)
+    if isinstance(cached, int) and not isinstance(cached, bool) and getattr(owner, "_weight_bytes_id", None) == id(model):
+        return cached, max(0, int((time.perf_counter() - started) * 1000))
+    measured = _module_bytes(model)
+    try:
+        owner._weight_bytes = measured
+        owner._weight_bytes_id = id(model)
+    except (AttributeError, TypeError):
+        pass
+    return measured, max(0, int((time.perf_counter() - started) * 1000))
 
 
 def gate_device(need_bytes: int) -> str:
@@ -44,10 +71,11 @@ def gate_device(need_bytes: int) -> str:
         if not torch.cuda.is_available():
             return "cpu"
         free, _total = torch.cuda.mem_get_info()
-        generator_now = max(0, int(torch.cuda.memory_reserved()) - _gate_cuda_bytes)
+        reserved = int(torch.cuda.memory_reserved())
+        generator_now = max(0, reserved - _gate_cuda_bytes)
     except (RuntimeError, AssertionError):
         return "cpu"
-    if generator_now == 0:
+    if generator_now <= RESERVE_SLACK_BYTES:
         still_needed = 0
     else:
         still_needed = max(0, GENERATOR_RESERVE_BYTES - generator_now)
@@ -83,15 +111,26 @@ class _Placed:
 
     def _place(self, model: Any) -> Any:
         global _gate_cuda_bytes
-        need = _module_bytes(model)
+        need, bytes_ms = _cached_module_bytes(self, model)
         forced = getattr(self, "_forced", None)
+        started = time.perf_counter()
         device = gate_device(need) if forced is None else forced
+        if forced is None:
+            query_ms = max(0, int((time.perf_counter() - started) * 1000))
+            kind = "cuda" if "cuda" in str(device) else "cpu"
+            log_detail("check_query", "vram", kind, f"ms={query_ms} bytes_ms={bytes_ms} bytes={need}")
         if device == "cpu":
-            self.device = "cpu"
+            if self.device == "cuda" or on_cuda(model):
+                self._model = model
+                self._to_cpu()
+            else:
+                self.device = "cpu"
             _remember_check_device("cpu")
-            return model
+            parked = self._model if self._model is not None else model
+            return parked
+        started = time.perf_counter()
         try:
-            moved = model.to(device)
+            moved = self._to_device(model, device)
         except Exception as exc:
             if not _device_error(exc):
                 raise
@@ -99,15 +138,30 @@ class _Placed:
             _empty_cuda_cache()
             _remember_check_device("cpu")
             return model.to("cpu")
+        _log_check_move(device, need, started)
         self.device = device
         self._cuda_bytes = need
+        # The same byte count as a real copy, including when the weights were
+        # already on the device. Later gate_device choices stay the same.
         _gate_cuda_bytes += need
         _remember_check_device(device)
         return moved
 
+    def _to_device(self, model: Any, device: str) -> Any:
+        """Copy onto ``device``. A model already there, or a pinned RAM copy, skips the pageable path."""
+        if _fully_on_device(model, device):
+            return model
+        name = getattr(self, "_park_name", "")
+        if isinstance(name, str) and retained(name) and activate(name, device, blocking=True):
+            return model
+        return model.to(device)
+
     def _to_cpu(self) -> None:
         global _gate_cuda_bytes
-        if self._model is not None:
+        name = getattr(self, "_park_name", "")
+        if isinstance(name, str) and retained(name):
+            deactivate(name)
+        elif self._model is not None:
             self._model = self._model.to("cpu")
         _gate_cuda_bytes = max(0, _gate_cuda_bytes - self._cuda_bytes)
         self._cuda_bytes = 0
@@ -115,19 +169,83 @@ class _Placed:
         _empty_cuda_cache()
 
     def release(self) -> None:
-        """Drop loaded weights so the picture model can use the GPU. The next check loads them again."""
+        """Drop the VRAM copy so the picture model can use the GPU.
+
+        A tier that keeps this check leaves the RAM weights, in their current
+        dtype, for the rest of the session. The pinned park is the copy that
+        stays; a pageable ``.to("cpu")`` is not taken on that path.
+        """
+        name = getattr(self, "_park_name", "")
         self._to_cpu()
-        self._model = None
+        if not isinstance(name, str) or not retained(name):
+            if isinstance(name, str) and name:
+                deactivate(name)
+            self._model = None
+
+    def _held(self, name: str) -> bool:
+        """True when this instance already holds the model. It is put on its device again."""
+        self._park_name = name
+        if self._model is None:
+            return False
+        self._model = self._place(self._model)
+        return True
+
+    def _take(self, name: str, build: Callable[[], Any]) -> None:
+        """Load ``name`` from RAM when the session kept it, otherwise from ``build``."""
+        self._park_name = name
+        found = cached(name)
+        if found is None:
+            started = time.perf_counter()
+            found = build()
+            note_ssd(name, found, started)
+            remember(name, found)
+        self._model = self._place(found)
 
     def _checked(self, run: Any) -> Any:
         """Run one check. A device error moves the model to the CPU and runs the same check again."""
+        started = time.perf_counter()
         try:
+            try:
+                return run()
+            except Exception as exc:
+                if self.device == "cpu" or not _device_error(exc):
+                    raise
+            self._to_cpu()
             return run()
-        except Exception as exc:
-            if self.device == "cpu" or not _device_error(exc):
-                raise
-        self._to_cpu()
-        return run()
+        finally:
+            elapsed = max(0, int((time.perf_counter() - started) * 1000))
+            kind = "cuda" if "cuda" in str(self.device) else "cpu"
+            log_detail("check", "infer", kind, f"ms={elapsed}")
+
+
+def _log_check_move(device: str, need: int, started: float) -> None:
+    """One placement, in milliseconds. This is the cost the output check was paying."""
+    elapsed = max(0, int((time.perf_counter() - started) * 1000))
+    kind = "cuda" if "cuda" in str(device) else "cpu"
+    log_detail("check", "move", kind, f"ms={elapsed} bytes={max(0, int(need))}")
+
+
+def _fully_on_device(model: Any, device: str) -> bool:
+    """True when every parameter and buffer is already on ``device``."""
+    found = False
+    want_cuda = "cuda" in device
+    for getter in ("parameters", "buffers"):
+        items = getattr(model, getter, None)
+        if not callable(items):
+            continue
+        try:
+            tensors = list(items())
+        except (TypeError, RuntimeError):
+            return False
+        for tensor in tensors:
+            found = True
+            dev = getattr(tensor, "device", None)
+            kind = getattr(dev, "type", None)
+            text = kind if isinstance(kind, str) else str(dev)
+            on_cuda_tensor = "cuda" in text
+            if want_cuda != on_cuda_tensor:
+                return False
+    return found
 
 
 def _remember_check_device(device: str) -> None:
@@ -271,6 +389,23 @@ def _rgb(image: RawImage) -> Image.Image:
     return Image.frombytes("RGB", (image.width, image.height), image.to_bytes())
 
 
+_siglip_text: dict[tuple[Any, ...], Any] = {}
+
+
+def _siglip_text_embeds(torch: Any, model: Any, processor: Any, labels: Sequence[str], device: str) -> Any:
+    """Normalised label embeddings. The labels do not change between frames."""
+    key = (id(model), tuple(labels), str(device), str(getattr(model, "dtype", None)))
+    cached = _siglip_text.get(key)
+    if cached is not None:
+        return cached
+    text_inputs = _inputs_to(processor(text=list(labels), padding="max_length", return_tensors="pt"), device)
+    with torch.no_grad():
+        embeds = _pooled_features(model.get_text_features(**text_inputs))
+        embeds = embeds / embeds.norm(dim=-1, keepdim=True)
+    _siglip_text[key] = embeds
+    return embeds
+
+
 def _pooled_features(out: Any) -> Any:
     """Tensor from ``get_*_features``."""
     if hasattr(out, "norm"):
@@ -294,12 +429,13 @@ class Qwen3GuardGen(_Placed):
     def load(self) -> None:
         """Load."""
         folder = _need_folder(self.folder)
-        if self._model is not None:
+        if self._held("prompt_check"):
             return
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
-        self._tokenizer = AutoTokenizer.from_pretrained(folder, local_files_only=True)
-        self._model = self._place(AutoModelForCausalLM.from_pretrained(
+        if self._tokenizer is None:
+            self._tokenizer = AutoTokenizer.from_pretrained(folder, local_files_only=True)
+        self._take("prompt_check", lambda: AutoModelForCausalLM.from_pretrained(
             folder, torch_dtype=torch.float32, local_files_only=True,
         ))
 
@@ -342,11 +478,12 @@ class SiglipZeroShot(_Placed):
     def load(self) -> None:
         """Load."""
         folder = _need_folder(self.folder)
-        if self._model is not None:
+        if self._held("gate_siglip"):
             return
         from transformers import AutoModel, AutoProcessor
-        self._processor = AutoProcessor.from_pretrained(folder, local_files_only=True)
-        self._model = self._place(AutoModel.from_pretrained(folder, local_files_only=True))
+        if self._processor is None:
+            self._processor = AutoProcessor.from_pretrained(folder, local_files_only=True)
+        self._take("gate_siglip", lambda: AutoModel.from_pretrained(folder, local_files_only=True))
 
     def score_text(self, text: str, labels: Sequence[str]) -> dict[str, float]:
         """Score text."""
@@ -373,10 +510,8 @@ class SiglipZeroShot(_Placed):
     ) -> Any:
         model = self._model
         device = self.device
-        text_inputs = _inputs_to(processor(text=label_list, padding="max_length", return_tensors="pt"), device)
         with torch.no_grad():
-            text_embeds = _pooled_features(model.get_text_features(**text_inputs))
-            text_embeds = text_embeds / text_embeds.norm(dim=-1, keepdim=True)
+            text_embeds = _siglip_text_embeds(torch, model, processor, label_list, device)
             if image is not None:
                 image_inputs = _inputs_to(processor(images=_rgb(image), return_tensors="pt"), device)
                 image_embeds = _pooled_features(model.get_image_features(**image_inputs))
@@ -402,6 +537,7 @@ class YuNetFaces:
     def __init__(self, folder: Path | None = None) -> None:
         self.folder = folder
         self._path: Path | None = None
+        self._detector: Any = None
 
     def load(self) -> None:
         """Load."""
@@ -419,7 +555,12 @@ class YuNetFaces:
         import cv2
         pixels = np.frombuffer(image.to_bytes(), dtype=np.uint8).reshape(image.height, image.width, 3)
         bgr = cv2.cvtColor(pixels, cv2.COLOR_RGB2BGR)
-        detector = cv2.FaceDetectorYN.create(str(self._path), "", (image.width, image.height), 0.9, 0.3, 5000)
+        detector = self._detector
+        if detector is None:
+            detector = cv2.FaceDetectorYN.create(str(self._path), "", (image.width, image.height), 0.9, 0.3, 5000)
+            if detector is None:
+                raise SafetyUnavailable("model_not_ready")
+            self._detector = detector
         cv2.utils.logging.setLogLevel(cv2.utils.logging.LOG_LEVEL_ERROR)
         detector.setInputSize((image.width, image.height))
         _retval, faces = detector.detect(bgr)
@@ -446,11 +587,12 @@ class FairFaceAge(_Placed):
     def load(self) -> None:
         """Load."""
         folder = _need_folder(self.folder)
-        if self._model is not None:
+        if self._held("gate_fairface"):
             return
         from transformers import AutoImageProcessor, AutoModelForImageClassification
-        self._processor = AutoImageProcessor.from_pretrained(folder, local_files_only=True)
-        self._model = self._place(AutoModelForImageClassification.from_pretrained(
+        if self._processor is None:
+            self._processor = AutoImageProcessor.from_pretrained(folder, local_files_only=True)
+        self._take("gate_fairface", lambda: AutoModelForImageClassification.from_pretrained(
             folder, local_files_only=True,
         ))
 
@@ -562,7 +704,7 @@ class FaceAgeRegressor(_Placed):
     def load(self) -> None:
         """Load."""
         folder = _need_folder(self.folder)
-        if self._model is not None:
+        if self._held("gate_regressor"):
             return
         import json
 
@@ -584,6 +726,12 @@ class FaceAgeRegressor(_Placed):
         if not isinstance(config, dict):
             raise SafetyUnavailable("model_not_ready")
         scale = regressor_scale(config)
+        found = cached("gate_regressor")
+        if found is not None:
+            self._scale = scale
+            self._park_name = "gate_regressor"
+            self._model = self._place(found)
+            return
         state = load_file(str(weights))
         if not state or not all(key.startswith(_REGRESSOR_PREFIX) for key in state):
             raise SafetyUnavailable("model_not_ready")
@@ -593,7 +741,10 @@ class FaceAgeRegressor(_Placed):
             model.load_state_dict(stripped, strict=True)
         except RuntimeError as exc:
             raise SafetyUnavailable("model_not_ready") from exc
-        self._model = self._place(model.to(dtype=torch.float32).eval())
+        model = model.to(dtype=torch.float32).eval()
+        self._park_name = "gate_regressor"
+        remember("gate_regressor", model)
+        self._model = self._place(model)
         self._scale = scale
 
     def _tensor(self, pixels: np.ndarray, size: int) -> Any:
@@ -647,11 +798,12 @@ class NsfwViT(_Placed):
     def load(self) -> None:
         """Load."""
         folder = _need_folder(self.folder)
-        if self._model is not None:
+        if self._held("gate_nsfw"):
             return
         from transformers import AutoImageProcessor, AutoModelForImageClassification
-        self._processor = AutoImageProcessor.from_pretrained(folder, local_files_only=True)
-        self._model = self._place(AutoModelForImageClassification.from_pretrained(
+        if self._processor is None:
+            self._processor = AutoImageProcessor.from_pretrained(folder, local_files_only=True)
+        self._take("gate_nsfw", lambda: AutoModelForImageClassification.from_pretrained(
             folder, local_files_only=True,
         ))
 
@@ -659,7 +811,12 @@ class NsfwViT(_Placed):
         """Sexual score."""
         self.load()
         import torch
-        inputs = self._processor(images=_rgb(image), return_tensors="pt")
+        started = time.perf_counter()
+        try:
+            inputs = self._processor(images=_rgb(image), return_tensors="pt")
+        finally:
+            elapsed = max(0, int((time.perf_counter() - started) * 1000))
+            log_detail("check_prepare", "image", "cpu", f"ms={elapsed}")
 
         def run() -> Any:
             with torch.no_grad():

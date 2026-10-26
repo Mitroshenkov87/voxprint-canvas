@@ -1,6 +1,8 @@
 """Startup commands. The window itself is not opened here."""
 import json
 import os
+import sys
+import time
 
 from canvas.app.info import RELEASES_API
 from canvas.app.main import main
@@ -13,6 +15,7 @@ from canvas.infra.models_users import read_users
 from canvas.models.modes import Tier
 from canvas.models.registry import load_catalog
 from canvas.models.snapshots import weight_dir
+from canvas.safety.gate import GenerationBlocked
 from canvas.ui.backdrop import apply_backdrop
 
 
@@ -287,3 +290,40 @@ def test_generate_command_refuses_an_unsupported_machine(capsys):
 
 def test_backdrop_is_plain_off_windows():
     assert apply_backdrop(0) == "plain"
+
+
+def test_photoshoot_writes_a_heartbeat_from_the_entry_point(monkeypatch, tmp_path):
+    """pythonw has no stderr. The photoshoot command still heartbeats during prep."""
+    monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
+    monkeypatch.setattr("canvas.infra.stage_timer.HEARTBEAT_S", 0.05)
+    monkeypatch.setattr(sys, "stderr", None)
+    monkeypatch.setattr("canvas.app.main.current_os_check", lambda: OsCheck(True, ""))
+    monkeypatch.setattr("canvas.app.main.check_gpu", lambda _info: GpuCheck(True, "", Tier.GB16))
+    monkeypatch.setattr("canvas.app.main.probe_gpu", lambda: None)
+    monkeypatch.setattr("canvas.app.main.install_supporting", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("canvas.app.main.load_catalog_stack", lambda *_args, **_kwargs: object())
+
+    class _Gate:
+        def review_prompt(self, prompt: str) -> None:
+            time.sleep(0.25)
+            raise GenerationBlocked("prompt")
+
+        def release_weights(self) -> None:
+            return None
+
+    monkeypatch.setattr("canvas.app.main.AgeGate", lambda _stack: _Gate())
+    monkeypatch.setattr("canvas.app.main.model_rewrite", lambda *_args, **_kwargs: (lambda _prompt: _prompt))
+    monkeypatch.setattr("canvas.app.main.model_generate", lambda *_args, **_kwargs: (lambda *_ignored: None))
+    code = main([
+        "photoshoot",
+        "--prompt",
+        "a red cup on a table",
+        "--out",
+        str(tmp_path / "frames"),
+        "--frames",
+        "1",
+        "--json",
+    ])
+    log = (tmp_path / "logs" / "voxprint.log").read_text(encoding="utf-8")
+    assert "stage prep heartbeat" in log
+    assert code == 1

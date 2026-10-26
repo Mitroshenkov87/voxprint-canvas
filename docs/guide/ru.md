@@ -7,7 +7,7 @@
   licence line: Apache-2.0 · © 2026 Aleksandr Mitroshenkov
 Заголовки: "#" = глава, "##" = раздел, "###" = подраздел. Нумерацию ставит сборка.
 Надписи интерфейса взяты дословно из canvas/ui/locales/ru.json, canvas/app/messages.json и каталога
-voxprint-common 0.3.1 и выделены жирным. Снимки экрана: ![подпись](screens/<id>.png), список в screens.md.
+voxprint-common 0.4.2 и выделены жирным. Снимки экрана: ![подпись](screens/<id>.png), список в screens.md.
 Проверенные пометки, которые раньше стояли в HTML-комментариях, закрыты в тексте ниже.
 Структура совпадает с en.md глава в главу.
 -->
@@ -635,7 +635,7 @@ voxprint-canvas-cli photoshoot --prompt "Жёлтый чайник с синей
 | Сообщение | Что сделать |
 |---|---|
 | *uv could not install Python 3.14. Install Python 3.14 from … and run this setup again.* | Установите Python 3.14 по адресу из сообщения и запустите установщик снова |
-| *voxprint-common 0.3.1 failed the SHA-256 check.* | Файл повреждён при загрузке. Проверьте соединение и запустите установщик снова |
+| *voxprint-common 0.4.2 failed the SHA-256 check.* | Файл повреждён при загрузке. Проверьте соединение и запустите установщик снова |
 | *CUDA 13.0 PyTorch is still missing.* | Графические библиотеки не установились. Проверьте соединение и свободное место, затем запустите установщик снова |
 | *Setup stopped because this path contains a link: …* | Папка, в которую пишет установщик, является ссылкой или точкой соединения. Замените её обычной папкой и запустите установщик снова |
 | *VOXPrint AI Canvas could not start its setup script.* | Не удалось запустить PowerShell. Установите PowerShell 7 и запустите установщик снова |

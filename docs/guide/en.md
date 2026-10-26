@@ -7,7 +7,7 @@ Cover metadata (kept in the build script, as in Audiobook Builder's build_manual
   licence line: Apache-2.0 · © 2026 Aleksandr Mitroshenkov
 Headings: "#" = chapter, "##" = section, "###" = sub-section. The build numbers chapters and sections.
 UI labels are written exactly as in canvas/ui/locales/en.json, canvas/app/messages.json and the
-voxprint-common 0.3.1 catalog, in bold. Screenshots: ![caption](screens/<id>.png), listed in screens.md.
+voxprint-common 0.4.2 catalog, in bold. Screenshots: ![caption](screens/<id>.png), listed in screens.md.
 Checked notes that used to sit in HTML comments have been resolved in the text below.
 -->
 
@@ -632,7 +632,7 @@ Open both logs; the last lines name the step that failed.
 | Message | What to do |
 |---|---|
 | *uv could not install Python 3.14. Install Python 3.14 from … and run this setup again.* | Install Python 3.14 from the address in the message, then run Setup again |
-| *voxprint-common 0.3.1 failed the SHA-256 check.* | The download was damaged. Check the connection and run Setup again |
+| *voxprint-common 0.4.2 failed the SHA-256 check.* | The download was damaged. Check the connection and run Setup again |
 | *CUDA 13.0 PyTorch is still missing.* | The graphics libraries did not install. Check the connection and the free space, then run Setup again |
 | *Setup stopped because this path contains a link: …* | A folder Setup writes to is a link or junction. Replace it with a normal folder and run Setup again |
 | *VOXPrint AI Canvas could not start its setup script.* | PowerShell could not be started. Install PowerShell 7 and run Setup again |

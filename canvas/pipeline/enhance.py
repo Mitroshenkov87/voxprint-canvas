@@ -22,6 +22,7 @@ from canvas.pipeline.device_guard import (
     DeviceRefused,
     place_on_cuda,
     pretrained_attempts,
+    reclaim_cuda,
     require_cuda,
     weights_on_cuda,
 )
@@ -30,7 +31,7 @@ from canvas.pipeline.generation_weights import (
     kv_cache_label,
     prepare_generation,
 )
-from canvas.models.adopt import adopt_required
+from canvas.pipeline.writer_decode import GraphDecode, cache_len, try_decode
 from canvas.models.registry import Catalog, ModelSpec
 from canvas.models import hot_tier as hot
 from canvas.models.runtime import park_pipeline
@@ -288,7 +289,6 @@ def open_rewriter(
     if stage not in {"writer", "enhancer"}:
         raise ValueError(f"unknown stage {stage}")
     spec = writer_spec(catalog)
-    adopt_required(root, catalog)
     folder = snapshot_ready(spec, root, process_cache())
     if folder is None:
         if progress is not None:
@@ -329,6 +329,7 @@ class QwenRewriter:
         self._model: Any = None
         self._tokenizer: Any = None
         self._dtype = "bf16"
+        self._graph: GraphDecode | None = None
 
     def rewrite(self, prompt: str) -> str:
         """Generate a rewrite, then unload. The caller can close again."""
@@ -348,6 +349,8 @@ class QwenRewriter:
         """Park the writer and drop its VRAM copy. RAM stays when the tier keeps it."""
         note_vram(self.stage, "before", self._model)
         try:
+            if self._graph is not None:
+                self._graph.invalidate()
             if self._model is not None and not hot.retained("writer"):
                 hot.remember("writer", self._model)
             hot.deactivate("writer")
@@ -380,6 +383,7 @@ class QwenRewriter:
             self.closed = False
             if self.device == "cuda":
                 hot.activate("writer", "cuda")
+            self._capture_decode()
             return
         found = hot.cached("writer")
         if found is not None:
@@ -390,8 +394,11 @@ class QwenRewriter:
             self.closed = False
             if self.device == "cuda":
                 hot.activate("writer", "cuda")
+            self._capture_decode()
             return
         park_pipeline()
+        torch, transformers = _generation_libs()
+        reclaim_cuda(torch)
         if self.tier is Tier.GB16:
             try:
                 begin_stage(self.stage, self.tier)
@@ -399,7 +406,6 @@ class QwenRewriter:
                 raise VramRefused() from exc
         note_vram("writer_load", "before")
         with timed("writer_load"):
-            torch, transformers = _generation_libs()
             config_path = self.encoder_dir / "config.json"
             index_path = self.encoder_dir / "model.safetensors.index.json"
             config = json.loads(config_path.read_text(encoding="utf-8"))
@@ -419,24 +425,19 @@ class QwenRewriter:
                 self.tokenizer_dir, local_files_only=True,
             )
             try:
-                # The session copy is read onto the CPU and cast there, then one
-                # stage copies it RAM to VRAM. ``ram32`` still maps the file
-                # straight onto the card because that tier does not keep RAM.
-                load_on = "cpu" if device == "cuda" and hot.keeps_main_tier() else device
+                # Read the file on the CPU and move one tensor at a time. A
+                # device_map load reserved a second full copy (~16 GB on nvidia-smi)
+                # and the 14 GB check then refused the writer.
+                load_on = "cpu"
                 started_ssd = time.perf_counter()
                 model = _causal_model(transformers, torch, self.encoder_dir, load_on)
                 hot.note_ssd("writer", model, started_ssd)
-                # Layerwise FP8 upcasts every linear on every token. A ~4 GB
-                # FP8 model fits the 16 GB rule as resident BF16. A larger one
-                # gets a real FP8 matmul. Either way the weights sit on the GPU.
+                # One BF16 copy. FP8 is not installed: it kept the original
+                # weights alive next to the cast copy.
                 if device != "cpu" and self.tier is Tier.GB16:
                     with timed("cast"):
-                        chosen, fell_back = prepare_generation(model, torch)
+                        chosen, _fell_back = prepare_generation(model, torch)
                     self._dtype = chosen
-                    if fell_back:
-                        note_error(f"{self.stage}.bf16")
-                    if cuda:
-                        torch.cuda.empty_cache()
                 elif device != "cpu":
                     self._dtype = "bf16"
                 if hot.remember("writer", model):
@@ -449,6 +450,7 @@ class QwenRewriter:
                         model = place_on_cuda(model)
                 if device != "cpu":
                     require_cuda(model, "writer.device", torch)
+                reclaim_cuda(torch)
             except DeviceRefused:
                 raise
             except RuntimeError as exc:
@@ -472,6 +474,19 @@ class QwenRewriter:
             note_vram("writer_load", "after", model)
             if device in {"cpu", "cuda"}:
                 note_tag("writer", device)
+        self._capture_decode()
+
+    def _capture_decode(self) -> None:
+        """Capture the 1-token graph once the weights are on the card."""
+        if self.device != "cuda" or self._model is None:
+            return
+        torch, _transformers = _generation_libs()
+        if self._graph is None or self._graph.model is not self._model:
+            self._graph = GraphDecode(
+                self._model, torch, cache_len(self.max_new_tokens), stage=self.stage,
+            )
+        if self._graph.stale():
+            self._graph.capture()
 
     def _complete(self, prompt: str, system: str) -> str:
         torch, _transformers = _generation_libs()
@@ -491,31 +506,44 @@ class QwenRewriter:
         encoded = tokenizer(templated, return_tensors="pt")
         device = self.device or "cpu"
         encoded = {key: value.to(device) for key, value in encoded.items()}
-        elapsed = 0.0
         count = 0
         kv_cache = kv_cache_label(model)
+        graph_label = "eager"
+        prefill_ms = 0
         with timed("writer_generate"):
             started = time.perf_counter()
-            with torch.inference_mode():
-                # use_cache keeps the KV cache on the GPU. No streamer and no
-                # stopping criterion: those call .item() and stall the card
-                # between tokens. inference_mode keeps autograd off.
-                output = model.generate(
-                    **encoded,
-                    max_new_tokens=self.max_new_tokens,
-                    do_sample=False,
-                    use_cache=kv_cache == "on",
-                )
-            elapsed = time.perf_counter() - started
-            start = int(encoded["input_ids"].shape[-1])
-            count = _generated_count(output, start)
-            reply = str(tokenizer.decode(output[0, start:], skip_special_tokens=True))
-        rate = 0 if elapsed <= 0 else min(1_000_000, int(count / elapsed))
+            decoded = try_decode(model, torch, encoded["input_ids"], self.max_new_tokens, self._graph)
+            if decoded is None:
+                with torch.inference_mode():
+                    # use_cache keeps the KV cache on the GPU. No streamer and no
+                    # stopping criterion: those call .item() and stall the card
+                    # between tokens. inference_mode keeps autograd off.
+                    output = model.generate(
+                        **encoded,
+                        max_new_tokens=self.max_new_tokens,
+                        do_sample=False,
+                        use_cache=kv_cache == "on",
+                    )
+                elapsed = time.perf_counter() - started
+                start = int(encoded["input_ids"].shape[-1])
+                count = _generated_count(output, start)
+                reply = str(tokenizer.decode(output[0, start:], skip_special_tokens=True))
+                rate = 0 if elapsed <= 0 else min(1_000_000, int(count / elapsed))
+                decode_rate = rate
+            else:
+                count = decoded.count
+                prefill_ms = decoded.prefill_ms
+                decode_rate = decoded.decode_tok_s
+                graph_label = decoded.graph
+                reply = str(tokenizer.decode(decoded.ids, skip_special_tokens=True))
+                rate = decode_rate
         note_tag("writer_tps", f"tps{rate}")
         logged = device if device in {"cpu", "cuda"} else "none"
         resident = dtype_label(model, self._dtype)
         log_stage(
-            "writer", "tokens", logged, tokens=count, tok_s=rate, dtype=resident, kv_cache=kv_cache,
+            "writer", "tokens", logged,
+            tokens=count, tok_s=rate, prefill_ms=prefill_ms, decode_tok_s=decode_rate,
+            graph=graph_label, dtype=resident, kv_cache=kv_cache,
         )
         return _visible_reply(reply)
 

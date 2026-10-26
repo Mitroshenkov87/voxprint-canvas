@@ -151,16 +151,24 @@ def note_peak_mib(mib: int) -> None:
 
 def log_stage(
     stage: str, event: str, device: str, *, tokens: int | None = None, tok_s: int | None = None,
-    dtype: str = "", kv_cache: str = "",
+    dtype: str = "", kv_cache: str = "", prefill_ms: int | None = None,
+    decode_tok_s: int | None = None, graph: str = "",
 ) -> None:
     """Write one ``stage`` line. ``device`` is ``cuda``, ``cpu``, or ``none``.
 
-    A writer line carries ``tokens``, ``tok_s``, ``dtype`` and ``kv_cache`` so
-    a slow generate can be told from a resident cache-on generate.
+    A writer line carries ``tokens``, ``tok_s``, ``prefill_ms``, ``decode_tok_s``,
+    ``dtype`` and ``kv_cache``. ``tok_s`` is the decode rate. Prefill is separate
+    so a long prompt is not mistaken for a slow decode.
     """
     parts: list[str] = []
     if tokens is not None and tok_s is not None:
         parts.append(f"tokens={int(tokens)} tok_s={int(tok_s)}")
+    if prefill_ms is not None:
+        parts.append(f"prefill_ms={int(prefill_ms)}")
+    if decode_tok_s is not None:
+        parts.append(f"decode_tok_s={int(decode_tok_s)}")
+    if graph:
+        parts.append(f"graph={graph}")
     if dtype:
         parts.append(f"dtype={dtype}")
     if kv_cache:

@@ -15,6 +15,7 @@ from canvas.models.registry import load_catalog
 from canvas.models.verified import process_cache
 from voxprint_common.mdl.catalog import load_manifest
 from canvas.infra import vram_trace
+from canvas.infra.stage_guard import PEAK_LIMIT_BYTES, StageBlocked
 from canvas.infra.stage_timer import StageTimes, set_current
 from canvas.pipeline.device_guard import DeviceRefused
 from canvas.pipeline.enhance import WRITER_ID, QwenRewriter, encoder_names, open_rewriter, turbo_spec, writer_spec
@@ -156,6 +157,7 @@ def _writer_dir(folder: Path) -> Path:
 def _arm_writer(
     monkeypatch, devices: list[str], codes: list[str], *, fail: str, cuda: bool = True,
     ram: int = 32 * 1024**3, calls: list[dict[str, object]] | None = None,
+    peak: dict[str, int] | None = None,
 ) -> None:
     monkeypatch.setattr("canvas.models.runtime.system_ram_bytes", lambda: ram)
     class _Tensor:
@@ -187,6 +189,8 @@ def _arm_writer(
     class _Model:
         def to(self, device: str) -> _Model:
             devices.append(f"to:{device}")
+            if fail == "oom" and "cuda" in str(device):
+                raise RuntimeError("CUDA out of memory")
             return self
 
         def generate(self, **kwargs: object) -> _Output:
@@ -211,6 +215,12 @@ def _arm_writer(
         def empty_cache() -> None:
             return None
 
+        @staticmethod
+        def reset_peak_memory_stats() -> None:
+            # The live copy is one model. The historical reserve is what the 14 GB check reads.
+            if peak is not None and peak["bytes"] > 8 * 1024**3:
+                peak["bytes"] = 8 * 1024**3
+
     class _Torch:
         bfloat16 = "bf16"
         cuda = _Cuda
@@ -229,6 +239,8 @@ def _arm_writer(
     def causal(_transformers: object, _torch: object, folder: Path, device: str) -> _Model:
         del _transformers, _torch, folder
         devices.append(device)
+        if peak is not None:
+            peak["bytes"] = 16 * 1024**3
         if fail == "oom" and device != "cpu":
             raise RuntimeError("CUDA out of memory")
         if fail == "other":
@@ -265,7 +277,7 @@ def test_oom_on_cuda_stops_instead_of_generating_on_cpu(tmp_path: Path, monkeypa
         set_current(previous)
     assert caught.value.code == "device.cpu"
     assert str(caught.value) == text("error.device")
-    assert devices == ["cuda"]
+    assert devices == ["cpu", "to:cuda"]
     assert codes == ["writer.oom"]
     line = clock.log_line()
     assert "writer_fallback" not in line
@@ -279,7 +291,7 @@ def test_a_cuda_writer_records_its_device_without_a_fallback(tmp_path: Path, mon
     folder = _writer_dir(tmp_path / "encoder")
     _arm_writer(monkeypatch, devices, codes, fail="")
     _reply, line = _run_writer(folder)
-    assert devices == ["cuda", "to:cuda"]
+    assert devices == ["cpu", "to:cuda"]
     assert codes == []
     assert "writer=cuda" in line
     assert "writer_load=" in line
@@ -322,15 +334,11 @@ def test_no_cuda_is_a_visible_cpu_fallback(tmp_path: Path, monkeypatch) -> None:
     assert "writer_fallback=nocuda" in line
 
 
-def test_a_16gb_enhancer_logs_bf16_when_fp8_is_missing(tmp_path: Path, monkeypatch) -> None:
+def test_a_16gb_enhancer_stays_bf16(tmp_path: Path, monkeypatch) -> None:
     devices: list[str] = []
     codes: list[str] = []
     folder = _writer_dir(tmp_path / "encoder")
     _arm_writer(monkeypatch, devices, codes, fail="")
-    monkeypatch.setattr(
-        "canvas.pipeline.generation_weights.module_bf16_bytes", lambda _module: 12 * 1024**3,
-    )
-    monkeypatch.setattr("canvas.pipeline.generation_weights.install_fp8_matmul", lambda *_args, **_kwargs: False)
     vram_trace._holders.clear()
     clock = StageTimes()
     previous = set_current(clock)
@@ -342,9 +350,42 @@ def test_a_16gb_enhancer_logs_bf16_when_fp8_is_missing(tmp_path: Path, monkeypat
         rewriter.close()
         vram_trace._holders.clear()
     assert reply.startswith("1.")
-    assert devices[0] == "cuda"
-    assert "to:cuda" in devices
-    assert any(code.startswith("enhancer.bf16") for code in codes)
+    assert devices[0] == "cpu"
+    assert devices.count("to:cuda") == 1
+    assert not any(code.startswith("enhancer.bf16") for code in codes)
+
+
+def test_a_16gb_load_reclaims_the_reserved_peak_before_admit(tmp_path: Path, monkeypatch) -> None:
+    devices: list[str] = []
+    codes: list[str] = []
+    peak = {"bytes": 0}
+    seen: list[int] = []
+    folder = _writer_dir(tmp_path / "encoder")
+    _arm_writer(monkeypatch, devices, codes, fail="", peak=peak)
+    monkeypatch.setattr("canvas.infra.stage_guard.on_cuda", lambda _module: True)
+
+    def guard(stage: str, tier: object) -> None:
+        del stage, tier
+        seen.append(peak["bytes"])
+        if peak["bytes"] > PEAK_LIMIT_BYTES:
+            raise StageBlocked("vram.peak")
+
+    monkeypatch.setattr("canvas.infra.stage_guard.guard_peak", guard)
+    vram_trace._holders.clear()
+    clock = StageTimes()
+    previous = set_current(clock)
+    rewriter = QwenRewriter(folder, folder, device="cuda", tier=Tier.GB16)
+    try:
+        reply = rewriter.complete("ping", system="sys")
+    finally:
+        set_current(previous)
+        rewriter.close()
+        vram_trace._holders.clear()
+    assert reply.startswith("1.")
+    assert devices[0] == "cpu"
+    assert seen
+    assert seen[0] <= PEAK_LIMIT_BYTES
+    assert codes == []
 
 
 def test_writer_generate_stays_on_gpu_with_the_kv_cache(tmp_path: Path, monkeypatch) -> None:
@@ -363,6 +404,8 @@ def test_writer_generate_stays_on_gpu_with_the_kv_cache(tmp_path: Path, monkeypa
     assert "stage writer tokens" in log
     assert "tokens=" in log and "tok_s=" in log
     assert "dtype=bf16" in log and "kv_cache=on" in log
+    assert "prefill_ms=" in log and "decode_tok_s=" in log
+    assert "graph=eager" in log
     assert "device=" in log
 
 

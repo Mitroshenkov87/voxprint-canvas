@@ -4,6 +4,7 @@ A check model is not covered here. Its CPU fallback stays where it is.
 """
 from __future__ import annotations
 
+import gc
 from typing import Any
 
 from canvas.app.i18n import text
@@ -75,6 +76,36 @@ def pretrained_attempts(dtype: object, device: str) -> tuple[dict[str, Any], ...
     return tuple(ordered)
 
 
+def reclaim_cuda(torch: Any) -> None:
+    """Drop a freed reservation and forget the allocator's historical peak.
+
+    A full-module copy can leave a second weight-sized block reserved after
+    the live tensors are the only ones still referenced. The 14 GB check reads
+    that peak, so it is cleared once the reserve is released.
+    """
+    gc.collect()
+    cuda = getattr(torch, "cuda", None)
+    if cuda is None:
+        return
+    try:
+        if not bool(cuda.is_available()):
+            return
+    except (TypeError, RuntimeError):
+        return
+    empty = getattr(cuda, "empty_cache", None)
+    if callable(empty):
+        try:
+            empty()
+        except (TypeError, RuntimeError):
+            pass
+    reset = getattr(cuda, "reset_peak_memory_stats", None)
+    if callable(reset):
+        try:
+            reset()
+        except (TypeError, RuntimeError):
+            pass
+
+
 def place_on_cuda(module: Any) -> Any:
     """Move parameters onto CUDA one tensor at a time.
 
@@ -103,6 +134,8 @@ def place_on_cuda(module: Any) -> Any:
             continue
         if key:
             seen.add(key)
+        if _device_type(target) == "cuda":
+            continue
         mover = getattr(target, "to", None)
         if not callable(mover):
             continue

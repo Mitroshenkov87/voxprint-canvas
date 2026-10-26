@@ -46,24 +46,16 @@ def module_bf16_bytes(module: Any) -> int:
 
 
 def prepare_generation(module: Any, torch: Any) -> tuple[GenerationDtype, bool]:
-    """Drop offload hooks and pick a resident dtype.
+    """Drop offload hooks and keep one resident BF16 copy.
 
-    The bool is True when a real FP8 matmul was required and could not be
-    installed. The weights then stay BF16, which is one cast at load rather
-    than one cast per token. The caller logs that fallback.
+    FP8 is not installed. The per-row torchao path is missing from the pinned
+    build, and keeping the original tensor next to a cast copy put a second
+    set of weights on the card. The bool is always False.
     """
+    del torch
     drop_offload_hooks(module)
-    choice = generation_dtype(module_bf16_bytes(module))
-    if choice == "bf16":
-        _materialize_bf16(module, torch)
-        _freeze(module)
-        return "bf16", False
-    if install_fp8_matmul(module, torch):
-        _freeze(module)
-        return "fp8", False
-    _materialize_bf16(module, torch)
     _freeze(module)
-    return "bf16", True
+    return "bf16", False
 
 
 def drop_offload_hooks(module: Any) -> None:

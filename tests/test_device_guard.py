@@ -93,6 +93,33 @@ def test_place_on_cuda_moves_parameter_data_without_copying_the_module() -> None
     assert module.called is False
 
 
+def test_place_on_cuda_leaves_a_resident_tensor_where_it_is() -> None:
+    calls: list[str] = []
+
+    class _CudaWeight:
+        def __init__(self) -> None:
+            self.device = "cuda"
+
+        def data_ptr(self) -> int:
+            return 7
+
+        def to(self, device: str) -> _CudaWeight:
+            calls.append(device)
+            return self
+
+    class _Held:
+        def __init__(self) -> None:
+            self.data = _CudaWeight()
+
+        def parameters(self):
+            yield self
+
+    module = _Held()
+    assert place_on_cuda(module) is module
+    assert module.data.device == "cuda"
+    assert calls == []
+
+
 def test_place_on_cuda_uses_module_to_when_there_are_no_parameters() -> None:
     seen: list[str] = []
 

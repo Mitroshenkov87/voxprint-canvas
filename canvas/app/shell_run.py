@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import NoReturn
+from typing import NoReturn, TypeVar
 
 from PIL import Image
 
@@ -29,12 +29,14 @@ from canvas.pipeline.adult_direction import improve_adult
 from canvas.pipeline.enhance import SYSTEM_PROMPT as ENHANCE_SYSTEM
 from canvas.pipeline.enhance import open_rewriter, resolve_prompt, rewrite_text
 from canvas.pipeline.gpu_release import release_gate_weights
-from canvas.pipeline.engine import run_generator
+from canvas.pipeline.engine import run_generator, run_sampler
 from canvas.pipeline.pipeline import CoolingDown, EnlargeMissing, JobError, Pipeline
 from canvas.safety.gate import AgeGate, SafetyError, SafetyUnavailable, issue_input
 from canvas.safety.image import RawImage, SafeImage
 from canvas.safety.inputs import PendingInput, role_name
 from canvas.ui.shell_layout import PictureJob
+
+_T = TypeVar("_T")
 
 
 class RunStopped(Exception):
@@ -68,6 +70,7 @@ class ShellRunner:
         self.lora_strength: float | None = None
         # A Photoshoot series sets this for the cook pass. A single picture leaves it off.
         self.cook = False
+        self._sampled = False
 
     def precompute(self, prompts: tuple[str, ...]) -> None:
         """Encode every series prompt with the text encoder alone, then unload it.
@@ -99,14 +102,39 @@ class ShellRunner:
         Raises:
             RunStopped: The pipeline refused the picture.
         """
+        def draw() -> RawImage:
+            if self.cook:
+                cooked = self._cook(job, inputs)
+                if cooked is None:
+                    raise InferenceUnavailable("the generator returned no picture")
+                return RawImage(cooked.width, cooked.height, cooked.to_bytes())
+            reviewed = self._through_pipeline(job, inputs)
+            return RawImage(reviewed.width, reviewed.height, reviewed.data)
+
+        return self._guarded(draw)
+
+    def sample(self, job: PictureJob, inputs: tuple[PendingInput, ...]) -> bool:
+        """Sample one series frame and keep its latent. ``__call__`` with the same job decodes it.
+
+        Only the cook pass samples ahead. False means nothing was kept, and the
+        caller draws the frame whole with ``__call__``.
+
+        Raises:
+            RunStopped: The pipeline refused the frame.
+        """
+        if not self.cook:
+            return False
+        return self._guarded(lambda: self._sample(job, inputs))
+
+    def _sample(self, job: PictureJob, inputs: tuple[PendingInput, ...]) -> bool:
+        self._cook(job, inputs, sample=True)
+        return self._sampled
+
+    def _guarded(self, draw: Callable[[], _T]) -> _T:
+        """Run ``draw`` and turn every refusal into ``RunStopped``."""
         try:
             try:
-                if self.cook:
-                    cooked = self._cook(job, inputs)
-                    width, height, pixels = cooked.width, cooked.height, cooked.to_bytes()
-                else:
-                    reviewed = self._through_pipeline(job, inputs)
-                    width, height, pixels = reviewed.width, reviewed.height, reviewed.data
+                return draw()
             except DeviceRefused as exc:
                 _halt(str(exc), exc, exc.code, unavailable=True)
             except SafetyUnavailable as exc:
@@ -138,7 +166,6 @@ class ShellRunner:
                 _halt(str(exc), exc, "internal", unavailable=True)
             except Exception as exc:
                 _halt(text("gate.unavailable"), exc, "internal", unavailable=True)
-            return RawImage(width, height, pixels)
         finally:
             release(lock_path())
 
@@ -158,8 +185,8 @@ class ShellRunner:
             job.prompt, job.mode, inputs, aspect=job.aspect, output=job.output, explicit=job.adult_content,
         )
 
-    def _cook(self, job: PictureJob, inputs: tuple[PendingInput, ...]) -> RawImage:
-        """Draw one series frame. The output check runs after the whole series is drawn."""
+    def _cook(self, job: PictureJob, inputs: tuple[PendingInput, ...], *, sample: bool = False) -> RawImage | None:
+        """Draw one series frame, or only sample it. The output check runs after the series is decoded."""
         packed = tuple(
             (role_name(item.role), item.image.width, item.image.height, item.image.to_bytes())
             for item in inputs
@@ -173,6 +200,9 @@ class ShellRunner:
             generator = self._generator(job)
             frame = frame_size(load_catalog(), "z-image-turbo", "1:1")
             try:
+                if sample:
+                    self._sampled = run_sampler(generator, screened, width=frame.width, height=frame.height)
+                    return None
                 return run_generator(generator, screened, width=frame.width, height=frame.height)
             finally:
                 release(path)

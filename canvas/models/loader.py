@@ -3,8 +3,9 @@
 A missing pin, a missing file or a bad hash refuses the stack. Generation runs
 when the pinned snapshot is already on disk. Downloading is a separate call.
 """
+from collections.abc import Callable
 from pathlib import Path
-from typing import NoReturn, assert_never
+from typing import Any, NoReturn, assert_never
 
 from canvas.app.i18n import text
 from canvas.app.preflight import PreflightFailed, Reason, preflight
@@ -13,7 +14,7 @@ from canvas.models.modes import Mode, Tier
 from canvas.models.pin import PinError, require_pin, verify_file
 from canvas.models.plan import CallPlan, build_plan
 from canvas.models.registry import Catalog, ModelSpec, RegistryError, load_catalog
-from canvas.models.runtime import WeightsLoadError, render
+from canvas.models.runtime import WeightsLoadError, render, sample_latent
 from canvas.models.user_lora import UserLora, resolve_selected
 from canvas.models.snapshots import SnapshotError, fallback_ready, request_download, snapshot_ready
 from canvas.models.verified import VerifiedCache, flush_process_cache, process_cache
@@ -171,6 +172,15 @@ class ZImageGenerator:
 
     def generate(self, screened: ScreenedInput, width: int | None = None, height: int | None = None) -> RawImage:
         """Run the plan when the pinned snapshot is on disk. A 16 GB BF16 job schedules memory first."""
+        return self._draw(render, screened, width, height)
+
+    def sample(self, screened: ScreenedInput, width: int, height: int) -> None:
+        """Sample the frame and keep its latent. ``generate`` with the same input decodes it."""
+        self._draw(sample_latent, screened, width, height)
+
+    def _draw(
+        self, draw: Callable[..., Any], screened: ScreenedInput, width: int | None, height: int | None,
+    ) -> Any:
         if type(screened) is not ScreenedInput:
             raise TypeError("the generator only accepts a ScreenedInput")
         if width is not None and height is not None:
@@ -192,7 +202,7 @@ class ZImageGenerator:
             control_file = _control_file(self.catalog, plan, root, cache)
             lora, lora_strength = self._selected_lora()
             try:
-                return render(
+                return draw(
                     plan, folder, screened, width, height, self.tier,
                     seed=self.seed, control_file=control_file,
                     strength=self.img2img_strength,
@@ -205,7 +215,7 @@ class ZImageGenerator:
                 if fp32 is None or fp32 == folder:
                     request_fp32(spec)
                     raise ModelNotReady(plan, missing=True) from None
-                return render(
+                return draw(
                     plan, fp32, screened, width, height, self.tier,
                     seed=self.seed, control_file=control_file,
                     strength=self.img2img_strength,

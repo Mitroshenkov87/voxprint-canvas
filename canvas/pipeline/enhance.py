@@ -595,6 +595,37 @@ class QwenRewriter:
         return _visible_reply(reply)
 
 
+class WriterSession:
+    """One writer for every scenario chunk of a series.
+
+    Calling the session is one reply. The first call opens the writer, later
+    calls reuse it while it stays on the card, and ``release`` unloads it once.
+    """
+
+    def __init__(
+        self, open_writer: Callable[[int], QwenRewriter], system: str, budget: Callable[[str], int],
+    ) -> None:
+        self._open = open_writer
+        self._system = system
+        self._budget = budget
+        self._writer: QwenRewriter | None = None
+
+    def __call__(self, prompt: str) -> str:
+        """Reply to one scenario request. ``budget`` sets its new-token cap."""
+        budget = self._budget(prompt)
+        if self._writer is None:
+            self._writer = self._open(budget)
+        self._writer.max_new_tokens = budget
+        return self._writer.complete(prompt, system=self._system)
+
+    def release(self) -> None:
+        """Unload the writer. A second call does nothing."""
+        writer = self._writer
+        self._writer = None
+        if writer is not None:
+            writer.close()
+
+
 def _has_resident_tensors(module: Any) -> bool:
     """True when the module exposes a parameter or a buffer."""
     for name in ("parameters", "buffers"):

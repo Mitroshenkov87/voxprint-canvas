@@ -344,6 +344,9 @@ def test_adult_flag_reaches_run_series_and_scenario_system(monkeypatch, tmp_path
     rewrite = seen["rewrite"]
     assert callable(rewrite)
     rewrite("ping")
+    # One writer serves every chunk. The series releases it after the scenario.
+    assert "closed" not in seen
+    rewrite.release()  # type: ignore[attr-defined]
     assert seen["closed"] is True
     system = str(seen["system"])
     assert system.startswith(SYSTEM_PROMPT)

@@ -19,7 +19,7 @@ from canvas.models.modes import Mode, Tier
 from canvas.models.registry import load_catalog
 from canvas.models.runtime import InferenceUnavailable
 from canvas.pipeline.adult_direction import scenario_system
-from canvas.pipeline.enhance import open_rewriter
+from canvas.pipeline.enhance import QwenRewriter, WriterSession, open_rewriter
 from canvas.pipeline.photoshoot import (
     MAX_FRAMES,
     SYSTEM_PROMPT,
@@ -68,7 +68,7 @@ def reject_frames(count: int) -> dict[str, object]:
 
 
 def model_rewrite(tier: Tier, adult: bool) -> Callable[[str], str]:
-    """The local scenario writer. The model stays closed between calls.
+    """The local scenario writer. One session serves every chunk, and the series releases it.
 
     Args:
         tier: The tier chosen for this machine.
@@ -76,18 +76,14 @@ def model_rewrite(tier: Tier, adult: bool) -> Callable[[str], str]:
     """
     catalog = load_catalog()
 
-    def rewrite(prompt: str) -> str:
-        rewriter = open_rewriter(
+    def open_writer(budget: int) -> QwenRewriter:
+        return open_rewriter(
             catalog, tier, models_dir(),
             lambda message: print(message, file=sys.stderr),
-            max_new_tokens=tokens_for_request(prompt),
+            max_new_tokens=budget,
         )
-        try:
-            return rewriter.complete(prompt, system=scenario_system(SYSTEM_PROMPT, adult))
-        finally:
-            rewriter.close()
 
-    return rewrite
+    return WriterSession(open_writer, scenario_system(SYSTEM_PROMPT, adult), tokens_for_request)
 
 
 def model_generate(
@@ -123,7 +119,9 @@ def model_generate(
         except (ImportError, ModelNotReady, InferenceUnavailable):
             return
 
-    def generate(line: str, seed: int, hero: SeriesFrame | None, strength: float | None) -> RawImage | None:
+    def job_for(
+        line: str, seed: int, hero: SeriesFrame | None, strength: float | None,
+    ) -> tuple[PictureJob, tuple[PendingInput, ...]]:
         prompt = _prompt(line)
         negative = frame_negative(", ".join(part for part in (look.negative, policy.negatives) if part))
         mode = Mode.TEXT if hero is None else Mode.RESTYLE
@@ -138,6 +136,10 @@ def model_generate(
         if hero is not None:
             raw = RawImage(hero.width, hero.height, hero.to_bytes())
             fresh = (PendingInput(ImageRole.INIT, raw),)
+        return job, fresh
+
+    def generate(line: str, seed: int, hero: SeriesFrame | None, strength: float | None) -> RawImage | None:
+        job, fresh = job_for(line, seed, hero, strength)
         reset_image_seconds()
         try:
             return runner(job, fresh)
@@ -146,7 +148,22 @@ def model_generate(
             if seconds is not None:
                 note_stage("denoise", seconds)
 
+    def sample(line: str, seed: int, hero: SeriesFrame | None, strength: float | None) -> bool:
+        # A runner without ``sample`` draws each frame whole in the decode pass.
+        sampler = getattr(runner, "sample", None)
+        if not callable(sampler):
+            return False
+        job, fresh = job_for(line, seed, hero, strength)
+        reset_image_seconds()
+        try:
+            return sampler(job, fresh) is True
+        finally:
+            seconds = last_image_seconds()
+            if seconds is not None:
+                note_stage("denoise", seconds)
+
     generate.prepare = prepare  # type: ignore[attr-defined]
+    generate.sample = sample  # type: ignore[attr-defined]
     return generate
 
 

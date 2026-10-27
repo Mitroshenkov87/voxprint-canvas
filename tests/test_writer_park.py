@@ -176,7 +176,9 @@ def _log(tmp_path: Path) -> str:
 def test_the_writer_stage_parks_its_vram_copy(monkeypatch, tmp_path: Path) -> None:
     weight, seen = _arm(monkeypatch, tmp_path, fail=False)
     try:
-        reply = model_rewrite(Tier.GB16, False)("a red cup on a table")
+        rewrite = model_rewrite(Tier.GB16, False)
+        reply = rewrite("a red cup on a table")
+        rewrite.release()  # type: ignore[attr-defined]
     finally:
         hot_tier.reset()
         vram_trace._holders.clear()

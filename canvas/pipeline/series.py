@@ -1,9 +1,13 @@
-"""Run one Photoshoot series: prep every frame, cook them, then check them.
+"""Run one Photoshoot series in phases: prep, render, decode, then check.
 
-Prep writes the scenario and reviews every prompt, then drops those models
-from VRAM. Cook loads the picture pipeline once and draws every frame. The
-output check runs after the pipeline leaves the GPU. RAM copies stay when the
-tier keeps them. A frame is written only after it passes.
+Prep writes the scenario with one writer session, reviews every prompt, and
+encodes every accepted line with the text encoder alone. Those embeddings stay
+in RAM, and prep fails when its models leave more than 0.5 GB on the card.
+Render loads the picture pipeline once and samples every frame while the
+denoiser stays on the GPU. Decode turns every kept latent into pixels in one
+VAE session. The output check runs after the pipeline leaves the GPU, one frame
+at a time. RAM copies stay when the tier keeps them. A frame is written only
+after it passes.
 """
 from __future__ import annotations
 
@@ -23,10 +27,18 @@ from canvas.app.shell_run import RunStopped
 from canvas.core.exchange import handoff_image
 from canvas.core.formats import EXPORT_FORMAT, OutputFormat, extension
 from canvas.infra.errors import note_crash, note_debug, note_error, note_timing
+from canvas.infra.phase_vram import Phase, ResidualVram, phase, require_released, start_phase
 from canvas.infra.stage_timer import StageTimes, log_detail, note_peak_mib, set_current, timed
 from canvas.infra.vram import peak_allocated_bytes
 from canvas.models import hot_tier as hot
-from canvas.models.runtime import clear_series_embeds, park_pipeline, pipeline_scope
+from canvas.models.runtime import (
+    clear_series_embeds,
+    decode_phase,
+    park_pipeline,
+    pipeline_scope,
+    render_phase,
+)
+from canvas.pipeline.bf16_schedule import VramRefused
 from canvas.pipeline.device_guard import DeviceRefused
 from canvas.pipeline.enhance import mask_numbers, stated_ages
 from canvas.pipeline.gpu_release import release_cuda_cache, release_gate_weights
@@ -136,20 +148,28 @@ def run_series(
     clock = timings if timings is not None else StageTimes()
     previous_clock = set_current(clock)
     noted: list[bool] = []
+    prep = start_phase("prep")
     try:
         return _run_series(
             idea=idea, count=count, style=style, place_mode=place_mode, seed=seed, strength=strength,
             include_camera=include_camera, rewrite=rewrite, age_gate=age_gate, draw_frame=draw_frame,
             cancelled=cancelled, folder=folder, on_scenario=on_scenario, line_for=line_for,
             on_status=on_status, adult=adult, container=container, clock=clock, own_clock=timings is None,
-            noted=noted,
+            noted=noted, prep=prep,
         )
     except DeviceRefused as exc:
         note_error(exc.code)
         if timings is None and not noted:
             note_timing(clock.log_line())
         return SeriesResult("error", str(exc), (), None, exc.code)
+    except ResidualVram as exc:
+        note_error(exc.code)
+        if timings is None and not noted:
+            note_timing(clock.log_line())
+        return SeriesResult("error", str(VramRefused()), (), None, exc.code)
     finally:
+        _release_writer(rewrite)
+        prep.finish()
         set_current(previous_clock)
 
 
@@ -160,7 +180,7 @@ def _run_series(
     cancelled: Callable[[], bool], folder: Path, on_scenario: Callable[[Scenario], None] | None,
     line_for: Callable[[int], str] | None, on_status: Callable[[int, str], None] | None,
     adult: bool, container: OutputFormat | None, clock: StageTimes, own_clock: bool,
-    noted: list[bool],
+    noted: list[bool], prep: Phase,
 ) -> SeriesResult:
     hot.note_tier()
     gate = SerialGate.wrap(age_gate)
@@ -201,6 +221,8 @@ def _run_series(
             preload.close()
             raise
         finally:
+            # Every chunk shared one writer. It leaves the card before the prompt checks.
+            _release_writer(rewrite)
             hot.deactivate("writer")
     if scenario is None or len(scenario.shots) < count:
         preload.close()
@@ -250,10 +272,13 @@ def _run_series(
         if own_clock:
             note_timing(clock.log_line())
         return SeriesResult("cancelled", "", (), folder, "", source)
-    # Prompt models are finished. The picture pipeline is the next thing on the GPU.
-    release_gate_weights(gate)
     try:
         try:
+            _encode_lines(draw_frame, accepted, clock)
+            # Prompt models are finished. The picture pipeline is the next thing on the GPU.
+            release_gate_weights(gate)
+            prep.finish()
+            require_released("prep")
             drawn, cook_error, cancelled_run = _cook_frames(
                 accepted, series_strength, draw_frame, cancelled, clock, blocked, on_status,
             )
@@ -366,6 +391,26 @@ def _accepted_shots(
     return accepted, None, False
 
 
+def _release_writer(rewrite: Callable[[str], str]) -> None:
+    """Close the writer session behind ``rewrite``. A plain callable has none."""
+    release = getattr(rewrite, "release", None)
+    if callable(release):
+        release()
+
+
+def _encode_lines(
+    draw_frame: Callable[[str, int, SeriesFrame | None, float | None], SeriesFrame | None],
+    accepted: list[_CookShot],
+    clock: StageTimes,
+) -> None:
+    """Encode every accepted line with the text encoder alone. The embeddings stay in RAM."""
+    prepare = getattr(draw_frame, "prepare", None)
+    if not callable(prepare) or not accepted:
+        return
+    with clock.measure("encode_all"):
+        prepare([shot.line for shot in accepted])
+
+
 def _cook_frames(
     accepted: list[_CookShot],
     series_strength: float | None,
@@ -375,24 +420,99 @@ def _cook_frames(
     blocked: list[int],
     on_status: Callable[[int, str], None] | None,
 ) -> tuple[list[_Drawn], RunStopped | None, bool]:
-    """Draw every accepted frame on the pipeline loaded for this series."""
+    """Render every accepted frame on one loaded pipeline, then decode them together.
+
+    With a ``sample`` hook that returns True, the render phase only samples and
+    the decode phase turns each kept latent into pixels. A series that follows its first frame
+    draws that frame whole, because the later frames start from its pixels.
+    Without the hook every frame is drawn whole in the render phase.
+    """
     hero: SeriesFrame | None = None
     drawn: list[_Drawn] = []
+    sampled: list[_CookShot] = []
     active = style_reference(series_strength)
-    prepare = getattr(draw_frame, "prepare", None)
+    sample = getattr(draw_frame, "sample", None)
+    stop: RunStopped | None = None
+    stopped = False
     with pipeline_scope():
-        if callable(prepare):
-            prepare([shot.line for shot in accepted])
-        for shot in accepted:
-            if cancelled():
-                return drawn, None, True
-            _status(on_status, shot.index, "drawing")
+        with phase("render"), render_phase():
+            for shot in accepted:
+                if cancelled():
+                    stopped = True
+                    break
+                _status(on_status, shot.index, "drawing")
+                if cancelled():
+                    stopped = True
+                    break
+                whole = not callable(sample) or (active is not None and hero is None)
+                reference = hero if active is not None else None
+                try:
+                    started = time.perf_counter()
+                    with clock.measure("render"):
+                        image = None
+                        if not whole and callable(sample):
+                            # A hook that kept nothing leaves this frame to be drawn whole.
+                            whole = sample(shot.line, shot.seed, reference, active) is not True
+                        if whole:
+                            image = draw_frame(shot.line, shot.seed, reference, active)
+                    _remember_vram_peak()
+                    _log_frame("render", shot.index, started)
+                except RunStopped as exc:
+                    _remember_vram_peak()
+                    blocked.append(shot.index)
+                    _status(on_status, shot.index, "blocked")
+                    if exc.unavailable or _ends_series(exc) or (exc.code == "prompt" and scan(shot.line).minor):
+                        stop = exc
+                        break
+                    continue
+                if not whole:
+                    sampled.append(shot)
+                    continue
+                if image is None:
+                    blocked.append(shot.index)
+                    _status(on_status, shot.index, "blocked")
+                    continue
+                if hero is None:
+                    hero = image
+                drawn.append(_Drawn(shot.index, shot.line, shot.seed, image))
+        if sampled:
+            decoded, decode_stop, decode_cancelled = _decode_frames(
+                sampled, hero, active, draw_frame, cancelled, clock, blocked, on_status,
+            )
+            drawn.extend(decoded)
+            drawn.sort(key=lambda item: item.index)
+            stop = stop or decode_stop
+            stopped = stopped or decode_cancelled
+    return drawn, stop, stopped
+
+
+def _decode_frames(
+    sampled: list[_CookShot],
+    hero: SeriesFrame | None,
+    active: float | None,
+    draw_frame: Callable[[str, int, SeriesFrame | None, float | None], SeriesFrame | None],
+    cancelled: Callable[[], bool],
+    clock: StageTimes,
+    blocked: list[int],
+    on_status: Callable[[int, str], None] | None,
+) -> tuple[list[_Drawn], RunStopped | None, bool]:
+    """Turn each sampled frame into pixels in one VAE session.
+
+    Each call repeats the frame's own arguments, so it finds the latent its
+    sample left and does not sample again.
+    """
+    drawn: list[_Drawn] = []
+    reference = hero if active is not None else None
+    with phase("decode"), decode_phase():
+        for shot in sampled:
             if cancelled():
                 return drawn, None, True
             try:
-                with clock.measure("render"):
-                    image = draw_frame(shot.line, shot.seed, hero if active is not None else None, active)
+                started = time.perf_counter()
+                with clock.measure("decode"):
+                    image = draw_frame(shot.line, shot.seed, reference, active)
                 _remember_vram_peak()
+                _log_frame("decode", shot.index, started)
             except RunStopped as exc:
                 _remember_vram_peak()
                 blocked.append(shot.index)
@@ -404,10 +524,14 @@ def _cook_frames(
                 blocked.append(shot.index)
                 _status(on_status, shot.index, "blocked")
                 continue
-            if hero is None:
-                hero = image
             drawn.append(_Drawn(shot.index, shot.line, shot.seed, image))
     return drawn, None, False
+
+
+def _log_frame(stage: str, index: int, started: float) -> None:
+    """One per-frame timing line for the render or decode phase."""
+    elapsed = max(0, int((time.perf_counter() - started) * 1000))
+    log_detail("frame", stage, "cuda" if peak_allocated_bytes() is not None else "cpu", f"index={index + 1} ms={elapsed}")
 
 
 def _review_frames(

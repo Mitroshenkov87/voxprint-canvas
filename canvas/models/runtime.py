@@ -10,6 +10,7 @@ import gc
 import inspect
 import threading
 import time
+import zlib
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -22,6 +23,7 @@ from PIL import Image
 
 from canvas.app.i18n import text
 from canvas.infra.errors import note_error
+from canvas.infra.load_lock import pretrained_lock
 from canvas.infra.stage_timer import log_detail, note_peak_mib, note_stage, note_tag, timed
 from canvas.pipeline.frame_prompt import log_frame_prompt, split_frame_prompts
 from canvas.infra.stage_guard import (
@@ -52,6 +54,7 @@ from canvas.models.plan import CallPlan
 from canvas.models.user_lora import UserLora, apply_lora, unload_lora
 from canvas.pipeline.bf16_schedule import VramRefused
 from canvas.pipeline.device_guard import DeviceRefused, pretrained_attempts, require_cuda
+from canvas.pipeline.generation_weights import dtype_label
 from canvas.pipeline.offload import (
     OffloadUnavailable,
     cast_module_fp8,
@@ -115,6 +118,9 @@ class _Held:
 
 
 _slot: _Held | None = None
+# Phase 2 of a series keeps the denoiser on the card. Phase 3 decodes the latents it left here.
+_resident_cook = False
+_pending_latents: dict[tuple[object, ...], Any] = {}
 
 
 def system_ram_bytes() -> int:
@@ -530,11 +536,40 @@ def _load_text_pair(folder: Path, torch: Any) -> tuple[Any, Any]:
     encoder = _load_component(
         transformers.AutoModel.from_pretrained, folder / "text_encoder", torch.bfloat16, device,
     )
+    _note_encoder_dtype(encoder, torch, device)
     return tokenizer, encoder
 
 
+def _note_encoder_dtype(encoder: Any, torch: Any, device: str) -> int:
+    """Log the loaded parameter dtype. An fp32 parameter is a reason code. Returns the fp32 count."""
+    fp32 = getattr(torch, "float32", None)
+    parameters = getattr(encoder, "parameters", None)
+    try:
+        params = list(parameters()) if callable(parameters) else []
+    except (TypeError, RuntimeError):
+        params = []
+    found = sum(1 for param in params if fp32 is not None and getattr(param, "dtype", None) == fp32)
+    log_detail(
+        "text_encoder", "dtype", device if device in {"cpu", "cuda"} else "cpu",
+        f"loaded={dtype_label(encoder, 'bf16')} params={len(params)} fp32={found}",
+    )
+    if found:
+        note_error("encoder.fp32")
+    return found
+
+
 def _load_component(loader: Any, folder: Path, dtype: object, onto: str, **extra: Any) -> Any:
-    """Open one weight folder. A rejected ``device_map`` is tried again without it."""
+    """Open one weight folder. A rejected ``device_map`` is tried again without it.
+
+    transformers and diffusers both set torch's process default dtype while
+    they build. The picture checks can be loading on a side thread, so the
+    build holds the process load lock.
+    """
+    with pretrained_lock():
+        return _load_attempts(loader, folder, dtype, onto, **extra)
+
+
+def _load_attempts(loader: Any, folder: Path, dtype: object, onto: str, **extra: Any) -> Any:
     attempts = pretrained_attempts(dtype, onto)
     error: TypeError | None = None
     last = len(attempts) - 1
@@ -758,11 +793,12 @@ def _inference(torch: Any) -> Iterator[None]:
 
 
 def clear_series_embeds() -> None:
-    """Drop cached prompt embeddings at the end of a series."""
+    """Drop cached prompt embeddings and undecoded latents at the end of a series."""
     global _prompt_embeds, _borrowed_pair
     _prompt_embeds = None
     _borrowed_pair = None
     _cosine_cache.clear()
+    _pending_latents.clear()
 
 
 def _remember_components(pipe: Any, tier: Tier) -> None:
@@ -1095,7 +1131,52 @@ def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, he
            seed: int = 0, control_file: Path | None = None,
            strength: float | None = None, lora: UserLora | None = None,
            lora_strength: float | None = None, negative: str = "") -> RawImage:
-    """Run one pinned snapshot. ``folder`` is a local diffusers tree."""
+    """Run one pinned snapshot. ``folder`` is a local diffusers tree.
+
+    A latent that ``sample_latent`` kept for this same call is decoded instead
+    of sampling again.
+    """
+    key = _latent_key(plan, screened, width, height, seed, strength, negative)
+    with _lock:
+        pending = _pending_latents.pop(key, None)
+        held = _slot
+    if pending is not None and held is not None:
+        torch = _import_torch()
+        with _lock:
+            return _image_from_result(held.pipe, pending, torch)
+    if pending is not None:
+        note_error("decode.miss")
+    image = _render(
+        plan, folder, screened, width, height, tier, seed=seed, control_file=control_file,
+        strength=strength, lora=lora, lora_strength=lora_strength, negative=negative, keep_latent=False,
+    )
+    if image is None:
+        raise InferenceUnavailable("the generator returned no picture")
+    return image
+
+
+def sample_latent(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, height: int, tier: Tier, *,
+                  seed: int = 0, control_file: Path | None = None,
+                  strength: float | None = None, lora: UserLora | None = None,
+                  lora_strength: float | None = None, negative: str = "") -> None:
+    """Sample one frame and keep its latent in RAM. ``render`` with the same call decodes it.
+
+    Inside ``render_phase`` the denoiser stays on the card between frames, so a
+    series loads it once and decodes every frame afterwards in ``decode_phase``.
+    """
+    key = _latent_key(plan, screened, width, height, seed, strength, negative)
+    latent = _render(
+        plan, folder, screened, width, height, tier, seed=seed, control_file=control_file,
+        strength=strength, lora=lora, lora_strength=lora_strength, negative=negative, keep_latent=True,
+    )
+    with _lock:
+        _pending_latents[key] = latent
+
+
+def _render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, height: int, tier: Tier, *,
+            seed: int, control_file: Path | None, strength: float | None, lora: UserLora | None,
+            lora_strength: float | None, negative: str, keep_latent: bool) -> Any:
+    """Sample one frame. Pixels, or the CPU latent when ``keep_latent`` is set."""
     hot.note_tier()
     if tier is Tier.GB16:
         note_image_fit()
@@ -1133,9 +1214,9 @@ def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, he
             resident = getattr(pipe, "_canvas_placement", "resident") == "resident"
             device = "cuda" if torch.cuda.is_available() else "cpu"
             if resident and pipeline_name not in _ENCODES_BEFORE_SAMPLE:
-                hot.activate("transformer", device)
+                _activate_once(pipe, "transformer", device)
                 if getattr(pipe, "controlnet", None) is not None:
-                    hot.activate("controlnet", device)
+                    _activate_once(pipe, "controlnet", device)
             elif pipeline_name in _ENCODES_BEFORE_SAMPLE:
                 _seat_vae_for_latents(pipe, torch)
             common["generator"] = _noise_generator(torch, seed, _latent_device(pipe, torch))
@@ -1169,9 +1250,12 @@ def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, he
                 else:
                     raise InferenceUnavailable(f"unknown pipeline {pipeline_name}")
             finally:
-                if resident:
+                # A render phase keeps the denoiser on the card for the next frame.
+                if resident and not _resident_cook:
                     hot.deactivate("transformer")
                     hot.deactivate("controlnet")
+            if keep_latent:
+                return _keep_latent(result)
             return _image_from_result(pipe, result, torch)
         except Exception:
             failed = True
@@ -1182,6 +1266,91 @@ def render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, he
                 release_pipeline()
             elif failed:
                 park_pipeline()
+
+
+def _latent_key(
+    plan: CallPlan, screened: ScreenedInput, width: int, height: int, seed: int,
+    strength: float | None, negative: str,
+) -> tuple[object, ...]:
+    """Everything that decides one sample, so a decode finds only its own latent."""
+    frames = tuple(
+        (frame.role, frame.width, frame.height, zlib.crc32(frame.to_bytes())) for frame in screened.frames
+    )
+    return (plan.pipeline_class, screened.prompt, width, height, seed, strength, negative, frames)
+
+
+def _keep_latent(result: Any) -> Any:
+    """The first output on the CPU. The pipeline result is dropped so its graph can go."""
+    first = _detach_tensor(_first_output(result))
+    _forget_result(result)
+    return _to_cpu(first)
+
+
+def pending_latents() -> int:
+    """How many sampled frames are waiting for ``render`` to decode them."""
+    with _lock:
+        return len(_pending_latents)
+
+
+def clear_pending_latents() -> None:
+    """Forget latents a stopped series did not decode."""
+    with _lock:
+        _pending_latents.clear()
+
+
+def _activate_once(pipe: Any, name: str, device: str) -> None:
+    """Unpark ``name`` unless a render phase already left it on the card."""
+    if _resident_cook and _module_on_cuda(getattr(pipe, name, None)):
+        return
+    hot.activate(name, device)
+
+
+@contextmanager
+def render_phase() -> Iterator[None]:
+    """Keep the denoiser on the GPU between the frames drawn inside this block.
+
+    The first frame unparks the transformer. Later frames reuse it, and an
+    img2img encode does not send it back to RAM. The block parks it once.
+    """
+    global _resident_cook
+    with _lock:
+        _resident_cook = True
+    try:
+        yield
+    finally:
+        with _lock:
+            _resident_cook = False
+            for name in ("transformer", "controlnet"):
+                hot.deactivate(name)
+            torch = _optional_torch()
+            if torch is not None:
+                gc.collect()
+                _release_cuda_cache(torch)
+
+
+@contextmanager
+def decode_phase() -> Iterator[None]:
+    """Hold one VAE session while every kept latent is decoded.
+
+    The other models are parked once at the start, the VAE is unparked once,
+    and each ``render`` decode inside the block reuses it.
+    """
+    with _lock:
+        held = _slot
+    if held is None or _decoding_vae(held.pipe) is None:
+        yield
+        return
+    torch = _import_torch()
+    with _lock:
+        with _vae_session(held.pipe, torch, "vae_decode", restore=False):
+            yield
+
+
+def _optional_torch() -> Any:
+    try:
+        return _import_torch()
+    except ImportError:
+        return None
 
 
 def _timed(pipe: Any, torch: Any, **kwargs: Any) -> Any:
@@ -1363,7 +1532,10 @@ def _vae_session(pipe: Any, torch: Any, stage: str, *, restore: bool) -> Iterato
     restored: tuple[str, ...] = ()
     try:
         if _cuda_is_up(torch):
-            restored = _park_for_vae(pipe, torch)
+            # A render phase keeps the denoiser beside the VAE (about 0.4 GB more at
+            # 1024 px), so the next frame does not copy it back from RAM.
+            keep = ("transformer", "controlnet") if _resident_cook else ()
+            restored = _park_for_vae(pipe, torch, keep)
             _sync_cuda(torch)
             _log_vae_residents(pipe, torch, stage)
         _reset_stage_peak(torch)
@@ -1567,11 +1739,13 @@ def _is_bf16(dtype: Any, torch: Any) -> bool:
     return text in {"bf16", "torch.bfloat16", "bfloat16"} or text.endswith("bfloat16")
 
 
-def _park_for_vae(pipe: Any, torch: Any) -> tuple[str, ...]:
-    """Park every hot model that is still on CUDA. Returns the names that were."""
+def _park_for_vae(pipe: Any, torch: Any, keep: tuple[str, ...] = ()) -> tuple[str, ...]:
+    """Park every hot model that is still on CUDA except ``keep``. Returns the names that were."""
     residents = {name for name, _size in hot.cuda_residents()}
     parked: list[str] = []
     for name in _VAE_ASIDE:
+        if name in keep:
+            continue
         module = getattr(pipe, name, None)
         on_pipe = module is not None and _module_on_cuda(module)
         if name not in residents and not on_pipe:

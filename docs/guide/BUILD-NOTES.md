@@ -1,6 +1,6 @@
 # Building the Canvas user guide PDFs
 
-Notes for the follow-up agent that turns `docs/guide/en.md` and `docs/guide/ru.md` into PDFs.
+Notes for the follow-up agent that turns `docs/guide/en.md` into a PDF. The guide and the window are English only.
 
 ## What Audiobook Builder does
 
@@ -22,9 +22,9 @@ workflow for the manual: the PDFs are built locally and committed. The ABB insta
 How the ABB sources are written, and how the Canvas sources mirror it:
 
 - No YAML front matter. The cover (title, subtitle, version line, licence line) lives in `META` in the build script.
-  The Canvas values are in the HTML comment at the top of `en.md` and `ru.md`.
+  The Canvas values are in the HTML comment at the top of `en.md`.
 - `#` is a chapter, `##` a section, `###` a sub-section. The script numbers `#` and `##` and builds the table of
-  contents; headings carry no numbers in the source. Canvas follows this (16 chapters, identical in both languages).
+  contents; headings carry no numbers in the source. Canvas follows this (16 chapters).
 - Tables for requirements, paths and messages; `>` blockquotes for notes; fenced code for commands.
 - Figures: a paragraph holding only an image becomes `<figure>` with the alt text as caption.
 
@@ -32,20 +32,20 @@ Differences you must handle:
 
 | ABB | Canvas guide | What to do |
 |---|---|---|
-| UI labels as `{{key}}`, replaced from `locales/<lang>.json` | UI labels written out in **bold**, exactly as in `canvas/ui/locales/<lang>.json`, `canvas/app/messages.json` and the voxprint-common 0.5.1 catalog (Canvas files override voxprint-common) | Keep them literal, or optionally style `**…**` as `span.ui`. If you switch to `{{key}}`, the substitution must read the merged catalog (voxprint-common `ui/locales` first, then `canvas/ui/locales`, then `messages.json`). |
-| Screenshots `![caption](@name)` | `![caption](screens/<id>.png)` | Change the image regex to `!\[([^\]]*)\]\(screens/([a-z0-9-]+)\.png\)` and resolve `docs/guide/screens/<lang>/<id>.png`, then `screens/en/<id>.png` with the "(screenshot of the English interface)" caption suffix, as ABB does. The capture list is `screens.md`. |
+| UI labels as `{{key}}`, replaced from `locales/<lang>.json` | UI labels written out in **bold**, exactly as in `canvas/ui/locales/en.json`, `canvas/app/messages.json` and the voxprint-common 0.5.1 catalog (Canvas files override voxprint-common) | Keep them literal, or optionally style `**…**` as `span.ui`. If you switch to `{{key}}`, the substitution must read the merged catalog (voxprint-common `ui/locales` first, then `canvas/ui/locales`, then `messages.json`). |
+| Screenshots `![caption](@name)` | `![caption](screens/<id>.png)` | Change the image regex to `!\[([^\]]*)\]\(screens/([a-z0-9-]+)\.png\)` and resolve `docs/guide/screens/en/<id>.png`. The capture list is `screens.md`. |
 | Logo is the Voxprint waveform mark, header text "AI Audiobook Builder" | — | Replace the header text with "AI Canvas". Ask the owner whether the waveform mark stays or a Canvas mark is drawn. |
-| Languages en, ru, de | en, ru only | `LANGS = ("en", "ru")`. |
+| Languages en, ru, de | en only | `LANGUAGES = ("en",)`. |
 | Sources in `docs/manual/src/` | Sources in `docs/guide/` | Suggested layout: `docs/guide/build_guide.py`, `docs/guide/guide.css`, `docs/guide/check_pagination.py` (copied), outputs `VOXPrint-Canvas-Guide-<lang>.pdf` and `-print.pdf`. |
 
 ## Before building
 
 - Resolve every `TODO(check)` (they are HTML comments, so they do not print). The build should fail if any remains:
-  `rg -n "TODO\(check\)" docs/guide/en.md docs/guide/ru.md` must return nothing.
+  `rg -n "TODO\(check\)" docs/guide/en.md` must return nothing.
 - `tests/test_wording.py` scans every `docs/**/*.md` for banned words. Run it after any edit to the guide.
 - `docs/guide/` is listed in `exclude_docs` in `mkdocs.yml`, so `mkdocs build --strict` does not fail on the
   screenshot links before the images exist. Keep it excluded or add the images first.
-- Fonts: ABB uses Noto Sans / DejaVu Sans, which cover Cyrillic.
+- Fonts: ABB uses Noto Sans / DejaVu Sans, which also cover quoted non-Latin prompts.
 
 ## Shipping
 

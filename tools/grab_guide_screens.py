@@ -1,6 +1,6 @@
 """Offscreen captures for the user guide.
 
-Extends ``tools/grab_shell_screens.py``. English and Russian shots are written
+Extends ``tools/grab_shell_screens.py``. English shots are written
 to ``docs/guide/screens/<lang>/<id>.png``. The two Setup message boxes are
 drawn from the installer strings. Weights are not loaded.
 """
@@ -12,6 +12,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
+from typing import cast
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -21,6 +22,7 @@ from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import QApplication, QCheckBox, QPushButton, QRadioButton
 
 from canvas.app.i18n import text
+from canvas.models.mdl_registry import Model
 from canvas.models.modes import Tier
 from canvas.pipeline.photoshoot import Shot
 from canvas.safety.image import RawImage
@@ -43,11 +45,6 @@ PROMPTS = {
         "kettle": "A yellow kettle with a blue handle",
         "lora": "a lighthouse on a rocky coast at dusk",
     },
-    "ru": {
-        "first": "Красный велосипед у кирпичной стены на тихой улице, утреннее солнце, мягкие тени",
-        "kettle": "Жёлтый чайник с синей ручкой",
-        "lora": "маяк на скалистом берегу в сумерках",
-    },
 }
 PWSH = {
     "en": {
@@ -60,17 +57,8 @@ PWSH = {
         "no": "No",
         "ok": "OK",
     },
-    "ru": {
-        "ask": "PowerShell 7 не установлен. Установить PowerShell 7 (Microsoft) сейчас? Рекомендуется.",
-        "fallback": (
-            "Установка продолжится с Windows PowerShell 5.1. По возможности установите PowerShell 7: "
-            "https://aka.ms/powershell-release?tag=stable"
-        ),
-        "yes": "Да",
-        "no": "Нет",
-        "ok": "ОК",
-    },
 }
+LANGUAGES = ("en",)
 LIMIT = 400_000
 
 
@@ -96,7 +84,7 @@ def capture_guide(destination: Path) -> tuple[list[str], list[str], list[str]]:
     _sample(landscape)
     _interior(interior)
     captured: list[str] = []
-    for language in ("en", "ru"):
+    for language in LANGUAGES:
         _language(language)
         folder = destination / language
         folder.mkdir(parents=True, exist_ok=True)
@@ -110,7 +98,7 @@ def capture_guide(destination: Path) -> tuple[list[str], list[str], list[str]]:
 
 
 def _language(language: str) -> None:
-    os.environ["LANG"] = "ru_RU.UTF-8" if language == "ru" else "en_US.UTF-8"
+    os.environ["LANG"] = "en_US.UTF-8"
     os.environ["LC_ALL"] = os.environ["LANG"]
     os.environ["LC_MESSAGES"] = os.environ["LANG"]
     set_language(language)
@@ -346,7 +334,7 @@ def _splash(app: QApplication, path: Path) -> None:
 def _models(app: QApplication, destination: Path) -> list[str]:
     del app
     try:
-        for language in ("en", "ru"):
+        for language in LANGUAGES:
             _language(language)
             path = destination / language / "manage-models.png"
             grab_view(_manage_view(), path, (980, 640))
@@ -354,7 +342,7 @@ def _models(app: QApplication, destination: Path) -> list[str]:
                 raise RuntimeError("manage-models grab was empty")
     except Exception as exc:
         print(f"manage-models dropped: {exc}")
-        for language in ("en", "ru"):
+        for language in LANGUAGES:
             path = destination / language / "manage-models.png"
             if path.is_file():
                 path.unlink()
@@ -428,7 +416,7 @@ def _manage_view() -> WindowView:
 
 
 def _messages(destination: Path) -> list[str]:
-    for language in ("en", "ru"):
+    for language in LANGUAGES:
         folder = destination / language
         folder.mkdir(parents=True, exist_ok=True)
         words = PWSH[language]
@@ -466,7 +454,7 @@ def _message_box(path: Path, message: str, buttons: tuple[str, ...], *, question
     image.save(path)
 
 
-def _lines(message: str, font: ImageFont.ImageFont, limit: int) -> list[str]:
+def _lines(message: str, font: ImageFont.FreeTypeFont | ImageFont.ImageFont, limit: int) -> list[str]:
     draw = ImageDraw.Draw(Image.new("RGB", (1, 1)))
     words: list[str] = []
     for word in message.split():
@@ -497,7 +485,7 @@ def _lines(message: str, font: ImageFont.ImageFont, limit: int) -> list[str]:
     return lines
 
 
-def _font(size: int) -> ImageFont.ImageFont:
+def _font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     path = Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
     if path.is_file():
         return ImageFont.truetype(str(path), size)
@@ -528,8 +516,8 @@ def _scenario(idea: str) -> str:
     return json.dumps({"subject_block": idea, "descriptors": [idea], "place": "kitchen table", "shots": shots})
 
 
-def _ready() -> tuple[object, ...]:
-    return (object(),)
+def _ready() -> tuple[Model, ...]:
+    return cast(tuple[Model, ...], (object(),))
 
 
 def _grab(app: QApplication, window: ShellWindow, path: Path) -> None:

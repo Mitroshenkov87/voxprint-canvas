@@ -33,10 +33,10 @@ def app():
     return QApplication.instance() or QApplication([])
 
 
-@pytest.fixture(params=["ru", "en"])
-def window(request, app, monkeypatch, tmp_path: Path):
+@pytest.fixture
+def window(app, monkeypatch, tmp_path: Path):
     monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
-    set_language(request.param)
+    set_language("en")
     entry = import_lora(write_voxlora(tmp_path / "in"), World().gate(), base_ready=lambda: True)
     w = ShellWindow(open_layout(tmp_path / "state", gate=World().gate()), tier=Tier.GB16, enlarge=object())
     w.resize(1280, 800)
@@ -116,7 +116,6 @@ def _is_dark(widget: QWidget) -> bool:
 
 
 def test_every_lora_dialog_is_dark(app):
-    set_language("ru")
     busy = QProgressDialog("…", "", 0, 0)
     refused = QMessageBox()
     for d in (busy, refused):
@@ -133,7 +132,6 @@ def test_every_lora_dialog_is_dark(app):
     finally:
         for d in dialogs:
             shiboken6.delete(d)
-        set_language("en")
 
 
 def test_menus_open_from_their_buttons(window):
@@ -154,21 +152,3 @@ def test_the_bundled_font_is_registered(app):
     assert "Open Font License" in (FONT_DIR / "OFL.txt").read_text(encoding="utf-8")
     assert FAMILY == "Noto Sans"
 
-
-def test_the_file_dialog_reads_in_russian(app, monkeypatch):
-    from canvas.ui.fonts import qt_translations, translations_dir
-
-    assert (translations_dir() / "qtbase_ru.qm").is_file()
-    monkeypatch.setenv("LANG", "ru_RU.UTF-8")
-    monkeypatch.setenv("LC_ALL", "ru_RU.UTF-8")
-    set_language("ru")
-    try:
-        assert qt_translations() == "ru"
-        dialog = file_dialog(None)
-        labels = " ".join(w.text() for w in dialog.findChildren(QLabel)) + " ".join(
-            b.text() for b in dialog.findChildren(QPushButton))
-        assert "Look in" not in labels and "Отмена" in labels, labels
-        shiboken6.delete(dialog)
-    finally:
-        set_language("en")
-        qt_translations("en")

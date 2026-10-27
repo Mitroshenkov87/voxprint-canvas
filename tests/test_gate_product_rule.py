@@ -94,7 +94,6 @@ def test_school_context_refusal_has_its_own_message_in_both_locales():
     assert caught.value.code == "prompt"
     assert str(caught.value) == text("gate.blocked_youth")
     assert text("gate.blocked_youth", "en").startswith("This request cannot be completed.")
-    assert "школ" in text("gate.blocked_youth", "ru")
 
 
 @pytest.mark.parametrize("prompt", ["nude, student", "голая, школьница", "explicit, 16 лет"])
@@ -274,7 +273,6 @@ def test_stylised_refusal_has_its_own_message():
     with pytest.raises(StylisedBlocked) as caught:
         World().gate().review_prompt("nude, waifu")
     assert str(caught.value) == text("gate.blocked_stylised")
-    assert "аниме" in text("gate.blocked_stylised", "ru")
 
 
 @pytest.mark.parametrize("label", [IMAGE_ANIME, IMAGE_CHIBI])

@@ -256,7 +256,7 @@ jobs:
             libcairo2 \
             libgdk-pixbuf-2.0-0 \
             shared-mime-info
-      - name: Build the guides
+      - name: Build the guide
         run: |
           python -m pip install --require-hashes -r installer/requirements-pdf.txt
           python scripts/build_pdf_guide.py docs/guide/dist
@@ -325,7 +325,7 @@ jobs:
           Copy-Item $uvExe.FullName (Join-Path $stage "uv.exe")
           Copy-Item installer\windows\install.ps1 (Join-Path $stage "install.ps1")
           Copy-Item installer\windows\voxprint-canvas.cmd (Join-Path $stage "voxprint-canvas.cmd")
-          foreach ($pdf in @("VOXPrint-AI-Canvas-Guide-en.pdf", "VOXPrint-AI-Canvas-Guide-ru.pdf")) {
+          foreach ($pdf in @("VOXPrint-AI-Canvas-Guide-en.pdf")) {
             $guide = Join-Path $stage "docs\$pdf"
             if (-not (Test-Path -LiteralPath $guide)) { throw "missing guide PDF: $guide" }
           }

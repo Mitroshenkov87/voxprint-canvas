@@ -57,17 +57,9 @@ def test_the_frame_count_starts_at_six(app, home: Path) -> None:
     app.processEvents()
     assert frames.isVisible()
     assert label.isVisible()
-    set_language("ru")
-    russian = _window(home, lambda job, inputs: rgb())
-    russian.show()
-    app.processEvents()
-    assert russian.findChild(QLabel, "photoshootFramesLabel").text() == "Кадров"
-    set_language("en")
 
 
-@pytest.mark.parametrize("language", ["en", "ru"])
-def test_the_frame_count_shows_its_widest_value(app, home: Path, language: str) -> None:
-    set_language(language)
+def test_the_frame_count_shows_its_widest_value(app, home: Path) -> None:
     window = _window(home, lambda job, inputs: rgb())
     window.setFixedSize(1920, 1080)
     window.show()
@@ -84,9 +76,7 @@ def test_the_frame_count_shows_its_widest_value(app, home: Path, language: str) 
     assert room >= need
 
 
-@pytest.mark.parametrize("language", ["en", "ru"])
-def test_the_option_sits_centred_under_generate(app, home: Path, language: str) -> None:
-    set_language(language)
+def test_the_option_sits_centred_under_generate(app, home: Path) -> None:
     window = _window(home, lambda job, inputs: rgb())
     window.setFixedSize(1920, 1080)
     window.show()

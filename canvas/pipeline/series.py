@@ -52,6 +52,7 @@ from canvas.pipeline.photoshoot import (
     Shot,
     accept_shot,
     assemble_line,
+    describes_person,
     fixed_appearance,
     planned_shots,
     single_frame,
@@ -209,9 +210,11 @@ def _run_series(
     if warm_error is not None:
         return _stop("error", warm_error.user_message, f"check.{warm_error.code}")
     appearance = fixed_appearance(idea, seed)
-    # None is the caller's default. A person series then follows the first frame
-    # loosely enough that the pose can still change.
-    series_strength = REFERENCE_STRENGTH if strength is None and appearance else strength
+    # None is the caller's default. A same-place person series then follows the
+    # first frame loosely enough that the pose can still change. With different
+    # places every shot is drawn from its own line, so its place and pose lead.
+    anchored = strength is None and mode == "same" and describes_person(idea)
+    series_strength = REFERENCE_STRENGTH if anchored else strength
     with clock.measure("scenario"):
         try:
             scenario, fail_code, source = _scenario(
@@ -546,25 +549,20 @@ def _review_frames(
     seeds: list[int],
     on_status: Callable[[int, str], None] | None,
 ) -> tuple[str, str, str | None]:
-    """Check every held frame, then write the ones that passed before a series stop.
+    """Check every held frame in one batch, then write the ones that passed before a series stop.
 
-    A check that cannot finish is recorded once. Later frames are still checked
+    The picture pipeline has left the GPU. The check weights stay placed for
+    the whole batch and leave the card once, before anything is written. A
+    check that cannot finish is recorded once. Later frames are still checked
     and none of them are written.
     """
+    verdicts = _check_frames(drawn, gate, clock)
     save_stop = False
     crash_noted = False
     check_code = ""
     check_reason = ""
     ending: str | None = None
-    for item in drawn:
-        try:
-            with clock.measure("output_check"):
-                with timed("check"):
-                    _release_check_cache()
-                    released, refusal = _released_frame(gate, item.image, item.line)
-        finally:
-            # The check has finished. Its weights leave VRAM before this frame is written.
-            release_gate_weights(gate)
+    for item, released, refusal in verdicts:
         if released is None:
             blocked.append(item.index)
             _status(on_status, item.index, "blocked")
@@ -594,6 +592,29 @@ def _review_frames(
         seeds.append(item.seed)
         _status(on_status, item.index, "kept")
     return check_code, check_reason, ending
+
+
+def _check_frames(
+    drawn: list[_Drawn], gate: AgeGate, clock: StageTimes,
+) -> list[tuple[_Drawn, _Released | None, Exception | None]]:
+    """Every frame's verdict, in order. Nothing is written or shown here.
+
+    The check weights leave VRAM once, after the last frame, also when a call raises.
+    """
+    verdicts: list[tuple[_Drawn, _Released | None, Exception | None]] = []
+    try:
+        with phase("output_check"):
+            _release_check_cache()
+            for item in drawn:
+                started = time.perf_counter()
+                with clock.measure("output_check"):
+                    with timed("check"):
+                        released, refusal = _released_frame(gate, item.image, item.line)
+                verdicts.append((item, released, refusal))
+                _log_frame("check", item.index, started)
+    finally:
+        release_gate_weights(gate)
+    return verdicts
 
 
 def _stated_age(idea: str) -> int | list[int] | None:

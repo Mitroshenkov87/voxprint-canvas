@@ -78,10 +78,11 @@ def test_saving_overlaps_the_next_render_and_follows_the_check(tmp_path: Path, m
     )
     assert len(result.kept) == 6
     assert order.index("draw5") < order.index("check0")
+    # Every frame is checked in one batch, and only then is anything written.
     for index in range(6):
         assert order.index(f"check{index}") < order.index(f"save{index}")
-        if index:
-            assert order.index(f"save{index - 1}") < order.index(f"check{index}")
+        assert order.index(f"check{index}") < order.index("save0")
+    assert [item for item in order if item.startswith("save")] == [f"save{index}" for index in range(6)]
     stages = times.summary()["stages"]
     assert isinstance(stages, dict)
     assert {"scenario", "prompt_check", "render", "output_check", "save"} <= set(stages)
@@ -185,7 +186,8 @@ def test_gate_weights_are_parked_before_the_frame_is_saved(tmp_path: Path, monke
     assert result.stopped == ""
     assert len(result.kept) == 2
     first = order.index("check")
-    assert order[first:] == ["check", "park", "save0", "check", "park", "save1"]
+    # The check weights stay placed for the batch and leave the card once, before any save.
+    assert order[first:] == ["check", "check", "park", "save0", "save1"]
 
 
 def test_prep_loads_the_picture_checks_before_a_frame(tmp_path: Path) -> None:

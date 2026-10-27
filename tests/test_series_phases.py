@@ -348,6 +348,7 @@ def _install(monkeypatch, record: dict[str, list[object]]) -> tuple[_Module, _Mo
             assert id(transformer) in on_cuda
             generator = kwargs["generator"]
             record["samples"].append(getattr(generator, "seed", None))
+            record.setdefault("embeds", []).append(kwargs.get("prompt_embeds"))
             return types.SimpleNamespace(images=[_Latent(int(getattr(generator, "seed", 0)))])
 
     def activate(name: str, device: str, *, blocking: bool = False) -> bool:
@@ -436,6 +437,8 @@ def test_the_generator_loads_once_and_every_frame_decodes_in_one_vae_session(tmp
         runtime.reset_pipeline_cache()
     assert record["loads"] == ["pipeline"]
     assert record["samples"] == [1, 2, 3]
+    # Each shot is conditioned on its own prompt embedding.
+    assert record["embeds"] == ["embed 0", "embed 1", "embed 2"]
     assert record["decodes"] == [1, 2, 3]
     assert record["vae_sessions"] == ["open"]
     assert [image.to_bytes()[0] for image in images] == [1, 2, 3]

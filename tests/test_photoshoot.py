@@ -22,14 +22,10 @@ from canvas.pipeline.photoshoot import (
     TOKENS_PER_FRAME,
     Draft,
     Shot,
-    _BUILD,
-    _ETHNICITY,
-    _EYES,
-    _FACE,
-    _HAIR,
     _object,
     accept_shot,
     assemble_line,
+    describes_person,
     fixed_appearance,
     planned_shots,
     scenario_request,
@@ -767,25 +763,41 @@ def test_a_three_part_line_is_read_by_its_last_part(tmp_path: Path) -> None:
     assert still.source == "writer"
 
 
-def test_fixed_appearance_is_stable_and_names_a_concrete_look() -> None:
-    assert fixed_appearance(IDEA, 3) == ""
-    assert fixed_appearance("a manual camera", 1) == ""
-    assert fixed_appearance("the manager of the shop", 1) == ""
-    assert fixed_appearance("personal computer", 1) == ""
-    assert fixed_appearance("humanoid robot", 1) == ""
-    assert fixed_appearance(PERSON, 3) == fixed_appearance(f"  {PERSON}  ", 3)
-    assert fixed_appearance("a man in a wool coat", 1)
-    assert fixed_appearance("женщина в красном пальто", 2)
-    for table in (_ETHNICITY, _HAIR, _EYES, _FACE, _BUILD):
-        for item in table:
-            assert _BANNED_LOOK.search(item) is None
-            assert stated_ages(item) == ()
+def test_no_default_look_is_added_in_front_of_the_users_words() -> None:
+    blonde = "an Asian woman, about 30, blonde hair, athletic build with defined muscles"
     for seed in range(400):
-        look = fixed_appearance(PERSON, seed)
-        assert look == fixed_appearance(PERSON, seed)
-        assert _BANNED_LOOK.search(look) is None
-        assert stated_ages(look) == ()
-        assert len([part for part in look.split(",") if part.strip()]) == 5
+        assert fixed_appearance(blonde, seed) == ""
+        assert fixed_appearance(PERSON, seed) == ""
+        assert fixed_appearance("a man in a wool coat", seed) == ""
+        assert fixed_appearance("женщина в красном пальто", seed) == ""
+    assert describes_person(blonde)
+    assert describes_person("женщина в красном пальто")
+    for idea in (IDEA, "a manual camera", "the manager of the shop", "personal computer", "humanoid robot", ""):
+        assert describes_person(idea) is False
+        assert fixed_appearance(idea, 3) == ""
+
+
+def test_the_users_hair_colour_leads_every_frame(tmp_path: Path) -> None:
+    idea = "an Asian woman, about 30, blonde hair, athletic build with defined muscles"
+    prompts: list[str] = []
+
+    def generate(line: str, seed: int, hero: object | None, strength: float | None) -> object:
+        del seed, hero, strength
+        prompts.append(line)
+        return _frame()
+
+    result = _run(tmp_path, idea=idea, generate=generate, count=5, place_mode="different",
+                  rewrite=lambda _prompt: "no lines here")
+    document = json.loads((tmp_path / "series.json").read_text(encoding="utf-8"))
+    assert result.stopped == ""
+    assert document["subject_block"] == idea
+    assert document["appearance"] == ""
+    assert len(prompts) == 5
+    for line in prompts:
+        assert line.startswith(f"A single photograph of {idea},")
+        assert "blonde hair" in line
+        assert re.search(r"\b(?:black|brown|auburn|chestnut)\s+hair\b", line) is None
+        assert re.search(r"\b(?:European|Hispanic|Middle Eastern)\b", line) is None
 
 
 def test_the_test_series_character_is_copied_into_every_frame(tmp_path: Path) -> None:
@@ -821,18 +833,16 @@ def test_a_person_series_repeats_one_appearance_and_anchors_the_hero(tmp_path: P
         return _frame()
 
     result = _run(tmp_path, idea=PERSON, generate=generate)
-    look = fixed_appearance(PERSON, 3)
     document = json.loads((tmp_path / "series.json").read_text(encoding="utf-8"))
     assert result.stopped == ""
     assert len(result.kept) == 6
-    assert look
-    assert document["appearance"] == look
-    assert document["subject_block"] == f"{look}, {PERSON}"
-    assert all(line.count(look) == 1 and PERSON in line for line in document["lines"])
+    assert document["appearance"] == ""
+    assert document["subject_block"] == PERSON
+    assert all(line.count(PERSON) == 1 for line in document["lines"])
     assert all(sorted(stated_ages(line)) == [25] for line in document["lines"])
     assert seen[0][1] is None
     assert all(item[1] is seen[1][1] for item in seen[1:])
-    assert all(item[0].startswith(f"A single photograph of {look},") for item in seen)
+    assert all(item[0].startswith(f"A single photograph of {PERSON},") for item in seen)
     assert [item[2] for item in seen] == [REFERENCE_STRENGTH] * 6
     assert document["age"] == 25
 
@@ -875,10 +885,9 @@ def test_a_planned_person_series_shares_the_same_appearance(tmp_path: Path) -> N
         return _frame()
 
     result = _run(tmp_path, idea=PERSON, rewrite=lambda _prompt: "no lines here", generate=generate)
-    look = fixed_appearance(PERSON, 3)
     assert result.source == "planned"
     assert len(prompts) == 6
-    assert all(line.count(look) == 1 for line in prompts)
+    assert all(line.startswith(f"A single photograph of {PERSON},") for line in prompts)
     assert strengths == [REFERENCE_STRENGTH] * 6
 
 
@@ -919,7 +928,7 @@ def test_a_frame_prompt_has_no_series_words(tmp_path: Path) -> None:
 
     generate.prepare = prepare  # type: ignore[attr-defined]
     result = _run(tmp_path, idea=idea, generate=generate, count=3)
-    look = fixed_appearance(idea, 3)
+    assert fixed_appearance(idea, 3) == ""
     assert result.stopped == ""
     assert prompts
     banned = re.compile(
@@ -930,7 +939,7 @@ def test_a_frame_prompt_has_no_series_words(tmp_path: Path) -> None:
     joined = "\n".join(prompts)
     for line in prompts:
         assert banned.search(line) is None
-        assert line.startswith(f"A single photograph of {look},")
+        assert line.startswith("A single photograph of same woman, ")
         assert " in," not in line
         assert not line.endswith(" in")
         assert "red coat" in line
@@ -986,7 +995,7 @@ def test_each_frame_keeps_one_listed_outfit_and_covers_the_list(tmp_path: Path) 
         )
 
     result = _run(tmp_path, idea=idea, generate=generate, count=5, rewrite=rewrite)
-    look = fixed_appearance(idea, 3)
+    assert fixed_appearance(idea, 3) == ""
     assert result.stopped == ""
     assert result.source == "writer"
     assert len(prompts) == 5
@@ -994,7 +1003,7 @@ def test_each_frame_keeps_one_listed_outfit_and_covers_the_list(tmp_path: Path) 
     seen_lights: set[str] = set()
     seen_places: set[str] = set()
     for index, line in enumerate(prompts):
-        assert line.startswith(f"A single photograph of {look},")
+        assert line.startswith("A single photograph of a woman")
         assert line.count("A single photograph of") == 1
         assert "photograph" in line
         assert _PROMPT_DENY.search(line) is None

@@ -1,9 +1,9 @@
-"""Build the English and Russian user-guide PDFs.
+"""Build the English user-guide PDF.
 
 Markdown is rendered with Python-Markdown and paginated with WeasyPrint.
 Chapters (``#``) and sections (``##``) are numbered. A cover and a table of
 contents are added. A paragraph that is only an image becomes a captioned
-figure. DejaVu is embedded so Cyrillic prints.
+figure. DejaVu is embedded so quoted non-Latin prompts print.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ import markdown
 from weasyprint import CSS, HTML
 
 GUIDE = Path(__file__).resolve().parents[1] / "docs" / "guide"
-LANGUAGES = ("en", "ru")
+LANGUAGES = ("en",)
 FONTS = Path("/usr/share/fonts/truetype/dejavu")
 BUILD = json.loads((GUIDE.parents[1] / "BUILD.json").read_text(encoding="utf-8"))["build"]
 
@@ -29,13 +29,6 @@ META = {
         "licence": "Apache-2.0 · © 2026 Aleksandr Mitroshenkov",
         "contents": "Contents",
     },
-    "ru": {
-        "title": "VOXPrint AI Canvas",
-        "subtitle": "Руководство пользователя",
-        "version": f"Версия 0.1.0 (кандидат в релиз) · сборка {BUILD} · руководство от 18 октября 2026 г.",
-        "licence": "Apache-2.0 · © 2026 Aleksandr Mitroshenkov",
-        "contents": "Содержание",
-    },
 }
 
 _COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
@@ -43,14 +36,10 @@ _HEADING = re.compile(r"^(#{1,3}) (?!#)(.+?)\s*$")
 _IMAGE = re.compile(r"!\[([^\]]*)\]\(screens/([a-z0-9-]+)\.png\)")
 _FIGURE = re.compile(r"<p>\s*(<img\b[^>]*>)\s*</p>", re.IGNORECASE)
 _IMG_ALT = re.compile(r'\balt="([^"]*)"', re.IGNORECASE)
-_FALLBACK_CAPTION = {
-    "en": "",
-    "ru": " (снимок английского интерфейса)",
-}
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Write both PDFs. An optional argument is the output directory."""
+    """Write the PDF. An optional argument is the output directory."""
     args = list(sys.argv[1:] if argv is None else argv)
     destination = Path(args[0]) if args else GUIDE / "dist"
     destination.mkdir(parents=True, exist_ok=True)
@@ -89,14 +78,8 @@ def _prepare(raw: str, language: str) -> tuple[str, list[tuple[int, str, str]]]:
 def _image(match: re.Match[str], language: str) -> str:
     caption = match.group(1)
     image_id = match.group(2)
-    local = GUIDE / "screens" / language / f"{image_id}.png"
-    english = GUIDE / "screens" / "en" / f"{image_id}.png"
-    if local.is_file():
-        path = local
-    elif english.is_file():
-        path = english
-        caption = f"{caption}{_FALLBACK_CAPTION[language]}"
-    else:
+    path = GUIDE / "screens" / language / f"{image_id}.png"
+    if not path.is_file():
         raise SystemExit(f"missing screenshot {language}/{image_id}.png")
     return f"![{caption}]({path.resolve().as_uri()})"
 

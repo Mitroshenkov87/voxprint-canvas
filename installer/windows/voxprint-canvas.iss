@@ -51,29 +51,23 @@ PrivilegesRequired=admin
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.26100
-ShowLanguageDialog=auto
+ShowLanguageDialog=no
 SetupIconFile=..\..\assets\voxprint-canvas.ico
 UninstallDisplayName={#MyAppName}
 UninstallDisplayIcon={app}\assets\voxprint-canvas.ico
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
-Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
 
 [CustomMessages]
 english.PwshAsk=PowerShell 7 is not installed. Install PowerShell 7 (Microsoft) now? Recommended.
-russian.PwshAsk=PowerShell 7 не установлен. Установить PowerShell 7 (Microsoft) сейчас? Рекомендуется.
 english.PwshInstalling=Installing PowerShell 7 (Microsoft)
-russian.PwshInstalling=Установка PowerShell 7 (Microsoft)
 english.PwshInstallingDesc=Downloading and checking the official installer from Microsoft.
-russian.PwshInstallingDesc=Загрузка и проверка официального установщика Microsoft.
 english.PwshFallback=Setup will continue with Windows PowerShell 5.1. Please install PowerShell 7 when possible: https://aka.ms/powershell-release?tag=stable
 english.SetupScripts=Installing the program libraries and models. This can take a while; progress is written to the setup log.
-russian.SetupScripts=Установка библиотек программы и моделей. Это может занять продолжительное время; ход установки записывается в журнал установки.
-russian.PwshFallback=Установка продолжится с Windows PowerShell 5.1. По возможности установите PowerShell 7: https://aka.ms/powershell-release?tag=stable
 
 [Files]
-; staging\docs\VOXPrint-AI-Canvas-Guide-en.pdf and -ru.pdf land in {app}\docs.
+; staging\docs\VOXPrint-AI-Canvas-Guide-en.pdf lands in {app}\docs.
 Source: "staging\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "vxsigcheck.exe"; DestDir: "{tmp}"; Flags: dontcopy
 Source: "voxprint-canvas.exe"; DestDir: "{app}"; Flags: ignoreversion

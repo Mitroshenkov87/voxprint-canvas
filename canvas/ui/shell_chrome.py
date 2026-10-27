@@ -10,7 +10,7 @@ from pathlib import Path
 
 from typing import assert_never
 
-from PySide6.QtCore import QPoint, QRect, QSize, Qt
+from PySide6.QtCore import QPoint, QRect, QSize, Qt, QTimer
 from PySide6.QtGui import QAction, QColor, QFont, QFontInfo, QFontMetrics, QIcon, QImage, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
@@ -133,6 +133,13 @@ QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,
 QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {{
     background: {CONTROL_HOVER};
 }}
+QComboBox::drop-down {{
+    subcontrol-origin: padding; subcontrol-position: center right; width: 22px;
+    background: transparent; border: none;
+}}
+QComboBox::down-arrow {{
+    image: url("{down}"); width: 8px; height: 5px;
+}}
 QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{
     image: url("{up}"); width: 8px; height: 5px;
 }}
@@ -142,6 +149,9 @@ QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{
 QLabel[dialogTitle="true"] {{ font-size: 18px; }}
 QDialog QPushButton:checked {{
     background: {PRIMARY}; color: {TEXT_ON_PRIMARY}; border-color: {PRIMARY_BORDER}; font-weight: 600;
+}}
+QPushButton#actionPicture, QPushButton#actionMask {{
+    padding: 2px 12px; min-height: 28px;
 }}
 QPushButton[primary="true"] {{
     background: {PRIMARY}; color: {TEXT_ON_PRIMARY}; border: 1px solid {PRIMARY_BORDER}; font-weight: 600;
@@ -253,6 +263,7 @@ def fit_panel(window, enabled):
     width = max(1, window.width() - PANEL_WIDTH)
     split.setSizes([width, PANEL_WIDTH])
     _flow_heights(window, True)
+    _settle_form(window)
 
 
 def polish(window):
@@ -275,6 +286,7 @@ def polish(window):
         _paint_panel(window)
         _widen_combos(window)
         _even_rows(window)
+        _settle_form(window)
     _hide_row_resets(window)
     _labels(window)
     _fit_controls(window)
@@ -726,11 +738,30 @@ def _widen_combos(window):
         for index in range(combo.count()):
             longest = max(longest, metrics.horizontalAdvance(combo.itemText(index)))
         combo.setMinimumWidth(longest + 48)
-        label = _row_label(form.layout(), combo)
-        if label is not None:
-            label.setMaximumWidth(88)
-        combo.resize(max(combo.minimumWidth(), combo.width()), max(combo.height(), 28))
         combo.updateGeometry()
+    # A combo sized by hand keeps that width until the form lays out again, so
+    # it stayed narrower than the spin boxes in the same column.
+    for grid in form.findChildren(QFormLayout):
+        grid.invalidate()
+
+
+def _settle_form(window):
+    """Lay the expert form out again once its refilled fields are shown.
+
+    The shared panel refills the form, and Qt shows the new fields from a
+    queued call after this pass. The form was laid out while they were hidden,
+    so the combos kept their minimum width beside the full-width spin boxes.
+    """
+    form = window.findChild(QWidget, "expertForm")
+    if form is None:
+        return
+
+    def settle():
+        if _alive(form) and form.layout() is not None:
+            form.layout().invalidate()
+            form.layout().activate()
+
+    QTimer.singleShot(0, form, settle)
 
 
 def _even_rows(window):
@@ -776,31 +807,6 @@ def inset_spin(spin):
     edit = spin.findChild(QLineEdit)
     if edit is not None:
         edit.setTextMargins(6, 0, 0, 0)
-
-
-def _row_label(layout, widget):
-    if layout is None:
-        return None
-    found = None
-    label = None
-    for index in range(layout.count()):
-        item = layout.itemAt(index)
-        child = item.widget()
-        if child is widget:
-            found = layout
-            break
-        if isinstance(child, QLabel):
-            label = child
-        nested = _row_label(item.layout(), widget)
-        if nested is not None:
-            return nested
-    if found is None:
-        return None
-    for index in range(found.count()):
-        child = found.itemAt(index).widget()
-        if isinstance(child, QLabel):
-            return child
-    return label
 
 
 def _wrap_rows(window):

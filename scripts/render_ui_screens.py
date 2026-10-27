@@ -1,4 +1,4 @@
-"""Render each main Canvas screen offscreen in EN and RU at 1920×1080.
+"""Render each main Canvas screen offscreen at 1920×1080.
 
 Usage::
 
@@ -28,7 +28,6 @@ def _arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("destination", type=Path)
     parser.add_argument("--scale", type=float, default=1.0, help="devicePixelRatio, e.g. 2 for HiDPI")
-    parser.add_argument("--lang", choices=("en", "ru"), action="append", help="default: both")
     return parser.parse_args()
 
 
@@ -58,7 +57,7 @@ MAIN = ("simple", "expert", "simple-result", "expert-custom")
 
 
 def main() -> int:
-    """Write every screen for each language and print the overflow warnings."""
+    """Write every screen and print the overflow warnings."""
     assert ARGS is not None
     destination: Path = ARGS.destination
     destination.mkdir(parents=True, exist_ok=True)
@@ -67,8 +66,8 @@ def main() -> int:
     picture = home / "sample.png"
     _sample(picture)
     warnings: list[str] = []
-    for language in ARGS.lang or ("en", "ru"):
-        os.environ["LANG"] = os.environ["LC_ALL"] = "ru_RU.UTF-8" if language == "ru" else "en_US.UTF-8"
+    for language in ("en",):
+        os.environ["LANG"] = os.environ["LC_ALL"] = "en_US.UTF-8"
         set_language(language)
         for name in MAIN:
             window = _open(home / language / name, name)

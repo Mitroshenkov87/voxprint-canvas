@@ -34,10 +34,8 @@ _BOXES = {"question", "information", "warning", "critical"}
 _CATALOG_CALLS = {"text", "catalog_text"}
 _PLURAL_KEYS = (
     "unit.minute.one",
-    "unit.minute.few",
     "unit.minute.many",
     "unit.second.one",
-    "unit.second.few",
     "unit.second.many",
 )
 
@@ -144,9 +142,24 @@ def _catalog_keys(source: str) -> list[str]:
 
 
 def test_gate_unavailable_is_the_shipped_sentence():
-    assert shipped_locales() == ("en", "ru")
+    assert shipped_locales() == ("en",)
     assert text("gate.unavailable", "en") == "Image generation is unavailable."
-    assert text("gate.unavailable", "ru") == "Генерация изображений недоступна."
+
+
+def test_a_russian_system_locale_still_shows_english(monkeypatch):
+    from voxprint_common.i18n import get_language, set_language, tr, tr_lang
+
+    from canvas.app import main as app_main
+
+    for name in ("LC_ALL", "LC_MESSAGES", "LANG"):
+        monkeypatch.setenv(name, "ru_RU.UTF-8")
+    monkeypatch.setenv("VOXPRINT_LANG", "ru")
+    set_language("ru")
+    assert app_main.main(["--version"]) == 0
+    assert get_language() == "en"
+    assert text("gate.unavailable") == "Image generation is unavailable."
+    assert tr("simple.cancel") == tr_lang("simple.cancel", "en")
+    assert not list((ROOT / "canvas" / "ui" / "locales").glob("ru.json"))
 
 
 def test_every_catalog_key_has_every_shipped_locale():
@@ -156,8 +169,8 @@ def test_every_catalog_key_has_every_shipped_locale():
 
 
 def test_a_missing_translation_fails_the_catalog_check():
-    gaps = locale_gaps({"locales": ["en", "ru"], "strings": {"gate.unavailable": {"en": "Stopped"}}})
-    assert gaps == ["gate.unavailable missing ru"]
+    gaps = locale_gaps({"locales": ["en"], "strings": {"gate.unavailable": {"de": "Gestoppt"}}})
+    assert gaps == ["gate.unavailable missing en", "gate.unavailable has unshipped locale de"]
 
 
 def test_ui_code_has_no_hardcoded_text():

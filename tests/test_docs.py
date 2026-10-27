@@ -46,5 +46,5 @@ def test_interrogate_gate_is_65_percent():
     workflow = Path(".github/workflows/docs.yml").read_text(encoding="utf-8")
     assert "actions/deploy-pages@v4" in workflow
     assert "actions/upload-pages-artifact@v3" in workflow
-    readme = Path("docs/README-full.md").read_text(encoding="utf-8")
+    readme = Path("README.md").read_text(encoding="utf-8")
     assert "https://mitroshenkov87.github.io/voxprint-canvas/" in readme

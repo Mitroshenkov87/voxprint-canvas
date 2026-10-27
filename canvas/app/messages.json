@@ -1,1048 +1,778 @@
 {
   "locales": [
-    "en",
-    "ru"
+    "en"
   ],
   "strings": {
     "app.name": {
-      "en": "VOXPrint AI Canvas",
-      "ru": "VOXPrint AI Canvas"
+      "en": "VOXPrint AI Canvas"
     },
     "app.about_title": {
-      "en": "About {name}",
-      "ru": "О программе {name}"
+      "en": "About {name}"
     },
     "app.close": {
-      "en": "Close",
-      "ru": "Закрыть"
+      "en": "Close"
     },
     "prompt.placeholder": {
-      "en": "Describe the picture",
-      "ru": "Опишите изображение"
+      "en": "Describe the picture"
     },
     "tab.text": {
-      "en": "Text to image",
-      "ru": "Текст в изображение"
+      "en": "Text to image"
     },
     "tab.image": {
-      "en": "Image to image",
-      "ru": "Изображение в изображение"
+      "en": "Image to image"
     },
     "label.operation": {
-      "en": "Operation",
-      "ru": "Операция"
+      "en": "Operation"
     },
     "format.avif": {
-      "en": "AVIF",
-      "ru": "AVIF"
+      "en": "AVIF"
     },
     "format.jxl": {
-      "en": "JPEG XL",
-      "ru": "JPEG XL"
+      "en": "JPEG XL"
     },
     "format.webp": {
-      "en": "WebP",
-      "ru": "WebP"
+      "en": "WebP"
     },
     "checkbox.fourk": {
-      "en": "Output size: 4K",
-      "ru": "Размер вывода: 4K"
+      "en": "Output size: 4K"
     },
     "checkbox.addons": {
-      "en": "Third-party add-ons",
-      "ru": "Сторонние дополнения"
+      "en": "Third-party add-ons"
     },
     "button.install_enlarge": {
-      "en": "Install Enlarge",
-      "ru": "Установить Enlarge"
+      "en": "Install Enlarge"
     },
     "button.generate": {
-      "en": "Generate",
-      "ru": "Создать"
+      "en": "Generate"
     },
     "button.enhance": {
-      "en": "Enhance",
-      "ru": "Улучшить"
+      "en": "Enhance"
     },
     "button.enhancing": {
-      "en": "Enhancing…",
-      "ru": "Улучшение…"
+      "en": "Enhancing…"
     },
     "button.about": {
-      "en": "About",
-      "ru": "О программе"
+      "en": "About"
     },
     "button.models": {
-      "en": "Manage models",
-      "ru": "Управление моделями"
+      "en": "Manage models"
     },
     "models.missing": {
-      "en": "VOXPrint MDL is not installed.",
-      "ru": "VOXPrint MDL не установлен."
+      "en": "VOXPrint MDL is not installed."
     },
     "tooltip.enhance": {
-      "en": "Improve the prompt",
-      "ru": "Улучшить запрос"
+      "en": "Improve the prompt"
     },
     "tooltip.revert": {
-      "en": "Revert",
-      "ru": "Вернуть"
+      "en": "Revert"
     },
     "aspect.landscape": {
-      "en": "Landscape",
-      "ru": "Альбомная"
+      "en": "Landscape"
     },
     "aspect.square": {
-      "en": "Square",
-      "ru": "Квадрат"
+      "en": "Square"
     },
     "aspect.portrait": {
-      "en": "Portrait",
-      "ru": "Портретная"
+      "en": "Portrait"
     },
     "mode.text": {
-      "en": "Text to image",
-      "ru": "Текст в изображение"
+      "en": "Text to image"
     },
     "mode.creative": {
-      "en": "Creative",
-      "ru": "Творческий"
+      "en": "Creative"
     },
     "mode.restyle": {
-      "en": "Restyle",
-      "ru": "Смена стиля"
+      "en": "Restyle"
     },
     "mode.inpaint": {
-      "en": "Inpaint",
-      "ru": "Дорисовка"
+      "en": "Inpaint"
     },
     "mode.outpaint": {
-      "en": "Outpaint",
-      "ru": "Расширение"
+      "en": "Outpaint"
     },
     "mode.pose": {
-      "en": "Pose",
-      "ru": "Поза"
+      "en": "Pose"
     },
     "mode.depth": {
-      "en": "Depth",
-      "ru": "Глубина"
+      "en": "Depth"
     },
     "mode.edge": {
-      "en": "Edge",
-      "ru": "Контур"
+      "en": "Edge"
     },
     "notice.responsibility": {
-      "en": "Do not use the app to create content that is illegal or socially unacceptable; you are responsible for what you create.",
-      "ru": "Не используйте приложение для создания незаконного или социально неприемлемого контента; вы отвечаете за то, что создаёте."
+      "en": "Do not use the app to create content that is illegal or socially unacceptable; you are responsible for what you create."
     },
     "notice.third_party": {
-      "en": "Third-party weights are provided by their authors, who are responsible for the licence and training data. Voxprint does not host or redistribute them.",
-      "ru": "Сторонние веса предоставляют их авторы, которые отвечают за лицензию и обучающие данные. Voxprint их не размещает и не распространяет."
+      "en": "Third-party weights are provided by their authors, who are responsible for the licence and training data. Voxprint does not host or redistribute them."
     },
     "enlarge.hint": {
-      "en": "Install {name} to use this.",
-      "ru": "Установите {name}, чтобы пользоваться этим."
+      "en": "Install {name} to use this."
     },
     "dialog.download": {
-      "en": "Download",
-      "ru": "Скачать"
+      "en": "Download"
     },
     "status.done": {
-      "en": "Done",
-      "ru": "Готово"
+      "en": "Done"
     },
     "gate.blocked": {
-      "en": "This request cannot be completed.",
-      "ru": "Этот запрос нельзя выполнить."
+      "en": "This request cannot be completed."
     },
     "gate.blocked_youth": {
-      "en": "This request cannot be completed. Explicit content cannot be combined with school, student or young-age themes.",
-      "ru": "Этот запрос нельзя выполнить. Откровенный контент нельзя сочетать со школьной, студенческой или детской тематикой."
+      "en": "This request cannot be completed. Explicit content cannot be combined with school, student or young-age themes."
     },
     "gate.blocked_stylised": {
-      "en": "This request cannot be completed. Explicit content cannot be combined with anime, manga or other stylised characters.",
-      "ru": "Этот запрос нельзя выполнить. Откровенный контент нельзя сочетать с аниме, мангой или другими стилизованными персонажами."
+      "en": "This request cannot be completed. Explicit content cannot be combined with anime, manga or other stylised characters."
     },
     "gate.unavailable": {
-      "en": "Image generation is unavailable.",
-      "ru": "Генерация изображений недоступна."
+      "en": "Image generation is unavailable."
     },
     "photoshoot.code.internal": {
-      "en": "Something went wrong. The series stopped.",
-      "ru": "Что-то пошло не так. Серия остановлена."
+      "en": "Something went wrong. The series stopped."
     },
     "error.job": {
-      "en": "This mode needs another image.",
-      "ru": "Для этого режима нужно другое изображение."
+      "en": "This mode needs another image."
     },
     "error.cooling": {
-      "en": "The GPU is cooling down. Try again in a little while.",
-      "ru": "Видеокарта остывает. Попробуйте ещё раз чуть позже."
+      "en": "The GPU is cooling down. Try again in a little while."
     },
     "error.mode": {
-      "en": "This mode is not available on this GPU.",
-      "ru": "Этот режим недоступен на этой видеокарте."
+      "en": "This mode is not available on this GPU."
     },
     "error.base": {
-      "en": "The text model has not been selected yet.",
-      "ru": "Текстовая модель ещё не выбрана."
+      "en": "The text model has not been selected yet."
     },
     "error.vram": {
-      "en": "This picture does not fit on the GPU.",
-      "ru": "Это изображение не помещается на видеокарту."
+      "en": "This picture does not fit on the GPU."
     },
     "error.device": {
-      "en": "The model did not stay on the GPU.",
-      "ru": "Модель не осталась на видеокарте."
+      "en": "The model did not stay on the GPU."
     },
     "error.download": {
-      "en": "The model could not be downloaded.",
-      "ru": "Не удалось скачать модель."
+      "en": "The model could not be downloaded."
     },
     "model.missing": {
-      "en": "Model missing, fetch it with MDL.",
-      "ru": "Модель отсутствует, загрузите её через MDL."
+      "en": "Model missing, fetch it with MDL."
     },
     "view.link_failed": {
-      "en": "{name} could not be linked to the model store. Weights are not copied.",
-      "ru": "Не удалось связать {name} с хранилищем моделей. Веса не копируются."
+      "en": "{name} could not be linked to the model store. Weights are not copied."
     },
     "view.bad_path": {
-      "en": "A model file must stay inside its folder.",
-      "ru": "Файл модели должен оставаться внутри своей папки."
+      "en": "A model file must stay inside its folder."
     },
     "error.verify": {
-      "en": "The model file could not be verified.",
-      "ru": "Не удалось проверить файл модели."
+      "en": "The model file could not be verified."
     },
     "error.cancelled": {
-      "en": "The download was cancelled.",
-      "ru": "Загрузка отменена."
+      "en": "The download was cancelled."
     },
     "error.offload": {
-      "en": "This pipeline cannot offload weights.",
-      "ru": "Этот конвейер не может выгрузить веса."
+      "en": "This pipeline cannot offload weights."
     },
     "error.package": {
-      "en": "A package could not be installed.",
-      "ru": "Не удалось установить пакет."
+      "en": "A package could not be installed."
     },
     "error.python": {
-      "en": "Python could not be installed.",
-      "ru": "Не удалось установить Python."
+      "en": "Python could not be installed."
     },
     "error.address": {
-      "en": "unsupported download address",
-      "ru": "Неподдерживаемый адрес загрузки"
+      "en": "unsupported download address"
     },
     "enlarge.finish": {
-      "en": "Enlarge could not finish.",
-      "ru": "Enlarge не смог завершить работу."
+      "en": "Enlarge could not finish."
     },
     "enlarge.read": {
-      "en": "Enlarge could not read this picture.",
-      "ru": "Enlarge не смог прочитать это изображение."
+      "en": "Enlarge could not read this picture."
     },
     "enlarge.format": {
-      "en": "Enlarge cannot write this format.",
-      "ru": "Enlarge не может записать этот формат."
+      "en": "Enlarge cannot write this format."
     },
     "enlarge.gpu": {
-      "en": "This computer cannot run Enlarge.",
-      "ru": "Этот компьютер не может запустить Enlarge."
+      "en": "This computer cannot run Enlarge."
     },
     "enlarge.busy": {
-      "en": "The GPU is busy.",
-      "ru": "Видеокарта занята."
+      "en": "The GPU is busy."
     },
     "enlarge.oom": {
-      "en": "Enlarge ran out of memory.",
-      "ru": "Enlarge не хватило памяти."
+      "en": "Enlarge ran out of memory."
     },
     "enlarge.model_missing": {
-      "en": "Download the upscale model in {name}, then try again.",
-      "ru": "Скачайте модель увеличения в {name} и попробуйте снова."
+      "en": "Download the upscale model in {name}, then try again."
     },
     "enlarge.write": {
-      "en": "Enlarge could not write the picture.",
-      "ru": "Enlarge не смог записать изображение."
+      "en": "Enlarge could not write the picture."
     },
     "enlarge.cancelled": {
-      "en": "Enlarge was cancelled.",
-      "ru": "Enlarge отменён."
+      "en": "Enlarge was cancelled."
     },
     "enlarge.protocol": {
-      "en": "Enlarge sent a message this app does not understand.",
-      "ru": "Enlarge прислал сообщение, которое это приложение не понимает."
+      "en": "Enlarge sent a message this app does not understand."
     },
     "enlarge.vram": {
-      "en": "Enlarge needs more free GPU memory.",
-      "ru": "Enlarge нужно больше свободной памяти видеокарты."
+      "en": "Enlarge needs more free GPU memory."
     },
     "enlarge.missing": {
-      "en": "Enlarge is not installed.",
-      "ru": "Enlarge не установлен."
+      "en": "Enlarge is not installed."
     },
     "enhance.age": {
-      "en": "The enhanced prompt changed a stated age, so the original prompt was used.",
-      "ru": "Улучшенный запрос изменил указанный возраст, поэтому использован исходный запрос."
+      "en": "The enhanced prompt changed a stated age, so the original prompt was used."
     },
     "enhance.age_descriptor": {
-      "en": "The enhanced prompt added words about age, so the original prompt was used.",
-      "ru": "Улучшенный запрос добавил слова о возрасте, поэтому использован исходный запрос."
+      "en": "The enhanced prompt added words about age, so the original prompt was used."
     },
     "enhance.quote": {
-      "en": "The enhanced prompt dropped quoted text, so the original prompt was used.",
-      "ru": "Улучшенный запрос потерял текст в кавычках, поэтому использован исходный запрос."
+      "en": "The enhanced prompt dropped quoted text, so the original prompt was used."
     },
     "enhance.empty": {
-      "en": "The enhanced prompt was empty, so the original prompt was used.",
-      "ru": "Улучшенный запрос оказался пустым, поэтому использован исходный запрос."
+      "en": "The enhanced prompt was empty, so the original prompt was used."
     },
     "splash.gpu": {
-      "en": "Checking the GPU",
-      "ru": "Проверка видеокарты"
+      "en": "Checking the GPU"
     },
     "startup.lock": {
-      "en": "Another Canvas window is still open. Close it, then try again.",
-      "ru": "Другое окно Canvas ещё открыто. Закройте его и попробуйте снова."
+      "en": "Another Canvas window is still open. Close it, then try again."
     },
     "splash.installing": {
-      "en": "Installing {name}",
-      "ru": "Установка {name}"
+      "en": "Installing {name}"
     },
     "splash.repairing": {
-      "en": "Repairing {name}",
-      "ru": "Восстановление {name}"
+      "en": "Repairing {name}"
     },
     "splash.leaving": {
-      "en": "Leaving {name} unchanged",
-      "ru": "{name} оставлен без изменений"
+      "en": "Leaving {name} unchanged"
     },
     "splash.install_python": {
-      "en": "Installing Python",
-      "ru": "Установка Python"
+      "en": "Installing Python"
     },
     "splash.runtime_left": {
-      "en": "Leaving the suite runtime in place",
-      "ru": "Среда выполнения комплекта оставлена без изменений"
+      "en": "Leaving the suite runtime in place"
     },
     "splash.install_torch": {
-      "en": "Installing PyTorch",
-      "ru": "Установка PyTorch"
+      "en": "Installing PyTorch"
     },
     "splash.tensorrt_skip": {
-      "en": "TensorRT is skipped on Python 3.14.",
-      "ru": "TensorRT пропускается в Python 3.14."
+      "en": "TensorRT is skipped on Python 3.14."
     },
     "splash.install_tensorrt": {
-      "en": "Installing TensorRT",
-      "ru": "Установка TensorRT"
+      "en": "Installing TensorRT"
     },
     "splash.tensorrt_left": {
-      "en": "Leaving TensorRT in place",
-      "ru": "TensorRT оставлен без изменений"
+      "en": "Leaving TensorRT in place"
     },
     "splash.copying": {
-      "en": "{name} copying",
-      "ru": "Копирование {name}"
+      "en": "{name} copying"
     },
     "splash.starting": {
-      "en": "{name} starting",
-      "ru": "{name}: начало"
+      "en": "{name} starting"
     },
     "splash.progress": {
-      "en": "{name} {percent}% about {seconds}s",
-      "ru": "{name} {percent}% ещё около {seconds} с"
+      "en": "{name} {percent}% about {seconds}s"
     },
     "splash.ready": {
-      "en": "{name} ready",
-      "ru": "{name} готов"
+      "en": "{name} ready"
     },
     "pack.controlnet_lite": {
-      "en": "ControlNet lite",
-      "ru": "ControlNet lite"
+      "en": "ControlNet lite"
     },
     "pack.controlnet": {
-      "en": "ControlNet",
-      "ru": "ControlNet"
+      "en": "ControlNet"
     },
     "pack.creative": {
-      "en": "Creative Z-Image",
-      "ru": "Creative Z-Image"
+      "en": "Creative Z-Image"
     },
     "pack.turbo": {
-      "en": "Z-Image-Turbo",
-      "ru": "Z-Image-Turbo"
+      "en": "Z-Image-Turbo"
     },
     "download.notice": {
-      "en": "{title} is {size}. Estimated time {duration}.",
-      "ru": "{title}: {size}. Примерное время: {duration}."
+      "en": "{title} is {size}. Estimated time {duration}."
     },
     "unit.gb": {
-      "en": "{value} GB",
-      "ru": "{value} ГБ"
+      "en": "{value} GB"
     },
     "unit.mb": {
-      "en": "{value} MB",
-      "ru": "{value} МБ"
+      "en": "{value} MB"
     },
     "unit.kb": {
-      "en": "{value} KB",
-      "ru": "{value} КБ"
+      "en": "{value} KB"
     },
     "unit.b": {
-      "en": "{value} B",
-      "ru": "{value} Б"
+      "en": "{value} B"
     },
     "unit.span": {
-      "en": "{count} {unit}",
-      "ru": "{count} {unit}"
+      "en": "{count} {unit}"
     },
     "unit.minute.one": {
-      "en": "minute",
-      "ru": "минута"
-    },
-    "unit.minute.few": {
-      "en": "minutes",
-      "ru": "минуты"
+      "en": "minute"
     },
     "unit.minute.many": {
-      "en": "minutes",
-      "ru": "минут"
+      "en": "minutes"
     },
     "unit.second.one": {
-      "en": "second",
-      "ru": "секунда"
-    },
-    "unit.second.few": {
-      "en": "seconds",
-      "ru": "секунды"
+      "en": "second"
     },
     "unit.second.many": {
-      "en": "seconds",
-      "ru": "секунд"
+      "en": "seconds"
     },
     "edit.removed": {
-      "en": "Instruction editing has been removed.",
-      "ru": "Правка по инструкции удалена."
+      "en": "Instruction editing has been removed."
     },
     "canvas.models.missing": {
-      "en": "Models are not ready yet. Use Manage models.",
-      "ru": "Модели ещё не готовы. Откройте «Управлять моделями»."
+      "en": "Models are not ready yet. Use Manage models."
     },
     "canvas.stage.prepare": {
-      "en": "Preparing",
-      "ru": "Подготовка"
+      "en": "Preparing"
     },
     "canvas.stage.draw": {
-      "en": "Drawing",
-      "ru": "Рисуем"
+      "en": "Drawing"
     },
     "canvas.progress.count": {
-      "en": "{current} of {total}",
-      "ru": "{current} из {total}"
+      "en": "{current} of {total}"
     },
     "canvas.revert.symbol": {
-      "en": "↶",
-      "ru": "↶"
+      "en": "↶"
     },
     "canvas.menu.value": {
-      "en": "{name}: {value}  ▾",
-      "ru": "{name}: {value}  ▾"
+      "en": "{name}: {value}  ▾"
     },
     "canvas.proportions": {
-      "en": "Proportions",
-      "ru": "Пропорции"
+      "en": "Proportions"
     },
     "canvas.image_size": {
-      "en": "Image size",
-      "ru": "Размер изображения"
+      "en": "Image size"
     },
     "canvas.action.picture": {
-      "en": "Use a picture",
-      "ru": "Использовать картинку"
+      "en": "Use a picture"
     },
     "canvas.action.mask": {
-      "en": "Edit the mask",
-      "ru": "Править маску"
+      "en": "Edit the mask"
     },
     "canvas.action.addons": {
-      "en": "Add-ons",
-      "ru": "Дополнения"
+      "en": "Add-ons"
     },
     "canvas.action.check": {
-      "en": "Check this PC",
-      "ru": "Проверить компьютер"
+      "en": "Check this PC"
     },
     "canvas.action.setup": {
-      "en": "Picture setup",
-      "ru": "Настройка картинки"
+      "en": "Picture setup"
     },
     "canvas.output.4k.needs": {
-      "en": "4K (needs Enlarge)",
-      "ru": "4K (нужен Enlarge)"
+      "en": "4K (needs Enlarge)"
     },
     "canvas.enlarge.title": {
-      "en": "VOXPrint Enlarge",
-      "ru": "VOXPrint Enlarge"
+      "en": "VOXPrint Enlarge"
     },
     "canvas.enlarge.confirm": {
-      "en": "4K needs VOXPrint Enlarge. Install it?",
-      "ru": "Для 4K нужен VOXPrint Enlarge. Установить?"
+      "en": "4K needs VOXPrint Enlarge. Install it?"
     },
     "canvas.enlarge.confirm.size": {
-      "en": "4K needs VOXPrint Enlarge (≈ {size}). Install it?",
-      "ru": "Для 4K нужен VOXPrint Enlarge (≈ {size}). Установить?"
+      "en": "4K needs VOXPrint Enlarge (≈ {size}). Install it?"
     },
     "canvas.enlarge.progress": {
-      "en": "Installing VOXPrint Enlarge…",
-      "ru": "Устанавливается VOXPrint Enlarge…"
+      "en": "Installing VOXPrint Enlarge…"
     },
     "canvas.enlarge.progress.bytes": {
-      "en": "Installing VOXPrint Enlarge… {done} of {total}",
-      "ru": "Устанавливается VOXPrint Enlarge… {done} из {total}"
+      "en": "Installing VOXPrint Enlarge… {done} of {total}"
     },
     "canvas.enlarge.failed": {
-      "en": "VOXPrint Enlarge could not be installed.",
-      "ru": "Не удалось установить VOXPrint Enlarge."
+      "en": "VOXPrint Enlarge could not be installed."
     },
     "canvas.expert.preset": {
-      "en": "Preset",
-      "ru": "Набор"
+      "en": "Preset"
     },
     "canvas.expert.custom": {
-      "en": "Custom",
-      "ru": "Свои настройки"
+      "en": "Custom"
     },
     "canvas.expert.reset": {
-      "en": "Reset to preset",
-      "ru": "Сбросить к пресету"
+      "en": "Reset to preset"
     },
     "canvas.setup.title": {
-      "en": "Picture setup",
-      "ru": "Настройка картинки"
+      "en": "Picture setup"
     },
     "canvas.setup.done": {
-      "en": "Done",
-      "ru": "Готово"
+      "en": "Done"
     },
     "canvas.picture.title": {
-      "en": "Use a picture",
-      "ru": "Использовать картинку"
+      "en": "Use a picture"
     },
     "canvas.picture.open": {
-      "en": "Open",
-      "ru": "Открыть"
+      "en": "Open"
     },
     "canvas.picture.use": {
-      "en": "Use this picture",
-      "ru": "Использовать эту картинку"
+      "en": "Use this picture"
     },
     "canvas.picture.empty": {
-      "en": "No picture yet.",
-      "ru": "Картинки пока нет."
+      "en": "No picture yet."
     },
     "canvas.mask.title": {
-      "en": "Edit the mask",
-      "ru": "Править маску"
+      "en": "Edit the mask"
     },
     "canvas.mask.brush": {
-      "en": "Brush",
-      "ru": "Кисть"
+      "en": "Brush"
     },
     "canvas.mask.eraser": {
-      "en": "Eraser",
-      "ru": "Ластик"
+      "en": "Eraser"
     },
     "canvas.mask.clear": {
-      "en": "Clear",
-      "ru": "Очистить"
+      "en": "Clear"
     },
     "canvas.mask.use": {
-      "en": "Use this mask",
-      "ru": "Использовать эту маску"
+      "en": "Use this mask"
     },
     "canvas.mask.need": {
-      "en": "Open a picture first.",
-      "ru": "Сначала откройте картинку."
+      "en": "Open a picture first."
     },
     "canvas.mask.hint": {
-      "en": "Paint the area that should change.",
-      "ru": "Закрасьте область, которую нужно изменить"
+      "en": "Paint the area that should change."
     },
     "canvas.mask.size": {
-      "en": "Brush size",
-      "ru": "Размер кисти"
+      "en": "Brush size"
     },
     "canvas.addons.title": {
-      "en": "Add-ons",
-      "ru": "Дополнения"
+      "en": "Add-ons"
     },
     "canvas.addons.path": {
-      "en": "Folder",
-      "ru": "Папка"
+      "en": "Folder"
     },
     "canvas.addons.strength": {
-      "en": "Strength",
-      "ru": "Сила"
+      "en": "Strength"
     },
     "canvas.addons.save": {
-      "en": "Save",
-      "ru": "Сохранить"
+      "en": "Save"
     },
     "canvas.addons.none": {
-      "en": "None",
-      "ru": "Нет"
+      "en": "None"
     },
     "canvas.addons.empty": {
-      "en": "No add-ons in the models folder.",
-      "ru": "В папке моделей нет дополнений."
+      "en": "No add-ons in the models folder."
     },
     "canvas.addons.adult_label": {
-      "en": "Adult content",
-      "ru": "Для взрослых"
+      "en": "Adult content"
     },
     "canvas.addons.trigger": {
-      "en": "Insert this word",
-      "ru": "Вставить это слово"
+      "en": "Insert this word"
     },
     "canvas.addons.skipped": {
-      "en": "{name}: {reason}",
-      "ru": "{name}: {reason}"
+      "en": "{name}: {reason}"
     },
     "canvas.addons.reason.record": {
-      "en": "This add-on record cannot be read.",
-      "ru": "Запись дополнения не читается."
+      "en": "This add-on record cannot be read."
     },
     "canvas.addons.reason.schema": {
-      "en": "This add-on record uses an unsupported schema.",
-      "ru": "Схема записи дополнения не поддерживается."
+      "en": "This add-on record uses an unsupported schema."
     },
     "canvas.addons.reason.type": {
-      "en": "This add-on is not a LoRA.",
-      "ru": "Это дополнение не LoRA."
+      "en": "This add-on is not a LoRA."
     },
     "canvas.addons.reason.base": {
-      "en": "This add-on is for a different base model.",
-      "ru": "Это дополнение для другой базовой модели."
+      "en": "This add-on is for a different base model."
     },
     "canvas.addons.reason.file": {
-      "en": "This add-on file does not match its record.",
-      "ru": "Файл дополнения не совпадает с записью."
+      "en": "This add-on file does not match its record."
     },
     "canvas.addons.reason.person": {
-      "en": "This person add-on is missing a required field.",
-      "ru": "У дополнения человека не хватает обязательного поля."
+      "en": "This person add-on is missing a required field."
     },
     "canvas.addons.reason.incomplete": {
-      "en": "This add-on is incomplete.",
-      "ru": "Дополнение неполное."
+      "en": "This add-on is incomplete."
     },
     "canvas.addons.reason.preview": {
-      "en": "The preview file does not match its record.",
-      "ru": "Файл предпросмотра не совпадает с записью."
+      "en": "The preview file does not match its record."
     },
     "lora.base_mismatch": {
-      "en": "This LoRA is for a different base model.",
-      "ru": "Эта LoRA для другой базовой модели."
+      "en": "This LoRA is for a different base model."
     },
     "lora.invalid": {
-      "en": "This LoRA file cannot be read.",
-      "ru": "Этот файл LoRA не читается."
+      "en": "This LoRA file cannot be read."
     },
     "lora.scale": {
-      "en": "LoRA scale must be from 0 to 2.",
-      "ru": "Сила LoRA должна быть от 0 до 2."
+      "en": "LoRA scale must be from 0 to 2."
     },
     "lora.kind": {
-      "en": "This kind of LoRA cannot be imported yet.",
-      "ru": "Этот вид LoRA пока нельзя импортировать."
+      "en": "This kind of LoRA cannot be imported yet."
     },
     "lora.preview": {
-      "en": "This LoRA package cannot be imported.",
-      "ru": "Этот пакет LoRA нельзя импортировать."
+      "en": "This LoRA package cannot be imported."
     },
     "lora.base_missing": {
-      "en": "The base model for this LoRA could not be requested from VOXPrint MDL.",
-      "ru": "Не удалось запросить базовую модель для этой LoRA в VOXPrint MDL."
+      "en": "The base model for this LoRA could not be requested from VOXPrint MDL."
     },
     "canvas.lora.base_queued": {
-      "en": "VOXPrint MDL is downloading the base model for this LoRA.",
-      "ru": "VOXPrint MDL загружает базовую модель для этой LoRA."
+      "en": "VOXPrint MDL is downloading the base model for this LoRA."
     },
     "canvas.lora.import": {
-      "en": "Import LoRA",
-      "ru": "Импорт LoRA"
+      "en": "Import LoRA"
     },
     "canvas.lora.import_filter": {
-      "en": "Model Forge LoRA (*.voxlora *.safetensors)",
-      "ru": "LoRA из Model Forge (*.voxlora *.safetensors)"
+      "en": "Model Forge LoRA (*.voxlora *.safetensors)"
     },
     "canvas.lora.imported": {
-      "en": "{name} is in the LoRA library.",
-      "ru": "{name} добавлена в библиотеку LoRA."
+      "en": "{name} is in the LoRA library."
     },
     "canvas.lora.checking": {
-      "en": "Checking the file…",
-      "ru": "Проверяем файл…"
+      "en": "Checking the file…"
     },
     "canvas.lora.done": {
-      "en": "Done",
-      "ru": "Готово"
+      "en": "Done"
     },
     "canvas.lora.library": {
-      "en": "LoRA library",
-      "ru": "Библиотека LoRA"
+      "en": "LoRA library"
     },
     "canvas.lora.library_empty": {
-      "en": "The library is empty. Import a LoRA from Model Forge.",
-      "ru": "Библиотека пуста. Импортируйте LoRA из Model Forge."
+      "en": "The library is empty. Import a LoRA from Model Forge."
     },
     "canvas.lora.remove": {
-      "en": "Remove",
-      "ru": "Удалить"
+      "en": "Remove"
     },
     "canvas.lora.kind_line": {
-      "en": "Kind: {kind}",
-      "ru": "Вид: {kind}"
+      "en": "Kind: {kind}"
     },
     "canvas.lora.trigger_line": {
-      "en": "Trigger word: {trigger}",
-      "ru": "Слово-триггер: {trigger}"
+      "en": "Trigger word: {trigger}"
     },
     "canvas.lora.kind.object": {
-      "en": "object",
-      "ru": "объект"
+      "en": "object"
     },
     "canvas.lora.kind.style": {
-      "en": "style",
-      "ru": "стиль"
+      "en": "style"
     },
     "canvas.lora.kind.subject": {
-      "en": "subject",
-      "ru": "персонаж"
+      "en": "subject"
     },
     "canvas.lora.pick": {
-      "en": "LoRA",
-      "ru": "LoRA"
+      "en": "LoRA"
     },
     "canvas.lora.none": {
-      "en": "No LoRA",
-      "ru": "Без LoRA"
+      "en": "No LoRA"
     },
     "canvas.lora.third_party.title": {
-      "en": "{name} was not made in VOXPrint Model Forge",
-      "ru": "{name} создана не в VOXPrint Model Forge"
+      "en": "{name} was not made in VOXPrint Model Forge"
     },
     "canvas.lora.third_party.body": {
-      "en": "Canvas is optimised for LoRAs made in VOXPrint Model Forge; this LoRA may work less well. It is added without previews and without a trigger word; you can enter one in the LoRA library.",
-      "ru": "Canvas оптимизирован для LoRA из VOXPrint Model Forge; эта LoRA может работать хуже. Она будет добавлена без превью и без слова-триггера; его можно указать в библиотеке LoRA."
+      "en": "Canvas is optimised for LoRAs made in VOXPrint Model Forge; this LoRA may work less well. It is added without previews and without a trigger word; you can enter one in the LoRA library."
     },
     "canvas.lora.continue": {
-      "en": "Continue",
-      "ru": "Продолжить"
+      "en": "Continue"
     },
     "canvas.lora.cancel": {
-      "en": "Cancel",
-      "ru": "Отмена"
+      "en": "Cancel"
     },
     "canvas.lora.no_preview": {
-      "en": "No preview",
-      "ru": "Нет превью"
+      "en": "No preview"
     },
     "canvas.lora.trigger_edit": {
-      "en": "Trigger word",
-      "ru": "Слово-триггер"
+      "en": "Trigger word"
     },
     "canvas.lora.trigger_placeholder": {
-      "en": "Not set",
-      "ru": "Не задано"
+      "en": "Not set"
     },
     "canvas.lora.kind.unknown": {
-      "en": "unknown",
-      "ru": "не указан"
+      "en": "unknown"
     },
     "canvas.lora.third_party.short": {
-      "en": "It may work less well than a Model Forge LoRA.",
-      "ru": "Она может работать хуже, чем LoRA из Model Forge."
+      "en": "It may work less well than a Model Forge LoRA."
     },
     "canvas.lora.more": {
-      "en": "Details",
-      "ru": "Подробнее"
+      "en": "Details"
     },
     "canvas.lora.trigger_tip": {
-      "en": "Insert «{trigger}» into the prompt",
-      "ru": "Вставить «{trigger}» в запрос"
+      "en": "Insert «{trigger}» into the prompt"
     },
     "canvas.lora.pick_tip": {
-      "en": "LoRA for this picture. Import more under More → Import LoRA.",
-      "ru": "LoRA для этой картинки. Новые — в «Ещё» → «Импорт LoRA»."
+      "en": "LoRA for this picture. Import more under More → Import LoRA."
     },
     "canvas.lora.strength_tip": {
-      "en": "LoRA strength",
-      "ru": "Сила LoRA"
+      "en": "LoRA strength"
     },
     "canvas.menu.compact": {
-      "en": "{value}  ▾",
-      "ru": "{value}  ▾"
+      "en": "{value}  ▾"
     },
     "canvas.menu.value_tip": {
-      "en": "{name}: {value}",
-      "ru": "{name}: {value}"
+      "en": "{name}: {value}"
     },
     "canvas.lora.strength": {
-      "en": "Strength",
-      "ru": "Сила"
+      "en": "Strength"
     },
     "canvas.check.title": {
-      "en": "Check this PC",
-      "ru": "Проверить компьютер"
+      "en": "Check this PC"
     },
     "canvas.check.run": {
-      "en": "Run check",
-      "ru": "Запустить проверку"
+      "en": "Run check"
     },
     "canvas.check.deep": {
-      "en": "Check every file",
-      "ru": "Проверить каждый файл"
+      "en": "Check every file"
     },
     "canvas.check.update": {
-      "en": "Check for an update",
-      "ru": "Проверить обновление"
+      "en": "Check for an update"
     },
     "canvas.check.ready": {
-      "en": "This PC is ready.",
-      "ru": "Компьютер готов."
+      "en": "This PC is ready."
     },
     "canvas.check.failed": {
-      "en": "This PC is not ready.",
-      "ru": "Компьютер не готов."
+      "en": "This PC is not ready."
     },
     "canvas.check.current": {
-      "en": "This is the current release.",
-      "ru": "Это текущий выпуск."
+      "en": "This is the current release."
     },
     "canvas.check.newer": {
-      "en": "A newer release is {tag}.",
-      "ru": "Есть более новый выпуск: {tag}."
+      "en": "A newer release is {tag}."
     },
     "canvas.check.os": {
-      "en": "System",
-      "ru": "Система"
+      "en": "System"
     },
     "canvas.check.gpu": {
-      "en": "Graphics",
-      "ru": "Графика"
+      "en": "Graphics"
     },
     "canvas.check.encoders": {
-      "en": "File types",
-      "ru": "Типы файлов"
+      "en": "File types"
     },
     "canvas.source": {
-      "en": "Start from",
-      "ru": "Начать с"
+      "en": "Start from"
     },
     "canvas.source.words": {
-      "en": "From text",
-      "ru": "С текста"
+      "en": "From text"
     },
     "canvas.source.picture": {
-      "en": "From a picture",
-      "ru": "С картинки"
+      "en": "From a picture"
     },
     "canvas.source.help": {
-      "en": "From text — the picture is created from the description. From a picture — the chosen image is the base.",
-      "ru": "С текста — картинка создаётся по описанию. С картинки — за основу берётся выбранное изображение."
+      "en": "From text — the picture is created from the description. From a picture — the chosen image is the base."
     },
     "canvas.variation": {
-      "en": "Variation",
-      "ru": "Разнообразие"
+      "en": "Variation"
     },
     "canvas.variation.quick": {
-      "en": "Usual",
-      "ru": "Обычно"
+      "en": "Usual"
     },
     "canvas.variation.varied": {
-      "en": "Bolder",
-      "ru": "Смелее"
+      "en": "Bolder"
     },
     "canvas.variation.help": {
-      "en": "Usual — the familiar result. Bolder — more unusual ideas.",
-      "ru": "Обычно — привычный результат. Смелее — больше необычных идей."
+      "en": "Usual — the familiar result. Bolder — more unusual ideas."
     },
     "canvas.change": {
-      "en": "Change",
-      "ru": "Изменение"
+      "en": "Change"
     },
     "canvas.change.restyle": {
-      "en": "Restyle",
-      "ru": "Перерисовать"
+      "en": "Restyle"
     },
     "canvas.change.inpaint": {
-      "en": "Paint over",
-      "ru": "Закрасить"
+      "en": "Paint over"
     },
     "canvas.change.outpaint": {
-      "en": "Extend",
-      "ru": "Расширить"
+      "en": "Extend"
     },
     "canvas.change.pose": {
-      "en": "Copy the pose",
-      "ru": "Повторить позу"
+      "en": "Copy the pose"
     },
     "canvas.change.depth": {
-      "en": "Depth map",
-      "ru": "Карта глубины"
+      "en": "Depth map"
     },
     "canvas.change.edge": {
-      "en": "Outlines",
-      "ru": "Контуры"
+      "en": "Outlines"
     },
     "canvas.change.help": {
-      "en": "What to change in the picture.",
-      "ru": "Что изменить в картинке."
+      "en": "What to change in the picture."
     },
     "canvas.change.restyle.hint": {
-      "en": "Redraws the picture in a new look.",
-      "ru": "Перерисовывает картинку в новом виде."
+      "en": "Redraws the picture in a new look."
     },
     "canvas.change.inpaint.hint": {
-      "en": "Paints over one area and replaces it.",
-      "ru": "Закрашивает область и заменяет её."
+      "en": "Paints over one area and replaces it."
     },
     "canvas.change.outpaint.hint": {
-      "en": "Grows the picture past its edges.",
-      "ru": "Продолжает картинку за её края."
+      "en": "Grows the picture past its edges."
     },
     "canvas.change.pose.hint": {
-      "en": "Keeps the pose from the picture.",
-      "ru": "Повторяет позу с картинки."
+      "en": "Keeps the pose from the picture."
     },
     "canvas.change.depth.hint": {
-      "en": "Follows what is near and what is far.",
-      "ru": "Повторяет ближнее и дальнее."
+      "en": "Follows what is near and what is far."
     },
     "canvas.change.edge.hint": {
-      "en": "Follows the outlines in the picture.",
-      "ru": "Повторяет контуры картинки."
+      "en": "Follows the outlines in the picture."
     },
     "canvas.format": {
-      "en": "File type",
-      "ru": "Тип файла"
+      "en": "File type"
     },
     "canvas.format.avif": {
-      "en": "AVIF",
-      "ru": "AVIF"
+      "en": "AVIF"
     },
     "canvas.format.jxl": {
-      "en": "JPEG XL",
-      "ru": "JPEG XL"
+      "en": "JPEG XL"
     },
     "canvas.format.webp": {
-      "en": "WebP",
-      "ru": "WebP"
+      "en": "WebP"
     },
     "canvas.format.help": {
-      "en": "The file type of a saved picture.",
-      "ru": "Тип файла сохранённой картинки."
+      "en": "The file type of a saved picture."
     },
     "canvas.export": {
-      "en": "Export",
-      "ru": "Экспорт"
+      "en": "Export"
     },
     "canvas.export.png": {
-      "en": "PNG",
-      "ru": "PNG"
+      "en": "PNG"
     },
     "canvas.export.jpg": {
-      "en": "JPEG",
-      "ru": "JPEG"
+      "en": "JPEG"
     },
     "canvas.export.webp": {
-      "en": "WebP",
-      "ru": "WebP"
+      "en": "WebP"
     },
     "canvas.export.avif": {
-      "en": "AVIF",
-      "ru": "AVIF"
+      "en": "AVIF"
     },
     "canvas.export.help": {
-      "en": "The file type handed to Forge. PNG is the default.",
-      "ru": "Тип файла для Forge. По умолчанию PNG."
+      "en": "The file type handed to Forge. PNG is the default."
     },
     "canvas.style": {
-      "en": "Look",
-      "ru": "Вид"
+      "en": "Look"
     },
     "canvas.style.help": {
-      "en": "The look added to the prompt.",
-      "ru": "Вид, который добавляется к описанию."
+      "en": "The look added to the prompt."
     },
     "canvas.output_size": {
-      "en": "Exact size",
-      "ru": "Точный размер"
+      "en": "Exact size"
     },
     "canvas.output_size.help": {
-      "en": "Standard, 2K, or 4K.",
-      "ru": "Стандарт, 2K или 4K."
+      "en": "Standard, 2K, or 4K."
     },
     "canvas.output_size.follow": {
-      "en": "Match the choice",
-      "ru": "Как в выборе"
+      "en": "Match the choice"
     },
     "canvas.output_size.native": {
-      "en": "Standard",
-      "ru": "Стандарт"
+      "en": "Standard"
     },
     "canvas.output_size.2k": {
-      "en": "2K",
-      "ru": "2K"
+      "en": "2K"
     },
     "canvas.output_size.4k": {
-      "en": "4K",
-      "ru": "4K"
+      "en": "4K"
     },
     "writer.download": {
-      "en": "Downloading the text model",
-      "ru": "Загрузка текстовой модели"
+      "en": "Downloading the text model"
     },
     "menu.help": {
-      "en": "Help",
-      "ru": "Справка"
+      "en": "Help"
     },
     "menu.help.guide_en": {
-      "en": "VOXPrint AI Canvas Guide (English)",
-      "ru": "Руководство VOXPrint AI Canvas (английский)"
-    },
-    "menu.help.guide_ru": {
-      "en": "VOXPrint AI Canvas Guide (Russian)",
-      "ru": "Руководство VOXPrint AI Canvas (русский)"
+      "en": "VOXPrint AI Canvas Guide"
     },
     "canvas.file.look_in": {
-      "en": "Look in:",
-      "ru": "Папка:"
+      "en": "Look in:"
     },
     "canvas.file.name": {
-      "en": "File name:",
-      "ru": "Имя файла:"
+      "en": "File name:"
     },
     "canvas.file.type": {
-      "en": "Files of type:",
-      "ru": "Тип файлов:"
+      "en": "Files of type:"
     },
     "canvas.file.open": {
-      "en": "Open",
-      "ru": "Открыть"
+      "en": "Open"
     },
     "canvas.file.cancel": {
-      "en": "Cancel",
-      "ru": "Отмена"
+      "en": "Cancel"
     },
     "canvas.file.folder": {
-      "en": "Folder",
-      "ru": "Папка"
+      "en": "Folder"
     }
   }
 }

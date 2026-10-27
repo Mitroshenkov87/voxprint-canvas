@@ -1,4 +1,4 @@
-"""The user-guide sources agree, and a built PDF contains its chapters."""
+"""The user guide has its screenshots, and a built PDF contains its chapters."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 GUIDE = Path("docs/guide")
-LANGUAGES = ("en", "ru")
+LANGUAGES = ("en",)
 _HEADING = re.compile(r"^(#{1,3}) (.+)$")
 _CHAPTER = re.compile(r"^# (.+)$", re.MULTILINE)
 _IMAGE = re.compile(r"screens/([a-z0-9-]+)\.png")
@@ -33,14 +33,11 @@ def test_guides_have_no_todo_markers() -> None:
         assert "TODO(check)" not in _text(language)
 
 
-def test_guides_share_structure() -> None:
-    english = _headings("en")
-    russian = _headings("ru")
-    assert len(english) == len(russian)
-    assert [level for level, _title in english] == [level for level, _title in russian]
-    assert _IMAGE.findall(_text("en")) == _IMAGE.findall(_text("ru"))
-    assert len(_CHAPTER.findall(_text("en"))) == len(_CHAPTER.findall(_text("ru")))
-    assert len(english) > 0
+def test_every_guide_screenshot_exists() -> None:
+    for language in LANGUAGES:
+        for image_id in _IMAGE.findall(_text(language)):
+            assert (GUIDE / "screens" / language / f"{image_id}.png").is_file(), image_id
+    assert len(_headings("en")) > 0
 
 
 def test_built_pdfs_contain_every_chapter() -> None:
@@ -64,4 +61,3 @@ def test_built_pdfs_contain_every_chapter() -> None:
         for title in _CHAPTER.findall(_text(language)):
             assert title in collapsed, title
     assert counts["en"] > 0
-    assert counts["ru"] > 0

@@ -151,14 +151,15 @@ def test_a_person_series_anchors_at_the_default_strength(app, home: Path, tmp_pa
     window.findChild(QPushButton, "generate").click()
     QApplication.processEvents()
 
-    look = fixed_appearance(PERSON, int(window.shell.layout.seed))
+    look = PERSON
+    assert fixed_appearance(PERSON, int(window.shell.layout.seed)) == ""
     names = [name for name, _ in _Pipe.calls]
     assert names[0] == "text"
     assert len(names) == 6 and set(names[1:]) == {"img2img"}
     hero_pixels = Image.open(next((home / "state" / "pictures" / "series").iterdir()) / "01.png").convert("RGB")
     for _name, kwargs in _Pipe.calls:
         assert "A single photograph of" in kwargs["prompt"]
-        assert kwargs["prompt"].index(look) < kwargs["prompt"].index(PERSON)
+        assert kwargs["prompt"].index("A single photograph of") < kwargs["prompt"].index(PERSON)
         assert "collage, grid, panels, split screen" in kwargs["negative_prompt"]
     for _name, kwargs in _Pipe.calls[1:]:
         assert kwargs["strength"] == pytest.approx(REFERENCE_STRENGTH)
@@ -168,6 +169,6 @@ def test_a_person_series_anchors_at_the_default_strength(app, home: Path, tmp_pa
     assert all(look in row.full and row.full.count(look) == 1 for row in window.photoshoot.rows)
     folder = next((home / "state" / "pictures" / "series").iterdir())
     document = json.loads((folder / "series.json").read_text(encoding="utf-8"))
-    assert document["appearance"] == look
+    assert document["appearance"] == ""
     assert document["age"] == 25
     window.close()

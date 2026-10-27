@@ -25,7 +25,7 @@ from canvas.models.modes import Mode
 from canvas.models.registry import load_catalog
 from canvas.models.snapshots import SnapshotError
 from canvas.pipeline.adult_direction import scenario_system
-from canvas.pipeline.enhance import open_rewriter
+from canvas.pipeline.enhance import QwenRewriter, WriterSession, open_rewriter
 from canvas.pipeline.photoshoot import SYSTEM_PROMPT, Scenario, frame_negative, tokens_for_request
 from canvas.pipeline.series import REFERENCE_STRENGTH, SeriesFrame, SeriesResult, run_series
 
@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from canvas.ui.shell_screen import ShellWindow
 from canvas.safety.image import RawImage
 from canvas.safety.inputs import ImageRole, PendingInput
-from canvas.ui.shell_layout import SimpleLayout, job_from
+from canvas.ui.shell_layout import PictureJob, SimpleLayout, job_from
 from canvas.ui.styles import look_for
 from canvas.ui.ui_call import on_ui, run_off_ui
 
@@ -82,13 +82,21 @@ def run_photoshoot(window: ShellWindow) -> None:
     base_seed = int(layout.seed)
     adult = adult_content(layout)
 
+    writer = _writer_session(window, adult)
+
     def rewrite(prompt: str) -> str:
         if bar.writer is not None:
             return bar.writer(prompt)
-        return _model_reply(window, prompt, adult)
+        return writer(prompt)
 
-    def generate(line: str, seed: int, hero: SeriesFrame | None, strength: float | None) -> RawImage | None:
-        used = _seed(bar.seed_mode, base_seed, seed)
+    rewrite.release = writer.release  # type: ignore[attr-defined]
+    # The sample pass and the decode pass of one frame use the same seed, also in random mode.
+    seeds: dict[int, int] = {}
+
+    def job_for(
+        line: str, seed: int, hero: SeriesFrame | None, strength: float | None,
+    ) -> tuple[PictureJob, tuple[PendingInput, ...]]:
+        used = seeds.setdefault(seed, _seed(bar.seed_mode, base_seed, seed))
         prompt = _compose(layout, line, style)
         # Later shots can follow the first kept frame. The first frame itself is text.
         picture = job._replace(
@@ -111,13 +119,29 @@ def run_photoshoot(window: ShellWindow) -> None:
             # Always a copy: the pipeline wipes its inputs, and the hero is reused for every shot.
             raw_hero = RawImage(hero.width, hero.height, hero.to_bytes())
             fresh = (PendingInput(ImageRole.INIT, raw_hero),)
+        return picture, fresh
+
+    def generate(line: str, seed: int, hero: SeriesFrame | None, strength: float | None) -> RawImage | None:
+        picture, fresh = job_for(line, seed, hero, strength)
         try:
-            raw = runner(picture, fresh)
+            raw = window._runner(picture, fresh)
         except RunStopped as exc:
             if exc.unavailable:
                 raise _Halt(exc.message, unavailable=True) from exc
             raise
         return raw
+
+    def sample(line: str, seed: int, hero: SeriesFrame | None, strength: float | None) -> bool:
+        sampler = getattr(window._runner, "sample", None)
+        if not callable(sampler):
+            return False
+        picture, fresh = job_for(line, seed, hero, strength)
+        try:
+            return sampler(picture, fresh) is True
+        except RunStopped as exc:
+            if exc.unavailable:
+                raise _Halt(exc.message, unavailable=True) from exc
+            raise
 
     def prepare(lines: list[str]) -> None:
         precompute = getattr(window._runner, "precompute", None)
@@ -130,6 +154,7 @@ def run_photoshoot(window: ShellWindow) -> None:
             raise _Halt(str(exc), unavailable=True) from exc
 
     generate.prepare = prepare  # type: ignore[attr-defined]
+    generate.sample = sample  # type: ignore[attr-defined]
 
     def on_scenario(scenario: Scenario) -> None:
         def show(scenario: Scenario = scenario) -> None:
@@ -187,6 +212,7 @@ def run_photoshoot(window: ShellWindow) -> None:
         bar.sync()
         return
     finally:
+        writer.release()
         if hasattr(runner, "cook"):
             runner.cook = False
         release(lock_path())
@@ -362,15 +388,15 @@ def adult_content(layout: SimpleLayout) -> bool:
         return False
 
 
-def _model_reply(window: ShellWindow, prompt: str, adult: bool = False) -> str:
-    try:
-        rewriter = open_rewriter(
-            load_catalog(), window.tier, models_dir(), busy_progress(window),
-            max_new_tokens=tokens_for_request(prompt),
-        )
-    except (SnapshotError, OSError) as exc:
-        raise _Halt(str(exc), unavailable=True) from exc
-    try:
-        return rewriter.complete(prompt, system=scenario_system(SYSTEM_PROMPT, adult))
-    finally:
-        rewriter.close()
+def _writer_session(window: ShellWindow, adult: bool) -> WriterSession:
+    """The scenario writer for one series. It opens on the first chunk."""
+
+    def open_writer(budget: int) -> QwenRewriter:
+        try:
+            return open_rewriter(
+                load_catalog(), window.tier, models_dir(), busy_progress(window), max_new_tokens=budget,
+            )
+        except (SnapshotError, OSError) as exc:
+            raise _Halt(str(exc), unavailable=True) from exc
+
+    return WriterSession(open_writer, scenario_system(SYSTEM_PROMPT, adult), tokens_for_request)

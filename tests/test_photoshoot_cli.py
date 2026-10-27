@@ -253,16 +253,15 @@ def test_a_person_series_anchors_by_default(monkeypatch, tmp_path: Path) -> None
         rewrite=_rewrite,
         generate=model_generate(gate, Tier.GB16, "photo", False),
     )
-    look = fixed_appearance(PERSON, 3)
+    assert fixed_appearance(PERSON, 3) == ""
     assert code == 0 and payload["made"] == 5
-    assert look
     lines = Path(str(payload["scenario"])).read_text(encoding="utf-8").splitlines()
     assert len(lines) == 5
-    assert all(line.count(look) == 1 and PERSON in line for line in lines)
+    assert all(line.count(PERSON) == 1 for line in lines)
     assert calls[0][1] is Mode.TEXT and calls[0][3] is None and calls[0][4] == ()
-    assert look in calls[0][0]
+    assert PERSON in calls[0][0]
     for prompt, mode, _seed, strength, roles in calls[1:]:
-        assert look in prompt
+        assert PERSON in prompt
         assert mode is Mode.RESTYLE
         assert strength == REFERENCE_STRENGTH
         assert roles == (ImageRole.INIT,)
@@ -344,6 +343,9 @@ def test_adult_flag_reaches_run_series_and_scenario_system(monkeypatch, tmp_path
     rewrite = seen["rewrite"]
     assert callable(rewrite)
     rewrite("ping")
+    # One writer serves every chunk. The series releases it after the scenario.
+    assert "closed" not in seen
+    rewrite.release()  # type: ignore[attr-defined]
     assert seen["closed"] is True
     system = str(seen["system"])
     assert system.startswith(SYSTEM_PROMPT)

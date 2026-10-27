@@ -111,39 +111,29 @@ _PERSON_RE = re.compile(
     r"(?<![\w])(?:" + "|".join(re.escape(word) for word in sorted(_PERSON_WORDS, key=len, reverse=True)) + r")(?![\w])",
     re.IGNORECASE,
 )
-_ETHNICITY = (
-    "East Asian", "South Asian", "Southeast Asian", "Black", "European", "Middle Eastern", "Hispanic",
-)
-_HAIR = (
-    "straight black hair", "wavy dark brown hair", "curly black hair",
-    "straight chestnut hair", "wavy auburn hair", "straight blonde hair",
-)
-_EYES = ("dark brown eyes", "brown eyes", "hazel eyes", "green eyes", "amber eyes", "blue eyes")
-_FACE = ("oval face", "square face", "oblong face", "angular face", "diamond face", "heart-shaped face")
-_BUILD = ("athletic build", "average build", "broad-shouldered build", "lean build", "sturdy build", "solid build")
 TEST_SERIES_CHARACTER = "an Asian woman, about 30, blonde, athletic with defined muscles"
 
 
-def fixed_appearance(idea: str, seed: int) -> str:
-    """One concrete look for a person series, or empty when the idea has no person.
+def describes_person(idea: str) -> bool:
+    """True when the idea names a person, so a same-place series can follow its first shot."""
+    return bool(idea) and _PERSON_RE.search(idea) is not None
 
-    The same idea and seed always return the same text. The text names ethnicity,
-    hair, eyes, face shape, and build.
+
+def fixed_appearance(idea: str, seed: int) -> str:
+    """The look copied verbatim into every shot, or empty.
+
+    The user's own words describe the person, and they lead every shot as
+    written. Nothing is added in front of them. Only the fixed test character
+    is returned, so it is copied exactly once per shot.
 
     Args:
         idea: The prompt-field text.
-        seed: The series seed.
+        seed: The series seed. The look does not depend on it.
     """
+    del seed
     if idea and TEST_SERIES_CHARACTER in idea:
         return TEST_SERIES_CHARACTER
-    if not idea or _PERSON_RE.search(idea) is None:
-        return ""
-    if isinstance(seed, bool) or not isinstance(seed, int):
-        seed = 0
-    mix = zlib.crc32(f"{seed}\n{idea.strip()}".encode("utf-8"))
-    tables = (_ETHNICITY, _HAIR, _EYES, _FACE, _BUILD)
-    parts = [table[(mix >> (shift * 5)) % len(table)] for shift, table in enumerate(tables)]
-    return ", ".join(parts)
+    return ""
 
 
 def scenario_token_budget(count: int) -> int:
@@ -587,7 +577,8 @@ def planned_shots(
     while len(added) < count and step < limit:
         index = len(taken) + step
         framing = PLAN_FRAMINGS[(offset + index) % len(PLAN_FRAMINGS)]
-        light = PLAN_LIGHTS[(index // len(PLAN_FRAMINGS)) % len(PLAN_LIGHTS)]
+        # The light changes every shot. Framing and light still pair uniquely for 96 shots.
+        light = PLAN_LIGHTS[(index + index // len(PLAN_FRAMINGS)) % len(PLAN_LIGHTS)]
         pose = PLAN_POSES[(offset + index) % len(PLAN_POSES)]
         if adult and index < len(plan):
             framing = plan[index]["shot_type"]

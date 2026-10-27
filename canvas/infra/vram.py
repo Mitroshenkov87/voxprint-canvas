@@ -63,6 +63,10 @@ def reset_peak_allocated() -> None:
     cuda = getattr(torch, "cuda", None)
     if cuda is None or not bool(cuda.is_available()):
         return
+    # A Photoshoot phase spans many stage samples. It keeps the larger peak.
+    from canvas.infra.phase_vram import fold_peak
+
+    fold_peak()
     cuda.reset_peak_memory_stats()
 
 

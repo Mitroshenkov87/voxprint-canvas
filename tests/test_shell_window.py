@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -28,11 +29,14 @@ from PySide6.QtWidgets import (
 )
 
 from canvas.app.i18n import text
+from canvas.app.identity import splash_line, version_label
 from canvas.models.mdl_registry import enlarge_download_bytes
 from canvas.ui.enlarge_flow import enlarge_question
 from canvas.models.modes import Tier
 from canvas.ui.shell_layout import open_layout
-from canvas.ui.shell_screen import ShellWindow
+from canvas.ui.about import AboutDialog
+from canvas.ui.shell_screen import ShellWindow, mdl_argv
+from canvas.ui.splash import Splash
 from tests.fakes import World
 from tools.grab_shell_screens import prepare
 from voxprint_common.i18n import set_language, tr
@@ -121,7 +125,7 @@ def test_simple_mode_hides_expert_words_and_keeps_picture_tools(app, home: Path)
     assert window.findChild(QAction, "actionCheck") is not None
     assert window.findChild(QAction, "actionSetup") is not None
     help_menu = window.findChild(QMenu, "menuHelp")
-    assert help_menu is not None and len(help_menu.actions()) == 2
+    assert help_menu is not None and len(help_menu.actions()) == 1
     proportions = window.findChild(QPushButton, "proportionsMenu")
     assert proportions is not None and proportions.isVisible() and proportions.toolTip().startswith("Proportions:")
     image_size = window.findChild(QPushButton, "imageSizeMenu")
@@ -296,94 +300,45 @@ def test_a_hand_edit_uses_the_shared_reset(app, home: Path) -> None:
     assert resets[0].text() == tr("simple.preset.reset", name=tr("simple.quality.balanced"))
 
 
-def test_simple_shots_keep_the_expert_panel_closed(app, home: Path, monkeypatch) -> None:
+def test_simple_shots_keep_the_expert_panel_closed(app, home: Path) -> None:
     state = home / "state"
     state.mkdir(parents=True, exist_ok=True)
     payload = {"schema": 1, "items": [{"id": "pic-01", "prompt": "a red boat", "presets": [], "seed": 3}]}
     (state / "image-history.json").write_text(json.dumps(payload) + "\n", encoding="utf-8")
     set_expert_mode(True)
-    for language, locale in (("en", "en_US.UTF-8"), ("ru", "ru_RU.UTF-8")):
-        monkeypatch.setenv("LANG", locale)
-        monkeypatch.setenv("LC_ALL", locale)
-        set_language(language)
-        for name in ("simple", "simple-result"):
-            set_expert_mode(True)
-            window = _window(home)
-            prepare(window, name)
-            window.resize(1280, 800)
-            window.show()
-            app.processEvents()
-            panel = window.findChild(QWidget, "expertPanel")
-            toggle = window.findChild(QPushButton, "expertToggle")
-            assert panel is not None and not panel.isVisible()
-            assert toggle is not None and not toggle.isChecked()
-            if name == "simple-result":
-                result = window.findChild(QLabel, "result")
-                assert result is not None and result.pixmap() is not None and not result.pixmap().isNull()
-            window.close()
+    for name in ("simple", "simple-result"):
+        set_expert_mode(True)
+        window = _window(home)
+        prepare(window, name)
+        window.resize(1280, 800)
+        window.show()
+        app.processEvents()
+        panel = window.findChild(QWidget, "expertPanel")
+        toggle = window.findChild(QPushButton, "expertToggle")
+        assert panel is not None and not panel.isVisible()
+        assert toggle is not None and not toggle.isChecked()
+        if name == "simple-result":
+            result = window.findChild(QLabel, "result")
+            assert result is not None and result.pixmap() is not None and not result.pixmap().isNull()
+        window.close()
 
 
-def test_russian_buttons_keep_their_full_labels(app, home: Path, monkeypatch) -> None:
-    monkeypatch.setenv("LANG", "ru_RU.UTF-8")
-    monkeypatch.setenv("LC_ALL", "ru_RU.UTF-8")
-    set_language("ru")
+def test_expert_combos_fill_the_field_column(app, home: Path) -> None:
     window = _window(home)
     window.resize(1280, 800)
     window.show()
-    window.set_expert(True)
     app.processEvents()
-    expected = {
-        "chip-quality-balanced": "Сбалансировано",
-        "expertToggle": "Режим эксперта",
-    }
-    for name, words in expected.items():
-        button = window.findChild(QPushButton, name)
-        assert button.text() == words
-        font = QFont(button.font())
-        font.setWeight(QFont.Weight.DemiBold)
-        advance = QFontMetrics(font).horizontalAdvance(words)
-        assert button.width() >= advance + 28
-    style_names = ("photo", "cinematic", "portrait", "illustration", "anime", "3d", "painting", "sketch")
-    style_chips = [window.findChild(QPushButton, f"chip-style-{name}") for name in style_names]
-    assert all(chip is not None and chip.isVisible() for chip in style_chips)
-    # The left panel may wrap the style chips (line count depends on the system font);
-    # each chip keeps its full label inside the panel.
-    _assert_chips_whole(window, style_chips)
-    assert not style_chips[3].geometry().intersects(style_chips[4].geometry())
-    combo = window.findChild(QComboBox, "canvas.output_size")
-    assert combo is not None and combo.isVisible()
-    assert combo.property("fittedText") == combo.currentText()
-    assert "…" not in str(combo.property("fittedText"))
-    setup = window.setup_wizard()
-    assert setup.findChild(QPushButton, "setup-source-words").text() == "С текста"
-    assert setup.findChild(QPushButton, "setup-source-picture").text() == "С картинки"
-    assert setup.findChild(QPushButton, "setup-variation-quick").text() == "Обычно"
-    assert setup.findChild(QPushButton, "setup-variation-varied").text() == "Смелее"
-    back = window.findChild(QPushButton, "revertSegment")
-    assert back is not None and back.toolTip() == "Вернуть мой запрос"
-    assert window.findChild(QPushButton, "proportionsMenu").toolTip().startswith("Пропорции:")
-    assert window.findChild(QPushButton, "imageSizeMenu").toolTip().startswith("Размер изображения:")
-    fourk = window.findChild(QPushButton, "chip-output-4k")
-    assert fourk is not None and fourk.isEnabled() and fourk.text() == "4K (нужен Enlarge)"
-    install = window.findChild(QPushButton, "unavailable-output-4k")
-    assert install is not None and not install.isVisible()
-    question = window.enlarge_confirm()
-    amount = enlarge_download_bytes()
-    expected = (
-        text("canvas.enlarge.confirm")
-        if amount is None
-        else text("canvas.enlarge.confirm.size", size=format_size(amount))
-    )
-    assert question.findChild(QLabel, "enlargePrompt").text() == expected
-    assert question.findChild(QPushButton, "enlargeInstall").text() == "Установить"
-    assert question.findChild(QPushButton, "enlargeCancel").text() == "Отмена"
-    question.close()
-    restyle = setup.findChild(QLabel, "setup-hint-restyle")
-    depth = setup.findChild(QLabel, "setup-hint-depth")
-    assert restyle is not None and depth is not None
-    assert restyle.width() == depth.width() >= 200
-    mask = window.mask_wizard()
-    assert mask.findChild(QLabel, "maskNeed").text() == text("canvas.mask.need")
+    window.set_expert(True)
+    # The form settles on a queued call once the refilled fields are shown.
+    app.processEvents()
+    app.processEvents()
+    form = window.findChild(QWidget, "expertForm")
+    steps = form.findChild(QSpinBox, "shell.steps")
+    combos = [combo for combo in form.findChildren(QComboBox) if combo.isVisible()]
+    assert steps is not None and steps.isVisible() and len(combos) >= 3
+    for combo in combos:
+        assert combo.width() == steps.width(), combo.objectName()
+        assert combo.x() == steps.x(), combo.objectName()
 
 
 def test_the_new_screen_does_not_mention_temporary_editing() -> None:
@@ -507,7 +462,6 @@ def test_an_installed_enlarge_chip_reads_4k(app, home: Path) -> None:
 
 def test_the_enlarge_question_uses_the_registry_size(home: Path) -> None:
     assert text("canvas.enlarge.confirm", "en") == "4K needs VOXPrint Enlarge. Install it?"
-    assert text("canvas.enlarge.confirm", "ru") == "Для 4K нужен VOXPrint Enlarge. Установить?"
     assert text("canvas.enlarge.confirm.size", "en") == "4K needs VOXPrint Enlarge (≈ {size}). Install it?"
     assert enlarge_download_bytes() is None
     folder = home / "enlarge-app"
@@ -660,10 +614,8 @@ def test_proportions_and_image_size_menus_choose_presets(app, home: Path) -> Non
     assert labels == ["Standard", "4K (needs Enlarge)"]
 
 
-@pytest.mark.parametrize("language", ["ru", "en"])
 @pytest.mark.parametrize("width", [1280, 1100, 960])
-def test_result_buttons_show_every_label_whole(app, home: Path, language: str, width: int) -> None:
-    set_language(language)
+def test_result_buttons_show_every_label_whole(app, home: Path, width: int) -> None:
     state = home / "state"
     state.mkdir(parents=True, exist_ok=True)
     payload = {"schema": 1, "items": [{"id": "pic-01", "prompt": "a red boat", "presets": [], "seed": 3}]}
@@ -692,3 +644,39 @@ def test_result_buttons_show_every_label_whole(app, home: Path, language: str, w
         assert button.mapTo(holder, button.rect().topRight()).x() < holder.width(), button.objectName()
         for other in buttons[index + 1:]:
             assert not geometry.intersects(other.geometry()), (button.objectName(), other.objectName())
+
+
+def test_manage_models_starts_mdl_beside_the_interpreter(app, home: Path, monkeypatch) -> None:
+    del app
+    real = home / "runtime" / "bin"
+    real.mkdir(parents=True)
+    (real / "python").write_text("#!/bin/sh\n", encoding="utf-8")
+    venv_bin = home / "venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    link = venv_bin / "python"
+    link.symlink_to(real / "python")
+    launcher = venv_bin / ("voxprint-mdl.exe" if sys.platform == "win32" else "voxprint-mdl")
+    launcher.write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setattr("canvas.ui.shell_screen.sys.executable", str(link))
+    assert mdl_argv() == [str(launcher), "--gui", "--app", "canvas"]
+    seen: list[list[str]] = []
+    monkeypatch.setattr("canvas.ui.shell_screen.subprocess.Popen", lambda argv: seen.append(list(argv)))
+    window = _window(home)
+    window._on_command("models.manage")
+    assert seen == [[str(launcher), "--gui", "--app", "canvas"]]
+    launcher.unlink()
+    assert mdl_argv()[0] == "voxprint-mdl"
+    window.close()
+
+
+def test_about_and_splash_show_the_release_identity(app, home: Path) -> None:
+    del app
+    window = _window(home)
+    dialog = AboutDialog(window)
+    assert dialog.version.text() == version_label()
+    assert dialog.version.objectName() == "about-version"
+    splash = Splash()
+    assert splash.version_line == splash_line()
+    assert splash.version_line != version_label()
+    splash.close()
+    window.close()

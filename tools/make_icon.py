@@ -41,13 +41,13 @@ def scene(S,box,w,rr,detail=True):
 
 def main(folder: Path = Path(__file__).resolve().parents[1] / "assets") -> None:
     S = 4096
-    master = scene(S, [int(S*.16), int(S*.24), int(S*.84), int(S*.76)], int(S*.05), int(S*.07)).resize((1024, 1024), Image.LANCZOS)
+    master = scene(S, [int(S*.16), int(S*.24), int(S*.84), int(S*.76)], int(S*.05), int(S*.07)).resize((1024, 1024), Image.Resampling.LANCZOS)
     folder.mkdir(parents=True, exist_ok=True)
     master.save(folder / "voxprint-canvas.png")
-    fr = {n: master.resize((n, n), Image.LANCZOS) for n in (48, 64, 128, 256)}
+    fr = {n: master.resize((n, n), Image.Resampling.LANCZOS) for n in (48, 64, 128, 256)}
     for n, box, w in ((16, (1, 3, 14, 12), 1), (24, (2, 5, 21, 18), 2), (32, (3, 7, 28, 24), 2)):
         k = 16; Sb = n*k; bx = [box[0]*k, box[1]*k, (box[2]+1)*k-1, (box[3]+1)*k-1]
-        fr[n] = scene(Sb, bx, w*k, int(1.5*k), detail=n >= 32).resize((n, n), Image.BOX)
+        fr[n] = scene(Sb, bx, w*k, int(1.5*k), detail=n >= 32).resize((n, n), Image.Resampling.BOX)
     o = (256, 128, 64, 48, 32, 24, 16)
     fr[256].save(folder / "voxprint-canvas.ico", format="ICO", append_images=[fr[n] for n in o[1:]], sizes=[(n, n) for n in o])
 

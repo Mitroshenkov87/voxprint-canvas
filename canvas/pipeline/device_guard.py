@@ -9,6 +9,7 @@ from typing import Any
 
 from canvas.app.i18n import text
 from canvas.infra.errors import note_error
+from canvas.infra.phase_vram import fold_peak
 
 
 class DeviceRefused(Exception):
@@ -122,6 +123,7 @@ def reclaim_cuda(torch: Any) -> None:
             pass
     reset = getattr(cuda, "reset_peak_memory_stats", None)
     if callable(reset):
+        fold_peak()
         try:
             reset()
         except (TypeError, RuntimeError):

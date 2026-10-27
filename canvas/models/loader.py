@@ -79,13 +79,16 @@ def ensure_weights(spec: ModelSpec, root: Path, folder: Path | None = None) -> N
 def load_safety_stack(catalog: Catalog, root: Path) -> SafetyStack:
     """Open the check stack after every weight file is verified."""
     folders: dict[str, Path] = {}
-    for role in _SAFETY_ROLES:
-        found = catalog.by_role(role)
-        if len(found) != 1:
-            raise SafetyUnavailable("missing_model")
-        folder = _safety_folder(found[0], root)
-        ensure_weights(found[0], root, folder)
-        folders[role] = folder
+    try:
+        for role in _SAFETY_ROLES:
+            found = catalog.by_role(role)
+            if len(found) != 1:
+                raise SafetyUnavailable("missing_model")
+            folder = _safety_folder(found[0], root)
+            ensure_weights(found[0], root, folder)
+            folders[role] = folder
+    finally:
+        flush_process_cache()
     return SafetyStack(
         Qwen3GuardGen(folders["prompt-guard"]),
         SiglipZeroShot(folders["zero-shot"]),
@@ -99,11 +102,13 @@ def load_safety_stack(catalog: Catalog, root: Path) -> SafetyStack:
 def _safety_folder(spec: ModelSpec, root: Path) -> Path:
     """The view over the MDL blobs. An incomplete view is not a legacy folder.
 
-    ``ensure_weights`` checks every file against its pin before use. A view that
-    cannot be built refuses the stack. The ``<org>--<name>`` tree is left as it is.
+    ``ensure_weights`` reads every file against its pin before use, so finding
+    the view goes by the recorded size and time and does not read the bytes a
+    second time. A view that cannot be built refuses the stack. The
+    ``<org>--<name>`` tree is left as it is.
     """
     try:
-        folder = snapshot_ready(spec, root)
+        folder = snapshot_ready(spec, root, process_cache())
     except SnapshotError as exc:
         raise ModelMissing("missing_model") from exc
     if folder is None:

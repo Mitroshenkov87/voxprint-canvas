@@ -578,27 +578,47 @@ def _cook_groups(groups: list[_Plan], cancelled: Callable[[], bool], clock: Stag
     that ends one group leaves the other groups drawing.
     """
     stopped = False
+    halt: RunStopped | None = None
     with pipeline_scope():
         with phase("render"), render_phase():
             for group in groups:
+                if halt is not None:
+                    group.stop = halt
+                    continue
                 if _render_group(group, cancelled, clock):
                     stopped = True
                     break
+                halt = _machine_stop(group.stop)
         if any(group.sampled for group in groups):
             with phase("decode"), decode_phase():
                 for group in groups:
                     if not group.sampled:
                         continue
+                    if halt is not None:
+                        group.stop = halt
+                        continue
                     decoded, decode_stop, decode_cancelled = _decode_shots(group, cancelled, clock)
                     group.drawn.extend(decoded)
                     group.drawn.sort(key=lambda item: item.index)
                     group.stop = group.stop or decode_stop
+                    halt = halt or _machine_stop(decode_stop)
                     if decode_cancelled:
                         stopped = True
                         break
     if stopped:
         for group in groups:
             group.stopped = True
+
+
+# The card or the lock stopped a picture: the next group would load the model again and fail the same way.
+_MACHINE_STOPS = frozenset({"vram", "gpu_busy"})
+
+
+def _machine_stop(stop: RunStopped | None) -> RunStopped | None:
+    """The stop when it ends every group, otherwise None."""
+    if stop is not None and stop.unavailable and stop.code in _MACHINE_STOPS:
+        return stop
+    return None
 
 
 def _render_group(group: _Plan, cancelled: Callable[[], bool], clock: StageTimes) -> bool:

@@ -35,6 +35,8 @@ _HEADER_BASE = "voxprint.lora.base"
 _HEADER_CONSENT = "voxprint.subject.consent_obtained"
 _HEADER_CONFIRMED = "voxprint.subject.adult_confirmed"
 _ADULT_LABEL = "voxprint.lora.adult_content"
+# Older Model Forge exports wrote "thing" for an object LoRA; a .voxlora package maps it the same way.
+_HEADER_KIND_ALIAS = {"thing": "object"}
 _HEADER_KEYS = (
     _HEADER_TRIGGER,
     _HEADER_KIND,
@@ -330,7 +332,7 @@ def open_weights(path: Path) -> UserLora:
     if not base_matches(base):
         raise LoraRejected(CODE_BASE_MISMATCH)
     sidecar = _matching_sidecar(path)
-    kind = meta.get(_HEADER_KIND, "")
+    kind = _HEADER_KIND_ALIAS.get(meta.get(_HEADER_KIND, ""), meta.get(_HEADER_KIND, ""))
     lora_id = path.stem
     default_strength = CLI_DEFAULT_STRENGTH
     low, high = CLI_STRENGTH_RANGE

@@ -40,11 +40,11 @@ from canvas.models.plan import BaseNotSelected, ModeUnavailable, build_plan
 from canvas.models.registry import load_catalog
 from canvas.models.snapshots import SnapshotError
 from canvas.app.photoshoot_bench import live_generate, live_rewrite, run_bench
-from canvas.app.batch_cli import ManifestInvalid, default_out, load_manifest, run_batch_command
+from canvas.app.batch_cli import ManifestInvalid, default_out, load_manifest, run_batch_command, write_failed
 from canvas.app.photoshoot_cli import model_generate, model_rewrite, reject_frames, run_command
 from canvas.pipeline.photoshoot import DEFAULT_FRAMES, MAX_FRAMES, TEST_SERIES_CHARACTER
 from canvas.ui.styles import LOOKS
-from canvas.pipeline.bf16_schedule import VramRefused
+from canvas.pipeline.bf16_schedule import VramRefused, is_out_of_memory
 from canvas.pipeline.device_guard import DeviceRefused
 from canvas.pipeline.gpu_release import release_gate_weights
 from canvas.infra.stage_timer import StageTimes
@@ -604,6 +604,7 @@ def _batch(args: argparse.Namespace) -> int:
                 container=parse_export_format(str(args.export_format)),
             )
     except GpuLockTimeout:
+        write_failed(folder, entries, "gpu_busy", "the GPU is busy")
         return _emit_batch(
             {"ok": False, "error": "gpu_busy", "code": "gpu_busy", "message": "the GPU is busy"}, as_json, 1,
         )
@@ -612,7 +613,15 @@ def _batch(args: argparse.Namespace) -> int:
         ModeUnavailable, BaseNotSelected, JobError, CoolingDown, EnlargeMissing, EnlargeError, VramRefused, DeviceRefused,
         OSError,
     ) as exc:
-        return _emit({"ok": False, "error": str(exc)}, as_json, 1)
+        code_name = "vram" if isinstance(exc, VramRefused) else "error"
+        write_failed(folder, entries, code_name, str(exc))
+        return _emit({"ok": False, "error": str(exc), "code": code_name}, as_json, 1)
+    except Exception as exc:
+        if not is_out_of_memory(exc):
+            raise
+        message = str(VramRefused())
+        write_failed(folder, entries, "vram", message)
+        return _emit({"ok": False, "error": message, "code": "vram"}, as_json, 1)
     return _emit_batch(_with_lora(payload, chosen), as_json, code)
 
 

@@ -268,7 +268,9 @@ def test_frame_two_runs_through_the_shared_pipeline(tmp_path: Path, monkeypatch)
         assert result.stopped == ""
         assert len(result.kept) == 2
         assert seen == ["text", "img"]
-        assert order.index("draw") < order.index("release") < order.index("check")
+        # A frame is checked only after it has pixels. The check can overlap the pipeline.
+        assert order.index("draw") < order.index("check")
+        assert order.count("check") == 2 and "release" in order
         assert transformer.calls == []
     finally:
         runtime.clear_series_embeds()

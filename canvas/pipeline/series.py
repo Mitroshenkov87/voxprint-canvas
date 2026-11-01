@@ -5,13 +5,15 @@ encodes every accepted line with the text encoder alone. Those embeddings stay
 in RAM, and prep fails when its models leave more than 0.5 GB on the card.
 Render loads the picture pipeline once and samples every frame while the
 denoiser stays on the GPU. Decode turns every kept latent into pixels in one
-VAE session. The output check runs after the pipeline leaves the GPU, one frame
-at a time. RAM copies stay when the tier keeps them. A frame is written only
-after it passes.
+VAE session. While render and decode hold the GPU, a CPU worker runs the output
+check on every frame whose pixels already exist. Frames it did not reach are
+checked after the pipeline leaves the GPU, one frame at a time. RAM copies stay
+when the tier keeps them. A frame is written only after it passes.
 """
 from __future__ import annotations
 
 import json
+import queue
 import threading
 import struct
 import time
@@ -77,6 +79,11 @@ REFERENCE_STRENGTH = 0.80
 REFERENCE_MIN = 0.75
 _RAW_LIMIT = 6000
 _PICTURE_CODES = frozenset({"image", "input"})
+# Internal switch for tools/bench_series_check.py. False runs the old order:
+# every output check after the pipeline has left the GPU.
+_OVERLAP_CHECK = True
+# Tests switch pacing off to make the worker take every frame it is given.
+_PACE_OVERLAP = True
 
 
 class SeriesFrame(Protocol):
@@ -275,6 +282,7 @@ def _run_series(
         if own_clock:
             note_timing(clock.log_line())
         return SeriesResult("cancelled", "", (), folder, "", source)
+    overlap: _CheckOverlap | None = None
     try:
         try:
             _encode_lines(draw_frame, accepted, clock)
@@ -282,12 +290,20 @@ def _run_series(
             release_gate_weights(gate)
             prep.finish()
             require_released("prep")
+            if _OVERLAP_CHECK:
+                overlap = _CheckOverlap.start(gate, preload, cancelled, clock)
             drawn, cook_error, cancelled_run = _cook_frames(
                 accepted, series_strength, draw_frame, cancelled, clock, blocked, on_status,
+                overlap,
             )
         finally:
-            park_pipeline()
-            clear_series_embeds()
+            try:
+                park_pipeline()
+                clear_series_embeds()
+            finally:
+                # The worker finishes the frame it holds. Its CPU pin is lifted before the batch pass.
+                if overlap is not None:
+                    overlap.close()
         release_gate_weights(gate)
         # Sampling overlapped the SSD read. The check still runs in order, and
         # nothing is written until it passes.
@@ -295,7 +311,7 @@ def _run_series(
         if load_error is not None:
             return _stop("error", load_error.user_message, f"check.{load_error.code}")
         check_code, check_reason, ending = _review_frames(
-            drawn, gate, folder, container, clock, blocked, kept, saved_lines, seeds, on_status,
+            drawn, gate, folder, container, clock, blocked, kept, saved_lines, seeds, on_status, overlap,
         )
         _write_meta(folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept)
         if cancelled_run:
@@ -323,6 +339,8 @@ def _run_series(
             return SeriesResult("", "", (), folder, "not_produced", source)
         return SeriesResult("", "", tuple(kept), folder, "", source)
     finally:
+        if overlap is not None:
+            overlap.close()
         preload.close()
         if own_clock:
             note_timing(clock.log_line())
@@ -422,6 +440,7 @@ def _cook_frames(
     clock: StageTimes,
     blocked: list[int],
     on_status: Callable[[int, str], None] | None,
+    overlap: _CheckOverlap | None = None,
 ) -> tuple[list[_Drawn], RunStopped | None, bool]:
     """Render every accepted frame on one loaded pipeline, then decode them together.
 
@@ -429,6 +448,8 @@ def _cook_frames(
     the decode phase turns each kept latent into pixels. A series that follows its first frame
     draws that frame whole, because the later frames start from its pixels.
     Without the hook every frame is drawn whole in the render phase.
+    ``overlap`` gets each frame as soon as it has pixels, with an estimate of
+    the GPU work still ahead.
     """
     hero: SeriesFrame | None = None
     drawn: list[_Drawn] = []
@@ -437,9 +458,10 @@ def _cook_frames(
     sample = getattr(draw_frame, "sample", None)
     stop: RunStopped | None = None
     stopped = False
+    render_s: list[float] = []
     with pipeline_scope():
         with phase("render"), render_phase():
-            for shot in accepted:
+            for position, shot in enumerate(accepted):
                 if cancelled():
                     stopped = True
                     break
@@ -460,6 +482,9 @@ def _cook_frames(
                             image = draw_frame(shot.line, shot.seed, reference, active)
                     _remember_vram_peak()
                     _log_frame("render", shot.index, started)
+                    render_s.append(time.perf_counter() - started)
+                    if overlap is not None:
+                        overlap.gpu_left((len(accepted) - position - 1) * sum(render_s) / len(render_s))
                 except RunStopped as exc:
                     _remember_vram_peak()
                     blocked.append(shot.index)
@@ -477,10 +502,13 @@ def _cook_frames(
                     continue
                 if hero is None:
                     hero = image
-                drawn.append(_Drawn(shot.index, shot.line, shot.seed, image))
+                item = _Drawn(shot.index, shot.line, shot.seed, image)
+                drawn.append(item)
+                if overlap is not None:
+                    overlap.submit(item)
         if sampled:
             decoded, decode_stop, decode_cancelled = _decode_frames(
-                sampled, hero, active, draw_frame, cancelled, clock, blocked, on_status,
+                sampled, hero, active, draw_frame, cancelled, clock, blocked, on_status, overlap,
             )
             drawn.extend(decoded)
             drawn.sort(key=lambda item: item.index)
@@ -498,6 +526,7 @@ def _decode_frames(
     clock: StageTimes,
     blocked: list[int],
     on_status: Callable[[int, str], None] | None,
+    overlap: _CheckOverlap | None = None,
 ) -> tuple[list[_Drawn], RunStopped | None, bool]:
     """Turn each sampled frame into pixels in one VAE session.
 
@@ -506,8 +535,9 @@ def _decode_frames(
     """
     drawn: list[_Drawn] = []
     reference = hero if active is not None else None
+    decode_s: list[float] = []
     with phase("decode"), decode_phase():
-        for shot in sampled:
+        for position, shot in enumerate(sampled):
             if cancelled():
                 return drawn, None, True
             try:
@@ -516,6 +546,9 @@ def _decode_frames(
                     image = draw_frame(shot.line, shot.seed, reference, active)
                 _remember_vram_peak()
                 _log_frame("decode", shot.index, started)
+                decode_s.append(time.perf_counter() - started)
+                if overlap is not None:
+                    overlap.gpu_left((len(sampled) - position - 1) * sum(decode_s) / len(decode_s))
             except RunStopped as exc:
                 _remember_vram_peak()
                 blocked.append(shot.index)
@@ -527,14 +560,18 @@ def _decode_frames(
                 blocked.append(shot.index)
                 _status(on_status, shot.index, "blocked")
                 continue
-            drawn.append(_Drawn(shot.index, shot.line, shot.seed, image))
+            item = _Drawn(shot.index, shot.line, shot.seed, image)
+            drawn.append(item)
+            if overlap is not None:
+                overlap.submit(item)
     return drawn, None, False
 
 
-def _log_frame(stage: str, index: int, started: float) -> None:
-    """One per-frame timing line for the render or decode phase."""
+def _log_frame(stage: str, index: int, started: float, device: str = "") -> None:
+    """One per-frame timing line for the render, decode or check step."""
     elapsed = max(0, int((time.perf_counter() - started) * 1000))
-    log_detail("frame", stage, "cuda" if peak_allocated_bytes() is not None else "cpu", f"index={index + 1} ms={elapsed}")
+    kind = device or ("cuda" if peak_allocated_bytes() is not None else "cpu")
+    log_detail("frame", stage, kind, f"index={index + 1} ms={elapsed}")
 
 
 def _review_frames(
@@ -548,15 +585,17 @@ def _review_frames(
     saved_lines: list[str],
     seeds: list[int],
     on_status: Callable[[int, str], None] | None,
+    overlap: _CheckOverlap | None = None,
 ) -> tuple[str, str, str | None]:
     """Check every held frame in one batch, then write the ones that passed before a series stop.
 
     The picture pipeline has left the GPU. The check weights stay placed for
     the whole batch and leave the card once, before anything is written. A
     check that cannot finish is recorded once. Later frames are still checked
-    and none of them are written.
+    and none of them are written. A frame the overlap worker already checked
+    keeps that verdict.
     """
-    verdicts = _check_frames(drawn, gate, clock)
+    verdicts = _check_frames(drawn, gate, clock, overlap)
     save_stop = False
     crash_noted = False
     check_code = ""
@@ -595,25 +634,41 @@ def _review_frames(
 
 
 def _check_frames(
-    drawn: list[_Drawn], gate: AgeGate, clock: StageTimes,
+    drawn: list[_Drawn], gate: AgeGate, clock: StageTimes, overlap: _CheckOverlap | None = None,
 ) -> list[tuple[_Drawn, _Released | None, Exception | None]]:
     """Every frame's verdict, in order. Nothing is written or shown here.
 
-    The check weights leave VRAM once, after the last frame, also when a call raises.
+    A frame the overlap worker checked keeps that verdict. Every other frame is
+    checked here, after the pipeline has left the GPU. The check weights leave
+    VRAM once, after the last frame, also when a call raises.
     """
     verdicts: list[tuple[_Drawn, _Released | None, Exception | None]] = []
+    early = 0
+    batch_started = time.perf_counter()
     try:
         with phase("output_check"):
             _release_check_cache()
             for item in drawn:
+                found = None if overlap is None else overlap.verdict(item)
+                if found is not None:
+                    verdicts.append(found)
+                    early += 1
+                    continue
                 started = time.perf_counter()
                 with clock.measure("output_check"):
                     with timed("check"):
                         released, refusal = _released_frame(gate, item.image, item.line)
                 verdicts.append((item, released, refusal))
-                _log_frame("check", item.index, started)
+                _log_frame("check", item.index, started, clock.tag_value("check_device") or "cpu")
     finally:
         release_gate_weights(gate)
+    batch_ms = max(0, int((time.perf_counter() - batch_started) * 1000))
+    overlap_ms = 0 if overlap is None else int(overlap.seconds * 1000)
+    log_detail(
+        "series_check", "done", clock.tag_value("check_device") or "cpu",
+        f"frames={len(drawn)} overlap={early} batch={len(drawn) - early} "
+        f"overlap_ms={overlap_ms} batch_ms={batch_ms} wall_s={clock.summary()['wall_s']}",
+    )
     return verdicts
 
 
@@ -720,6 +775,13 @@ class _CheckPreload:
             raise crash
         return self._error
 
+    def wait_ok(self) -> bool:
+        """Join the side thread without taking its result. True when the load finished cleanly."""
+        thread = self._thread
+        if thread is not None:
+            thread.join()
+        return self._error is None and self._crash is None
+
     def close(self) -> None:
         """Join the side thread. A second call does nothing."""
         if self._joined:
@@ -761,6 +823,162 @@ class _CheckPreload:
                     pass
             elapsed = max(0, int((time.perf_counter() - started) * 1000))
             log_detail("check_load", "preload", "cpu", f"ms={elapsed} models={len(components)}")
+
+
+class _CheckOverlap:
+    """Output check of finished frames on a CPU worker while render and decode hold the GPU.
+
+    Every check component is pinned to the CPU for the worker's life, so the
+    check never takes VRAM from the picture pipeline. The worker only stores
+    verdicts. Statuses and writes stay in ``_review_frames``. A frame the worker
+    did not reach is checked by the batch pass. A worker failure on a frame is
+    that frame's verdict, an unavailable check, so the frame is dropped.
+
+    The worker starts a frame only while the GPU work still ahead covers its
+    mean CPU check time. A frame it passes on goes to the batch pass, which
+    runs once the GPU is free. Pacing changes who checks a frame, never whether.
+    """
+
+    def __init__(self, gate: AgeGate, preload: _CheckPreload, cancelled: Callable[[], bool], clock: StageTimes) -> None:
+        self._gate = gate
+        self._preload = preload
+        self._cancelled = cancelled
+        self._clock = clock
+        self._queue: queue.Queue[_Drawn | None] = queue.Queue()
+        self._lock = threading.Lock()
+        self._verdicts: dict[int, tuple[_Drawn, _Released | None, Exception | None]] = {}
+        self._halt = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._ahead = (0.0, time.perf_counter())
+        self._checked = 0
+        self.seconds = 0.0
+
+    @classmethod
+    def start(
+        cls, gate: AgeGate, preload: _CheckPreload, cancelled: Callable[[], bool], clock: StageTimes,
+    ) -> _CheckOverlap:
+        """Start the worker. It waits for the RAM preload before its first check."""
+        job = cls(gate, preload, cancelled, clock)
+        job._thread = threading.Thread(target=job._run, name="check-overlap", daemon=True)
+        job._thread.start()
+        return job
+
+    def submit(self, item: _Drawn) -> None:
+        """Queue a frame that has pixels. Ignored once the worker is closing."""
+        if not self._halt.is_set():
+            self._queue.put(item)
+
+    def gpu_left(self, seconds: float) -> None:
+        """Estimated GPU seconds still ahead in render and decode."""
+        with self._lock:
+            self._ahead = (max(0.0, seconds), time.perf_counter())
+
+    def worth_starting(self) -> bool:
+        """True when the GPU work still ahead covers one more CPU check."""
+        with self._lock:
+            seconds, stamp = self._ahead
+            checked = self._checked
+            spent = self.seconds
+        left = seconds - (time.perf_counter() - stamp)
+        if not _PACE_OVERLAP:
+            return True
+        if checked == 0:
+            return left > 0
+        return left >= spent / checked
+
+    def verdict(self, item: _Drawn) -> tuple[_Drawn, _Released | None, Exception | None] | None:
+        """The worker's verdict for this exact frame object, or None when it has none."""
+        with self._lock:
+            found = self._verdicts.get(id(item))
+        if found is None or found[0] is not item:
+            return None
+        return found
+
+    def close(self) -> None:
+        """Stop taking frames and join. The frame in progress finishes. A second call only joins."""
+        self._halt.set()
+        self._queue.put(None)
+        thread = self._thread
+        if thread is not None:
+            thread.join()
+
+    @property
+    def alive(self) -> bool:
+        """True while the worker thread runs."""
+        return self._thread is not None and self._thread.is_alive()
+
+    def _keep(self, item: _Drawn, released: _Released | None, refusal: Exception | None) -> None:
+        with self._lock:
+            self._verdicts[id(item)] = (item, released, refusal)
+
+    def _run(self) -> None:
+        pinned: list[tuple[object, bool, object]] = []
+        try:
+            if not self._preload.wait_ok():
+                return
+            pinned = _pin_cpu(self._gate)
+            while True:
+                item = self._queue.get()
+                if item is None or self._halt.is_set() or self._cancelled():
+                    return
+                if self.worth_starting():
+                    self._check(item)
+        except BaseException as exc:  # noqa: BLE001 - frames without a verdict go to the batch pass
+            note_crash("check.overlap", exc)
+        finally:
+            _unpin(pinned)
+
+    def _check(self, item: _Drawn) -> None:
+        started = time.perf_counter()
+        try:
+            with self._clock.measure("check_overlap"):
+                released, refusal = _released_frame(self._gate, item.image, item.line)
+        except BaseException as exc:
+            failed = SafetyUnavailable("classifier_error")
+            failed.__cause__ = exc
+            self._keep(item, None, failed)
+            raise
+        finally:
+            with self._lock:
+                self.seconds += time.perf_counter() - started
+                self._checked += 1
+        self._keep(item, released, refusal)
+        _log_frame("check", item.index, started, "cpu")
+
+
+_CHECK_NAMES = ("guard", *_IMAGE_CHECK_NAMES)
+
+
+def _pin_cpu(gate: AgeGate) -> list[tuple[object, bool, object]]:
+    """Force every check component onto the CPU. Returns what ``_unpin`` restores."""
+    inner = gate._gate if isinstance(gate, SerialGate) else gate
+    stack = getattr(inner, "_stack", None)
+    saved: list[tuple[object, bool, object]] = []
+    if stack is None:
+        return saved
+    for name in _CHECK_NAMES:
+        component = getattr(stack, name, None)
+        if component is None:
+            continue
+        had = hasattr(component, "_forced")
+        previous = getattr(component, "_forced", None)
+        try:
+            setattr(component, "_forced", "cpu")
+        except (AttributeError, TypeError):
+            continue
+        saved.append((component, had, previous))
+    return saved
+
+
+def _unpin(saved: list[tuple[object, bool, object]]) -> None:
+    for component, had, previous in saved:
+        try:
+            if had:
+                setattr(component, "_forced", previous)
+            else:
+                delattr(component, "_forced")
+        except (AttributeError, TypeError):
+            pass
 
 
 def _image_loaders(gate: AgeGate) -> tuple[object, ...]:

@@ -185,9 +185,9 @@ def test_prep_render_decode_then_check_in_that_order(tmp_path: Path, monkeypatch
     assert events.index("render:start") < _first(events, "sample")
     assert _last(events, "sample") < events.index("render:end") < events.index("decode:start")
     assert events.index("decode:start") < _first(events, "draw") <= _last(events, "draw") < events.index("decode:end")
-    # Each frame is checked after decode, one by one.
+    # Each frame is checked once, after it has pixels from decode.
     assert events.count("output_check") == 3
-    assert events.index("decode:end") < _first(events, "output_check")
+    assert _first(events, "draw") < _first(events, "output_check")
     log = _log(tmp_path / "home")
     for name in ("prep", "render", "decode"):
         assert f"stage phase {name} " in log

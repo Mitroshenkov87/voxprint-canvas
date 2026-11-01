@@ -77,15 +77,18 @@ def test_saving_overlaps_the_next_render_and_follows_the_check(tmp_path: Path, m
         draw_frame=generate, cancelled=lambda: False, folder=tmp_path, timings=times,
     )
     assert len(result.kept) == 6
-    assert order.index("draw5") < order.index("check0")
-    # Every frame is checked in one batch, and only then is anything written.
+    # A frame's check can overlap the next render. Nothing is written until every frame is checked.
     for index in range(6):
+        assert order.index(f"draw{index}") < order.index(f"check{index}")
         assert order.index(f"check{index}") < order.index(f"save{index}")
         assert order.index(f"check{index}") < order.index("save0")
     assert [item for item in order if item.startswith("save")] == [f"save{index}" for index in range(6)]
     stages = times.summary()["stages"]
     assert isinstance(stages, dict)
-    assert {"scenario", "prompt_check", "render", "output_check", "save"} <= set(stages)
+    assert {"scenario", "prompt_check", "render", "save"} <= set(stages)
+    # The worker or the batch pass, or both, ran the six checks.
+    checked = stages.get("check_overlap", {"count": 0})["count"] + stages.get("output_check", {"count": 0})["count"]
+    assert checked == 6
 
 
 def test_no_file_is_written_before_its_output_check(tmp_path: Path) -> None:
@@ -185,9 +188,12 @@ def test_gate_weights_are_parked_before_the_frame_is_saved(tmp_path: Path, monke
     result = _run(tmp_path, age_gate=gate, rewrite=lambda _prompt: _payload(IDEA, 2), count=2)
     assert result.stopped == ""
     assert len(result.kept) == 2
-    first = order.index("check")
-    # The check weights stay placed for the batch and leave the card once, before any save.
-    assert order[first:] == ["check", "check", "park", "save0", "save1"]
+    last = len(order) - 1 - order[::-1].index("check")
+    # The check weights leave the card after the last check, before any save.
+    tail = order[last + 1:]
+    assert tail[-2:] == ["save0", "save1"]
+    assert tail[:-2] and set(tail[:-2]) == {"park"}
+    assert order.count("check") == 2
 
 
 def test_prep_loads_the_picture_checks_before_a_frame(tmp_path: Path) -> None:

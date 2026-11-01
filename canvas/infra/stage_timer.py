@@ -42,6 +42,11 @@ class StageTimes:
         with self._lock:
             self._tags[key] = value
 
+    def tag_value(self, key: str) -> str:
+        """The code recorded under ``key``, or an empty string."""
+        with self._lock:
+            return self._tags.get(key, "")
+
     def note_mib(self, key: str, mib: int) -> None:
         """Keep the larger MiB reading. The value is ``mib`` plus the number."""
         if not _NAME.match(key) or mib <= 0:

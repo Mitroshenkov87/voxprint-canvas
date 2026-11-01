@@ -169,7 +169,7 @@ class ShellRunner:
                 if is_out_of_memory(exc):
                     refused = VramRefused()
                     _halt(str(refused), exc, "vram", unavailable=True)
-                _halt(text("gate.unavailable"), exc, "internal", unavailable=True)
+                _halt(f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__, exc, "internal", unavailable=True)
         finally:
             release(lock_path())
 

@@ -21,7 +21,7 @@ from canvas.app.main import main
 from canvas.models import runtime
 from canvas.pipeline.batch import BatchEntry
 from canvas.pipeline.enhance import WriterSession
-from canvas.safety.gate import GenerationBlocked, SafetyUnavailable
+from canvas.safety.gate import GenerationBlocked, SafetyUnavailable, StylisedBlocked
 from canvas.safety.image import RawImage
 from tests.fakes import World, rgb
 from tests.test_photoshoot import IDEA, _payload
@@ -402,3 +402,78 @@ def test_the_pipeline_loads_once_across_entries_below_64gb(tmp_path: Path, monke
     assert loads[0] == 1
     # ram32 keeps nothing once the batch is over.
     assert runtime._slot is None
+
+
+# No entry is dropped silently
+
+
+def test_an_entry_that_saved_fewer_pictures_than_asked_is_partial_not_ok(tmp_path: Path) -> None:
+    events = _Events()
+    gate = _gate(events)
+    inner = gate.review_image
+    seen = [0]
+
+    def review_image(raw: RawImage, line: str):
+        seen[0] += 1
+        if seen[0] == 1:
+            raise StylisedBlocked("prompt")
+        return inner(raw, line)
+
+    gate.review_image = review_image
+    entries = _entries({"shot": CUP, "name": "arched_recline", "count": 3}, {"shot": LAMP, "name": "lamp"})
+    body, code = _run(tmp_path, entries, gate, events)
+    rows = _rows(body)
+    assert [row["name"] for row in rows] == ["arched_recline", "lamp"]
+    first = rows[0]
+    assert first["requested"] == 3 and first["made"] == 2
+    assert first["status"] == "partial" and first["code"] and first["message"]
+    assert rows[1]["status"] == "ok"
+    assert code == 1 and body["ok"] is False
+
+
+def test_an_error_inside_one_entry_is_recorded_and_the_others_continue(tmp_path: Path) -> None:
+    events = _Events()
+    entries = _entries({"shot": CUP, "name": "cup"}, {"shot": LAMP, "name": "lamp"})
+    plain = _frame_for(events)
+
+    def frame_for(entry: BatchEntry):
+        if entry.name == "cup":
+            raise RuntimeError("boom")
+        return plain(entry)
+
+    folder = tmp_path / "out"
+    folder.mkdir()
+    body, code = run_batch_command(
+        entries=entries, folder=folder, style="photo", places="same", adult=False,
+        age_gate=_gate(events), rewrite=_rewrite, frame_for=frame_for,
+    )
+    rows = {row["name"]: row for row in _rows(body)}
+    assert set(rows) == {"cup", "lamp"}
+    assert rows["cup"]["status"] == "error" and rows["cup"]["code"] == "internal" and rows["cup"]["message"]
+    assert rows["lamp"]["status"] == "ok" and rows["lamp"]["made"] == 1
+    assert code == 1
+    summary = json.loads((folder / "batch.json").read_text(encoding="utf-8"))
+    assert [row["name"] for row in summary["entries"]] == ["cup", "lamp"]
+
+
+def test_an_unexpected_error_mid_batch_still_gives_every_entry_a_row(tmp_path: Path) -> None:
+    events = _Events()
+    entries = _entries({"shot": CUP, "name": "cup"}, {"shot": LAMP, "name": "lamp"})
+
+    def frame_for(entry: BatchEntry):
+        def draw(line: str, seed: int, hero: object | None, strength: float | None) -> RawImage:
+            raise RuntimeError("render failed")
+
+        return draw
+
+    folder = tmp_path / "out"
+    folder.mkdir()
+    body, code = run_batch_command(
+        entries=entries, folder=folder, style="photo", places="same", adult=False,
+        age_gate=_gate(events), rewrite=_rewrite, frame_for=frame_for,
+    )
+    rows = _rows(body)
+    assert [row["name"] for row in rows] == ["cup", "lamp"]
+    assert all(row["status"] in {"error", "not_produced", "partial"} for row in rows)
+    assert all(row["made"] == 0 and row["message"] for row in rows)
+    assert code == 1 and (folder / "batch.json").is_file()

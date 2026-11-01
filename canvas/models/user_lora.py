@@ -404,6 +404,10 @@ def apply_lora(transformer: object, lora: UserLora, strength: float) -> float:
     if not callable(loader):
         raise RuntimeError("the transformer has no adapter loader")
     loader(str(lora.weights), adapter_name=_ADAPTER)
+    if not _adapter_attached(transformer):
+        # diffusers only warns when no key matches a layer of the right shape.
+        unload_lora(transformer)
+        raise LoraRejected(CODE_INVALID)
     setter = getattr(transformer, "set_adapters", None)
     if not callable(setter):
         raise RuntimeError("the transformer has no adapter loader")
@@ -412,6 +416,18 @@ def apply_lora(transformer: object, lora: UserLora, strength: float) -> float:
     except TypeError:
         setter([_ADAPTER], adapter_weights=[applied])
     return applied
+
+
+def _adapter_attached(transformer: object) -> bool:
+    """True when the adapter reached at least one layer. A transformer without modules is trusted."""
+    modules = getattr(transformer, "named_modules", None)
+    if not callable(modules):
+        return True
+    for _name, module in modules():
+        layers = getattr(module, "lora_A", None)
+        if layers is not None and _ADAPTER in layers:
+            return True
+    return False
 
 
 def unload_lora(transformer: object) -> None:

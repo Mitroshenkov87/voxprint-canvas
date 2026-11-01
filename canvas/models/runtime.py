@@ -57,7 +57,7 @@ from canvas.models.pins import (
     PIPELINE_TEXT,
 )
 from canvas.models.plan import CallPlan
-from canvas.models.user_lora import UserLora, apply_lora, unload_lora
+from canvas.models.user_lora import LoraRejected, UserLora, apply_lora, unload_lora
 from canvas.pipeline.bf16_schedule import VramRefused, is_out_of_memory
 from canvas.pipeline.device_guard import DeviceRefused, pretrained_attempts, require_cuda
 from canvas.pipeline.generation_weights import dtype_label
@@ -90,6 +90,9 @@ def _apply_lora_reported(transformer: Any, lora: UserLora, requested: float) -> 
     """``apply_lora`` with its failure reported as ``LoraLoadError``. An out-of-memory error passes through."""
     try:
         apply_lora(transformer, lora, requested)
+    except LoraRejected as exc:
+        rejected = LoraRejected(exc.code)
+        raise rejected from None
     except Exception as exc:
         if is_out_of_memory(exc):
             raise
@@ -1164,7 +1167,7 @@ def _pipeline_for(
             _reclaim(torch)
             if is_out_of_memory(exc):
                 raise VramRefused() from exc
-            if isinstance(exc, LoraLoadError):
+            if isinstance(exc, (LoraLoadError, LoraRejected)):
                 exc.__context__ = None
                 raise exc.with_traceback(None) from None
             raise

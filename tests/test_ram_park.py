@@ -114,8 +114,8 @@ def test_ram64_keeps_earlier_models_and_logs_the_rest_as_disk(monkeypatch) -> No
     assert decision["prompt_check"] == "disk"
 
 
-def test_a_cuda_weight_parks_into_pinned_memory(monkeypatch, tmp_path) -> None:
-    """The first park copies a CUDA weight straight into pinned host memory."""
+def test_a_cuda_weight_is_never_pinned_outside_the_park_budget(monkeypatch, tmp_path) -> None:
+    """A CUDA weight is copied to pageable memory. Only the park pins, inside the shared budget."""
     monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
     _tier(monkeypatch, "ram96", 96 * 1024**3)
 
@@ -146,10 +146,7 @@ def test_a_cuda_weight_parks_into_pinned_memory(monkeypatch, tmp_path) -> None:
     class _Torch:
         @staticmethod
         def empty_like(tensor: object, device: str = "cpu", pin_memory: bool = False) -> _Pinned:
-            del tensor
-            assert device == "cpu"
-            assert pin_memory is True
-            return _Pinned()
+            raise AssertionError("pinned outside the park budget")
 
     class _CudaWeight:
         def __init__(self) -> None:
@@ -161,9 +158,9 @@ def test_a_cuda_weight_parks_into_pinned_memory(monkeypatch, tmp_path) -> None:
         def detach(self) -> _CudaWeight:
             return self
 
-        def to(self, *args: object, **kwargs: object) -> _CudaWeight:
+        def to(self, *args: object, **kwargs: object) -> _Pinned:
             del args, kwargs
-            raise AssertionError("pageable copy")
+            return _Pinned()
 
     class _GpuModule:
         def __init__(self) -> None:
@@ -242,3 +239,31 @@ def test_a_failed_cpu_view_keeps_the_ram_tensors(monkeypatch) -> None:
     resident.parked = _Broken()
     hot_tier.deactivate("vae")
     assert module.weight.data.values == [1, 2, 3, 4]
+
+
+def test_a_pin_failure_at_release_does_not_end_the_job(monkeypatch) -> None:
+    """Two jobs: the host copy cannot be pinned again and releasing it raises. The job goes on."""
+    _tier(monkeypatch, "ram96", 128 * 1024**3)
+    first, second = _Module("bfloat16"), _Module("bfloat16")
+    assert hot_tier.remember("transformer", first) is True
+    assert hot_tier.remember("vae", second) is True
+
+    class _Stuck:
+        def to(self, *_args, **_kwargs):
+            raise RuntimeError("AcceleratorError: CUDA error: out of memory")
+
+        def release(self) -> None:
+            raise RuntimeError("AcceleratorError: CUDA error: out of memory")
+
+    hot_tier._cache["transformer"].parked = _Stuck()
+
+    def fail(*_args, **_kwargs):
+        raise RuntimeError("AcceleratorError: CUDA error: out of memory")
+
+    monkeypatch.setattr(hot_tier, "_park_state", fail)
+    hot_tier.deactivate("transformer")
+    hot_tier.forget("transformer")
+    assert hot_tier.cached("vae") is None
+    assert second.weight.data.values == [1, 2, 3, 4]
+    hot_tier._cache["gone"] = types.SimpleNamespace(parked=_Stuck())
+    hot_tier.reset()

@@ -272,7 +272,7 @@ def forget(*names: str) -> None:
             continue
         _committed = max(0, _committed - resident.declared)
         if resident.parked is not None:
-            resident.parked.release()
+            _release_quietly(resident.parked)
     _rebuild()
 
 
@@ -281,7 +281,7 @@ def reset() -> None:
     global _committed, _tier_noted
     for resident in _cache.values():
         if resident.parked is not None:
-            resident.parked.release()
+            _release_quietly(resident.parked)
     _cache.clear()
     _bundles.clear()
     _planned.clear()
@@ -378,7 +378,16 @@ def _rebuild() -> None:
     survivors = list(_cache.values())
     reset_process_park()
     for resident in survivors:
-        resident.parked = _park_state(resident.name, resident.state, resident.declared)
+        try:
+            resident.parked = _park_state(resident.name, resident.state, resident.declared)
+        except (RuntimeError, MemoryError, OSError) as exc:
+            global _committed
+            _cache.pop(resident.name, None)
+            _committed = max(0, _committed - resident.declared)
+            log_detail("hot", "skip", "cpu", f"model={_token(resident.name)} reason={type(exc).__name__}")
+            if not resident.hooked:
+                _assign(resident.module, resident.state)
+            continue
         if not resident.hooked:
             _assign(resident.module, _cpu_view(resident.parked, resident.state))
 
@@ -519,11 +528,11 @@ def _assign(module: Any, state: dict[str, Any]) -> None:
 
 
 def _cpu_copy(tensor: Any) -> Any:
-    """A CPU copy of ``tensor``.
+    """A pageable CPU copy of ``tensor``.
 
-    A CUDA tensor is copied once into pinned host memory. ``.to("cpu")`` lands
-    in pageable memory, and the park then pins that copy, so the first park of
-    the transformer was a slow transfer plus a second full copy.
+    Pinning is left to the park, which keeps every process inside the shared
+    pin budget. Pinning a CUDA tensor here skipped that budget: with two jobs
+    the host allocation failed and the CUDA context could not be used again.
     """
     detach = getattr(tensor, "detach", None)
     if callable(detach):
@@ -531,10 +540,6 @@ def _cpu_copy(tensor: Any) -> Any:
             tensor = detach()
         except (TypeError, RuntimeError):
             pass
-    if _tensor_on_cuda(tensor):
-        pinned = _pinned_from_cuda(tensor)
-        if pinned is not None:
-            return pinned
     mover = getattr(tensor, "to", None)
     if not callable(mover):
         return tensor
@@ -542,24 +547,6 @@ def _cpu_copy(tensor: Any) -> Any:
         return mover("cpu")
     except (TypeError, RuntimeError, AttributeError):
         return tensor
-
-
-def _pinned_from_cuda(tensor: Any) -> Any | None:
-    """One pinned CPU copy of a CUDA tensor. None when torch cannot pin it.
-
-    Torch is optional. The import stays inside this function so the park loads
-    when the package is absent. This is not a circular import.
-    """
-    try:
-        import torch
-    except ImportError:
-        return None
-    try:
-        pinned = torch.empty_like(tensor, device="cpu", pin_memory=True)
-        pinned.copy_(tensor)
-    except (TypeError, RuntimeError, AttributeError, ValueError):
-        return None
-    return pinned
 
 
 def _pin_note(state: dict[str, Any]) -> str:

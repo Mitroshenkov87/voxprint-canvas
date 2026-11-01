@@ -13,7 +13,7 @@ from canvas.infra.errors import note_crash
 from canvas.infra.gpu_lock import GpuLockTimeout, lock_path, release, try_acquire
 from canvas.infra.paths import models_dir
 from canvas.models.loader import ModelNotReady, ZImageGenerator, plan_specs
-from canvas.models.user_lora import UserLora
+from canvas.models.user_lora import LoraRejected, UserLora
 from canvas.models.mdl_registry import selectable
 from canvas.models.modes import Tier
 from canvas.models.plan import BaseNotSelected, ModeUnavailable, build_plan
@@ -159,6 +159,8 @@ class ShellRunner:
                 _halt(str(exc), exc, "enlarge_unavailable", unavailable=True)
             except LoraLoadError as exc:
                 _halt(str(exc), exc, "lora", unavailable=True)
+            except LoraRejected as exc:
+                _halt(text(exc.code), exc, exc.code, unavailable=False)
             except (
                 ModelNotReady,
                 InferenceUnavailable,

@@ -19,7 +19,7 @@ from canvas.models.modes import Tier
 from canvas.models.plan import BaseNotSelected, ModeUnavailable, build_plan
 from canvas.models.provision import DownloadDeclined
 from canvas.models.registry import load_catalog
-from canvas.models.runtime import InferenceUnavailable, prepare_series_embeds
+from canvas.models.runtime import InferenceUnavailable, LoraLoadError, prepare_series_embeds
 from canvas.models.sizes import frame_size
 from canvas.models.snapshots import SnapshotError, snapshot_ready
 from canvas.models.verified import flush_process_cache, process_cache
@@ -157,6 +157,8 @@ class ShellRunner:
                 _halt(str(exc), exc, "base", unavailable=False)
             except EnlargeError as exc:
                 _halt(str(exc), exc, "enlarge_unavailable", unavailable=True)
+            except LoraLoadError as exc:
+                _halt(str(exc), exc, "lora", unavailable=True)
             except (
                 ModelNotReady,
                 InferenceUnavailable,

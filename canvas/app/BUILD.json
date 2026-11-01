@@ -1,8 +1,8 @@
 {
   "version": "0.1.0",
   "channel": "RC",
-  "rc": 33,
-  "build": 31,
+  "rc": 34,
+  "build": 32,
   "offset": 0,
   "offset_note": "The build number is the build field in this file. VOXPRINT_BUILD overrides it. GITHUB_RUN_NUMBER is not used.",
   "codename": "Tavnit",

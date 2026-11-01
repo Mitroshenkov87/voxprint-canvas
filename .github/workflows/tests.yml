@@ -437,6 +437,9 @@ jobs:
           Assert-Dist "torchvision-" "0.26.0+cu130"
           $gpuDist = "onnx" + "runtime" + "_gpu-"
           Assert-Dist $gpuDist "1.31.0"
+          Assert-Dist "peft-" "0.21.2"
+          & (Join-Path $install "venv\Scripts\python.exe") -c "from peft import inject_adapter_in_model, set_peft_model_state_dict"
+          if ($LASTEXITCODE -ne 0) { throw "peft does not import in the installed venv" }
           $cpuDist = "onnx" + "runtime" + "-"
           foreach ($dir in @(Get-ChildItem -LiteralPath $site -Directory)) {
             if ($dir.Name.StartsWith($cpuDist, [System.StringComparison]::OrdinalIgnoreCase) -and $dir.Name.EndsWith(".dist-info", [System.StringComparison]::OrdinalIgnoreCase)) {

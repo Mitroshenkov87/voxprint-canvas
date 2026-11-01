@@ -5,7 +5,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QImage, QMouseEvent, QPainter, QPaintEvent, QPixmap
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QImage, QMouseEvent, QPainter, QPaintEvent
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -31,6 +31,7 @@ from canvas.app.i18n import text
 from canvas.models.user_lora import LoraIndex, UserLora, clamp_strength
 from canvas.safety.image import RawImage
 from canvas.ui.shell_chrome import inset_spin, shell_style
+from canvas.ui.picture_file import load_pixmap
 
 
 _SETUP_ROWS: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -203,7 +204,7 @@ class PictureWizard(QDialog):
             path: An image file.
         """
         self._path = path
-        pixmap = QPixmap(str(path))
+        pixmap = load_pixmap(path)
         self._use_button.setEnabled(not pixmap.isNull())
         if pixmap.isNull():
             self._preview.setText(text("canvas.picture.empty"))

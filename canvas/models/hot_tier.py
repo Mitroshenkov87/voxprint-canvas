@@ -38,6 +38,8 @@ _ORDER = (
 _MAIN = frozenset({"transformer", "text_encoder", "vae", "writer"})
 _GIB = 1024**3
 _RESERVE = 12 * _GIB
+# Free RAM left after a park. A second Canvas job on another card shares the RAM.
+_FREE_FLOOR = 8 * _GIB
 
 _cache: dict[str, "_Resident"] = {}
 _bundles: dict[str, Any] = {}
@@ -146,11 +148,23 @@ def remember(name: str, module: Any, *, size_bytes: int | None = None) -> bool:
     if not _seat(name, declared):
         _log_plan(name, "disk", declared)
         return False
+    if not _fits_now(declared):
+        _log_plan(name, "disk", declared)
+        log_detail("hot", "skip", "cpu", f"model={_token(name)} reason=free_ram bytes={declared}")
+        return False
     _refuse_meta(module)
     started = time.perf_counter()
-    state = _cpu_state(module)
-    parked = _park_state(name, state, declared)
-    view = _cpu_view(parked, state)
+    parked = None
+    try:
+        state = _cpu_state(module)
+        parked = _park_state(name, state, declared)
+        view = _cpu_view(parked, state)
+    except (RuntimeError, MemoryError, OSError) as exc:
+        if parked is not None:
+            _release_quietly(parked)
+        _log_plan(name, "disk", declared)
+        log_detail("hot", "skip", "cpu", f"model={_token(name)} reason={type(exc).__name__}")
+        return False
     hooked = _hooked(module)
     if not hooked:
         _assign(module, view)
@@ -369,8 +383,39 @@ def _rebuild() -> None:
             _assign(resident.module, _cpu_view(resident.parked, resident.state))
 
 
+def free_bytes() -> int:
+    """Available system RAM right now. 0 when it cannot be read."""
+    try:
+        import psutil
+
+        return max(0, int(psutil.virtual_memory().available))
+    except (ImportError, OSError, AttributeError, ValueError):
+        return 0
+
+
+def _fits_now(size: int) -> bool:
+    """True when parking ``size`` bytes still leaves ``_FREE_FLOOR`` free. Unknown free RAM fits."""
+    free = free_bytes()
+    if free <= 0:
+        return True
+    return free - max(0, int(size)) >= _FREE_FLOOR
+
+
+def _release_quietly(parked: Any) -> None:
+    release = getattr(parked, "release", None)
+    if not callable(release):
+        return
+    try:
+        release()
+    except (RuntimeError, MemoryError, OSError):
+        return
+
+
 def _cpu_view(parked: Any, fallback: dict[str, Any]) -> dict[str, Any]:
-    moved = parked.to("cpu", non_blocking=False)
+    try:
+        moved = parked.to("cpu", non_blocking=False)
+    except (RuntimeError, MemoryError, OSError):
+        return fallback
     if isinstance(moved, dict) and moved:
         return moved
     return fallback

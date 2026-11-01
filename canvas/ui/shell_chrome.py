@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import assert_never
 
 from PySide6.QtCore import QRect, QSize, Qt, QTimer
-from PySide6.QtGui import QAction, QFont, QFontInfo, QFontMetrics, QIcon, QPixmap
+from PySide6.QtGui import QAction, QFont, QFontInfo, QFontMetrics, QIcon
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
     QComboBox,
@@ -65,6 +65,7 @@ SHOT_HEIGHT = 800
 from canvas.ui.prompt_row import arrange as arrange_prompt  # noqa: E402
 from canvas.ui.action_row import GENERATE_FONT, GENERATE_PAD, sync as sync_actions  # noqa: E402
 from canvas.ui.result_bar import wrap as wrap_result  # noqa: E402
+from canvas.ui.picture_file import load_pixmap
 
 
 def shell_style() -> str:
@@ -576,7 +577,7 @@ def _thumbs(window):
         name = button.objectName()
         if not name.startswith("thumb-"):
             continue
-        pixmap = QPixmap(window._pictures.get(name[len("thumb-"):], ""))
+        pixmap = load_pixmap(window._pictures.get(name[len("thumb-"):], ""))
         if pixmap.isNull():
             button.setIcon(QIcon())
             continue
@@ -599,7 +600,7 @@ def show_real_pictures(window):
         size = label.size()
         if size.width() < 2 or size.height() < 2 or (size.width(), size.height()) == view._scaled_to:
             return
-        pixmap = QPixmap(window._pictures.get(window.shell.layout.selected or "", ""))
+        pixmap = load_pixmap(window._pictures.get(window.shell.layout.selected or "", ""))
         if pixmap.isNull():
             label.clear()
             return

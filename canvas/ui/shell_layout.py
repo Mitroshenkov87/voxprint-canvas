@@ -7,6 +7,7 @@ not a row.
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, replace
 from pathlib import Path
 from collections.abc import Mapping
@@ -85,6 +86,7 @@ def open_layout(state_dir_path: Path, *, gate: AgeGate, enlarge_installed: bool 
     presets = _presets(settings, enlarge_installed=enlarge_installed)
     names = state_names(surface)
     state_dir_path.mkdir(parents=True, exist_ok=True)
+    migrate_old_defaults(state_dir_path / names[0])
     check = ContentCheck(gate=gate)
     layout = SimpleLayout(
         presets=presets,
@@ -97,6 +99,40 @@ def open_layout(state_dir_path: Path, *, gate: AgeGate, enlarge_installed: bool 
         history_name=names[1],
     )
     return CanvasShell(layout, settings, check, state_dir_path, surface)
+
+
+# Expert defaults saved by rc.30 and earlier.
+_OLD_DEFAULTS = {"shell.steps": 20, "shell.guidance": 7.0}
+
+
+def migrate_old_defaults(path: Path) -> bool:
+    """Move saved steps and guidance that still equal the old defaults to the Turbo defaults.
+
+    Values the user changed are kept. Returns True when the file was rewritten.
+    """
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return False
+    values = payload.get("values") if isinstance(payload, dict) else None
+    if not isinstance(values, dict):
+        return False
+    for key, old in _OLD_DEFAULTS.items():
+        found = values.get(key)
+        if isinstance(found, bool) or not isinstance(found, (int, float)) or float(found) != float(old):
+            return False
+    values["shell.steps"] = int(TURBO_STEPS)
+    values["shell.guidance"] = max(1.0, float(TURBO_GUIDANCE))
+    overrides = payload.get("overrides")
+    if isinstance(overrides, dict):
+        for group, keys in overrides.items():
+            if isinstance(keys, list):
+                overrides[group] = [key for key in keys if key not in _OLD_DEFAULTS]
+    try:
+        path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    except OSError:
+        return False
+    return True
 
 
 def job_from(layout: SimpleLayout, live: Mapping[str, object] | None = None) -> PictureJob:

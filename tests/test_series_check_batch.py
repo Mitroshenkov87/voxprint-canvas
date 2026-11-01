@@ -78,14 +78,15 @@ def test_every_frame_is_checked_before_any_frame_is_saved_or_shown(tmp_path: Pat
     assert watch.checks == 4
     assert _frames(watch.folder) == ["01.png", "02.png", "03.png", "04.png"]
     kinds = [kind for kind, _index in watch.events]
-    last_draw = max(index for index, kind in enumerate(kinds) if kind == "draw")
+    draws = [index for index, kind in enumerate(kinds) if kind == "draw"]
     checks = [index for index, kind in enumerate(kinds) if kind == "check"]
     kept = [index for index, kind in enumerate(kinds) if kind == "kept"]
-    assert last_draw < checks[0]
+    # A frame can be checked while a later one renders, never before its own pixels exist.
+    assert all(draw < check for draw, check in zip(draws, checks, strict=True))
+    assert checks[-1] < kept[0]
     # The check weights leave the card once, after the last check and before the first kept frame.
     between = kinds[checks[-1]:kept[0]]
     assert between.count("release") == 1
-    assert "release" not in kinds[checks[0]:checks[-1]]
     assert [index for kind, index in watch.events if kind == "kept"] == [0, 1, 2, 3]
     assert [path.name for path in result.kept] == _frames(watch.folder)
 

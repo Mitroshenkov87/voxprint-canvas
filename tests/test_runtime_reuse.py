@@ -299,7 +299,8 @@ def test_a_second_series_does_not_read_parked_weights(tmp_path: Path, monkeypatc
     assert loads[0] == 1
 
 
-def test_the_window_does_not_keep_the_pipeline_between_runs(tmp_path: Path, monkeypatch) -> None:
+def test_an_open_window_alone_does_not_keep_the_pipeline(tmp_path: Path, monkeypatch) -> None:
+    """The window holds the pipeline only from its first generation (see test_warm_window)."""
     QApplication.instance() or QApplication([])
     loads, _places = _install(monkeypatch)
     monkeypatch.setattr(runtime, "system_ram_bytes", lambda: _GB32)

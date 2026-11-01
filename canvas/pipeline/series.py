@@ -18,7 +18,7 @@ import time
 import zipfile
 import zlib
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, Protocol, cast
 
@@ -180,10 +180,43 @@ def run_series(
         set_current(previous_clock)
 
 
+DrawFrame = Callable[[str, int, SeriesFrame | None, float | None], SeriesFrame | None]
+
+
+@dataclass
+class _Plan:
+    """One series whose prompts are checked, waiting for the picture model.
+
+    A batch holds one per entry. Render and decode fill ``drawn``, and the
+    output check decides what is written into ``folder``.
+    """
+
+    idea: str
+    scenario: Scenario
+    style: str
+    mode: PlaceMode
+    source: Source
+    folder: Path
+    strength: float | None
+    accepted: list[_CookShot]
+    prep_stop: Exception | None
+    blocked: list[int]
+    draw_frame: DrawFrame
+    on_status: Callable[[int, str], None] | None
+    hero: SeriesFrame | None = None
+    drawn: list[_Drawn] = field(default_factory=list)
+    sampled: list[_CookShot] = field(default_factory=list)
+    stop: RunStopped | None = None
+    stopped: bool = False
+    kept: list[Path] = field(default_factory=list)
+    saved_lines: list[str] = field(default_factory=list)
+    seeds: list[int] = field(default_factory=list)
+
+
 def _run_series(
     *, idea: str, count: int, style: str, place_mode: str, seed: int, strength: float | None,
     include_camera: Callable[[], bool], rewrite: Callable[[str], str], age_gate: AgeGate,
-    draw_frame: Callable[[str, int, SeriesFrame | None, float | None], SeriesFrame | None],
+    draw_frame: DrawFrame,
     cancelled: Callable[[], bool], folder: Path, on_scenario: Callable[[Scenario], None] | None,
     line_for: Callable[[int], str] | None, on_status: Callable[[int, str], None] | None,
     adult: bool, container: OutputFormat | None, clock: StageTimes, own_clock: bool,
@@ -191,11 +224,8 @@ def _run_series(
 ) -> SeriesResult:
     hot.note_tier()
     gate = SerialGate.wrap(age_gate)
-    if place_mode == "same":
-        mode: PlaceMode = "same"
-    elif place_mode == "different":
-        mode = "different"
-    else:
+    mode = place_mode_of(place_mode)
+    if mode is None:
         return _stop("scenario", "", "scenario.format")
     request = scenario_request(idea, count, style, mode, adult=adult)
     if request is None:
@@ -203,10 +233,70 @@ def _run_series(
     # The prompt check is the part of prep that has to finish before the writer.
     # Picture-check weights are read SSD to RAM on a side thread during the
     # writer and the sampler. They stay off the GPU until the output check.
+    refused = screen_idea(gate, idea, negative, adult, clock)
+    if refused is not None:
+        return refused
+    try:
+        scenario, fail_code, source = write_scenario(idea, count, style, mode, rewrite, adult, seed, clock)
+    finally:
+        # Every chunk shared one writer. It leaves the card before the prompt checks.
+        free_writer(rewrite)
+    if scenario is None or len(scenario.shots) < count:
+        return _stop("scenario", "", fail_code if scenario is None else "scenario.count")
+    # The picture checks are read only after the writer is gone, so their load
+    # never overlaps the writer on the card. The read still overlaps the
+    # prompt checks, the encoder and the sampler.
+    preload = _CheckPreload.open(gate)
+    try:
+        warm_error = preload.ready_error()
+        if warm_error is not None:
+            return _stop("error", warm_error.user_message, f"check.{warm_error.code}")
+        planned = plan_series(
+            gate=gate, idea=idea, scenario=scenario, source=source, style=style, mode=mode, seed=seed,
+            strength=series_strength(idea, mode, strength), adult=adult, include_camera=include_camera,
+            line_for=line_for, clock=clock, on_scenario=on_scenario, on_status=on_status,
+            cancelled=cancelled, folder=folder, draw_frame=draw_frame,
+        )
+        if isinstance(planned, SeriesResult):
+            if planned.stopped == "cancelled" and own_clock:
+                note_timing(clock.log_line())
+            return planned
+        try:
+            cook_plans([planned], gate, cancelled, clock, prep)
+            # Sampling overlapped the SSD read. The check still runs in order, and
+            # nothing is written until it passes.
+            load_error = preload.error()
+            if load_error is not None:
+                return _stop("error", load_error.user_message, f"check.{load_error.code}")
+            return review_plans([planned], gate, container, clock)[0]
+        finally:
+            if own_clock:
+                note_timing(clock.log_line())
+                noted.append(True)
+    finally:
+        preload.close()
+
+
+def place_mode_of(place_mode: str) -> PlaceMode | None:
+    """``same`` or ``different``. Anything else is None."""
+    if place_mode == "same":
+        return "same"
+    if place_mode == "different":
+        return "different"
+    return None
+
+
+def screen_idea(
+    gate: AgeGate, idea: str, negative: str, adult: bool, clock: StageTimes,
+) -> SeriesResult | None:
+    """Check the idea and the negative prompt before the writer. None lets the series go on.
+
+    The negative prompt is checked like the prompt, and a refusal stops the
+    series the same way. Nothing is drawn after a stop.
+    """
     with clock.measure("prep"):
         reason = _refuse_prompt(gate, idea)
         if not reason and negative.strip():
-            # The negative prompt is checked like the prompt.
             reason = _refuse_prompt(gate, negative)
         # The writer needs the GPU to itself. Anything the check put on the card is dropped first.
         release_gate_weights(gate)
@@ -214,31 +304,61 @@ def _run_series(
         return _stop("idea", reason, "idea.policy")
     if adult and not ages_allowed(idea):
         return _stop("idea", "", "idea.minor")
-    appearance = fixed_appearance(idea, seed)
-    # None is the caller's default. A same-place person series then follows the
-    # first frame loosely enough that the pose can still change. With different
-    # places every shot is drawn from its own line, so its place and pose lead.
+    return None
+
+
+def series_strength(idea: str, mode: PlaceMode, strength: float | None) -> float | None:
+    """The reference strength the series draws with.
+
+    None is the caller's default. A same-place person series then follows the
+    first frame loosely enough that the pose can still change. With different
+    places every shot is drawn from its own line, so its place and pose lead.
+    """
     anchored = strength is None and mode == "same" and describes_person(idea)
-    series_strength = REFERENCE_STRENGTH if anchored else strength
+    return REFERENCE_STRENGTH if anchored else strength
+
+
+def write_scenario(
+    idea: str, count: int, style: str, mode: PlaceMode, rewrite: Callable[[str], str],
+    adult: bool, seed: int, clock: StageTimes,
+) -> tuple[Scenario | None, str, Source]:
+    """The scenario for one idea. The writer behind ``rewrite`` stays open for the caller to free."""
+    appearance = fixed_appearance(idea, seed)
     with clock.measure("scenario"):
-        try:
-            scenario, fail_code, source = _scenario(
-                idea, count, style, mode, rewrite, adult=adult, appearance=appearance, seed=seed,
-            )
-        finally:
-            # Every chunk shared one writer. It leaves the card before the prompt checks.
-            _release_writer(rewrite)
-            hot.deactivate("writer")
-            release_cuda_cache()
-    if scenario is None or len(scenario.shots) < count:
-        return _stop("scenario", "", fail_code if scenario is None else "scenario.count")
-    # The picture checks are read only after the writer is gone, so their load
-    # never overlaps the writer on the card. The read still overlaps the
-    # prompt checks, the encoder and the sampler.
-    preload = _CheckPreload.open(gate)
-    warm_error = preload.ready_error()
-    if warm_error is not None:
-        return _stop("error", warm_error.user_message, f"check.{warm_error.code}")
+        return _scenario(idea, count, style, mode, rewrite, adult=adult, appearance=appearance, seed=seed)
+
+
+def shot_scenario(shot: str, count: int, seed: int) -> Scenario | None:
+    """A scenario that draws one given shot line ``count`` times. No writer is used.
+
+    The line is the subject of every frame, so each frame repeats it with its
+    own seed. None for an empty line.
+    """
+    subject = shot.strip()
+    if not subject or count < 1:
+        return None
+    appearance = fixed_appearance(subject, seed)
+    if appearance and appearance not in subject:
+        subject = f"{appearance}, {subject}"
+    empty = Shot("", "", "", "")
+    return Scenario(subject, (subject,), "", tuple(empty for _index in range(count)), appearance)
+
+
+def free_writer(rewrite: Callable[[str], str]) -> None:
+    """Close the writer session and drop its VRAM copy before the next model."""
+    _release_writer(rewrite)
+    hot.deactivate("writer")
+    release_cuda_cache()
+
+
+def plan_series(
+    *, gate: AgeGate, idea: str, scenario: Scenario, source: Source, style: str, mode: PlaceMode,
+    seed: int, strength: float | None, adult: bool, include_camera: Callable[[], bool],
+    line_for: Callable[[int], str] | None, clock: StageTimes,
+    on_scenario: Callable[[Scenario], None] | None, on_status: Callable[[int, str], None] | None,
+    cancelled: Callable[[], bool], folder: Path, draw_frame: DrawFrame,
+) -> _Plan | SeriesResult:
+    """Check every shot line of one scenario. A SeriesResult is a stop with nothing drawn."""
     lines = [
         single_frame(strip_series_words(assemble_line(
             scenario.subject_block, shot, include_camera=True, index=index, seed=seed,
@@ -248,9 +368,6 @@ def _run_series(
     try:
         with clock.measure("prompt_check"):
             verdicts = [_prompt_verdict(gate, _with_idea(idea, line)) for line in lines]
-    except Exception:
-        preload.close()
-        raise
     finally:
         # The picture model is next. GPU weights from the check are dropped first.
         release_gate_weights(gate)
@@ -261,81 +378,109 @@ def _run_series(
     ]
     if hard or all(refused):
         code = "scenario.minor" if hard else "scenario.policy"
-        preload.close()
         return _stop("scenario", (hard or refused)[0] or "", code, source)
     if adult and not ages_allowed("\n".join(lines)):
-        preload.close()
         return _stop("scenario", "", "scenario.minor", source)
     if on_scenario is not None:
         on_scenario(scenario)
     folder.mkdir(parents=True, exist_ok=True)
-    kept: list[Path] = []
     blocked: list[int] = []
-    saved_lines: list[str] = []
-    seeds: list[int] = []
     accepted, prep_stop, cancelled_prep = _accepted_shots(
         scenario, lines, verdicts, seed, idea, adult, include_camera, line_for, gate, clock, blocked,
         on_status, cancelled,
     )
     if cancelled_prep:
         release_gate_weights(gate)
-        preload.close()
-        _write_meta(folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept)
-        if own_clock:
-            note_timing(clock.log_line())
+        _write_meta(folder, idea, scenario, style, mode, [], [], blocked, [])
         return SeriesResult("cancelled", "", (), folder, "", source)
+    return _Plan(
+        idea, scenario, style, mode, source, folder, strength, accepted, prep_stop, blocked, draw_frame, on_status,
+    )
+
+
+def cook_plans(
+    plans: list[_Plan], gate: AgeGate, cancelled: Callable[[], bool], clock: StageTimes, prep: Phase,
+) -> None:
+    """Encode, render and decode every plan on one loaded picture pipeline.
+
+    Every accepted line is encoded in one text-encoder session. A batch shares
+    one style, tier and LoRA, so the first plan's ``prepare`` serves them all.
+    The pipeline is parked once after the last decode, before the output check.
+    """
     try:
-        try:
-            _encode_lines(draw_frame, accepted, clock)
-            # Prompt models are finished. The picture pipeline is the next thing on the GPU.
-            release_gate_weights(gate)
-            prep.finish()
-            require_released("prep")
-            drawn, cook_error, cancelled_run = _cook_frames(
-                accepted, series_strength, draw_frame, cancelled, clock, blocked, on_status,
-            )
-        finally:
-            park_pipeline()
-            clear_series_embeds()
+        shots = [shot for plan in plans for shot in plan.accepted]
+        if plans:
+            _encode_lines(plans[0].draw_frame, shots, clock)
+        # Prompt models are finished. The picture pipeline is the next thing on the GPU.
         release_gate_weights(gate)
-        # Sampling overlapped the SSD read. The check still runs in order, and
-        # nothing is written until it passes.
-        load_error = preload.error()
-        if load_error is not None:
-            return _stop("error", load_error.user_message, f"check.{load_error.code}")
-        check_code, check_reason, ending = _review_frames(
-            drawn, gate, folder, container, clock, blocked, kept, saved_lines, seeds, on_status,
-        )
-        _write_meta(folder, idea, scenario, style, mode, saved_lines, seeds, blocked, kept)
-        if cancelled_run:
-            return SeriesResult("cancelled", "", tuple(kept), folder, "", source)
-        if cook_error is not None and cook_error.unavailable:
-            return SeriesResult(
-                "error", cook_error.message, tuple(kept), folder, cook_error.code or "internal", source,
-            )
-        if cook_error is not None and (_ends_series(cook_error) or cook_error.code == "prompt"):
-            note_error("scenario.minor")
-            return SeriesResult("scenario", cook_error.message, tuple(kept), folder, "scenario.minor", source)
-        if check_code:
-            note_error(check_code)
-            return SeriesResult("error", check_reason, tuple(kept), folder, check_code, source)
-        if ending is not None:
-            note_error("scenario.minor")
-            return SeriesResult("scenario", ending, tuple(kept), folder, "scenario.minor", source)
-        if prep_stop is not None:
-            note_error("scenario.minor")
-            return SeriesResult(
-                "scenario", _verdict_message(prep_stop) or "", tuple(kept), folder, "scenario.minor", source,
-            )
-        if not kept:
-            note_error("not_produced")
-            return SeriesResult("", "", (), folder, "not_produced", source)
-        return SeriesResult("", "", tuple(kept), folder, "", source)
+        prep.finish()
+        require_released("prep")
+        _cook_groups(plans, cancelled, clock)
     finally:
-        preload.close()
-        if own_clock:
-            note_timing(clock.log_line())
-            noted.append(True)
+        park_pipeline()
+        clear_series_embeds()
+    release_gate_weights(gate)
+
+
+def review_plans(
+    plans: list[_Plan], gate: AgeGate, container: OutputFormat | None, clock: StageTimes,
+) -> list[SeriesResult]:
+    """Check every held frame of every plan in one batch, then write what passed.
+
+    A check that cannot finish stops every later write, in this plan and in
+    the plans after it. Each plan keeps its own series stop.
+    """
+    flat = [item for plan in plans for item in plan.drawn]
+    verdicts = _check_frames(flat, gate, clock)
+    results: list[SeriesResult] = []
+    start = 0
+    halted: tuple[str, str] | None = None
+    for plan in plans:
+        mine = verdicts[start:start + len(plan.drawn)]
+        start += len(plan.drawn)
+        check_code, check_reason, ending = _review_frames(
+            plan.drawn, gate, plan.folder, container, clock, plan.blocked, plan.kept,
+            plan.saved_lines, plan.seeds, plan.on_status, verdicts=mine, halted=halted is not None,
+        )
+        _write_meta(
+            plan.folder, plan.idea, plan.scenario, plan.style, plan.mode,
+            plan.saved_lines, plan.seeds, plan.blocked, plan.kept,
+        )
+        if halted is None and check_code:
+            halted = (check_code, check_reason)
+        elif halted is not None and not check_code:
+            check_code, check_reason = halted
+        results.append(_outcome(plan, check_code, check_reason, ending))
+    return results
+
+
+def _outcome(plan: _Plan, check_code: str, check_reason: str, ending: str | None) -> SeriesResult:
+    """The series result once the frames that passed are written."""
+    kept = tuple(plan.kept)
+    source = plan.source
+    cook_error = plan.stop
+    if plan.stopped:
+        return SeriesResult("cancelled", "", kept, plan.folder, "", source)
+    if cook_error is not None and cook_error.unavailable:
+        return SeriesResult("error", cook_error.message, kept, plan.folder, cook_error.code or "internal", source)
+    if cook_error is not None and (_ends_series(cook_error) or cook_error.code == "prompt"):
+        note_error("scenario.minor")
+        return SeriesResult("scenario", cook_error.message, kept, plan.folder, "scenario.minor", source)
+    if check_code:
+        note_error(check_code)
+        return SeriesResult("error", check_reason, kept, plan.folder, check_code, source)
+    if ending is not None:
+        note_error("scenario.minor")
+        return SeriesResult("scenario", ending, kept, plan.folder, "scenario.minor", source)
+    if plan.prep_stop is not None:
+        note_error("scenario.minor")
+        return SeriesResult(
+            "scenario", _verdict_message(plan.prep_stop) or "", kept, plan.folder, "scenario.minor", source,
+        )
+    if not kept:
+        note_error("not_produced")
+        return SeriesResult("", "", (), plan.folder, "not_produced", source)
+    return SeriesResult("", "", kept, plan.folder, "", source)
 
 
 def _remember_vram_peak() -> None:
@@ -423,120 +568,116 @@ def _encode_lines(
         prepare([shot.line for shot in accepted])
 
 
-def _cook_frames(
-    accepted: list[_CookShot],
-    series_strength: float | None,
-    draw_frame: Callable[[str, int, SeriesFrame | None, float | None], SeriesFrame | None],
-    cancelled: Callable[[], bool],
-    clock: StageTimes,
-    blocked: list[int],
-    on_status: Callable[[int, str], None] | None,
-) -> tuple[list[_Drawn], RunStopped | None, bool]:
-    """Render every accepted frame on one loaded pipeline, then decode them together.
+def _cook_groups(groups: list[_Plan], cancelled: Callable[[], bool], clock: StageTimes) -> None:
+    """Render every group's frames in one render phase, then decode them in one VAE session.
 
     With a ``sample`` hook that returns True, the render phase only samples and
     the decode phase turns each kept latent into pixels. A series that follows its first frame
     draws that frame whole, because the later frames start from its pixels.
-    Without the hook every frame is drawn whole in the render phase.
+    Without the hook every frame is drawn whole in the render phase. A stop
+    that ends one group leaves the other groups drawing.
     """
-    hero: SeriesFrame | None = None
-    drawn: list[_Drawn] = []
-    sampled: list[_CookShot] = []
-    active = style_reference(series_strength)
-    sample = getattr(draw_frame, "sample", None)
-    stop: RunStopped | None = None
     stopped = False
     with pipeline_scope():
         with phase("render"), render_phase():
-            for shot in accepted:
-                if cancelled():
+            for group in groups:
+                if _render_group(group, cancelled, clock):
                     stopped = True
                     break
-                _status(on_status, shot.index, "drawing")
-                if cancelled():
-                    stopped = True
-                    break
-                whole = not callable(sample) or (active is not None and hero is None)
-                reference = hero if active is not None else None
-                try:
-                    started = time.perf_counter()
-                    with clock.measure("render"):
-                        image = None
-                        if not whole and callable(sample):
-                            # A hook that kept nothing leaves this frame to be drawn whole.
-                            whole = sample(shot.line, shot.seed, reference, active) is not True
-                        if whole:
-                            image = draw_frame(shot.line, shot.seed, reference, active)
-                    _remember_vram_peak()
-                    _log_frame("render", shot.index, started)
-                except RunStopped as exc:
-                    _remember_vram_peak()
-                    blocked.append(shot.index)
-                    _status(on_status, shot.index, "blocked")
-                    if exc.unavailable or _ends_series(exc) or (exc.code == "prompt" and scan(shot.line).minor):
-                        stop = exc
+        if any(group.sampled for group in groups):
+            with phase("decode"), decode_phase():
+                for group in groups:
+                    if not group.sampled:
+                        continue
+                    decoded, decode_stop, decode_cancelled = _decode_shots(group, cancelled, clock)
+                    group.drawn.extend(decoded)
+                    group.drawn.sort(key=lambda item: item.index)
+                    group.stop = group.stop or decode_stop
+                    if decode_cancelled:
+                        stopped = True
                         break
-                    continue
-                if not whole:
-                    sampled.append(shot)
-                    continue
-                if image is None:
-                    blocked.append(shot.index)
-                    _status(on_status, shot.index, "blocked")
-                    continue
-                if hero is None:
-                    hero = image
-                drawn.append(_Drawn(shot.index, shot.line, shot.seed, image))
-        if sampled:
-            decoded, decode_stop, decode_cancelled = _decode_frames(
-                sampled, hero, active, draw_frame, cancelled, clock, blocked, on_status,
-            )
-            drawn.extend(decoded)
-            drawn.sort(key=lambda item: item.index)
-            stop = stop or decode_stop
-            stopped = stopped or decode_cancelled
-    return drawn, stop, stopped
+    if stopped:
+        for group in groups:
+            group.stopped = True
 
 
-def _decode_frames(
-    sampled: list[_CookShot],
-    hero: SeriesFrame | None,
-    active: float | None,
-    draw_frame: Callable[[str, int, SeriesFrame | None, float | None], SeriesFrame | None],
-    cancelled: Callable[[], bool],
-    clock: StageTimes,
-    blocked: list[int],
-    on_status: Callable[[int, str], None] | None,
+def _render_group(group: _Plan, cancelled: Callable[[], bool], clock: StageTimes) -> bool:
+    """Draw or sample one group's frames. True when the run was cancelled."""
+    active = style_reference(group.strength)
+    draw_frame = group.draw_frame
+    sample = getattr(draw_frame, "sample", None)
+    for shot in group.accepted:
+        if cancelled():
+            return True
+        _status(group.on_status, shot.index, "drawing")
+        if cancelled():
+            return True
+        whole = not callable(sample) or (active is not None and group.hero is None)
+        reference = group.hero if active is not None else None
+        try:
+            started = time.perf_counter()
+            with clock.measure("render"):
+                image = None
+                if not whole and callable(sample):
+                    # A hook that kept nothing leaves this frame to be drawn whole.
+                    whole = sample(shot.line, shot.seed, reference, active) is not True
+                if whole:
+                    image = draw_frame(shot.line, shot.seed, reference, active)
+            _remember_vram_peak()
+            _log_frame("render", shot.index, started)
+        except RunStopped as exc:
+            _remember_vram_peak()
+            group.blocked.append(shot.index)
+            _status(group.on_status, shot.index, "blocked")
+            if exc.unavailable or _ends_series(exc) or (exc.code == "prompt" and scan(shot.line).minor):
+                group.stop = exc
+                return False
+            continue
+        if not whole:
+            group.sampled.append(shot)
+            continue
+        if image is None:
+            group.blocked.append(shot.index)
+            _status(group.on_status, shot.index, "blocked")
+            continue
+        if group.hero is None:
+            group.hero = image
+        group.drawn.append(_Drawn(shot.index, shot.line, shot.seed, image))
+    return False
+
+
+def _decode_shots(
+    group: _Plan, cancelled: Callable[[], bool], clock: StageTimes,
 ) -> tuple[list[_Drawn], RunStopped | None, bool]:
-    """Turn each sampled frame into pixels in one VAE session.
+    """Decode one group's sampled frames inside the open VAE session.
 
     Each call repeats the frame's own arguments, so it finds the latent its
     sample left and does not sample again.
     """
     drawn: list[_Drawn] = []
-    reference = hero if active is not None else None
-    with phase("decode"), decode_phase():
-        for shot in sampled:
-            if cancelled():
-                return drawn, None, True
-            try:
-                started = time.perf_counter()
-                with clock.measure("decode"):
-                    image = draw_frame(shot.line, shot.seed, reference, active)
-                _remember_vram_peak()
-                _log_frame("decode", shot.index, started)
-            except RunStopped as exc:
-                _remember_vram_peak()
-                blocked.append(shot.index)
-                _status(on_status, shot.index, "blocked")
-                if exc.unavailable or _ends_series(exc) or (exc.code == "prompt" and scan(shot.line).minor):
-                    return drawn, exc, False
-                continue
-            if image is None:
-                blocked.append(shot.index)
-                _status(on_status, shot.index, "blocked")
-                continue
-            drawn.append(_Drawn(shot.index, shot.line, shot.seed, image))
+    active = style_reference(group.strength)
+    reference = group.hero if active is not None else None
+    for shot in group.sampled:
+        if cancelled():
+            return drawn, None, True
+        try:
+            started = time.perf_counter()
+            with clock.measure("decode"):
+                image = group.draw_frame(shot.line, shot.seed, reference, active)
+            _remember_vram_peak()
+            _log_frame("decode", shot.index, started)
+        except RunStopped as exc:
+            _remember_vram_peak()
+            group.blocked.append(shot.index)
+            _status(group.on_status, shot.index, "blocked")
+            if exc.unavailable or _ends_series(exc) or (exc.code == "prompt" and scan(shot.line).minor):
+                return drawn, exc, False
+            continue
+        if image is None:
+            group.blocked.append(shot.index)
+            _status(group.on_status, shot.index, "blocked")
+            continue
+        drawn.append(_Drawn(shot.index, shot.line, shot.seed, image))
     return drawn, None, False
 
 
@@ -557,6 +698,9 @@ def _review_frames(
     saved_lines: list[str],
     seeds: list[int],
     on_status: Callable[[int, str], None] | None,
+    *,
+    verdicts: list[tuple[_Drawn, _Released | None, Exception | None]] | None = None,
+    halted: bool = False,
 ) -> tuple[str, str, str | None]:
     """Check every held frame in one batch, then write the ones that passed before a series stop.
 
@@ -564,9 +708,14 @@ def _review_frames(
     the whole batch and leave the card once, before anything is written. A
     check that cannot finish is recorded once. Later frames are still checked
     and none of them are written.
+
+    ``verdicts`` are this series' frames from a check the caller already ran
+    over a whole batch. ``halted`` means an earlier series in that batch had a
+    check that could not finish, so nothing here is written.
     """
-    verdicts = _check_frames(drawn, gate, clock)
-    save_stop = False
+    if verdicts is None:
+        verdicts = _check_frames(drawn, gate, clock)
+    save_stop = halted
     crash_noted = False
     check_code = ""
     check_reason = ""

@@ -500,6 +500,21 @@ voxprint-canvas-cli photoshoot --prompt "A yellow kettle with a blue handle" --f
 
 `--frames` sets the number of shots, from 1 to 99. The default is 6. `--style` takes the same style ids as the **Style** row (`photo` by default). `--places` is `same` or `different` (`same` by default). `--seed` starts at 1. Each frame is an AVIF file. The folder also contains `scenario.txt`, with one scenario line per shot. Add `--json` for the frame paths, the path of `scenario.txt`, and how many frames were made of those requested. `scenario_source` is `writer` when the text model wrote every line, `planned` when the lines were built from the idea, and `mixed` for both. `--adult` follows the Expert **Adult content (18+)** switch. `--negative` sets a negative prompt for every frame; it is checked like the prompt, and a refused negative stops the command before anything is generated.
 
+The `batch` command runs many prompts or shots in one go, from a JSON manifest:
+
+```text
+voxprint-canvas-cli batch --manifest shoots.json --out ./shoots
+```
+
+```json
+{"entries": [
+  {"name": "kettle", "prompt": "A yellow kettle with a blue handle", "count": 3},
+  {"shot": "close-up of an old fisherman mending a net", "negative": "blurry", "seed": 7}
+]}
+```
+
+Each entry has either `prompt` (an idea, written into `count` shots like a Photoshoot series) or `shot` (one pose or shot line, drawn `count` times with consecutive seeds). `negative`, `seed` (default 1), `count` (1 to 99, default 1) and `name` are optional. Each entry writes into its own folder, named after `name` or its number (`001`, `002`, …). A manifest with an unknown key, a wrong type or a value out of range stops the command at once with exit code 2, before any model loads. Every prompt and negative prompt is checked like the prompt before anything is drawn: a refused entry is recorded as `refused` in `batch.json` and the other entries continue. Every picture is checked before it is saved. `--out` defaults to a folder next to the manifest named `<manifest>_batch`. `--style`, `--places`, `--adult`, `--lora`, `--lora-scale` and `--export-format` work as for `photoshoot` and apply to every entry. The command exits 0 when every entry wrote at least one picture, and 1 otherwise.
+
 # LoRAs from Model Forge
 
 VOXPrint AI Model Forge trains small add-ons (LoRAs) for Z-Image-Turbo: a style, an object or a person. Canvas lists the add-ons that Model Forge saved into the shared models folder.

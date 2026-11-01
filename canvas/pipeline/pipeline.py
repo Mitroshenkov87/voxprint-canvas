@@ -18,6 +18,7 @@ from canvas.models.loader import ModelMissing, ModelNotReady
 from canvas.models.modes import Mode, Tier, required_roles, visible_modes
 from canvas.models.plan import BaseNotSelected, ModeUnavailable
 from canvas.models.registry import Catalog
+from canvas.models.runtime import park_pipeline
 from canvas.models.sizes import FOUR_K_LONG, frame_size, family_for, upscale_factor
 from canvas.pipeline.engine import run_generator
 from canvas.pipeline.gpu_release import free_vram_gb, release_cuda_cache, release_gate_weights
@@ -232,7 +233,11 @@ class Pipeline:
             return reviewed
 
     def _release_models(self) -> None:
-        """Drop the generator, text encoder, and VAE, then return CUDA memory."""
+        """Drop the generator, text encoder, and VAE, then return CUDA memory.
+
+        A pipeline the window keeps warm is parked too: Enlarge needs the card.
+        """
+        park_pipeline()
         generator = self.generator
         for name in ("pipe", "pipeline", "text_encoder", "text_encoder_2", "vae", "transformer", "controlnet"):
             if getattr(generator, name, None) is not None:

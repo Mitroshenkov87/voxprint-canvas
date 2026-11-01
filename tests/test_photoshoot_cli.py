@@ -117,7 +117,7 @@ def test_command_writes_scenario_and_frame_files(monkeypatch, capsys, tmp_path: 
     assert scenario == tmp_path / "scenario.txt"
     lines = scenario.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 4
-    assert all(line.startswith(f"A single photograph of {IDEA}, still, 50 mm, ") for line in lines)
+    assert all(line.startswith("A single photograph, ") and f", 50 mm, still, of {IDEA}" in line for line in lines)
 
 
 def test_export_format_avif_is_still_a_frame_file(monkeypatch, capsys, tmp_path: Path) -> None:
@@ -194,7 +194,8 @@ def test_ten_frames_vary_pose_camera_and_seed(monkeypatch, tmp_path: Path) -> No
     assert len(set(lines)) == 10
     assert [seed for _prompt, _mode, seed, _strength, _roles in calls] == list(range(1, 11))
     for index, (line, (_prompt, mode, _seed, strength, roles)) in enumerate(zip(lines, calls, strict=True)):
-        assert line.startswith(f"A single photograph of {IDEA}, pose {index}, {30 + index} mm lens, ")
+        assert line.startswith("A single photograph, ")
+        assert f", {30 + index} mm lens, pose {index}, of {IDEA}" in line
         assert line.endswith(", kitchen table")
         assert IDEA in line
         assert mode is Mode.TEXT
@@ -219,7 +220,7 @@ def test_ten_frames_vary_pose_camera_and_seed(monkeypatch, tmp_path: Path) -> No
     assert REFERENCE_STRENGTH >= 0.75
     assert calls[0][1] is Mode.TEXT and calls[0][3] is None and calls[0][4] == ()
     for prompt, mode, _seed, strength, roles in calls[1:]:
-        assert _series_line(prompt).startswith("A single photograph of ")
+        assert _series_line(prompt).startswith("A single photograph, ")
         assert "pose " in _series_line(prompt)
         assert mode is Mode.RESTYLE
         assert strength == REFERENCE_STRENGTH

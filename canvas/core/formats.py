@@ -66,16 +66,14 @@ class UnsupportedFormat(ValueError):
 
 
 def parse_format(name: str) -> OutputFormat:
-    """Resolve a user-facing picture name. The Forge export parser accepts PNG."""
+    """Resolve a user-facing picture name. PNG is written lossless."""
     key = name.strip().lower()
-    if key in {"png", ".png", "image/png"}:
-        raise UnsupportedFormat("PNG output is not available")
+    if key == "image/png":
+        return OutputFormat.PNG
     for fmt in OutputFormat:
-        if fmt is OutputFormat.PNG:
-            continue
         if key in {fmt.value, _EXTENSION[fmt], _EXTENSION[fmt].lstrip(".")}:
             return fmt
-    raise UnsupportedFormat("Choose AVIF, JPEG XL or WebP")
+    raise UnsupportedFormat("Choose AVIF, JPEG XL, WebP, JPEG or PNG")
 
 
 def parse_export_format(name: str) -> OutputFormat:
@@ -116,8 +114,8 @@ def extension(fmt: OutputFormat) -> str:
 def save_image(image: SafeImage, path: Path, fmt: OutputFormat = DEFAULT_FORMAT) -> None:
     """Write one released image. Any other object is refused.
 
-    A PNG path is a Forge export. The picture default is still AVIF, and a PNG
-    path with another format is refused.
+    PNG is lossless. The picture default is still AVIF, and a path whose
+    extension does not match the format is refused.
     """
     if type(image) is not SafeImage:
         raise TypeError("only a released image can be saved")
@@ -127,8 +125,6 @@ def save_image(image: SafeImage, path: Path, fmt: OutputFormat = DEFAULT_FORMAT)
         picture = Image.frombytes("RGB", (image.width, image.height), image.data)
         picture.save(path, format="PNG")
         return
-    if path.suffix.lower() == ".png":
-        raise UnsupportedFormat("PNG output is not available")
     if path.suffix.lower() != extension(fmt):
         raise UnsupportedFormat("the file extension does not match the format")
     picture = Image.frombytes("RGB", (image.width, image.height), image.data)

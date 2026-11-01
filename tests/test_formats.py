@@ -1,4 +1,4 @@
-"""AVIF is the default. PNG is not an output format."""
+"""AVIF is the default. PNG is a lossless output format."""
 from pathlib import Path
 
 import numpy as np
@@ -30,10 +30,23 @@ def test_parse_and_default():
     assert parse_format("webp") is OutputFormat.WEBP
     assert parse_format("jpeg") is OutputFormat.JPEG
     assert parse_format("heic") is OutputFormat.HEIC
+    assert parse_format(".png") is OutputFormat.PNG
+    assert parse_format("PNG") is OutputFormat.PNG
+    assert parse_format("image/png") is OutputFormat.PNG
     with pytest.raises(UnsupportedFormat):
-        parse_format("png")
-    with pytest.raises(UnsupportedFormat):
-        parse_format("image/png")
+        parse_format(".bmp")
+
+
+def test_png_output_is_lossless(tmp_path: Path):
+    from PIL import Image
+
+    raw = rgb(8, 8)
+    image = issue(raw)
+    path = tmp_path / "picture.png"
+    save_image(image, path, parse_format(path.suffix))
+    with Image.open(path) as written:
+        assert written.format == "PNG"
+        assert written.convert("RGB").tobytes() == image.data
 
 
 def test_save_requires_a_released_image(tmp_path: Path):

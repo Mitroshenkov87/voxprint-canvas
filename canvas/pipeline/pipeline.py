@@ -81,11 +81,11 @@ class _Hold:
             self.held = False
 
     def lend(self) -> None:
-        """Release the lock so Enlarge can use the GPU."""
+        """Release the lock so Enlarge can use the GPU, also when the command pinned it."""
         if not self.held:
             self._lent = False
             return
-        release(self.path)
+        release(self.path, force=True)
         self.held = False
         self._lent = True
 

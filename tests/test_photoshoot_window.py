@@ -167,7 +167,7 @@ def test_generate_writes_a_read_only_series(app, home: Path, monkeypatch) -> Non
     app.processEvents()
     assert len(prompts) == 6
     assert all(
-        "A single photograph of" in prompt and "still, 50 mm, " in prompt and prompt.index(IDEA) < prompt.index("still, 50 mm, ")
+        "A single photograph, " in prompt and "50 mm, still, " in prompt and prompt.index("50 mm, still, ") < prompt.index(IDEA)
         for prompt in prompts
     )
     assert all(IDEA in prompt for prompt in prompts)

@@ -24,10 +24,10 @@ from canvas.safety.image import RawImage
 from canvas.safety.inputs import ImageRole, PendingInput
 from canvas.infra.enlarge import EnlargeClient, EnlargeError
 from canvas.infra.gpu import probe_gpu
-from canvas.infra.gpu_lock import prepare_startup_lock
+from canvas.infra.gpu_lock import GpuLockTimeout, pinned, prepare_startup_lock
 from canvas.infra.manifest import ManifestError
 from canvas.infra.models_users import register, unregister
-from canvas.infra.paths import models_dir, shared_dir
+from canvas.infra.paths import OutputFolderError, models_dir, prepare_output_folder, shared_dir
 from canvas.infra.vram import peak_allocated_bytes, set_vram_cap_gb
 from canvas.models.loader import ModelNotReady, ZImageGenerator, load_catalog_stack
 from canvas.models.views import remove_views
@@ -95,7 +95,10 @@ def _parser() -> argparse.ArgumentParser:
     generate.add_argument("--edit-instruction", default="", help="instruction for editing --input")
     generate.add_argument("--input", default="", help="image for inpaint, used with --mask")
     generate.add_argument("--aspect", default="1:1")
-    generate.add_argument("--out", required=True)
+    generate.add_argument(
+        "--out", required=True,
+        help="picture file: .avif, .jxl, .webp, .jpg, .heic or .png (lossless); missing folders are created",
+    )
     generate.add_argument("--mask", default="", help="mask image for inpaint, used with --input")
     generate.add_argument("--output-size", default="native", choices=("native", "2k", "4k"))
     generate.add_argument("--seed", type=int, default=0)
@@ -303,6 +306,9 @@ def _generate(args: argparse.Namespace) -> int:
     path = Path(args.out)
     try:
         fmt = parse_format(path.suffix)
+        prepare_output_folder(path.parent)
+    except OutputFolderError as exc:
+        return _emit({"ok": False, "error": str(exc), "code": "output_folder"}, as_json, 2)
     except ValueError as exc:
         return _emit({"ok": False, "error": str(exc)}, as_json, 2)
     catalog = load_catalog()
@@ -328,35 +334,38 @@ def _generate(args: argparse.Namespace) -> int:
     progress = lambda message: print(message, file=sys.stderr)
     started = time.perf_counter()
     try:
-        source = _inputs(args, mode)
-        install_supporting(catalog, progress)
-        stack = load_catalog_stack(root, catalog)
-        gate = AgeGate(stack)
-        gate.warm()
-        if args.enhance:
-            gate.review_prompt(prompt)
-            release_gate_weights(gate)
-            rewritten = rewrite_text(
-                open_rewriter(catalog, gpu.tier, root, progress, stage="enhancer"), prompt,
-            )
-            outcome = resolve_prompt(gate, prompt, rewritten)
-            active = outcome.prompt
-        screened = gate.release_request(active, mode.value, source)
-        try:
-            plan = build_plan(catalog, screened, gpu.tier)
-        finally:
-            screened.wipe()
-        ensure_plan(catalog, plan, progress, confirm=None)
-        generator = ZImageGenerator(catalog, gpu.tier)
-        generator.seed = args.seed
-        generator.models = root
-        if chosen is not None:
-            generator.lora_path = str(chosen[0].weights)
-            generator.lora_strength = chosen[1]
-            generator.bound_lora = chosen[0]
-        pipeline = Pipeline(gate, generator, gpu.tier, use_gpu_lock=True, catalog=catalog, enlarge=EnlargeClient())
-        fresh = _inputs(args, mode)
-        pipeline.export(active, mode, fresh, path, fmt, aspect=args.aspect, output=output)
+        with pinned("canvas-generate"):
+            source = _inputs(args, mode)
+            install_supporting(catalog, progress)
+            stack = load_catalog_stack(root, catalog)
+            gate = AgeGate(stack)
+            gate.warm()
+            if args.enhance:
+                gate.review_prompt(prompt)
+                release_gate_weights(gate)
+                rewritten = rewrite_text(
+                    open_rewriter(catalog, gpu.tier, root, progress, stage="enhancer"), prompt,
+                )
+                outcome = resolve_prompt(gate, prompt, rewritten)
+                active = outcome.prompt
+            screened = gate.release_request(active, mode.value, source)
+            try:
+                plan = build_plan(catalog, screened, gpu.tier)
+            finally:
+                screened.wipe()
+            ensure_plan(catalog, plan, progress, confirm=None)
+            generator = ZImageGenerator(catalog, gpu.tier)
+            generator.seed = args.seed
+            generator.models = root
+            if chosen is not None:
+                generator.lora_path = str(chosen[0].weights)
+                generator.lora_strength = chosen[1]
+                generator.bound_lora = chosen[0]
+            pipeline = Pipeline(gate, generator, gpu.tier, use_gpu_lock=True, catalog=catalog, enlarge=EnlargeClient())
+            fresh = _inputs(args, mode)
+            pipeline.export(active, mode, fresh, path, fmt, aspect=args.aspect, output=output)
+    except GpuLockTimeout as exc:
+        return _emit({"ok": False, "error": str(exc), "code": "gpu_busy"}, as_json, 1)
     except (
         SafetyError, SnapshotError, DownloadDeclined, InferenceUnavailable, ModelNotReady,
         ModeUnavailable, BaseNotSelected, JobError, CoolingDown, EnlargeMissing, EnlargeError, VramRefused, DeviceRefused,
@@ -383,18 +392,25 @@ def _photoshoot_bench(args: argparse.Namespace) -> int:
         return _emit({"ok": False, "error": gpu.message}, as_json, 2)
     folder = Path(args.out)
     try:
-        install_supporting(load_catalog(), lambda message: print(message, file=sys.stderr))
-        stack = load_catalog_stack(models_dir(), load_catalog())
-        gate = AgeGate(stack)
-        report = run_bench(
-            prompt=str(args.prompt),
-            folder=folder,
-            seed=int(args.seed),
-            tier=gpu.tier,
-            age_gate=gate,
-            rewrite=live_rewrite(gpu.tier),
-            generate=live_generate(gate, gpu.tier),
-        )
+        prepare_output_folder(folder)
+    except OutputFolderError as exc:
+        return _emit({"ok": False, "error": str(exc), "code": "output_folder"}, as_json, 2)
+    try:
+        with pinned("canvas-photoshoot-bench"):
+            install_supporting(load_catalog(), lambda message: print(message, file=sys.stderr))
+            stack = load_catalog_stack(models_dir(), load_catalog())
+            gate = AgeGate(stack)
+            report = run_bench(
+                prompt=str(args.prompt),
+                folder=folder,
+                seed=int(args.seed),
+                tier=gpu.tier,
+                age_gate=gate,
+                rewrite=live_rewrite(gpu.tier),
+                generate=live_generate(gate, gpu.tier),
+            )
+    except GpuLockTimeout as exc:
+        return _emit({"ok": False, "error": str(exc), "code": "gpu_busy"}, as_json, 1)
     except (
         SafetyError, SnapshotError, DownloadDeclined, InferenceUnavailable, ModelNotReady,
         ModeUnavailable, BaseNotSelected, JobError, CoolingDown, EnlargeMissing, EnlargeError, VramRefused, DeviceRefused,
@@ -426,28 +442,37 @@ def _photoshoot(args: argparse.Namespace) -> int:
     adult = bool(args.adult)
     style = str(args.style)
     try:
-        install_supporting(load_catalog(), lambda message: print(message, file=sys.stderr))
-        stack = load_catalog_stack(models_dir(), load_catalog())
-        gate = AgeGate(stack)
-        serial = SerialGate.wrap(gate)
-        clock = StageTimes()
-        payload, code = run_command(
-            idea=str(args.prompt),
-            folder=folder,
-            frames=frames,
-            seed=int(args.seed),
-            style=style,
-            places=str(args.places),
-            adult=adult,
-            age_gate=serial,
-            rewrite=model_rewrite(gpu.tier, adult),
-            generate=model_generate(
-                serial, gpu.tier, style, adult,
-                None if chosen is None else chosen[0],
-                0.7 if chosen is None else chosen[1],
-            ),
-            timings=clock,
-            container=parse_export_format(str(args.export_format)),
+        prepare_output_folder(folder)
+    except OutputFolderError as exc:
+        return _emit({"ok": False, "error": str(exc), "code": "output_folder"}, as_json, 2)
+    try:
+        with pinned("canvas-photoshoot"):
+            install_supporting(load_catalog(), lambda message: print(message, file=sys.stderr))
+            stack = load_catalog_stack(models_dir(), load_catalog())
+            gate = AgeGate(stack)
+            serial = SerialGate.wrap(gate)
+            clock = StageTimes()
+            payload, code = run_command(
+                idea=str(args.prompt),
+                folder=folder,
+                frames=frames,
+                seed=int(args.seed),
+                style=style,
+                places=str(args.places),
+                adult=adult,
+                age_gate=serial,
+                rewrite=model_rewrite(gpu.tier, adult),
+                generate=model_generate(
+                    serial, gpu.tier, style, adult,
+                    None if chosen is None else chosen[0],
+                    0.7 if chosen is None else chosen[1],
+                ),
+                timings=clock,
+                container=parse_export_format(str(args.export_format)),
+            )
+    except GpuLockTimeout:
+        return _emit_photoshoot(
+            {"ok": False, "error": "gpu_busy", "code": "gpu_busy", "message": "the GPU is busy"}, as_json, 1,
         )
     except (
         SafetyError, SnapshotError, DownloadDeclined, InferenceUnavailable, ModelNotReady,

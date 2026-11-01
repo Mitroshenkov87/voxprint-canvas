@@ -43,7 +43,7 @@ from canvas.pipeline.device_guard import DeviceRefused
 from canvas.pipeline.enhance import mask_numbers, stated_ages
 from canvas.pipeline.gpu_release import release_cuda_cache, release_gate_weights
 from canvas.pipeline.adult_direction import ages_allowed, with_adult_anchor, youth_cues
-from canvas.pipeline.frame_prompt import frame_identity, log_frame_prompt, strip_series_words, with_choices
+from canvas.pipeline.frame_prompt import log_frame_prompt, strip_series_words, with_choices
 from canvas.pipeline.photoshoot import (
     FORMAT_REMINDER,
     SCENARIO_CHUNK,
@@ -59,6 +59,7 @@ from canvas.pipeline.photoshoot import (
     read_drafts,
     reply_declined,
     scenario_request,
+    shot_identity,
 )
 from canvas.safety.denylist import scan
 from canvas.safety.gate import (
@@ -371,7 +372,7 @@ def _accepted_shots(
         line = single_frame(strip_series_words(line))
         # The stored subject can still name the series and list every outfit.
         # The photograph only has to keep the appearance once those words are gone.
-        identity = frame_identity(scenario.subject_block)
+        identity = shot_identity(scenario.subject_block)
         if (identity and identity not in line) or (adult and youth_cues(line)):
             blocked.append(index)
             _status(on_status, index, "blocked")

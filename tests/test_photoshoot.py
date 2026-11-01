@@ -140,20 +140,21 @@ def test_appearance_stays_inside_the_encoder_head() -> None:
     subject = f"{look}, a woman in a red coat"
     shot = Shot(" ".join(["wide room"] * 400), "still", "50 mm", "kitchen table")
     line = assemble_line(subject, shot, include_camera=True)
-    assert line.startswith(f"A single photograph of {look},")
+    assert line.startswith("A single photograph, wide room")
     assert len(line.split()) <= 512 - 48
-    assert truncate_for_encoder(line, limit=12).startswith("A single photograph of Southeast")
+    # The shot words ahead of the appearance are capped, so the look stays in the encoder head.
+    assert f"of {look}, a woman in a red coat" in truncate_for_encoder(line, limit=90)
 
 
-def test_assemble_line_leads_with_the_subject() -> None:
+def test_assemble_line_leads_with_the_shot() -> None:
     shot = Shot("close view", "still", "50 mm", "kitchen table")
     plain = assemble_line(IDEA, shot, include_camera=False)
     detailed = assemble_line(IDEA, shot, include_camera=True)
-    assert plain == f"A single photograph of {IDEA}, still, close view, kitchen table"
+    assert plain == f"A single photograph, close view, still, of {IDEA}, kitchen table"
     assert "50 mm" not in plain
-    assert detailed == f"A single photograph of {IDEA}, still, 50 mm, close view, kitchen table"
+    assert detailed == f"A single photograph, close view, 50 mm, still, of {IDEA}, kitchen table"
     assert IDEA in detailed
-    assert detailed.index(IDEA) < detailed.index("50 mm")
+    assert detailed.index("50 mm") < detailed.index(IDEA)
 
 
 def test_changed_age_discards_the_scenario() -> None:
@@ -326,7 +327,8 @@ def test_blocked_frame_is_dropped_without_a_rewrite(tmp_path: Path) -> None:
         del seed
         heroes.append(hero)
         assert strength is None
-        assert line.startswith(f"A single photograph of {IDEA}, still, 50 mm, ")
+        assert line.startswith("A single photograph, ")
+        assert line.endswith(f", 50 mm, still, of {IDEA}, kitchen table")
         assert IDEA in line
         return _frame(b"\x10\x20\x30")
 
@@ -632,7 +634,7 @@ def test_numbered_lines_are_read_as_shots(tmp_path: Path) -> None:
     assert document["age"] is None
     assert document["subject_block"] == IDEA
     assert document["lines"][0] == (
-        f"A single photograph of {IDEA}, still, 50 mm, eye level, view 0, soft light, kitchen table"
+        f"A single photograph, view 0, soft light, 50 mm, eye level, still, of {IDEA}, kitchen table"
     )
 
 
@@ -696,7 +698,8 @@ def test_planned_shots_cover_ninety_nine_frames_in_either_place_mode() -> None:
                 assert len({shot.place for shot in shots}) == 99
             for shot in shots:
                 line = assemble_line(AGED, shot, include_camera=True)
-                assert line.startswith(f"A single photograph of {AGED}, {shot.pose}")
+                assert line.startswith(f"A single photograph, {shot.scene}")
+                assert f"{shot.pose}, of {AGED}" in line
                 assert AGED in line
                 assert sorted(stated_ages(line)) == [34]
     assert planned_shots(IDEA, 6, "same", place="", taken=()) == planned_shots(IDEA, 6, "same", place="", taken=())
@@ -794,7 +797,8 @@ def test_the_users_hair_colour_leads_every_frame(tmp_path: Path) -> None:
     assert document["appearance"] == ""
     assert len(prompts) == 5
     for line in prompts:
-        assert line.startswith(f"A single photograph of {idea},")
+        assert line.startswith("A single photograph, ")
+        assert f", of {idea}," in line
         assert "blonde hair" in line
         assert re.search(r"\b(?:black|brown|auburn|chestnut)\s+hair\b", line) is None
         assert re.search(r"\b(?:European|Hispanic|Middle Eastern)\b", line) is None
@@ -820,7 +824,8 @@ def test_the_test_series_character_is_copied_into_every_frame(tmp_path: Path) ->
     assert fixed_appearance(TEST_SERIES_CHARACTER, 3) == TEST_SERIES_CHARACTER
     assert len(prompts) == 4
     for line in prompts:
-        assert line.startswith(f"A single photograph of {TEST_SERIES_CHARACTER},")
+        assert line.startswith("A single photograph, ")
+        assert f"of {TEST_SERIES_CHARACTER}," in line
         assert line.count(TEST_SERIES_CHARACTER) == 1
 
 
@@ -842,7 +847,7 @@ def test_a_person_series_repeats_one_appearance_and_anchors_the_hero(tmp_path: P
     assert all(sorted(stated_ages(line)) == [25] for line in document["lines"])
     assert seen[0][1] is None
     assert all(item[1] is seen[1][1] for item in seen[1:])
-    assert all(item[0].startswith(f"A single photograph of {PERSON},") for item in seen)
+    assert all(item[0].startswith("A single photograph, ") and f", of {PERSON}" in item[0] for item in seen)
     assert [item[2] for item in seen] == [REFERENCE_STRENGTH] * 6
     assert document["age"] == 25
 
@@ -887,7 +892,7 @@ def test_a_planned_person_series_shares_the_same_appearance(tmp_path: Path) -> N
     result = _run(tmp_path, idea=PERSON, rewrite=lambda _prompt: "no lines here", generate=generate)
     assert result.source == "planned"
     assert len(prompts) == 6
-    assert all(line.startswith(f"A single photograph of {PERSON},") for line in prompts)
+    assert all(line.startswith("A single photograph, ") and f", of {PERSON}" in line for line in prompts)
     assert strengths == [REFERENCE_STRENGTH] * 6
 
 
@@ -939,12 +944,13 @@ def test_a_frame_prompt_has_no_series_words(tmp_path: Path) -> None:
     joined = "\n".join(prompts)
     for line in prompts:
         assert banned.search(line) is None
-        assert line.startswith("A single photograph of same woman, ")
+        assert line.startswith("A single photograph, ")
+        assert ", of same woman, " in line
         assert " in," not in line
         assert not line.endswith(" in")
         assert "red coat" in line
         assert "woman" in line
-        assert line.count("A single photograph of") == 1
+        assert line.count("A single photograph") == 1
     assert prepared and prepared[0] == prompts
     assert joined not in prepared[0]
 
@@ -966,7 +972,7 @@ def test_shot_templates_say_shot_and_keep_the_photograph_lead() -> None:
     assert SINGLE_FRAME == "A single photograph of"
     shot = Shot("white border, photo shoot panel", "filling the frame", "50 mm", "sheet series")
     line = assemble_line("a red coat", shot, include_camera=True)
-    assert line.startswith("A single photograph of a red coat,")
+    assert line.startswith("A single photograph, white, 50 mm, filling the shot, of a red coat")
     assert "photograph" in line
     assert "filling the shot" in line
     assert _PROMPT_DENY.search(line) is None
@@ -1003,8 +1009,9 @@ def test_each_frame_keeps_one_listed_outfit_and_covers_the_list(tmp_path: Path) 
     seen_lights: set[str] = set()
     seen_places: set[str] = set()
     for index, line in enumerate(prompts):
-        assert line.startswith("A single photograph of a woman")
-        assert line.count("A single photograph of") == 1
+        assert line.startswith("A single photograph, ")
+        assert ", of a woman" in line
+        assert line.count("A single photograph") == 1
         assert "photograph" in line
         assert _PROMPT_DENY.search(line) is None
         assert re.search(r"\bframes?\b", line, re.IGNORECASE) is None

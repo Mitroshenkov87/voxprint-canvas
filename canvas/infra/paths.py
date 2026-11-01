@@ -5,6 +5,7 @@ Adapted from Voxprint AI Movie Dubber ``dubber/infra/shared_paths.py``
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from voxprint_common import paths as _common_paths
@@ -46,3 +47,32 @@ def lora_library_dir() -> Path:
     path = voxprint_home() / "canvas" / "lora-library"
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+class OutputFolderError(OSError):
+    """The output folder cannot be created or written."""
+
+
+def prepare_output_folder(folder: Path) -> Path:
+    """Create ``folder`` with its parents and prove it is writable.
+
+    Commands call this before any model loads, so a bad ``--out`` stops in
+    seconds instead of after a picture was made.
+
+    Raises:
+        OutputFolderError: The folder cannot be created or written.
+    """
+    target = Path(folder)
+    if target.exists() and not target.is_dir():
+        raise OutputFolderError(f"The output folder is a file: {target}")
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise OutputFolderError(f"The output folder cannot be created: {target} ({exc.strerror or exc})") from exc
+    probe = target / f".canvas-write-check-{os.getpid()}"
+    try:
+        probe.write_bytes(b"")
+        probe.unlink()
+    except OSError as exc:
+        raise OutputFolderError(f"The output folder is not writable: {target} ({exc.strerror or exc})") from exc
+    return target

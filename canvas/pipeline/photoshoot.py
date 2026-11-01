@@ -211,6 +211,7 @@ def scenario_request(
 
 
 SINGLE_FRAME = "A single photograph of"
+SINGLE_FRAME_LEAD = "A single photograph"
 COLLAGE_NEGATIVE = "collage, grid, panels, split screen"
 # The text encoder keeps this many tokens, including its chat wrapper.
 ENCODER_TOKEN_LIMIT = 512
@@ -225,7 +226,8 @@ _MULTI_SCENE = re.compile(
 def single_frame(line: str) -> str:
     """Lead with one photograph. The picture model does not read a negative."""
     text = line.strip()
-    if text.lower().startswith(SINGLE_FRAME.lower()):
+    lowered = text.lower()
+    if lowered.startswith(SINGLE_FRAME.lower()) or lowered.startswith(f"{SINGLE_FRAME_LEAD.lower()},"):
         return text
     if not text:
         return SINGLE_FRAME
@@ -285,34 +287,170 @@ def _with_test_character(text: str, subject: str) -> str:
     return f"{character}, {text}" if text else character
 
 
+# Words before a sentence names the person, the outfit, or quoted lettering.
+_IDENTITY_HINT = re.compile(
+    r"\b(?:hair|eyes?|skin|face|faces|wearing|wears|dressed|clothed|outfit|beard|freckles|tattoos?)\b",
+    re.IGNORECASE,
+)
+# A sentence about how the series is shot: framing, pose, lens, angle, foreshortening.
+_DIRECTION_HINT = re.compile(
+    r"\b(?:vary|varied|varying|alternat\w*|poses?|posing|framings?|camera|lens(?:es)?|angles?|viewpoints?"
+    r"|views?|close-?ups?|head-and-shoulders|waist-up|full[- ](?:body|length)|three-quarters?|profile"
+    r"|foreshorten\w*|low-angle|high-angle|overhead|bird's-eye|worm's-eye)\b",
+    re.IGNORECASE,
+)
+# A sentence about where the series is shot: backdrop, light, location.
+_SETTING_HINT = re.compile(
+    r"\b(?:backdrop|background|studio|lighting|light|lit|sunlight|daylight|location|setting|room"
+    r"|outdoors?|indoors?|interior|exterior)\b",
+    re.IGNORECASE,
+)
+# A series instruction such as "Vary pose and framing ...". Without its list it says nothing about one shot.
+_VARY = re.compile(r"^\s*(?:vary|varied|varying|alternate|alternating|change|mix)\b", re.IGNORECASE)
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+_LIST_SPLIT = re.compile(r"\s*(?:,|;|\bor\b)\s*", re.IGNORECASE)
+# Shot words ahead of the appearance stay short, so the appearance always sits inside the encoder head.
+_LEAD_WORDS = 64
+
+
+@dataclass(frozen=True)
+class SubjectParts:
+    """The subject block split by role.
+
+    ``identity`` is who or what is pictured, with outfit and quoted lettering.
+    ``framings`` is a per-shot framing or pose list the idea gave, in order.
+    ``direction`` is the idea's other shot wording, and ``setting`` its backdrop and light.
+    """
+
+    identity: str
+    framings: tuple[str, ...] = ()
+    direction: str = ""
+    setting: str = ""
+
+
+def subject_parts(subject: str) -> SubjectParts:
+    """Split a subject block into identity, per-shot framings, shot direction, and setting.
+
+    A sentence that names a person, an age, the look, or quoted lettering is
+    identity. A sentence about pose, framing, lens, or angle is direction; a
+    list after its colon becomes one framing per shot. A backdrop or light
+    sentence is setting. When nothing is identity the whole block is.
+
+    Args:
+        subject: The verbatim subject block.
+    """
+    identity: list[str] = []
+    framings: list[str] = []
+    direction: list[str] = []
+    setting: list[str] = []
+    for sentence in _sentences(subject):
+        if _names_identity(sentence):
+            identity.append(sentence)
+        elif _DIRECTION_HINT.search(sentence):
+            items = _listed(sentence)
+            if items:
+                framings.extend(items)
+            elif not _VARY.match(sentence):
+                direction.append(sentence)
+        elif _SETTING_HINT.search(sentence):
+            setting.append(sentence)
+        else:
+            identity.append(sentence)
+    if not identity:
+        return SubjectParts(_trimmed(subject))
+    return SubjectParts(
+        _trimmed(" ".join(identity)),
+        tuple(framings),
+        _trimmed(" ".join(direction)),
+        _trimmed(" ".join(setting)),
+    )
+
+
+def shot_identity(subject: str) -> str:
+    """The identity words every assembled line of ``subject`` contains verbatim."""
+    return _trimmed(frame_identity(subject_parts(subject).identity))
+
+
+def _sentences(text: str) -> list[str]:
+    return [piece.strip() for piece in _SENTENCE_END.split(text.strip()) if piece.strip()]
+
+
+def _names_identity(sentence: str) -> bool:
+    return bool(
+        _PERSON_RE.search(sentence)
+        or stated_ages(sentence)
+        or quoted_spans(sentence)
+        or _IDENTITY_HINT.search(sentence)
+    )
+
+
+def _listed(sentence: str) -> tuple[str, ...]:
+    """The items after a colon, when there are two or more."""
+    _head, colon, tail = sentence.partition(":")
+    if not colon:
+        return ()
+    items = tuple(part for part in (_trimmed(piece) for piece in _LIST_SPLIT.split(tail)) if part)
+    return items if len(items) >= 2 else ()
+
+
+def _trimmed(text: str) -> str:
+    return text.strip().rstrip(" .;:,").strip()
+
+
 def assemble_line(
     subject: str, shot: Shot, *, include_camera: bool, index: int = 0, seed: int = 0,
 ) -> str:
     """The line sent for one shot.
 
-    Appearance leads, then this shot's pose, camera, scene, and place. Each
-    parenthesized list in the subject contributes one item, chosen from the
-    seed. Series wording is removed. The line starts with one photograph and
-    stays inside the text encoder's token cap.
+    This shot's framing, camera, and pose lead, so the text encoder reads
+    them first. The idea's own framing list adds one item per shot, in
+    order, after them, unless the shot already names one. The idea's other
+    shot wording comes next. The appearance follows, then the place and the
+    idea's backdrop. Each parenthesized list in the subject
+    contributes one item, chosen from the seed. Series wording is removed. The
+    line starts with one photograph and stays inside the text encoder's token cap.
 
     Args:
         subject: Appearance, then the idea. Lists and series instructions are stripped.
         shot: Scene, pose, camera, and place for this shot only.
         include_camera: When true, the lens and angle stay on the line.
-        index: Which shot this is. Alternative lists walk forward from here.
+        index: Which shot this is. Framing and alternative lists walk forward from here.
         seed: Series seed. The same seed and index always pick the same item.
     """
-    sources = [subject, shot.pose]
+    parts = subject_parts(subject)
+    own = [shot.scene]
     if include_camera:
-        sources.append(shot.camera)
-    sources.extend((shot.scene, shot.place))
+        own.append(shot.camera)
+    own.append(shot.pose)
+    named = " ".join(own).casefold()
+    lead_sources = list(own)
+    if parts.framings and not any(item.casefold() in named for item in parts.framings):
+        lead_sources.append(parts.framings[index % len(parts.framings)])
+    lead_sources.append(parts.direction)
+    tail_sources = [shot.place, parts.setting]
+    sources = [*lead_sources, parts.identity, *tail_sources]
     kept = tuple(
         item for source in sources for item in chosen_items(source, index, seed)
     )
-    parts = [strip_series_words(with_choices(source, index, seed)) for source in sources]
-    body = ", ".join(part for part in parts if part)
+    lead = _cap_words(_joined(lead_sources, index, seed), _LEAD_WORDS)
+    identity = _trimmed(strip_series_words(with_choices(parts.identity, index, seed)))
+    tail = _joined(tail_sources, index, seed)
+    body = ", ".join(part for part in (identity, tail) if part)
     body = _with_test_character(body, subject)
-    return truncate_for_encoder(single_frame(body), keep=kept)
+    line = f"{SINGLE_FRAME_LEAD}, {lead}, of {body}" if lead else single_frame(body)
+    return truncate_for_encoder(line, keep=kept)
+
+
+def _joined(sources: list[str], index: int, seed: int) -> str:
+    parts = (_trimmed(strip_series_words(with_choices(source, index, seed))) for source in sources)
+    return ", ".join(part for part in parts if part)
+
+
+def _cap_words(text: str, limit: int) -> str:
+    words = text.split()
+    if len(words) <= limit:
+        return text
+    return _trimmed(_undangle(" ".join(words[:limit])))
 
 
 def validate_scenario(idea: str, raw: str, *, count: int, place_mode: PlaceMode) -> Scenario | None:
@@ -364,7 +502,7 @@ def _keep_shots(idea: str, subject: str, shots: tuple[Shot, ...]) -> tuple[Shot,
     required = [piece for piece in quoted_spans(idea) if piece in subject]
     for shot in shots:
         line = assemble_line(subject, shot, include_camera=True)
-        identity = frame_identity(subject)
+        identity = shot_identity(subject)
         if identity and identity not in line:
             continue
         if sorted(stated_ages(line)) != ages:
@@ -554,8 +692,9 @@ def planned_shots(
 ) -> tuple[Shot, ...]:
     """Shots built from fixed lists, for frames the reply did not cover.
 
-    Each shot varies framing, light, pose, and camera. In ``different`` mode
-    each shot also gets its own place. The same order comes back for the same
+    Each shot varies framing, light, pose, and camera. A framing list in the
+    idea replaces the fixed framings, in order. In ``different`` mode each
+    shot also gets its own place. The same order comes back for the same
     idea. Every shot still passes ``accept_shot``.
 
     Args:
@@ -567,6 +706,7 @@ def planned_shots(
         adult: Expert adult content is on. Uses the same pose and light plan as the request.
     """
     subject = idea.strip()
+    framings = subject_parts(subject).framings
     shots = list(taken)
     added: list[Shot] = []
     offset = zlib.crc32(subject.encode("utf-8")) % len(PLAN_FRAMINGS)
@@ -576,7 +716,10 @@ def planned_shots(
     limit = len(PLAN_FRAMINGS) * len(PLAN_LIGHTS) * len(PLAN_POSES)
     while len(added) < count and step < limit:
         index = len(taken) + step
-        framing = PLAN_FRAMINGS[(offset + index) % len(PLAN_FRAMINGS)]
+        framing = (
+            framings[index % len(framings)] if framings
+            else PLAN_FRAMINGS[(offset + index) % len(PLAN_FRAMINGS)]
+        )
         # The light changes every shot. Framing and light still pair uniquely for 96 shots.
         light = PLAN_LIGHTS[(index + index // len(PLAN_FRAMINGS)) % len(PLAN_LIGHTS)]
         pose = PLAN_POSES[(offset + index) % len(PLAN_POSES)]

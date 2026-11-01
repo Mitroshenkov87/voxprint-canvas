@@ -17,22 +17,24 @@ from canvas.infra.stage_timer import log_detail
 # has no word boundary around ``frame`` and is left as the lead.
 _FRAME_WORD = re.compile(r"\bframes?\b", re.IGNORECASE)
 _SERIES_WORDS = re.compile(
-    r"(?:\b(?:in|of|with|on|for|at|to|from|into|onto)\s+)?"
+    r"(?:\b(?:in|of|with|on|for|at|to|from|into|onto|across|throughout|between)\s+)?"
     r"\b(?:every\s+(?:shots?|frames?)|series|shots|angles|panels?|grids?|collages?|sheets?|sequences?"
     r"|multiple|sets?|borders?|photoshoots?|photo[-\s]+shoots?)\b",
     re.IGNORECASE,
 )
 _DANGLING = re.compile(
-    r"\b(?:in|of|with|on|for|at|to|from|into|onto|and|or)\b(?=\s*(?:,|$))",
+    r"\b(?:in|of|with|on|for|at|to|from|into|onto|across|throughout|between|and|or)\b(?=\s*(?:[,.;:]|$))",
     re.IGNORECASE,
 )
 _DIFFERENT = re.compile(r"\b(?:different|various)\s+[A-Za-z][\w'-]*\b", re.IGNORECASE)
 _CHOICE = re.compile(r"\(([^()]*)\)")
 _CHOICE_SPLIT = re.compile(r"\s*(?:,|\bor\b)\s*", re.IGNORECASE)
 _SPACES = re.compile(r"[ \t]{2,}")
-_COMMA_GAP = re.compile(r"\s+,")
+_COMMA_GAP = re.compile(r"\s+([,.;:])")
 _COMMA_RUN = re.compile(r"(?:,\s*){2,}")
 _LEAD = "A single photograph of"
+# Every assembled line starts with this, followed by "of" or by the shot's framing.
+_LEAD_MARK = "A single photograph"
 _NUMBERED = re.compile(r"^\s*\d{1,2}\s*[.)]\s*")
 
 
@@ -118,7 +120,7 @@ def log_frame_prompt(prompt: str) -> None:
 
 
 def _tidy(text: str) -> str:
-    cleaned = _COMMA_GAP.sub(",", text)
+    cleaned = _COMMA_GAP.sub(r"\1", text)
     cleaned = _COMMA_RUN.sub(", ", cleaned)
     cleaned = _SPACES.sub(" ", cleaned)
     return cleaned.strip(" ,")
@@ -153,9 +155,9 @@ def _split_one(prompt: str) -> tuple[str, ...]:
     text = prompt.strip()
     if not text:
         return ()
-    marker = _LEAD.lower()
+    marker = _LEAD_MARK.lower()
     if text.lower().count(marker) >= 2:
-        parts = re.split(rf"(?i)(?={re.escape(_LEAD)})", text)
+        parts = re.split(rf"(?i)(?={re.escape(_LEAD_MARK)})", text)
         return tuple(part.strip() for part in parts if part.strip())
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     numbered = [line for line in lines if _NUMBERED.match(line)]
@@ -165,7 +167,7 @@ def _split_one(prompt: str) -> tuple[str, ...]:
             body = strip_series_words(_NUMBERED.sub("", line).strip())
             if not body:
                 continue
-            if body.lower().startswith(marker):
+            if body.lower().startswith(_LEAD.lower()):
                 frames.append(body)
             else:
                 frames.append(f"{_LEAD} {body}")

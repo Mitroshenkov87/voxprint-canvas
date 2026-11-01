@@ -105,13 +105,24 @@ def test_a_stage_refuses_leftover_memory(monkeypatch) -> None:
     assert any(code.startswith("vram.residual:text_encoder:") for code in codes)
 
 
-def test_a_stage_refuses_a_peak_past_14gb(monkeypatch) -> None:
+def test_a_stage_refuses_a_live_allocation_past_14gb(monkeypatch) -> None:
     memory, codes = _arm(monkeypatch)
-    memory.peak = 15 * _GIB
+    memory.allocated = 15 * _GIB
     with pytest.raises(StageBlocked) as caught:
-        begin_stage("cook", Tier.GB16)
+        begin_stage("text_encoder", Tier.GB16)
     assert caught.value.code == "vram.peak"
-    assert any(code.startswith("vram.peak:cook:") for code in codes)
+    assert any(code.startswith("vram.peak:text_encoder:") for code in codes)
+
+
+def test_a_freed_peak_from_the_previous_stage_does_not_block(monkeypatch) -> None:
+    # rc.29 laptop: the writer was parked (34 MB left) but the allocator peak
+    # still held 15.7 GB from the load. That peak alone stopped the series.
+    memory, codes = _arm(monkeypatch)
+    memory.peak = 15746 * 1024 * 1024
+    memory.allocated = 34 * 1024 * 1024
+    finish_stage("writer", Tier.GB16)
+    begin_stage("cook", Tier.GB16)
+    assert not any(code.startswith("vram.") for code in codes)
 
 
 def test_finish_refuses_memory_left_between_stages(monkeypatch) -> None:

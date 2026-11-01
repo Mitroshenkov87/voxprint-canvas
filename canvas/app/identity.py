@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -94,3 +94,39 @@ def release_title(env: Mapping[str, str] | None = None) -> str:
     if _RC_TAG.fullmatch(ref):
         return f"{_PRODUCT_NAME} {ref} build {number}"
     return f"{_PRODUCT_NAME} {version_label(env)}"
+
+
+_TAG_PARTS = re.compile(r"^v(\d+\.\d+\.\d+)(?:-rc\.(\d+))?$")
+
+
+def tag_mismatch(tag: str, data: Mapping[str, Any]) -> str | None:
+    """Why ``tag`` does not name the release in ``data``. None when they match.
+
+    ``vX.Y.Z-rc.N`` needs ``version`` X.Y.Z and ``rc`` N. A plain ``vX.Y.Z``
+    needs ``version`` X.Y.Z and no ``rc``.
+    """
+    match = _TAG_PARTS.fullmatch(tag.strip())
+    if match is None:
+        return f"tag {tag!r} is not vX.Y.Z or vX.Y.Z-rc.N"
+    tag_version, tag_rc = match.group(1), match.group(2)
+    build_version = str(data.get("version") or "").strip()
+    if build_version != tag_version:
+        return f"tag {tag} has version {tag_version}, BUILD.json has {build_version or 'none'}"
+    rc = data.get("rc")
+    build_rc = rc if isinstance(rc, int) and not isinstance(rc, bool) and rc > 0 else None
+    wanted = None if tag_rc is None else int(tag_rc)
+    if build_rc != wanted:
+        shown = "none" if build_rc is None else str(build_rc)
+        return f"tag {tag} has rc {tag_rc or 'none'}, BUILD.json has rc {shown}"
+    return None
+
+
+def check_release_tag(tag: str, paths: Sequence[Path]) -> list[str]:
+    """One line per ``BUILD.json`` in ``paths`` that does not match ``tag``. Empty when all match."""
+    problems: list[str] = []
+    for path in paths:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        reason = tag_mismatch(tag, data) if isinstance(data, dict) else "BUILD.json must be an object"
+        if reason is not None:
+            problems.append(f"{path}: {reason}")
+    return problems

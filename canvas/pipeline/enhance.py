@@ -500,6 +500,10 @@ class QwenRewriter:
             note_error("writer.device")
             raise DeviceRefused()
         self.device = "cuda"
+        if weights_on_cuda(model):
+            # A second chunk reuses the resident copy. Unparking again would put
+            # a second set of weights on the card next to the first.
+            return
         activated = hot.activate("writer", "cuda", blocking=True)
         if _has_resident_tensors(model):
             if not weights_on_cuda(model):

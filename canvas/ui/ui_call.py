@@ -71,7 +71,7 @@ def run_off_ui(fn: Callable[[], T]) -> T:
     def work() -> None:
         try:
             holder["value"] = fn()
-        except Exception as exc:
+        except BaseException as exc:
             holder["error"] = exc
         finally:
             done.set()
@@ -92,6 +92,6 @@ def run_off_ui(fn: Callable[[], T]) -> T:
     timer.stop()
     timer.deleteLater()
     error = holder.get("error")
-    if isinstance(error, Exception):
+    if isinstance(error, BaseException):
         raise error
     return holder.get("value")  # type: ignore[return-value]

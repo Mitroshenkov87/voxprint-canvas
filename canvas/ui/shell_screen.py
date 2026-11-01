@@ -36,6 +36,8 @@ from canvas.app.updates import check_for_update
 from canvas.core.formats import extension, save_image
 from canvas.infra.enlarge import EnlargeClient
 from canvas.infra.vram import set_vram_cap_gb
+from canvas.infra.gpu import probe_gpu
+from canvas.models.mdl_layout import on_disk_manifest
 from canvas.models.mdl_registry import selectable
 from canvas.models.runtime import drop_warm, hold_warm, pipeline_scope, trim_warm
 from canvas.models.lora_library import LibraryEntry
@@ -61,7 +63,9 @@ from canvas.ui.shell_chrome import (
     fit_panel,
     mount,
     polish,
+    refresh_pictures,
     shell_style,
+    show_real_pictures,
 )
 from canvas.ui.photoshoot_bar import PhotoshootBar
 from canvas.ui.photoshoot_run import adult_content, busy_progress, load_series_folders, run_photoshoot
@@ -159,6 +163,7 @@ class ShellWindow(QMainWindow):
         self._split = mount(self)
         self.setCentralWidget(self._split)
         self.photoshoot = PhotoshootBar(self)
+        show_real_pictures(self)
         self._chrome_ready = True
         polish(self)
 
@@ -530,6 +535,7 @@ class ShellWindow(QMainWindow):
         path = folder / f"{item_id}{extension(job.fmt)}"
         save_image(safe, path, job.fmt)
         self._pictures[item_id] = str(path)
+        refresh_pictures(self)
         return True
 
     def _fresh_inputs(self, mode: Mode) -> tuple[PendingInput, ...]:
@@ -641,13 +647,17 @@ class ShellWindow(QMainWindow):
             shutil.copyfile(source, chosen)
 
     def _manage_models(self) -> None:
+        manifest = None
+        if probe_gpu() is None:
+            # No CUDA: list the models that are on disk whatever card they were made for.
+            manifest = on_disk_manifest(self.shell.state_dir / "mdl-on-disk.json")
         try:
-            subprocess.Popen(mdl_argv())
+            subprocess.Popen(mdl_argv(manifest))
         except OSError:
             self.view.set_note(text("canvas.models.missing"))
 
 
-def mdl_argv() -> list[str]:
+def mdl_argv(manifest: Path | None = None) -> list[str]:
     """``voxprint-mdl --gui --app canvas``, preferring the interpreter's folder.
 
     The installed venv is not on PATH, so a bare name does not start MDL there.
@@ -656,7 +666,10 @@ def mdl_argv() -> list[str]:
     # absolute() keeps a venv symlink in place. resolve() would follow it into the base interpreter.
     bundled = Path(sys.executable).absolute().parent / name
     program = str(bundled) if bundled.is_file() else CLI_NAME
-    return [program, "--gui", "--app", "canvas"]
+    argv = [program, "--gui", "--app", "canvas"]
+    if manifest is not None:
+        argv += ["--manifest", str(manifest)]
+    return argv
 
 
 def _role(mode: Mode) -> ImageRole:

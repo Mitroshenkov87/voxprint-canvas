@@ -7,6 +7,7 @@ the model is not downloaded.
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from voxprint_common.mdl.catalog import CatalogError, Model, load_manifest
@@ -64,3 +65,30 @@ def _ready(root: Path, model: Model) -> dict[str, Path] | None:
             return None
         mapped[item.path] = blob
     return mapped or None
+
+
+def on_disk_manifest(dest: Path, root: Path | None = None) -> Path | None:
+    """Write a copy of the installed ``mdl.json`` whose downloaded models list for any card.
+
+    Manage models hides a model above the card it detects, so a launch without
+    CUDA would not list models that are already on disk. In the copy those
+    models carry ``vram_tier`` ``any``; every other row is unchanged.
+
+    Args:
+        dest: The file to write.
+        root: Models directory. Defaults to :func:`canvas.infra.paths.models_dir`.
+
+    Returns:
+        ``dest``, or ``None`` when the manifest cannot be read or written.
+    """
+    try:
+        document = json.loads(manifest_path().read_text(encoding="utf-8-sig"))
+        rows = document["models"]
+        for row in rows:
+            if files_for(str(row["id"]), root) is not None:
+                row["vram_tier"] = "any"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(json.dumps(document, indent=2), encoding="utf-8")
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    return dest

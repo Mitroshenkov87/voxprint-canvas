@@ -7,7 +7,7 @@ not a row.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from collections.abc import Mapping
 from typing import NamedTuple
@@ -22,6 +22,7 @@ from voxprint_common.ui.variants import AppSurface, settings_for, state_names, s
 from canvas.app.shell_gate import ContentCheck
 from canvas.core.formats import OutputFormat
 from canvas.models.modes import Mode
+from canvas.models.pins import TURBO_GUIDANCE, TURBO_STEPS
 from canvas.safety.gate import AgeGate
 from canvas.ui.styles import LOOKS, look_for, style_label
 
@@ -206,6 +207,7 @@ def output_name(layout: SimpleLayout) -> str:
 
 def _settings() -> Settings:
     settings = settings_for(surface_for("canvas"))
+    _turbo_defaults(settings)
     settings.add(_enum("canvas.style", "photo", tuple((look.style_id, style_label(look.style_id)) for look in LOOKS)))
     settings.add(_enum("canvas.source", "words", (("words", "canvas.source.words"), ("picture", "canvas.source.picture"))))
     settings.add(
@@ -264,6 +266,16 @@ def _settings() -> Settings:
     return settings
 
 
+def _turbo_defaults(settings: Settings) -> None:
+    """Start Expert mode on the Turbo steps and guidance. The field minimum bounds the guidance."""
+    for setting_id, wanted in (("shell.steps", TURBO_STEPS), ("shell.guidance", TURBO_GUIDANCE)):
+        spec = settings.get(setting_id)
+        if spec is None:
+            continue
+        value = max(float(wanted), spec.minimum or 0.0)
+        settings._specs[setting_id] = replace(spec, default=int(value) if spec.type is SettingType.INT else value)
+
+
 def _enum(
     setting_id: str,
     default: str,
@@ -285,8 +297,26 @@ def _enum(
 
 def _presets(settings: Settings, *, enlarge_installed: bool) -> PresetFile:
     document = variant_presets(surface_for("canvas"), settings, enlarge_installed=enlarge_installed)
-    groups = [_style_group() if group.group_id == "style" else group for group in document.groups]
+    groups = []
+    for group in document.groups:
+        if group.group_id == "style":
+            group = _style_group()
+        elif group.group_id == "quality":
+            group = _turbo_quality(group)
+        groups.append(group)
     return PresetFile(tuple(groups))
+
+
+def _turbo_quality(group: PresetGroup) -> PresetGroup:
+    """The default quality chip writes the Turbo steps and guidance."""
+    turbo = {"shell.steps": TURBO_STEPS, "shell.guidance": max(1.0, TURBO_GUIDANCE)}
+    options = tuple(
+        replace(option, values=tuple((key, turbo.get(key, value)) for key, value in option.values))
+        if option.option_id == group.default
+        else option
+        for option in group.options
+    )
+    return replace(group, options=options)
 
 
 def _style_group() -> PresetGroup:

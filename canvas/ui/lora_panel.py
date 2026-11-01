@@ -45,6 +45,7 @@ from canvas.models.lora_library import (
 )
 from canvas.models.user_lora import LoraRejected, UserLora, discover
 from canvas.ui.theme import BUTTON_RADIUS
+from canvas.ui.picture_file import load_pixmap
 
 THUMB = 72
 ROW_HEIGHT = 36
@@ -256,7 +257,7 @@ def _kind_text(kind: str) -> str:
 
 
 def _thumb(path: Path, size: int) -> QPixmap:
-    pixmap = QPixmap(str(path))
+    pixmap = load_pixmap(path)
     if pixmap.isNull():
         return pixmap
     return pixmap.scaled(size, size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)

@@ -6,6 +6,7 @@ torch==2.11.0
 torchvision==0.26.0
 accelerate==1.15.0
 diffusers==0.41.0
+peft==0.21.2
 # CVE-2026-9856 floor is 5.14. 5.19.0 is the newest 5.x and includes the regex ReDoS fixes shipped in 5.14 and 5.15.
 transformers==5.19.0
 torchao==0.18.0

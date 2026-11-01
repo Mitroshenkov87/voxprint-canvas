@@ -205,7 +205,7 @@ def run_batch_command(
         entries=entries, folder=folder, style=scenario_style, place_mode=places, adult=adult,
         age_gate=age_gate, rewrite=rewrite, frame_for=frame_for, container=fmt, timings=clock,
     )
-    rows = [_row(index, outcome, fmt) for index, outcome in enumerate(outcomes)]
+    rows = [_safe_row(index, outcome, fmt) for index, outcome in enumerate(outcomes)]
     made = sum(len(outcome.result.kept) for outcome in outcomes)
     ok = all(row["status"] == "ok" for row in rows)
     body: dict[str, object] = {
@@ -222,12 +222,28 @@ def run_batch_command(
     return body, 0 if ok else 1
 
 
+def _safe_row(index: int, outcome: EntryResult, fmt: OutputFormat) -> dict[str, object]:
+    """One row per entry, always. A failure while describing the entry becomes an error row."""
+    try:
+        return _row(index, outcome, fmt)
+    except Exception as exc:
+        entry = outcome.entry
+        return {
+            "index": index + 1, "name": entry.name, "kind": "prompt" if entry.prompt else "shot",
+            "folder": None, "status": "error", "code": "internal", "requested": entry.count, "made": 0,
+            "frames": [], "scenario": None, "seed": entry.seed, "format": extension(fmt).lstrip("."),
+            "message": f"The entry summary could not be written ({type(exc).__name__}).",
+        }
+
+
 def _row(index: int, outcome: EntryResult, fmt: OutputFormat) -> dict[str, object]:
     entry = outcome.entry
     result = outcome.result
     frames = [str(path) for path in result.kept]
     scenario_path = _write_scenario(outcome)
     status = _status(result.stopped, result.code, bool(frames))
+    if status == "ok" and len(frames) < entry.count:
+        status = "partial"
     row: dict[str, object] = {
         "index": index + 1,
         "name": entry.name,
@@ -244,6 +260,9 @@ def _row(index: int, outcome: EntryResult, fmt: OutputFormat) -> dict[str, objec
     }
     if status != "ok":
         row["message"] = _message(result.stopped, result.code, result.reason)
+        if not result.code and status == "partial":
+            row["code"] = "frames_short"
+            row["message"] = f"{len(frames)} of {entry.count} pictures were saved; the others were not."
     return row
 
 
@@ -266,6 +285,8 @@ def _message(stopped: str, code: str, reason: str) -> str:
     if stopped == "idea" and reason.strip():
         return reason
     if stopped == "error":
+        if code == "internal" and reason.strip():
+            return reason
         return _english_stop_message(code or "internal")
     return _series_message(code or "not_produced")
 

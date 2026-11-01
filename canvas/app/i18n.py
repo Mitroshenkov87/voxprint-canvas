@@ -1,7 +1,9 @@
 """UI strings. Every user-visible line lives in ``messages.json``.
 
 The UI is English. Prompts may still be written in any language the
-enhancer and the checks read; only the window text is English.
+enhancer and the checks read; only the window text is English. A few
+messages also carry a line in a content language (``content_locales``),
+returned only when a caller asks for that language by name.
 """
 from __future__ import annotations
 
@@ -29,6 +31,14 @@ def shipped_locales() -> tuple[str, ...]:
     return tuple(str(item) for item in locales)
 
 
+def content_locales() -> tuple[str, ...]:
+    """Languages some lines carry for callers that ask for them; never offered in the UI."""
+    locales = _catalog().get("content_locales", [])
+    if not isinstance(locales, list):
+        raise ValueError("messages.json content_locales must be a list")
+    return tuple(str(item) for item in locales)
+
+
 def strings() -> Mapping[str, Mapping[str, str]]:
     """Catalog entries keyed by id, then by locale."""
     found = _catalog().get("strings")
@@ -43,12 +53,11 @@ def plural_form(count: int) -> str:
 
 
 def text(key: str, language: str | None = None, **values: object) -> str:
-    """One catalog line. The UI is English; ``language`` is kept for callers that pin it."""
-    del language
+    """One catalog line in English, or in ``language`` when the line carries it."""
     entry = strings().get(key)
     if not isinstance(entry, Mapping) or "en" not in entry:
         raise KeyError(key)
-    line = str(entry["en"])
+    line = str(entry.get(language or "en") or entry["en"])
     if values:
         return line.format(**values)
     return line

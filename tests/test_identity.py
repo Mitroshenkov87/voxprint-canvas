@@ -27,7 +27,7 @@ def test_version_label_and_release_title_come_from_build_json():
     assert data["version"] == "0.1.0"
     assert data["channel"] == "RC"
     assert data["rc"] == 32
-    assert data["build"] == 29
+    assert data["build"] == 30
     assert data["codename"] == "Tavnit"
     assert '"canvas.app" = ["BUILD.json", "messages.json"]' in (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     assert f'version = "{data["version"]}"' in (ROOT / "pyproject.toml").read_text(encoding="utf-8")

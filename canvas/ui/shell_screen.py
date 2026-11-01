@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 import uuid
 from collections.abc import Callable
 from pathlib import Path
@@ -22,7 +23,7 @@ from PySide6.QtWidgets import (
     QPushButton,
 )
 
-from voxprint_common.i18n import add_catalogs, tr
+from voxprint_common.i18n import add_catalogs, set_language, tr
 from voxprint_common.mdl.names import CLI_NAME
 from voxprint_common.ui.expert import ExpertMode
 from voxprint_common.ui.simple_image import Phase, SimpleImageWidget as SimpleWidget
@@ -105,6 +106,7 @@ class ShellWindow(QMainWindow):
         """
         super().__init__()
         add_catalogs(Path(__file__).resolve().parent / "locales")
+        set_language("en")
         self.shell = shell
         self.tier = tier
         self._enlarge = enlarge if enlarge is not None else EnlargeClient()
@@ -621,9 +623,21 @@ class ShellWindow(QMainWindow):
 
     def _manage_models(self) -> None:
         try:
-            subprocess.Popen([CLI_NAME, "--gui", "--app", "canvas"])
+            subprocess.Popen(mdl_argv())
         except OSError:
             self.view.set_note(text("canvas.models.missing"))
+
+
+def mdl_argv() -> list[str]:
+    """``voxprint-mdl --gui --app canvas``, preferring the interpreter's folder.
+
+    The installed venv is not on PATH, so a bare name does not start MDL there.
+    """
+    name = f"{CLI_NAME}.exe" if sys.platform == "win32" else CLI_NAME
+    # absolute() keeps a venv symlink in place. resolve() would follow it into the base interpreter.
+    bundled = Path(sys.executable).absolute().parent / name
+    program = str(bundled) if bundled.is_file() else CLI_NAME
+    return [program, "--gui", "--app", "canvas"]
 
 
 def _role(mode: Mode) -> ImageRole:

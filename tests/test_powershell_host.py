@@ -50,18 +50,17 @@ def test_setup_installs_only_the_pinned_verified_microsoft_package():
     assert "vxsigcheck.cs" in ISS.read_text(encoding="utf-8")
 
 
-def test_setup_messages_exist_in_english_and_russian():
+def test_setup_messages_exist_in_english():
     iss = ISS.read_text(encoding="utf-8")
-    assert 'Name: "russian"; MessagesFile: "compiler:Languages\\Russian.isl"' in iss
+    assert "russian" not in iss.casefold()
+    assert "ShowLanguageDialog=no" in iss
     expected = {
         "english.PwshAsk": "PowerShell 7 is not installed. Install PowerShell 7 (Microsoft) now? Recommended.",
-        "russian.PwshAsk": "PowerShell 7 не установлен. Установить PowerShell 7 (Microsoft) сейчас? Рекомендуется.",
         "english.PwshInstalling": "Installing PowerShell 7 (Microsoft)",
-        "russian.PwshInstalling": "Установка PowerShell 7 (Microsoft)",
     }
     for key, text in expected.items():
         assert f"{key}={text}" in iss
-    for lang in ("english", "russian"):
+    for lang in ("english",):
         line = next(item for item in iss.splitlines() if item.startswith(f"{lang}.PwshFallback="))
         assert LINK in line
         assert f"{lang}.PwshInstallingDesc=" in iss
@@ -90,7 +89,7 @@ def test_ci_runs_pwsh_and_still_covers_the_51_fallback():
 def test_setup_scripts_run_without_a_console_window():
     iss = (ROOT / "installer" / "windows" / "voxprint-canvas.iss").read_text(encoding="utf-8")
     assert "SW_SHOW" not in iss
-    assert "english.SetupScripts=" in iss and "russian.SetupScripts=" in iss
+    assert "english.SetupScripts=" in iss
 
 
 def test_setup_logs_each_stage_result_and_the_script_failure():

@@ -4,7 +4,7 @@ import json
 import re
 from pathlib import Path
 
-from canvas.app.i18n import shipped_locales, strings, text
+from canvas.app.i18n import content_locales, shipped_locales, strings, text
 
 ROOT = Path(__file__).resolve().parents[1]
 ALLOWLIST = ROOT / "canvas" / "app" / "i18n_allowlist.txt"
@@ -34,10 +34,8 @@ _BOXES = {"question", "information", "warning", "critical"}
 _CATALOG_CALLS = {"text", "catalog_text"}
 _PLURAL_KEYS = (
     "unit.minute.one",
-    "unit.minute.few",
     "unit.minute.many",
     "unit.second.one",
-    "unit.second.few",
     "unit.second.many",
 )
 
@@ -109,8 +107,9 @@ def hardcoded_ui_strings(source: str, filename: str = "sample.py") -> list[str]:
 
 
 def locale_gaps(payload: dict[str, object]) -> list[str]:
-    """Keys that miss a shipped locale, or name a locale Canvas does not ship."""
+    """Keys that miss a shipped locale, or name a locale Canvas does not ship or read."""
     locales = payload.get("locales")
+    extra = payload.get("content_locales", [])
     found = payload.get("strings")
     if not isinstance(locales, list) or not locales:
         return ["locales is empty"]
@@ -118,6 +117,7 @@ def locale_gaps(payload: dict[str, object]) -> list[str]:
         return ["strings is empty"]
     gaps: list[str] = []
     shipped = {str(item) for item in locales}
+    known = shipped | {str(item) for item in extra} if isinstance(extra, list) else shipped
     for key, entry in found.items():
         if not isinstance(entry, dict):
             gaps.append(f"{key} is not a locale map")
@@ -127,7 +127,7 @@ def locale_gaps(payload: dict[str, object]) -> list[str]:
             if not isinstance(value, str) or not value.strip():
                 gaps.append(f"{key} missing {lang}")
         for lang in entry:
-            if str(lang) not in shipped:
+            if str(lang) not in known:
                 gaps.append(f"{key} has unshipped locale {lang}")
     return gaps
 
@@ -144,9 +144,40 @@ def _catalog_keys(source: str) -> list[str]:
 
 
 def test_gate_unavailable_is_the_shipped_sentence():
-    assert shipped_locales() == ("en", "ru")
+    assert shipped_locales() == ("en",)
     assert text("gate.unavailable", "en") == "Image generation is unavailable."
-    assert text("gate.unavailable", "ru") == "Генерация изображений недоступна."
+
+
+def test_a_russian_system_locale_still_shows_english(monkeypatch):
+    from voxprint_common.i18n import get_language, set_language, tr, tr_lang
+
+    from canvas.app import main as app_main
+
+    for name in ("LC_ALL", "LC_MESSAGES", "LANG"):
+        monkeypatch.setenv(name, "ru_RU.UTF-8")
+    monkeypatch.setenv("VOXPRINT_LANG", "ru")
+    set_language("ru")
+    assert app_main.main(["--version"]) == 0
+    assert get_language() == "en"
+    assert text("gate.unavailable") == "Image generation is unavailable."
+    assert tr("simple.cancel") == tr_lang("simple.cancel", "en")
+    assert not list((ROOT / "canvas" / "ui" / "locales").glob("ru.json"))
+
+
+def test_a_content_locale_is_returned_only_when_asked_for():
+    assert content_locales() == ("ru",)
+    assert "ru" not in shipped_locales()
+    assert text("gate.unavailable") == text("gate.unavailable", "en")
+    assert text("gate.unavailable", "ru") != text("gate.unavailable")
+    assert text("app.close", "ru") == "Close"
+    assert text("app.about_title", "ru", name="X") == "About X"
+
+
+def test_a_content_locale_line_is_not_an_unshipped_locale():
+    payload = {"locales": ["en"], "content_locales": ["ru"], "strings": {"app.close": {"en": "Close", "ru": "Закрыть"}}}
+    assert locale_gaps(payload) == []
+    payload["content_locales"] = []
+    assert locale_gaps(payload) == ["app.close has unshipped locale ru"]
 
 
 def test_every_catalog_key_has_every_shipped_locale():
@@ -156,8 +187,8 @@ def test_every_catalog_key_has_every_shipped_locale():
 
 
 def test_a_missing_translation_fails_the_catalog_check():
-    gaps = locale_gaps({"locales": ["en", "ru"], "strings": {"gate.unavailable": {"en": "Stopped"}}})
-    assert gaps == ["gate.unavailable missing ru"]
+    gaps = locale_gaps({"locales": ["en"], "strings": {"gate.unavailable": {"de": "Gestoppt"}}})
+    assert gaps == ["gate.unavailable missing en", "gate.unavailable has unshipped locale de"]
 
 
 def test_ui_code_has_no_hardcoded_text():

@@ -38,7 +38,7 @@ def _user_text() -> list[tuple[str, str]]:
 
 
 def test_support_section_and_responsibility_line():
-    readme = Path("docs/README-full.md").read_text(encoding="utf-8")
+    readme = Path("README.md").read_text(encoding="utf-8")
     assert SUPPORT in readme
     assert RESPONSIBILITY in readme
     assert RESPONSIBILITY in Path("docs/ARCHITECTURE.md").read_text(encoding="utf-8")

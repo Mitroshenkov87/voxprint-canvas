@@ -215,12 +215,9 @@ def test_render_binds_the_transformer_and_releases_it(tmp_path: Path) -> None:
     assert transformer.calls[-1][0] == "delete"
 
 
-def test_addon_strings_exist_in_both_locales() -> None:
+def test_addon_strings_exist_in_the_catalog() -> None:
     for key in _KEYS:
-        english = text(key, "en", name="sample", reason="because")
-        russian = text(key, "ru", name="sample", reason="because")
-        assert english
-        assert russian
+        assert text(key, name="sample", reason="because")
 
 
 def test_the_app_does_not_read_the_attribute_or_import_the_shadow_tool() -> None:

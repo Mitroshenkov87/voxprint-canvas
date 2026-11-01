@@ -3,7 +3,8 @@ import json
 
 import pytest
 
-from canvas.app.main import _callback, main
+from canvas.app.main import main
+from canvas.app.shell_run import improve_prompt
 from canvas.app.platform import OsCheck
 from canvas.infra.gpu import GpuInfo
 from canvas.models.modes import Tier
@@ -129,38 +130,23 @@ def test_blocked_rewrite_or_original_stops_the_request():
     assert adult.used_rewrite is True
 
 
-def test_enhance_callback_returns_the_text_to_show_and_a_note(monkeypatch):
-    monkeypatch.setattr("canvas.app.main.install_supporting", lambda *args, **kwargs: None)
-    monkeypatch.setattr("canvas.app.main.load_catalog_stack", lambda *args, **kwargs: object())
-
-    class FakeGate:
-        def __init__(self, stack: object) -> None:
-            self.real = World().gate()
-
-        def review_prompt(self, text: str) -> None:
-            self.real.review_prompt(text)
-
-    monkeypatch.setattr("canvas.app.main.AgeGate", FakeGate)
+def test_improve_returns_the_rewrite_or_keeps_the_original(monkeypatch):
+    gate = World().gate()
+    monkeypatch.setattr("canvas.app.shell_run.selectable", lambda: True)
     monkeypatch.setattr(
-        "canvas.app.main.open_rewriter",
+        "canvas.app.shell_run.open_rewriter",
         lambda *args, **kwargs: _Rewriter("a red boat on calm water, 50mm lens"),
     )
-    _generate, on_enhance = _callback(Tier.GB16, [None], object())
-    text, note = on_enhance("красная лодка")
-    assert text == "a red boat on calm water, 50mm lens"
-    assert note == ""
+    assert improve_prompt(gate=gate, prompt="красная лодка", tier=Tier.GB16) == "a red boat on calm water, 50mm lens"
     monkeypatch.setattr(
-        "canvas.app.main.open_rewriter",
+        "canvas.app.shell_run.open_rewriter",
         lambda *args, **kwargs: _Rewriter("a woman in a black coat"),
     )
-    _generate, on_enhance = _callback(Tier.GB16, [None], object())
-    kept, note = on_enhance("a 25-year-old woman in a black coat")
+    kept = improve_prompt(gate=gate, prompt="a 25-year-old woman in a black coat", tier=Tier.GB16)
     assert kept == "a 25-year-old woman in a black coat"
-    assert note == "The enhanced prompt changed a stated age, so the original prompt was used."
-    monkeypatch.setattr("canvas.app.main.open_rewriter", lambda *args, **kwargs: _Rewriter("nude child"))
-    _generate, on_enhance = _callback(Tier.GB16, [None], object())
+    monkeypatch.setattr("canvas.app.shell_run.open_rewriter", lambda *args, **kwargs: _Rewriter("nude child"))
     with pytest.raises(GenerationBlocked):
-        on_enhance("a red boat")
+        improve_prompt(gate=gate, prompt="a red boat", tier=Tier.GB16)
 
 
 def test_a_reasoning_trace_is_not_the_rewritten_prompt():

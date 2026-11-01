@@ -25,6 +25,8 @@ class VerifiedCache:
         self.deep = deep
         self.shared = shared
         self.dirty = False
+        # The process cache is shared by the window, generate, and import threads.
+        self._lock = threading.Lock()
 
     @classmethod
     def open(cls, deep: bool) -> VerifiedCache:
@@ -48,7 +50,8 @@ class VerifiedCache:
         size = int(stat.st_size)
         mtime = int(stat.st_mtime_ns)
         if not self.deep:
-            row = self.records.get(key)
+            with self._lock:
+                row = self.records.get(key)
             if (
                 isinstance(row, dict)
                 and row.get("size") == size
@@ -59,23 +62,28 @@ class VerifiedCache:
         try:
             verify_file(path, pin)
         except PinError:
-            if key in self.records:
-                self.records.pop(key, None)
-                self.dirty = True
+            with self._lock:
+                if key in self.records:
+                    self.records.pop(key, None)
+                    self.dirty = True
             return False
-        self.records[key] = {"size": size, "mtime_ns": mtime, "sha256": pin}
-        self.dirty = True
+        with self._lock:
+            self.records[key] = {"size": size, "mtime_ns": mtime, "sha256": pin}
+            self.dirty = True
         return True
 
     def flush(self) -> None:
         """Write the cache back to the shared manifest when a check changed it."""
-        if not self.dirty or self.shared is None:
-            return
+        with self._lock:
+            if not self.dirty or self.shared is None:
+                return
+            records = dict(self.records)
+            self.dirty = False
         try:
-            update_extra(self.shared, VERIFIED_KEY, self.records)
+            update_extra(self.shared, VERIFIED_KEY, records)
         except (ManifestError, OSError):
-            return
-        self.dirty = False
+            with self._lock:
+                self.dirty = True
 
 
 _process_lock = threading.Lock()

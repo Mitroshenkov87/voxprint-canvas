@@ -86,10 +86,10 @@ The setup file is not code-signed. Windows SmartScreen may say that it prevented
 ## Run Setup
 
 1. Double-click the setup file. Windows asks for administrator rights; Setup installs for all users.
-2. On an English Windows, Setup uses English and does not ask. On a Russian Windows, Setup uses Russian and does not ask. When Windows uses another language, Setup asks which language to use.
+2. Setup is in English and does not ask for a language.
 3. Setup installs the program into `C:\Program Files\VOXPrint AI Suite\Canvas\`. There is no folder page: the location is fixed.
 4. Setup then runs its install steps. The wizard shows *Installing the program libraries and models. This can take a while; progress is written to the setup log.* There is no separate console window. This takes a while, mostly because of the model download.
-5. When Setup finishes, the Start menu has a **VOXPrint AI Suite** folder with **VOXPrint AI Canvas**. Setup can also add a desktop shortcut; that box is off by default. The guides open from **More → Help** in the Canvas window.
+5. When Setup finishes, the Start menu has a **VOXPrint AI Suite** folder with **VOXPrint AI Canvas**. Setup can also add a desktop shortcut; that box is off by default. The guide opens from **More → Help** in the Canvas window.
 
 ## PowerShell 7
 
@@ -114,11 +114,11 @@ The default model pack (about 28 GB) is downloaded during Setup through VOXPrint
 
 ## First launch
 
-Open **Start → VOXPrint AI Suite → VOXPrint AI Canvas**. A startup window appears while Canvas checks the system and the graphics card (**Checking the GPU**) and prepares its models. Then the main window opens.
+Open **Start → VOXPrint AI Suite → VOXPrint AI Canvas**. A startup window appears while Canvas checks the system and the graphics card (**Checking the GPU**). Then the main window opens. Models load when you make the first picture, not at startup, so the first picture takes longer than the next ones.
 
 ![The startup window.](screens/splash.png)
 
-The main window follows, in order, `ui_language` in the suite settings file, the `VOXPRINT_LANG` environment variable, the operating-system display language, then English. Canvas dialogs follow the process locale: Russian when it starts with `ru`, otherwise English. There is no language control in the window. To use one language for both, set the display language (on Linux, `LANG`) and do not set a different `ui_language`. `VOXPRINT_LANG` changes the main window only. The suite settings file is `%LOCALAPPDATA%\VOXPrint AI Suite\state\suite.json` on Windows and `~/.local/share/voxprint-ai-suite/state/suite.json` on Linux. `VOXPRINT_HOME` replaces that data folder.
+The window is in English. You can still write prompts in another language: **Improve prompt** rewrites them in English (chapter 6).
 
 If the startup window closes and no main window appears, the computer does not meet the requirements. See chapter 15.
 
@@ -285,7 +285,7 @@ The panel has two groups.
 | **Guidance (CFG)** | How closely the picture follows the words |
 | **Seed** | A number that repeats the same picture |
 | **Sampler** | How each picture is drawn: **Euler**, **DPM** or **Heun** |
-| **Picture size** | Width and height of the picture |
+| **Frame size** | Width and height of the picture |
 | **Image size** | How large the finished picture is |
 | **Negative prompt** | What to leave out of the picture |
 | **Add-ons (LoRA)** | The folder of the add-on in use (chapter 12) |
@@ -297,11 +297,11 @@ The panel has two groups.
 | Field | What it does |
 |---|---|
 | **Adult content (18+)** | Off by default |
-| **Exact size** | **Match the choice**, **Standard**, **2K** or **4K** (chapter 8) |
+| **Exact size** | **Same as Image size**, **Standard**, **2K** or **4K** (chapter 8) |
 
 **Seed** starts at 0, and 0 is a real seed, not a new number each time. The same **Seed** repeats the picture. Change **Seed** for a different picture. When **Number of pictures** is greater than 1, Canvas uses that seed and then the next integers. **Use prompt again** restores that picture's seed. **More like this** copies the history seed and generates again, so the seed stays the same.
 
-**Picture size** shows the preset text (for example `1344x768` for 16:9). The generator uses the aspect ratio from the **Proportions** menu: 16:9 is 1280×720 (chapter 8). Typing a size in this field does not change the picture.
+**Frame size** shows the preset text (for example `1344x768` for 16:9). The generator uses the aspect ratio from the **Proportions** menu: 16:9 is 1280×720 (chapter 8). Typing a size in this field does not change the picture.
 
 ## Your own values and the presets
 
@@ -334,7 +334,7 @@ When you start from a picture, Canvas picks the ratio closest to that picture's 
 | **2K** | Expert: **Exact size** | The 2K size from the table |
 | **4K** | **Image size** menu, or **Exact size** | The 2K frame enlarged by VOXPrint Enlarge so that the long side is 3840 pixels |
 
-**Exact size** wins over the **Image size** menu until it is set back to **Match the choice**.
+**Exact size** wins over the **Image size** menu until it is set back to **Same as Image size**.
 
 When **4K** is selected, a **Detail** row appears with **Light**, **Medium** and **Strong**.
 

@@ -62,7 +62,7 @@ def dark(widget: QWidget) -> QWidget:
 
 
 class _Icons(QFileIconProvider):
-    """System icons, with the folder type in the app language."""
+    """System icons, with the folder type from the catalog."""
 
     def type(self, info) -> str:  # noqa: A003
         return text("canvas.file.folder") if info.isDir() else super().type(info)
@@ -70,9 +70,6 @@ class _Icons(QFileIconProvider):
 
 def file_dialog(parent: QWidget | None) -> QFileDialog:
     """The Qt file dialog in the dark style. A native dialog would follow the system theme."""
-    from canvas.ui.fonts import qt_translations
-
-    qt_translations()
     dialog = QFileDialog(parent, text("canvas.lora.import"), "", text("canvas.lora.import_filter"))
     dialog.setObjectName("loraFileDialog")
     dialog.setOption(QFileDialog.Option.DontUseNativeDialog, True)

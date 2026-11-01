@@ -31,7 +31,7 @@ def test_display_name_and_install_paths():
     assert GUI_EXE in iss
     assert CLI_EXE in iss
     assert "voxprint-canvas.exe" in iss
-    readme = Path("docs/README-full.md").read_text(encoding="utf-8")
+    readme = Path("README.md").read_text(encoding="utf-8")
     assert readme.startswith("# VOXPrint AI Canvas\n")
     assert "C:\\Program Files\\VOXPrint AI Suite\\Canvas\\" in readme
     assert "/opt/voxprint-ai-suite/canvas/" in readme

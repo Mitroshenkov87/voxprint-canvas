@@ -25,14 +25,14 @@ from canvas.ui import photoshoot_run
 from canvas.ui.shell_layout import open_layout
 from canvas.ui.shell_screen import ShellWindow
 from tests.fakes import World, rgb
-from voxprint_common.i18n import set_language
+from voxprint_common.i18n import set_language, tr
 from voxprint_common.ui.simple_image import Phase
 
 SHOT = QSize(1280, 800)
 
 
 def main() -> int:
-    """Write EN and RU shots of the main screen and the secondary screens."""
+    """Write shots of the main screen and the secondary screens."""
     destination = Path(sys.argv[1] if len(sys.argv) > 1 else "/opt/cursor/artifacts/shell-screens")
     destination.mkdir(parents=True, exist_ok=True)
     home = Path(tempfile.mkdtemp(prefix="canvas-shell-shots-"))
@@ -40,8 +40,8 @@ def main() -> int:
     app = existing if isinstance(existing, QApplication) else QApplication([])
     picture = destination / "sample.png"
     _sample(picture)
-    for language in ("en", "ru"):
-        os.environ["LANG"] = "ru_RU.UTF-8" if language == "ru" else "en_US.UTF-8"
+    for language in ("en",):
+        os.environ["LANG"] = "en_US.UTF-8"
         os.environ["LC_ALL"] = os.environ["LANG"]
         set_language(language)
         for name in ("simple", "expert", "simple-result", "expert-custom"):
@@ -59,13 +59,12 @@ def main() -> int:
         _save_dialog(
             app, window, window.enlarge_confirm(), destination / f"enlarge-confirm-{language}.png", "enlarge-confirm"
         )
-        if language == "ru":
-            progress = window.enlarge_progress()
-            bar = progress.findChild(QProgressBar, "enlargeProgressBar")
-            if bar is not None:
-                bar.setRange(0, 100)
-                bar.setValue(40)
-            _save_dialog(app, window, progress, destination / "enlarge-progress-ru.png", "enlarge-progress")
+        progress = window.enlarge_progress()
+        bar = progress.findChild(QProgressBar, "enlargeProgressBar")
+        if bar is not None:
+            bar.setRange(0, 100)
+            bar.setValue(40)
+        _save_dialog(app, window, progress, destination / f"enlarge-progress-{language}.png", "enlarge-progress")
         window.close()
     return 0
 
@@ -122,6 +121,8 @@ def _sample(path: Path) -> None:
 def _save(app: QApplication, window: ShellWindow, path: Path, name: str) -> None:
     window.setFixedSize(SHOT)
     window.show()
+    # Two passes: the expert form settles on a queued call after the first.
+    app.processEvents()
     app.processEvents()
     if window.shell.layout.phase is not Phase.EMPTY:
         window.view._rescale()
@@ -194,7 +195,7 @@ def _expect(window: ShellWindow, name: str) -> None:
         raise SystemExit(f"{name} steps {seen}")
     chip = window.findChild(QPushButton, "chip-quality-balanced")
     words = "" if chip is None else chip.text()
-    if "изменения" not in words and "changes" not in words:
+    if "changes" not in words:
         raise SystemExit(f"{name} chip {words!r}")
     if window.findChild(QPushButton, "expertResetAll") is not None:
         raise SystemExit(f"{name} still has the canvas reset")
@@ -276,22 +277,22 @@ def _distance(one: tuple[int, int, int], other: tuple[int, int, int]) -> int:
 
 
 def photoshoot_shots(destination: Path) -> None:
-    """Write one plain Russian smoke grab at 1280×800.
+    """Write one plain smoke grab at 1280×800.
 
     Args:
-        destination: Directory for ``photoshoot-ru.png``.
+        destination: Directory for ``photoshoot-en.png``.
     """
     destination.mkdir(parents=True, exist_ok=True)
     existing = QApplication.instance()
     app = existing if isinstance(existing, QApplication) else QApplication([])
-    os.environ["LANG"] = "ru_RU.UTF-8"
-    os.environ["LC_ALL"] = "ru_RU.UTF-8"
-    set_language("ru")
-    idea = "Жёлтый чайник с синей ручкой"
-    home = Path(tempfile.mkdtemp(prefix="photoshoot-shot-ru-"))
+    os.environ["LANG"] = "en_US.UTF-8"
+    os.environ["LC_ALL"] = "en_US.UTF-8"
+    set_language("en")
+    idea = "A yellow kettle with a blue handle"
+    home = Path(tempfile.mkdtemp(prefix="photoshoot-shot-en-"))
     os.environ["VOXPRINT_HOME"] = str(home)
     window = _photoshoot_window(home, idea)
-    _run_smoke(app, window, idea, destination / "photoshoot-ru.png")
+    _run_smoke(app, window, idea, destination / "photoshoot-en.png")
     window.close()
 
 
@@ -349,10 +350,10 @@ def _save_smoke(app: QApplication, window: ShellWindow, path: Path) -> bool:
         return True
     app.processEvents()
     mode = _mode(window)
-    if not mode.isChecked() or mode.text() != "Фотосессия":
+    if not mode.isChecked() or mode.text() != tr("photoshoot.button"):
         raise SystemExit(f"{path.name} is missing the Photoshoot option")
     cancel = _button(window, "photoshootCancel")
-    if not cancel.isVisible() or cancel.text() != "Отмена":
+    if not cancel.isVisible() or cancel.text() != tr("simple.cancel"):
         raise SystemExit(f"{path.name} is missing Cancel")
     lines = [item for item in window.findChildren(QLabel, "photoshootLine") if item.isVisible() and item.text().strip()]
     if not lines:

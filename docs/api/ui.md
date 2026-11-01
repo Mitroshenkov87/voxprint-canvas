@@ -1,6 +1,5 @@
 # Window
 
-::: canvas.ui.main_window
 ::: canvas.ui.shell_screen
 ::: canvas.ui.shell_layout
 ::: canvas.ui.wizards

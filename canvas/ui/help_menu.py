@@ -1,4 +1,4 @@
-"""Help menu with the installed guide PDFs."""
+"""Help menu with the installed guide PDF."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -11,7 +11,6 @@ from canvas.app.i18n import text
 
 GUIDES = (
     ("menu.help.guide_en", "VOXPrint-AI-Canvas-Guide-en.pdf"),
-    ("menu.help.guide_ru", "VOXPrint-AI-Canvas-Guide-ru.pdf"),
 )
 
 

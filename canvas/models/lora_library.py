@@ -564,11 +564,17 @@ def _base_on_disk() -> bool:
         from canvas.infra.paths import models_dir
         from canvas.models.registry import load_catalog
         from canvas.models.snapshots import snapshot_ready
+        from canvas.models.verified import flush_process_cache, process_cache
 
         root = models_dir()
-        for spec in load_catalog().models:
-            if spec.role == "generator" and spec.text_base == ZIMAGE_TURBO_MDL_ID and snapshot_ready(spec, root) is not None:
-                return True
+        try:
+            for spec in load_catalog().models:
+                if spec.role != "generator" or spec.text_base != ZIMAGE_TURBO_MDL_ID:
+                    continue
+                if snapshot_ready(spec, root, process_cache()) is not None:
+                    return True
+        finally:
+            flush_process_cache()
     except Exception:  # noqa: BLE001 - an unreadable install counts as missing
         return False
     return False

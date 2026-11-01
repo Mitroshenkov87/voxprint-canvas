@@ -58,9 +58,8 @@ def test_terms_match_whole_words_only() -> None:
     assert added_aging_terms("mature face", "mature face, wrinkles") == ("wrinkles",)
 
 
-def test_catalog_has_the_new_key_in_both_languages() -> None:
+def test_catalog_has_the_new_key() -> None:
     assert text("enhance.age_descriptor", "en")
-    assert text("enhance.age_descriptor", "ru")
 
 
 def test_system_prompts_carry_the_rule() -> None:

@@ -38,7 +38,7 @@ from canvas.models.snapshots import (
     snapshot_repo,
     weight_dir,
 )
-from canvas.models.verified import VerifiedCache
+from canvas.models.verified import VerifiedCache, flush_process_cache, process_cache
 
 _RATE = 8 * 1024 * 1024
 _SAFETY_ROLES = ("prompt-guard", "zero-shot", "face-detector", "age", "nsfw", "age-fine")
@@ -122,17 +122,23 @@ def format_duration(seconds: int) -> str:
 def install_supporting(catalog: Catalog, progress: Callable[[str], None]) -> None:
     """Record supporting packs that are already on disk. VOXPrint MDL fetches weights."""
     del progress
-    for spec in default_specs(catalog):
-        if spec.role == "generator":
-            continue
-        install_spec(spec, lambda _message: None, confirm=None)
+    try:
+        for spec in default_specs(catalog):
+            if spec.role == "generator":
+                continue
+            install_spec(spec, lambda _message: None, confirm=None)
+    finally:
+        flush_process_cache()
 
 
 def install_defaults(catalog: Catalog, progress: Callable[[str], None]) -> None:
     """Record default packs that are already on disk. VOXPrint MDL fetches weights."""
     del progress
-    for spec in default_specs(catalog):
-        install_spec(spec, lambda _message: None, confirm=None)
+    try:
+        for spec in default_specs(catalog):
+            install_spec(spec, lambda _message: None, confirm=None)
+    finally:
+        flush_process_cache()
 
 
 def install_spec(
@@ -140,13 +146,17 @@ def install_spec(
     progress: Callable[[str], None],
     confirm: Callable[[str], bool] | None,
 ) -> None:
-    """Record one pack when it is already on disk. Canvas does not download it."""
+    """Record one pack when it is already on disk. Canvas does not download it.
+
+    A blob whose size and time match its recorded hash is not read again, so a
+    launch does not re-hash every default pack.
+    """
     del progress, confirm
     if withheld_from_setup(spec, catalog=None):
         return
     root = models_dir()
     try:
-        folder = snapshot_ready(spec, root)
+        folder = snapshot_ready(spec, root, process_cache())
     except SnapshotError:
         return
     if folder is None or is_view(root, folder):
@@ -162,8 +172,11 @@ def ensure_plan(
     confirm: Callable[[str], bool] | None,
 ) -> None:
     """Record packs that are already on disk. VOXPrint MDL fetches anything missing."""
-    for spec in plan_specs(catalog, plan):
-        install_spec(spec, progress, confirm)
+    try:
+        for spec in plan_specs(catalog, plan):
+            install_spec(spec, progress, confirm)
+    finally:
+        flush_process_cache()
 
 
 def repair(catalog: Catalog, progress: Callable[[str], None]) -> list[str]:

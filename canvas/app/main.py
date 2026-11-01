@@ -3,7 +3,6 @@ import argparse
 import json
 import os
 import sys
-import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -11,7 +10,7 @@ from pathlib import Path
 from PIL import Image
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QMessageBox
-from voxprint_common.i18n import tr
+from voxprint_common.i18n import set_language, tr
 
 from canvas.app.branding import icon_path, set_app_user_model_id
 from canvas.app.identity import splash_line
@@ -20,7 +19,7 @@ from canvas.app.info import APP_NAME, APP_VERSION, ENLARGE_NAME
 from canvas.app.platform import GpuCheck, check_gpu, current_os_check
 from canvas.app.selftest import selftest_report
 from canvas.app.updates import check_for_update
-from canvas.core.formats import OutputFormat, parse_export_format, parse_format
+from canvas.core.formats import parse_export_format, parse_format
 from canvas.safety.image import RawImage
 from canvas.safety.inputs import ImageRole, PendingInput
 from canvas.infra.enlarge import EnlargeClient, EnlargeError
@@ -46,13 +45,12 @@ from canvas.ui.styles import LOOKS
 from canvas.pipeline.bf16_schedule import VramRefused
 from canvas.pipeline.device_guard import DeviceRefused
 from canvas.pipeline.gpu_release import release_gate_weights
-from canvas.infra.stage_timer import StageTimes, beat_while
+from canvas.infra.stage_timer import StageTimes
 from canvas.pipeline.series import SerialGate
 from canvas.pipeline.enhance import EnhanceResult, fallback_message, open_rewriter, resolve_prompt, rewrite_text
 from canvas.pipeline.schedule import last_image_seconds, reset_image_seconds
 from canvas.pipeline.pipeline import CoolingDown, EnlargeMissing, JobError, Pipeline
 from canvas.safety.gate import AgeGate, SafetyError
-from canvas.ui.main_window import EnhanceReply, MainWindow
 from canvas.ui.shell_layout import canvas_state_dir, open_layout
 from canvas.ui.shell_screen import ShellWindow
 from canvas.ui.splash import Splash, show_splash
@@ -184,66 +182,6 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _callback(tier: Tier, window_box: list[MainWindow | None], enlarge: EnlargeClient):
-    catalog = load_catalog()
-
-    def on_generate(prompt: str, mode: Mode, fmt: OutputFormat, original: str | None = None) -> str:
-        del fmt
-        window = window_box[0]
-        aspect = "1:1" if window is None else window.current_aspect()
-        output = "4k" if window is not None and window.fourk.isChecked() else "native"
-        progress = lambda message: _progress(message, window)
-        try:
-            install_supporting(catalog, progress)
-            stack = load_catalog_stack(models_dir(), catalog)
-        except (SafetyError, SnapshotError) as exc:
-            return str(exc)
-        gate = AgeGate(stack)
-        active = prompt
-        note = ""
-        if original is not None:
-            try:
-                outcome = resolve_prompt(gate, original, prompt)
-            except SafetyError as exc:
-                return str(exc)
-            active = outcome.prompt
-            note = fallback_message(outcome)
-        pipeline = Pipeline(
-            gate, ZImageGenerator(catalog, tier), tier, use_gpu_lock=True, catalog=catalog, enlarge=enlarge,
-        )
-        try:
-            screened = gate.release_request(active, mode.value, ())
-            try:
-                plan = build_plan(catalog, screened, tier)
-            finally:
-                screened.wipe()
-            ensure_plan(catalog, plan, progress, lambda notice: _confirm(window, notice))
-            pipeline.generate(active, mode, aspect=aspect, output=output)
-        except (
-            SafetyError, SnapshotError, DownloadDeclined, InferenceUnavailable, ModelNotReady,
-            ModeUnavailable, BaseNotSelected, JobError, CoolingDown, EnlargeMissing, EnlargeError, VramRefused, DeviceRefused,
-        ) as exc:
-            return str(exc)
-        if note:
-            return note
-        return text("status.done")
-
-    def on_enhance(text: str) -> EnhanceReply:
-        progress = lambda message: _progress(message, window_box[0])
-        install_supporting(catalog, progress)
-        stack = load_catalog_stack(models_dir(), catalog)
-        gate = AgeGate(stack)
-        gate.review_prompt(text)
-        release_gate_weights(gate)
-        rewritten = rewrite_text(
-            open_rewriter(catalog, tier, models_dir(), progress, stage="enhancer"), text,
-        )
-        outcome = resolve_prompt(gate, text, rewritten)
-        return EnhanceReply(outcome.prompt, fallback_message(outcome))
-
-    return on_generate, on_enhance
-
-
 def _application() -> QApplication:
     """The running application, creating one when startup has not yet done so."""
     current = QApplication.instance()
@@ -251,23 +189,13 @@ def _application() -> QApplication:
         return current
     set_app_user_model_id()
     app = QApplication(sys.argv)
-    from canvas.ui.fonts import qt_translations, register_fonts
+    from canvas.ui.fonts import register_fonts
 
     register_fonts()
-    qt_translations()
     icon = icon_path()
     if icon.is_file():
         app.setWindowIcon(QIcon(str(icon)))
     return app
-
-
-def _prepare_gate(gate: AgeGate) -> None:
-    """Load stack components. The warm-up heartbeats under pythonw, which has no stderr."""
-    try:
-        with beat_while("warmup"):
-            gate.warm()
-    except SafetyError:
-        return
 
 
 def _stop_startup(splash: Splash, message: str) -> int:
@@ -310,9 +238,7 @@ def _launch(tier: Tier, splash: Splash | None = None, app: QApplication | None =
     except Exception as exc:
         message = str(exc).strip() or text("gate.unavailable")
         return _stop_startup(splash, message)
-    stage(text("canvas.stage.prepare"))
-    app.processEvents()
-    threading.Thread(target=_prepare_gate, args=(gate,), name="canvas-prepare", daemon=True).start()
+    # Models load on first use, not while the window sits idle.
     window = ShellWindow(
         open_layout(canvas_state_dir(), gate=gate, enlarge_installed=enlarge.ready()),
         tier=tier,
@@ -586,6 +512,8 @@ def _photoshoot_console(payload: dict[str, object]) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     """Register the shared model folder, check for a release, or open the window."""
+    # The shared catalogs follow the system locale or VOXPRINT_LANG; Canvas is English.
+    set_language("en")
     args = _parser().parse_args(argv)
     refused = _apply_vram_cap(args)
     if refused is not None:
@@ -699,18 +627,6 @@ def _generate_payload(
     if peak is not None:
         body["peak_allocated_bytes"] = peak
     return body
-
-
-def _progress(message: str, window: MainWindow | None) -> None:
-    print(message, file=sys.stderr)
-    if window is not None:
-        window.status.setText(message)
-
-
-def _confirm(window: MainWindow | None, notice: str) -> bool:
-    """Missing weights are installed in VOXPrint MDL, not from this window."""
-    del window, notice
-    return False
 
 
 def _instruction_removed(as_json: bool) -> int:

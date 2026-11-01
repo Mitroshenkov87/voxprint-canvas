@@ -40,7 +40,7 @@ from canvas.models.runtime import (
 )
 from canvas.pipeline.bf16_schedule import VramRefused
 from canvas.pipeline.device_guard import DeviceRefused
-from canvas.pipeline.enhance import mask_numbers, stated_ages
+from canvas.pipeline.enhance import mask_numbers
 from canvas.pipeline.gpu_release import release_cuda_cache, release_gate_weights
 from canvas.pipeline.adult_direction import ages_allowed, with_adult_anchor, youth_cues
 from canvas.pipeline.frame_prompt import log_frame_prompt, strip_series_words, with_choices
@@ -775,15 +775,6 @@ def _check_frames(
     return verdicts
 
 
-def _stated_age(idea: str) -> int | list[int] | None:
-    """The age stated in the idea. Several ages stay a list. None when the idea states none."""
-    stated = stated_ages(idea)
-    if len(stated) == 1:
-        return stated[0]
-    if stated:
-        return list(stated)
-    return None
-
 
 def style_reference(strength: float | None) -> float | None:
     """Loose style strength, or None when the frame is drawn from text.
@@ -1187,7 +1178,6 @@ def _write_meta(
         "seeds": seeds,
         "blocked": blocked,
         "appearance": scenario.appearance,
-        "age": _stated_age(idea),
     }
     (folder / "series.json").write_text(json.dumps(document, ensure_ascii=False, indent=2), encoding="utf-8")
     if not kept or any(path.suffix.lower() != ".png" for path in kept):

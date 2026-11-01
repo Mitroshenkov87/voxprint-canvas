@@ -170,5 +170,5 @@ def test_a_person_series_anchors_at_the_default_strength(app, home: Path, tmp_pa
     folder = next((home / "state" / "pictures" / "series").iterdir())
     document = json.loads((folder / "series.json").read_text(encoding="utf-8"))
     assert document["appearance"] == ""
-    assert document["age"] == 25
+    assert "age" not in document
     window.close()

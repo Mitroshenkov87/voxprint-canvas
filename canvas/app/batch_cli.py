@@ -229,17 +229,33 @@ def run_batch_command(
 
 def _write_stalled(folder: Path, entries: list[BatchEntry], stage: str) -> None:
     """Record a stalled stage in ``batch.json`` before the process ends. Nothing else is written."""
+    write_failed(folder, entries, CODE, f"stage {stage} made no progress and was stopped")
+
+
+def write_failed(folder: Path, entries: list[BatchEntry], code: str, message: str) -> None:
+    """Record a batch that could not run in ``batch.json``: one error row per entry."""
+    rows: list[dict[str, object]] = [
+        {
+            "index": index + 1, "name": entry.name, "kind": "prompt" if entry.prompt else "shot",
+            "folder": None, "status": "error", "code": code, "requested": entry.count, "made": 0,
+            "frames": [], "scenario": None, "seed": entry.seed, "message": message,
+        }
+        for index, entry in enumerate(entries)
+    ]
     body: dict[str, object] = {
         "ok": False,
         "folder": str(folder),
         "summary": str(folder / SUMMARY_NAME),
-        "error": CODE,
-        "code": CODE,
-        "message": f"stage {stage} made no progress and was stopped",
-        "entries": [],
+        "error": code,
+        "code": code,
+        "message": message,
+        "entries": rows,
         "requested": sum(entry.count for entry in entries),
     }
-    (folder / SUMMARY_NAME).write_text(json.dumps(body, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    try:
+        (folder / SUMMARY_NAME).write_text(json.dumps(body, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    except OSError:
+        return
 
 
 def _row(index: int, outcome: EntryResult, fmt: OutputFormat) -> dict[str, object]:

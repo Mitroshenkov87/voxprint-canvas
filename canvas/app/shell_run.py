@@ -23,7 +23,7 @@ from canvas.models.runtime import InferenceUnavailable, prepare_series_embeds
 from canvas.models.sizes import frame_size
 from canvas.models.snapshots import SnapshotError, snapshot_ready
 from canvas.models.verified import flush_process_cache, process_cache
-from canvas.pipeline.bf16_schedule import VramRefused
+from canvas.pipeline.bf16_schedule import VramRefused, is_out_of_memory
 from canvas.pipeline.device_guard import DeviceRefused
 from canvas.pipeline.adult_direction import improve_adult
 from canvas.pipeline.enhance import SYSTEM_PROMPT as ENHANCE_SYSTEM
@@ -143,6 +143,8 @@ class ShellRunner:
                 _halt(text("startup.lock"), exc, "gpu_busy", unavailable=True)
             except SafetyError as exc:
                 _halt(exc.user_message, exc, exc.code, unavailable=False)
+            except VramRefused as exc:
+                _halt(str(exc), exc, "vram", unavailable=True)
             except EnlargeMissing as exc:
                 _halt(str(exc), exc, "enlarge_unavailable", unavailable=True)
             except JobError as exc:
@@ -160,11 +162,13 @@ class ShellRunner:
                 InferenceUnavailable,
                 SnapshotError,
                 DownloadDeclined,
-                VramRefused,
                 OSError,
             ) as exc:
                 _halt(str(exc), exc, "internal", unavailable=True)
             except Exception as exc:
+                if is_out_of_memory(exc):
+                    refused = VramRefused()
+                    _halt(str(refused), exc, "vram", unavailable=True)
                 _halt(text("gate.unavailable"), exc, "internal", unavailable=True)
         finally:
             release(lock_path())

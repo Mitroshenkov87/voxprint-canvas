@@ -58,7 +58,7 @@ from canvas.models.pins import (
 )
 from canvas.models.plan import CallPlan
 from canvas.models.user_lora import UserLora, apply_lora, unload_lora
-from canvas.pipeline.bf16_schedule import VramRefused
+from canvas.pipeline.bf16_schedule import VramRefused, is_out_of_memory
 from canvas.pipeline.device_guard import DeviceRefused, pretrained_attempts, require_cuda
 from canvas.pipeline.generation_weights import dtype_label
 from canvas.pipeline.offload import (
@@ -1109,6 +1109,7 @@ def _pipeline_for(
             held.pipe = converted
             held.pipeline_name = pipeline_name
     if held is None:
+        _require_room_for_lora(torch, lora)
         _enter("cook", tier)
         note_vram("pipeline_load", "before")
         try:
@@ -1130,8 +1131,13 @@ def _pipeline_for(
             _remember_components(pipe, tier)
             _shelter(pipe)
             _peak("cook", tier)
-        except Exception:
+        except Exception as exc:
+            # The traceback keeps these frames alive, so let go of the weights before it travels.
+            pipe = controlnet = held = None
             release_pipeline()
+            _reclaim(torch)
+            if is_out_of_memory(exc):
+                raise VramRefused() from exc
             raise
         held.lora_key = _lora_key(lora, lora_strength)
         return pipe
@@ -1389,8 +1395,10 @@ def _render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, h
             if keep_latent:
                 return _keep_latent(result)
             return _image_from_result(pipe, result, torch)
-        except Exception:
+        except Exception as exc:
             failed = True
+            if is_out_of_memory(exc) and not isinstance(exc, VramRefused):
+                raise VramRefused() from exc
             raise
         finally:
             _remember_vram_peak()
@@ -2660,6 +2668,24 @@ def _call_guidance(plan: CallPlan) -> dict[str, float]:
             return {}
         return {"guidance_scale": plan.guidance_scale}
     raise InferenceUnavailable("unknown guidance kind")
+
+
+def _require_room_for_lora(torch: Any, lora: UserLora | None) -> None:
+    """Refuse a LoRA load when the card has no room for the picture models, before anything is read.
+
+    Raises:
+        VramRefused: The same fit check as the render path fails on real free memory.
+    """
+    if lora is None or not _cuda_is_up(torch):
+        return
+    if not note_image_fit():
+        raise VramRefused()
+
+
+def _reclaim(torch: Any) -> None:
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
 
 def _release_inference(torch: Any, pipe: Any, controlnet: Any) -> None:

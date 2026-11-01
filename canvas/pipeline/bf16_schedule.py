@@ -41,6 +41,11 @@ class VramRefused(Exception):
         return text("error.vram")
 
 
+def is_out_of_memory(exc: BaseException) -> bool:
+    """True for a CUDA out-of-memory error, whichever library raised it."""
+    return type(exc).__name__ == "OutOfMemoryError" or "out of memory" in str(exc).lower()
+
+
 @dataclass(frozen=True)
 class StageCost:
     """GB each stage asks for. Tests substitute a tighter table."""

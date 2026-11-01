@@ -23,6 +23,7 @@ from PIL import Image
 
 from canvas.app.i18n import text
 from canvas.infra.errors import note_error
+from canvas.infra import settings
 from canvas.infra.load_lock import pretrained_lock
 from canvas.infra.stage_timer import log_detail, note_peak_mib, note_stage, note_tag, timed
 from canvas.pipeline.frame_prompt import log_frame_prompt, split_frame_prompts
@@ -43,6 +44,7 @@ from canvas.infra.stage_guard import (
     note_image_fit,
     register_release,
 )
+from canvas.infra.watchdog import watch
 from canvas.infra.vram_trace import drop_model, hold_model, note_vram
 from canvas.infra.vram import peak_allocated_bytes, reset_peak_allocated
 from canvas.models import hot_tier as hot
@@ -106,6 +108,9 @@ _scope_depth = 0
 # Warm holds are scopes that outlive one run: the window holds one, and a batch holds one.
 _warm_holds = 0
 _lock = threading.RLock()
+# Idle release of a warm pipeline (``keep_warm_s`` in canvas.toml). 0 keeps it until close.
+_last_use = 0.0
+_idle_timer: threading.Timer | None = None
 
 
 @dataclass
@@ -167,6 +172,11 @@ def pipeline_scope() -> Iterator[None]:
                 release_pipeline()
 
 
+def _touch() -> None:
+    global _last_use
+    _last_use = time.monotonic()
+
+
 def hold_warm() -> None:
     """Keep the loaded pipeline between runs until ``drop_warm``.
 
@@ -218,12 +228,49 @@ def trim_warm() -> bool:
         held = _slot
     if held is None:
         return False
+    _touch()
     if _warm_fits():
+        _arm_idle_release()
         return True
     log_detail("warm", "park", "cuda", "reason=fit")
     park_pipeline()
     with _lock:
         return _slot is not None
+
+
+def _arm_idle_release() -> None:
+    """Release the warm pipeline after ``keep_warm_s`` seconds without a picture."""
+    global _idle_timer
+    limit = settings.get().keep_warm_s
+    if limit <= 0:
+        return
+    with _lock:
+        if _idle_timer is not None:
+            _idle_timer.cancel()
+        _idle_timer = threading.Timer(limit, _idle_release, args=(limit,))
+        _idle_timer.daemon = True
+        _idle_timer.start()
+
+
+def _idle_release(limit: float) -> None:
+    """Timer body: drop the pipeline when it has been idle for ``limit`` seconds, else wait the rest."""
+    if not _lock.acquire(blocking=False):
+        _arm_idle_release()
+        return
+    try:
+        if _warm_holds <= 0 or _slot is None:
+            return
+        idle = time.monotonic() - _last_use
+        if idle < limit:
+            global _idle_timer
+            _idle_timer = threading.Timer(limit - idle, _idle_release, args=(limit,))
+            _idle_timer.daemon = True
+            _idle_timer.start()
+            return
+        log_detail("warm", "release", "cuda", "reason=idle")
+        release_pipeline()
+    finally:
+        _lock.release()
 
 
 def _warm_fits() -> bool:
@@ -1268,7 +1315,7 @@ def _render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, h
     torch = _import_torch()
     diffusers = _import_diffusers()
     dtype = torch.bfloat16
-    steps = plan.steps if plan.steps is not None else 8
+    steps = settings.get().steps or (plan.steps if plan.steps is not None else 8)
     guidance = _call_guidance(plan)
     common = {
         "prompt": screened.prompt,
@@ -1289,6 +1336,7 @@ def _render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, h
     pipeline_name = plan.pipeline_class
     failed = False
     with _lock:
+        _touch()
         try:
             pipe = _pipeline_for(
                 diffusers, torch, pipeline_name, folder, dtype, tier, lora, lora_strength, control_file,
@@ -1446,13 +1494,31 @@ def _timed(pipe: Any, torch: Any, **kwargs: Any) -> Any:
     """
     _reset_stage_peak(torch)
     started = time.perf_counter()
-    with _inference(torch):
-        result = pipe(**kwargs)
+    with watch("sample") as progress, _inference(torch):
+        result = pipe(**_with_step_beat(pipe, kwargs, progress))
     seconds = time.perf_counter() - started
     note_image_seconds(seconds)
     note_stage("sample", seconds)
     _log_stage_peak("sample", torch)
     return result
+
+
+def _with_step_beat(pipe: Any, kwargs: dict[str, Any], progress: Any) -> dict[str, Any]:
+    """Add a step callback that marks progress, when the pipeline takes one and the caller set none."""
+    if "callback_on_step_end" in kwargs:
+        return kwargs
+    try:
+        names = set(inspect.signature(pipe.__call__).parameters)
+    except (AttributeError, TypeError, ValueError):
+        return kwargs
+
+    def beat(_pipe: Any, _step: int, _timestep: Any, tensors: dict[str, Any]) -> dict[str, Any]:
+        progress.kick()
+        return tensors
+
+    if "callback_on_step_end" not in names:
+        return kwargs
+    return {**kwargs, "callback_on_step_end": beat}
 
 
 def _disable_vae_upcast(pipe: Any) -> None:
@@ -1483,7 +1549,7 @@ def _image_from_result(pipe: Any, result: Any, torch: Any) -> RawImage:
     del result, first
     gc.collect()
     _release_cuda_cache(torch)
-    with timed("vae_decode"):
+    with timed("vae_decode"), watch("vae_decode"):
         decoded = _decode_latents(pipe, held, torch)
     with timed("to_pil"):
         image = _latents_to_pil(pipe, decoded, torch)

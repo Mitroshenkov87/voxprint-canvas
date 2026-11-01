@@ -30,6 +30,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterator
 
+from canvas.infra.errors import note_error
+
 OWNER = "canvas"
 LOCK_NAME = "voxprint-gpu.lock"
 STALE_AFTER = timedelta(hours=2)
@@ -205,6 +207,28 @@ def is_stale(data: dict[str, Any], now: datetime | None = None) -> bool:
     return moment - eta > STALE_AFTER
 
 
+def _remove_stale(path: Path, seen: dict[str, Any]) -> bool:
+    """Remove the lock file ``seen`` describes. False when it changed or cannot be removed.
+
+    A second process may have taken over between the read and the removal; its
+    fresh lock is left alone. A takeover from a dead owner is logged once.
+    """
+    now = read_lock(path)
+    if now is None:
+        return True
+    if now != seen:
+        return False
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    if seen.get("pid") != os.getpid():
+        note_error(f"gpu_lock: took over a stale lock (pid {seen.get('pid')})")
+    return True
+
+
 def try_acquire(job: str, eta_s: float, path: Path, owner: str = OWNER) -> dict[str, Any] | None:
     """Create the lock. Return None on success, otherwise the holder's data."""
     foreign = _foreign_legacy_holder(path, owner)
@@ -217,12 +241,8 @@ def try_acquire(job: str, eta_s: float, path: Path, owner: str = OWNER) -> dict[
             return None
         if not mine and not is_stale(current):
             return current
-        try:
-            path.unlink()
-        except FileNotFoundError:
-            pass
-        except PermissionError:
-            return current
+        if not _remove_stale(path, current):
+            return read_lock(path) or {"owner": "?"}
     now = _now()
     payload = {
         "owner": owner,
@@ -257,11 +277,7 @@ def prepare_startup_lock() -> str | None:
     if not current:
         return None
     if is_stale(current):
-        try:
-            path.unlink()
-        except OSError:
-            return "busy"
-        return None
+        return None if _remove_stale(path, current) else "busy"
     if current.get("owner") == OWNER and current.get("pid") == os.getpid():
         return None
     return "busy"

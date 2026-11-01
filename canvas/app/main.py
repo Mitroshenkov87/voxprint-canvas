@@ -24,6 +24,7 @@ from canvas.safety.image import RawImage
 from canvas.safety.inputs import ImageRole, PendingInput
 from canvas.infra.enlarge import EnlargeClient, EnlargeError
 from canvas.infra.gpu import probe_gpu
+from canvas.infra import settings
 from canvas.infra.gpu_lock import GpuLockTimeout, pinned, prepare_startup_lock
 from canvas.infra.manifest import ManifestError
 from canvas.infra.models_users import register, unregister
@@ -383,6 +384,8 @@ def _generate(args: argparse.Namespace) -> int:
         return _emit({"ok": False, "error": "A prompt is required."}, as_json, 2)
     if args.enhance and mode is not Mode.TEXT:
         return _emit({"ok": False, "error": "Enhance applies to a prompt."}, as_json, 2)
+    # canvas.toml can turn the writer on for a prompt; the flag still works on its own.
+    enhance = bool(args.enhance) or (mode is Mode.TEXT and settings.get().writer)
     outcome: EnhanceResult | None = None
     active = active_prompt
     reset_image_seconds()
@@ -395,7 +398,7 @@ def _generate(args: argparse.Namespace) -> int:
             stack = load_catalog_stack(root, catalog)
             gate = AgeGate(stack)
             gate.warm()
-            if args.enhance:
+            if enhance:
                 gate.review_prompt(prompt)
                 release_gate_weights(gate)
                 rewritten = rewrite_text(
@@ -682,6 +685,7 @@ def main(argv: list[str] | None = None) -> int:
     # The shared catalogs follow the system locale or VOXPRINT_LANG; Canvas is English.
     set_language("en")
     args = _parser().parse_args(argv)
+    _apply_gpu_setting()
     refused = _apply_vram_cap(args)
     if refused is not None:
         return refused
@@ -806,6 +810,13 @@ def _instruction_removed(as_json: bool) -> int:
     else:
         print(message, file=sys.stderr)
     return 2
+
+
+def _apply_gpu_setting() -> None:
+    """Use the ``gpu`` entry of canvas.toml unless CUDA_VISIBLE_DEVICES already names a device."""
+    chosen = settings.get().gpu
+    if chosen is not None and not os.environ.get("CUDA_VISIBLE_DEVICES", "").strip():
+        os.environ["CUDA_VISIBLE_DEVICES"] = str(chosen)
 
 
 def _apply_vram_cap(args: argparse.Namespace) -> int | None:

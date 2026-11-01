@@ -27,6 +27,7 @@ from pathlib import Path
 
 from canvas.core.formats import EXPORT_FORMAT, OutputFormat, extension
 from canvas.infra.stage_timer import StageTimes
+from canvas.infra.watchdog import CODE, on_abort
 from canvas.pipeline.batch import BatchEntry, EntryResult, run_batch
 from canvas.pipeline.photoshoot import MAX_FRAMES, assemble_line
 from canvas.pipeline.series import DrawFrame
@@ -201,10 +202,14 @@ def run_batch_command(
     fmt = EXPORT_FORMAT if container is None else container
     clock = timings if timings is not None else StageTimes()
     scenario_style = style if style in _SCENARIO_STYLES else "photo"
-    outcomes = run_batch(
-        entries=entries, folder=folder, style=scenario_style, place_mode=places, adult=adult,
-        age_gate=age_gate, rewrite=rewrite, frame_for=frame_for, container=fmt, timings=clock,
-    )
+    forget = on_abort(lambda stage: _write_stalled(folder, entries, stage))
+    try:
+        outcomes = run_batch(
+            entries=entries, folder=folder, style=scenario_style, place_mode=places, adult=adult,
+            age_gate=age_gate, rewrite=rewrite, frame_for=frame_for, container=fmt, timings=clock,
+        )
+    finally:
+        forget()
     rows = [_row(index, outcome, fmt) for index, outcome in enumerate(outcomes)]
     made = sum(len(outcome.result.kept) for outcome in outcomes)
     ok = all(row["status"] == "ok" for row in rows)
@@ -220,6 +225,21 @@ def run_batch_command(
     }
     (folder / SUMMARY_NAME).write_text(json.dumps(body, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return body, 0 if ok else 1
+
+
+def _write_stalled(folder: Path, entries: list[BatchEntry], stage: str) -> None:
+    """Record a stalled stage in ``batch.json`` before the process ends. Nothing else is written."""
+    body: dict[str, object] = {
+        "ok": False,
+        "folder": str(folder),
+        "summary": str(folder / SUMMARY_NAME),
+        "error": CODE,
+        "code": CODE,
+        "message": f"stage {stage} made no progress and was stopped",
+        "entries": [],
+        "requested": sum(entry.count for entry in entries),
+    }
+    (folder / SUMMARY_NAME).write_text(json.dumps(body, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def _row(index: int, outcome: EntryResult, fmt: OutputFormat) -> dict[str, object]:

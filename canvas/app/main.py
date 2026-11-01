@@ -25,7 +25,7 @@ from canvas.safety.inputs import ImageRole, PendingInput
 from canvas.infra.enlarge import EnlargeClient, EnlargeError
 from canvas.infra.gpu import probe_gpu
 from canvas.infra import settings
-from canvas.infra.gpu_lock import GpuLockTimeout, pinned, prepare_startup_lock
+from canvas.infra.gpu_lock import GpuLockTimeout, forget_device_key, pinned, prepare_startup_lock
 from canvas.infra.manifest import ManifestError
 from canvas.infra.models_users import register, unregister
 from canvas.infra.paths import OutputFolderError, models_dir, prepare_output_folder, shared_dir
@@ -66,6 +66,11 @@ _EXIT_CODES = (
 )
 
 
+def _gpu_argument(parser: argparse.ArgumentParser, default: object) -> None:
+    """``--gpu N``: the card this process uses. Allowed before or after the command."""
+    parser.add_argument("--gpu", type=int, default=default, metavar="N", help="use this CUDA device index")
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="voxprint-canvas",
@@ -84,6 +89,7 @@ def _parser() -> argparse.ArgumentParser:
         default=None,
         help="plan as if the GPU had this many GB (CANVAS_VRAM_CAP_GB)",
     )
+    _gpu_argument(parser, None)
     parser.add_argument("--json", action="store_true", help="print a JSON document")
     parser.add_argument("--version", action="store_true", help="print the release identity and exit")
     commands = parser.add_subparsers(dest="command", required=False)
@@ -117,6 +123,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     generate.add_argument("--lora", default="", help="LoRA .safetensors file, .voxlora package, add-on folder, or imported LoRA name")
     generate.add_argument("--lora-scale", type=float, default=0.7, help="LoRA strength, from 0 to 2")
+    _gpu_argument(generate, argparse.SUPPRESS)
     generate.add_argument("--json", action="store_true")
     bench = commands.add_parser(
         "photoshoot-bench",
@@ -131,6 +138,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     bench.add_argument("--out", required=True, help="folder for the series")
     bench.add_argument("--seed", type=int, default=1)
+    _gpu_argument(bench, argparse.SUPPRESS)
     bench.add_argument("--json", action="store_true")
     photoshoot = commands.add_parser(
         "photoshoot",
@@ -187,6 +195,7 @@ def _parser() -> argparse.ArgumentParser:
         choices=("png", "jpg", "jpeg", "webp", "avif"),
         help="frame file for Forge: png (default), jpg, webp, or avif",
     )
+    _gpu_argument(photoshoot, argparse.SUPPRESS)
     photoshoot.add_argument("--json", action="store_true")
     batch = commands.add_parser(
         "batch",
@@ -200,6 +209,7 @@ def _parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=_EXIT_CODES,
     )
+    _gpu_argument(batch, argparse.SUPPRESS)
     batch.add_argument("--manifest", required=True, help="JSON file with an entries list")
     batch.add_argument(
         "--out", default="",
@@ -694,7 +704,7 @@ def main(argv: list[str] | None = None) -> int:
     # The shared catalogs follow the system locale or VOXPRINT_LANG; Canvas is English.
     set_language("en")
     args = _parser().parse_args(argv)
-    _apply_gpu_setting()
+    _apply_gpu_setting(args)
     refused = _apply_vram_cap(args)
     if refused is not None:
         return refused
@@ -821,11 +831,20 @@ def _instruction_removed(as_json: bool) -> int:
     return 2
 
 
-def _apply_gpu_setting() -> None:
-    """Use the ``gpu`` entry of canvas.toml unless CUDA_VISIBLE_DEVICES already names a device."""
-    chosen = settings.get().gpu
-    if chosen is not None and not os.environ.get("CUDA_VISIBLE_DEVICES", "").strip():
-        os.environ["CUDA_VISIBLE_DEVICES"] = str(chosen)
+def _apply_gpu_setting(args: argparse.Namespace | None = None) -> None:
+    """Pin the card before anything starts CUDA: ``--gpu``, else the ``gpu`` entry of canvas.toml.
+
+    CUDA_VISIBLE_DEVICES already naming a device wins over canvas.toml but not over ``--gpu``.
+    After the pin the only visible card is ``cuda:0``, and the per-card lock follows it.
+    """
+    chosen = getattr(args, "gpu", None)
+    if chosen is None and not os.environ.get("CUDA_VISIBLE_DEVICES", "").strip():
+        chosen = settings.get().gpu
+    if chosen is None:
+        return
+    os.environ.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(chosen)
+    forget_device_key()
 
 
 def _apply_vram_cap(args: argparse.Namespace) -> int | None:

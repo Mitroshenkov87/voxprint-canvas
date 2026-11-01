@@ -81,6 +81,12 @@ def _limit_fraction(fraction: float) -> None:
         return
 
 
+def _card_selector() -> list[str]:
+    """``-i N`` for the pinned card. nvidia-smi ignores CUDA_VISIBLE_DEVICES."""
+    first = os.environ.get("CUDA_VISIBLE_DEVICES", "").split(",")[0].strip()
+    return ["-i", first] if first.isdigit() else []
+
+
 def probe_gpu() -> GpuInfo | None:
     """Read the first NVIDIA GPU. ``VOXPRINT_FAKE_VRAM`` is ``name,total_gb,free_gb,cc`` for tests."""
     info = _probe_gpu()
@@ -99,7 +105,7 @@ def _probe_gpu() -> GpuInfo | None:
     try:
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         proc = subprocess.run(
-            ["nvidia-smi", "--query-gpu=name,memory.total,memory.free,compute_cap", "--format=csv,noheader,nounits"],
+            ["nvidia-smi", *_card_selector(), "--query-gpu=name,memory.total,memory.free,compute_cap", "--format=csv,noheader,nounits"],
             capture_output=True,
             text=True,
             timeout=8,

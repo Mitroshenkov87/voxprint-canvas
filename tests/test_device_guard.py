@@ -337,9 +337,13 @@ def test_cook_maps_the_vae_onto_cuda_and_leaves_the_transformer_for_fp8(monkeypa
     )
     torch = types.SimpleNamespace(bfloat16="bf16", cuda=types.SimpleNamespace(is_available=lambda: True))
     monkeypatch.setattr(runtime, "_import_torch", lambda: torch)
+    monkeypatch.setattr(runtime, "_free_vram_bytes", lambda: 1024**3)
     _pipe, _control = runtime._open_cook(diffusers, PIPELINE_TEXT, tmp_path, "bf16", None)
     assert seen["transformer"]["low_cpu_mem_usage"] is True
     assert seen["transformer"]["device_map"] is None
+    monkeypatch.setattr(runtime, "_free_vram_bytes", lambda: 20 * 1024**3)
+    runtime._open_cook(diffusers, PIPELINE_TEXT, tmp_path, "bf16", None)
+    assert seen["transformer"]["device_map"] == {"": "cuda"}
     assert seen["vae"]["device_map"] == {"": "cuda"}
     assert seen["vae"]["low_cpu_mem_usage"] is True
     assert all(item.get("device_map") != "auto" for item in seen.values())

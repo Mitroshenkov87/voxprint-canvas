@@ -15,6 +15,7 @@ from canvas.app.i18n import text
 from canvas.core.formats import EXPORT_FORMAT, OutputFormat, UnsupportedFormat, parse_export_format
 from canvas.app.info import ENLARGE_NAME
 from canvas.app.shell_gate import reviewed_output
+from canvas.ui.shell_chrome import refresh_pictures
 from canvas.app.shell_run import RunStopped, load_rgb
 from canvas.models.loader import ModelNotReady
 from canvas.models.runtime import InferenceUnavailable
@@ -268,6 +269,7 @@ def _record_series(window: ShellWindow, result: SeriesResult, idea: str) -> bool
     if kept is None:
         return False
     window._pictures[item_id] = str(hero)
+    refresh_pictures(window)
     window._series_folders[item_id] = str(result.folder)
     record_series(window.shell.state_dir, item_id, result.folder, result.kept, idea)
     return True

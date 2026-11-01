@@ -10,8 +10,8 @@ from pathlib import Path
 
 from typing import assert_never
 
-from PySide6.QtCore import QPoint, QRect, QSize, Qt, QTimer
-from PySide6.QtGui import QAction, QColor, QFont, QFontInfo, QFontMetrics, QIcon, QImage, QPainter, QPixmap
+from PySide6.QtCore import QRect, QSize, Qt, QTimer
+from PySide6.QtGui import QAction, QFont, QFontInfo, QFontMetrics, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
     QComboBox,
@@ -571,79 +571,51 @@ def _stretch_index(row):
 
 
 def _thumbs(window):
-    """Give each history item its own placeholder, so the strip is not one picture repeated."""
-    buttons = sorted(
-        (
-            button
-            for button in window.findChildren(QPushButton)
-            if button.objectName().startswith("thumb-")
-        ),
-        key=lambda button: button.objectName(),
-    )
-    for index, button in enumerate(buttons):
-        button.setIcon(QIcon(_thumb(index)))
+    """Give each history item its own picture, read from the saved file. No file, no icon."""
+    for button in window.findChildren(QPushButton):
+        name = button.objectName()
+        if not name.startswith("thumb-"):
+            continue
+        pixmap = QPixmap(window._pictures.get(name[len("thumb-"):], ""))
+        if pixmap.isNull():
+            button.setIcon(QIcon())
+            continue
+        button.setIcon(QIcon(pixmap))
         button.setIconSize(QSize(80, 80))
 
 
-def _thumb(index):
-    image = QImage(80, 80, QImage.Format.Format_RGB32)
-    painter = QPainter(image)
-    kind = index % 6
-    hue = (index * 47) % 360
-    _thumb_scene(painter, kind, hue)
-    painter.end()
-    return QPixmap.fromImage(image)
+def show_real_pictures(window):
+    """Make the result area draw the saved picture, never a stand-in.
 
+    Args:
+        window: The shell window. Its view is already built.
+    """
+    view = window.view
 
-def _thumb_scene(painter, kind, hue):
-    base = QColor.fromHsv(hue, 90, 70)
-    accent = QColor.fromHsv((hue + 40) % 360, 140, 210)
-    light = QColor.fromHsv((hue + 180) % 360, 80, 230)
-    painter.fillRect(0, 0, 80, 80, base)
-    if kind == 0:
-        painter.setBrush(accent)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawEllipse(48, 10, 22, 22)
-        painter.setBrush(QColor.fromHsv(hue, 60, 46))
-        painter.drawPolygon(
-            [QPoint(0, 62), QPoint(28, 34), QPoint(58, 70), QPoint(80, 48), QPoint(80, 80), QPoint(0, 80)]
+    def rescale():
+        label = view._picture
+        if window.shell.layout.phase is not Phase.READY or label is None:
+            return
+        size = label.size()
+        if size.width() < 2 or size.height() < 2 or (size.width(), size.height()) == view._scaled_to:
+            return
+        pixmap = QPixmap(window._pictures.get(window.shell.layout.selected or "", ""))
+        if pixmap.isNull():
+            label.clear()
+            return
+        view._scaled_to = (size.width(), size.height())
+        label.setPixmap(
+            pixmap.scaled(size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
         )
-        return
-    if kind == 1:
-        painter.setBrush(QColor.fromHsv(hue, 40, 150))
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawEllipse(18, 8, 44, 44)
-        painter.setBrush(accent)
-        painter.drawRoundedRect(22, 48, 36, 28, 8, 8)
-        return
-    if kind == 2:
-        painter.setPen(Qt.PenStyle.NoPen)
-        for left, height, colour in ((6, 48, accent), (24, 62, light), (42, 36, accent), (58, 54, light)):
-            painter.setBrush(colour)
-            painter.drawRect(left, 80 - height, 14, height)
-        return
-    if kind == 3:
-        painter.setBrush(QColor.fromHsv(hue, 50, 40))
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawRect(0, 52, 80, 28)
-        painter.setBrush(accent)
-        painter.drawEllipse(28, 22, 24, 30)
-        return
-    if kind == 4:
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(accent)
-        painter.drawEllipse(8, 14, 36, 36)
-        painter.setBrush(light)
-        painter.drawEllipse(32, 28, 36, 36)
-        return
-    painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(QColor.fromHsv(hue, 30, 24))
-    painter.drawRect(0, 0, 80, 80)
-    painter.setBrush(light)
-    for spot in ((12, 16), (30, 28), (58, 14), (46, 42), (18, 50), (66, 36)):
-        painter.drawEllipse(spot[0], spot[1], 4, 4)
-    painter.setBrush(accent)
-    painter.drawEllipse(50, 48, 16, 16)
+
+    view._rescale = rescale
+
+
+def refresh_pictures(window):
+    """Redraw the result and the history strip once the saved files are known."""
+    window.view._scaled_to = None
+    window.view._rescale()
+    _thumbs(window)
 
 
 def _labels(window):

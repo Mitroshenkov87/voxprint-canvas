@@ -265,6 +265,11 @@ def test_a_finished_picture_keeps_the_result_actions(app, home: Path) -> None:
     labels = [action.text() for action in window.view.history_menu("pic-01").actions()]
     assert tr("simple.history.delete") in labels
     assert tr("simple.history.show_folder") in labels
+    from PySide6.QtGui import QImage
+
+    saved = home / "pic-01.png"
+    QImage(16, 16, QImage.Format.Format_RGB32).save(str(saved))
+    window._pictures["pic-01"] = str(saved)
     window.resize(1280, 800)
     window.show()
     window.view._select("pic-01")
@@ -309,6 +314,11 @@ def test_simple_shots_keep_the_expert_panel_closed(app, home: Path) -> None:
     for name in ("simple", "simple-result"):
         set_expert_mode(True)
         window = _window(home)
+        from PySide6.QtGui import QImage
+
+        saved = home / "pic-01.png"
+        QImage(16, 16, QImage.Format.Format_RGB32).save(str(saved))
+        window._pictures["pic-01"] = str(saved)
         prepare(window, name)
         window.resize(1280, 800)
         window.show()
@@ -661,6 +671,7 @@ def test_manage_models_starts_mdl_beside_the_interpreter(app, home: Path, monkey
     assert mdl_argv() == [str(launcher), "--gui", "--app", "canvas"]
     seen: list[list[str]] = []
     monkeypatch.setattr("canvas.ui.shell_screen.subprocess.Popen", lambda argv: seen.append(list(argv)))
+    monkeypatch.setattr("canvas.ui.shell_screen.probe_gpu", lambda: object())
     window = _window(home)
     window._on_command("models.manage")
     assert seen == [[str(launcher), "--gui", "--app", "canvas"]]
@@ -679,4 +690,46 @@ def test_about_and_splash_show_the_release_identity(app, home: Path) -> None:
     assert splash.version_line == splash_line()
     assert splash.version_line != version_label()
     splash.close()
+    window.close()
+
+
+def test_manage_models_without_cuda_lists_models_on_disk(app, home: Path, monkeypatch) -> None:
+    del app
+    seen: list[list[str]] = []
+    monkeypatch.setattr("canvas.ui.shell_screen.subprocess.Popen", lambda argv: seen.append(list(argv)))
+    monkeypatch.setattr("canvas.ui.shell_screen.probe_gpu", lambda: None)
+    window = _window(home)
+    window._on_command("models.manage")
+    assert seen[0][-2] == "--manifest"
+    assert Path(seen[0][-1]).is_file()
+    window.close()
+
+
+def test_expert_values_start_at_the_turbo_defaults(app, home: Path) -> None:
+    del app
+    window = _window(home)
+    assert window.shell.layout.get("shell.steps") == 8
+    assert window.shell.layout.get("shell.guidance") == 1.0
+    window.close()
+
+
+def test_a_picture_is_drawn_from_its_saved_file(app, home: Path) -> None:
+    from PySide6.QtGui import QColor, QImage
+
+    state = home / "state"
+    state.mkdir(parents=True, exist_ok=True)
+    payload = {"schema": 1, "items": [{"id": "pic-01", "prompt": "a red boat", "presets": [], "seed": 3}]}
+    (state / "image-history.json").write_text(json.dumps(payload) + "\n", encoding="utf-8")
+    saved = home / "pic-01.png"
+    image = QImage(32, 32, QImage.Format.Format_RGB32)
+    image.fill(QColor(10, 200, 30))
+    assert image.save(str(saved))
+    window = _window(home)
+    window._pictures["pic-01"] = str(saved)
+    window.resize(1280, 800)
+    window.show()
+    window.view._select("pic-01")
+    app.processEvents()
+    shown = window.findChild(QLabel, "result").pixmap().toImage()
+    assert shown.pixelColor(shown.width() // 2, shown.height() // 2) == QColor(10, 200, 30)
     window.close()

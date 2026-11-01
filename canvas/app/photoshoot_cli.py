@@ -338,6 +338,8 @@ def _english_stop_message(code: str) -> str:
         return text("gate.unavailable", "en")
     if code == "gpu_busy":
         return text("startup.lock", "en")
+    if code == "vram":
+        return text("error.vram", "en")
     if code == "enlarge_unavailable":
         return text("enlarge.hint", "en", name=ENLARGE_NAME)
     return _series_message(code)

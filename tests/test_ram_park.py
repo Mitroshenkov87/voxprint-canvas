@@ -199,3 +199,46 @@ def test_park_and_unpark_log_milliseconds_bytes_ram_and_vram(monkeypatch) -> Non
     assert "vram_mib=" in text and "ram_mib=" in text
     assert "ms=" in text and "bytes=" in text
     assert "where=disk" not in text
+
+
+def test_a_second_job_without_free_ram_keeps_the_model_on_its_card(monkeypatch) -> None:
+    """Two jobs on two cards: the one that finds RAM taken does not park a copy."""
+    _tier(monkeypatch, "ram96", 128 * 1024**3)
+    monkeypatch.setattr(hot_tier, "free_bytes", lambda: 4 * 1024**3)
+    module = _Module("float8_e4m3fn")
+    original = module.weight
+    assert hot_tier.remember("transformer", module, size_bytes=12 * 1024**3) is False
+    assert hot_tier.cached("transformer") is None
+    assert module.weight.data is original
+
+
+def test_a_failed_park_leaves_the_model_usable(monkeypatch) -> None:
+    """A host-memory error while parking falls back to no RAM copy instead of aborting."""
+    _tier(monkeypatch, "ram96", 128 * 1024**3)
+
+    def fail(*_args, **_kwargs):
+        raise RuntimeError("CUDA error: out of memory")
+
+    monkeypatch.setattr(hot_tier, "_park_state", fail)
+    module = _Module("bfloat16")
+    assert hot_tier.remember("transformer", module) is False
+    assert hot_tier.retained("transformer") is False
+    assert module.weight.data.values == [1, 2, 3, 4]
+
+
+def test_a_failed_cpu_view_keeps_the_ram_tensors(monkeypatch) -> None:
+    _tier(monkeypatch, "ram96", 128 * 1024**3)
+    module = _Module("bfloat16")
+    assert hot_tier.remember("vae", module) is True
+    resident = hot_tier._cache["vae"]
+
+    class _Broken:
+        def to(self, *_args, **_kwargs):
+            raise RuntimeError("AcceleratorError")
+
+        def release(self) -> None:
+            return None
+
+    resident.parked = _Broken()
+    hot_tier.deactivate("vae")
+    assert module.weight.data.values == [1, 2, 3, 4]

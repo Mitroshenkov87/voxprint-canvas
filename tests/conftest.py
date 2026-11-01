@@ -39,3 +39,13 @@ def _reset_pipeline_cache():
     reset = _pipeline_reset()
     if reset is not None:
         reset()
+
+
+@pytest.fixture(autouse=True)
+def _unknown_free_ram(monkeypatch):
+    """Tests do not depend on the free RAM of the machine that runs them."""
+    try:
+        from canvas.models import hot_tier
+    except ImportError:
+        return
+    monkeypatch.setattr(hot_tier, "free_bytes", lambda: 0)

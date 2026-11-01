@@ -455,7 +455,10 @@ def _empty_cache() -> None:
         return
     fn = getattr(torch.cuda, "empty_cache", None)
     if callable(fn):
-        fn()
+        try:
+            fn()
+        except Exception:  # cleanup only: an out-of-memory or driver error must not end the process
+            note_error("cuda.release")
 
 
 def _torch() -> Any:

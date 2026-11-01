@@ -9,6 +9,8 @@ from __future__ import annotations
 import gc
 from typing import Any
 
+from canvas.infra.errors import note_error
+from canvas.infra.stage_timer import log_detail
 from canvas.infra.vram_trace import note_vram
 
 
@@ -31,10 +33,15 @@ def release_cuda_cache() -> bool:
     torch = _torch()
     if torch is None or not torch.cuda.is_available():
         return False
-    torch.cuda.empty_cache()
-    ipc_collect = getattr(torch.cuda, "ipc_collect", None)
-    if ipc_collect is not None:
-        ipc_collect()
+    try:
+        torch.cuda.empty_cache()
+        ipc_collect = getattr(torch.cuda, "ipc_collect", None)
+        if ipc_collect is not None:
+            ipc_collect()
+    except Exception as exc:  # an out-of-memory or driver error must not end the process
+        note_error("cuda.release")
+        log_detail("cuda", "release_failed", "cuda", f"{type(exc).__name__}")
+        return False
     return True
 
 

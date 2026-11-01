@@ -98,6 +98,13 @@ def _cuda_uuid() -> str | None:
     return text if text.startswith("GPU-") else f"GPU-{text}"
 
 
+def forget_device_key() -> None:
+    """Drop the remembered card after CUDA_VISIBLE_DEVICES changed."""
+    clear = getattr(_cuda_uuid, "cache_clear", None)
+    if clear is not None:
+        clear()
+
+
 def _safe_key(value: str) -> str:
     key = re.sub(r"[^A-Za-z0-9_-]+", "_", value.strip())[:64]
     return key or "0"

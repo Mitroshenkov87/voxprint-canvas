@@ -164,6 +164,8 @@ class ShellRunner:
                 OSError,
             ) as exc:
                 _halt(str(exc), exc, "internal", unavailable=True)
+            except MemoryError as exc:
+                _halt(str(VramRefused()), exc, "vram", unavailable=True)
             except Exception as exc:
                 _halt(f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__, exc, "internal", unavailable=True)
         finally:

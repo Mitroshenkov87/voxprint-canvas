@@ -513,8 +513,7 @@ def _prepare_locked(folder: Path, tier: Tier, prompts: tuple[str, ...]) -> None:
         encoder = None
         tokenizer = None
         gc.collect()
-        if getattr(torch, "cuda", None) is not None and torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        _release_cuda_cache(torch)
         note_vram("text_encoder", "after")
         _leave("text_encoder", tier)
 
@@ -826,8 +825,7 @@ def _release_text_encoder(encoder: Any, tokenizer: Any, torch: Any) -> None:
                 pass
     del encoder, tokenizer
     gc.collect()
-    if getattr(torch, "cuda", None) is not None and torch.cuda.is_available():
-        torch.cuda.empty_cache()
+    _release_cuda_cache(torch)
 
 
 def _to_cpu(value: Any) -> Any:
@@ -967,6 +965,14 @@ def _open_pipeline(
     return pipe, controlnet
 
 
+def _transformer_device(torch: Any) -> str:
+    """``cuda`` when the BF16 transformer fits on the card with room to spare, else ``cpu``."""
+    if not _cuda_is_up(torch):
+        return "cpu"
+    free = _free_vram_bytes()
+    return "cuda" if free is not None and free >= 2 * TRANSFORMER_FP8_BYTES + 2 * 1024**3 else "cpu"
+
+
 def _open_cook(
     diffusers: Any, pipeline_name: str, folder: Path, dtype: object, control_file: Path | None,
 ) -> tuple[Any, Any] | None:
@@ -982,11 +988,12 @@ def _open_cook(
     if not isinstance(kind, type):
         return None
     torch = _import_torch()
-    # The transformer is cast to FP8 before it stays on the card. Mapping the
-    # BF16 file straight onto CUDA would hold that larger copy during the sample.
+    # When the card has room, the safetensors file is mapped straight onto it and
+    # the FP8 cast in ``_place`` shrinks it in place, so the full BF16 transformer
+    # never sits in RAM and two processes do not exhaust it. Otherwise it is mapped on the CPU.
     # The VAE stays in BF16 and is small enough to map onto the card here.
     vae_device = "cuda" if _cuda_is_up(torch) else "cpu"
-    transformer = _load_component(transformer_cls.from_pretrained, folder / "transformer", dtype, "cpu")
+    transformer = _load_component(transformer_cls.from_pretrained, folder / "transformer", dtype, _transformer_device(torch))
     vae = _load_component(vae_cls.from_pretrained, folder / "vae", dtype, vae_device)
     scheduler = _load(scheduler_cls.from_pretrained, folder / "scheduler", local_files_only=True)
     controlnet = None
@@ -2419,7 +2426,11 @@ def _release_cuda_cache(torch: Any) -> None:
     if callable(empty):
         try:
             empty()
-        except (TypeError, RuntimeError, AttributeError):
+            ipc_collect = getattr(torch.cuda, "ipc_collect", None)
+            if callable(ipc_collect):
+                ipc_collect()
+        except Exception:  # cleanup only: an out-of-memory or driver error must not end the process
+            note_error("cuda.release")
             return
 
 
@@ -2673,11 +2684,7 @@ def _release_inference(torch: Any, pipe: Any, controlnet: Any) -> None:
                     pass
     del pipe, controlnet
     gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-        ipc_collect = getattr(torch.cuda, "ipc_collect", None)
-        if ipc_collect is not None:
-            ipc_collect()
+    _release_cuda_cache(torch)
 
 
 def _place_and_bind(pipe: Any, tier: Tier, lora: UserLora | None, lora_strength: float | None) -> None:

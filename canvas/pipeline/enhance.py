@@ -464,7 +464,10 @@ class QwenRewriter:
                 if device == "cpu" or "out of memory" not in str(exc).lower():
                     raise
                 if cuda:
-                    torch.cuda.empty_cache()
+                    try:
+                        torch.cuda.empty_cache()
+                    except Exception:  # cleanup only
+                        note_error("cuda.release")
                 note_error("writer.oom")
                 raise DeviceRefused() from exc
             self._tokenizer = tokenizer

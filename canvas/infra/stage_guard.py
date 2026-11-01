@@ -12,6 +12,7 @@ from typing import Any, Literal, assert_never
 
 from canvas.infra.errors import note_error
 from canvas.infra.stage_timer import log_detail
+from canvas.infra.phase_vram import fold_peak
 from canvas.infra.vram_trace import drop_model, held_modules, hold_model, on_cuda, park_module, resident_summary
 from canvas.models import hot_tier as hot
 from canvas.models.modes import Tier, headroom_gb
@@ -89,10 +90,15 @@ def choose_encoder_storage(
 
 
 def begin_stage(name: str, tier: Tier) -> None:
-    """Open a heavy stage. On 16 GB a leftover model is parked, then the budget is checked."""
+    """Open a heavy stage. On 16 GB a leftover model is parked, then the budget is checked.
+
+    The allocator peak is reset here, so a transient from the previous stage is
+    never charged to this one.
+    """
     _known(name)
     if tier is not Tier.GB16:
         return
+    measure_free()
     residual = _snapshot_residual()
     fits = False
     if residual:
@@ -118,7 +124,7 @@ def finish_stage(name: str, tier: Tier) -> None:
         fits = _image_fits(residual)
     else:
         gc.collect()
-        _empty_cache()
+    measure_free()
     code = _block_code(name, allocated_bytes(), _other_heavy(""))
     if code is None or (code == "vram.residual" and fits):
         return
@@ -158,7 +164,7 @@ def note_image_fit() -> bool:
     so a clean render logged nothing. This uses the same log writer as the other
     ``stage`` lines.
     """
-    span = _cuda_span()
+    span = measure_free()
     free, total = span if span is not None else (0, 0)
     return decide_image_fit(
         free_bytes=free,
@@ -228,8 +234,12 @@ def admit(name: str, module: object, tier: Tier) -> None:
 
 
 def guard_peak(stage: str, tier: Tier) -> None:
-    """Stop a 16 GB stage whose allocation or peak passed 14 GB."""
-    if tier is not Tier.GB16 or not _over_peak():
+    """Stop a 16 GB stage whose live allocation passed 14 GB.
+
+    The allocator peak is not read: a load transient that was already freed
+    does not stop the stage.
+    """
+    if tier is not Tier.GB16 or not _over_limit():
         return
     _log("vram.peak", stage)
     release_residents()
@@ -272,8 +282,29 @@ def allocated_bytes() -> int:
         return 0
 
 
+def measure_free() -> tuple[int, int] | None:
+    """Empty the allocator cache, start a new peak sample, then read driver free and total.
+
+    Every fit and stage decision reads memory through this. The previous peak
+    is folded into the open phase first, so it stays on the log lines only.
+    None when this process cannot ask the card.
+    """
+    torch = _torch()
+    if torch is None or not bool(torch.cuda.is_available()):
+        return None
+    _empty_cache()
+    fold_peak()
+    reset = getattr(torch.cuda, "reset_peak_memory_stats", None)
+    if callable(reset):
+        try:
+            reset()
+        except (TypeError, RuntimeError):
+            pass
+    return _cuda_span()
+
+
 def peak_bytes() -> int:
-    """Peak CUDA allocation in this process. The current allocation when the peak is unavailable."""
+    """Peak CUDA allocation in this process, for logging only. The current allocation when unavailable."""
     torch = _torch()
     if torch is None or not bool(torch.cuda.is_available()):
         return 0
@@ -302,7 +333,7 @@ def _snapshot_residual() -> tuple[tuple[str, int], ...]:
 
 def _image_fits(residuals: Sequence[tuple[str, int]]) -> bool:
     """Whether an FP8 transformer and the VAE fit in free VRAM. False when free is unknown."""
-    span = _cuda_span()
+    span = measure_free()
     if span is None:
         return False
     free, total = span
@@ -393,7 +424,7 @@ def _other_heavy(name: str) -> list[str]:
 def _block_code(name: str, allocated: int, others: list[str]) -> str | None:
     if name == "cook" and allocated > COOK_BUDGET_BYTES:
         return "vram.cook"
-    if _over_peak() or allocated > PEAK_LIMIT_BYTES:
+    if allocated > PEAK_LIMIT_BYTES:
         return "vram.peak"
     if others:
         return "vram.overlap"
@@ -402,8 +433,8 @@ def _block_code(name: str, allocated: int, others: list[str]) -> str | None:
     return None
 
 
-def _over_peak() -> bool:
-    return peak_bytes() > PEAK_LIMIT_BYTES or allocated_bytes() > PEAK_LIMIT_BYTES
+def _over_limit() -> bool:
+    return allocated_bytes() > PEAK_LIMIT_BYTES
 
 
 def _log(code: str, stage: str) -> None:

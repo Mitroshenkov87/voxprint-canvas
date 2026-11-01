@@ -205,10 +205,6 @@ def _run_series(
         return _stop("idea", reason, "idea.policy")
     if adult and not ages_allowed(idea):
         return _stop("idea", "", "idea.minor")
-    preload = _CheckPreload.open(gate)
-    warm_error = preload.ready_error()
-    if warm_error is not None:
-        return _stop("error", warm_error.user_message, f"check.{warm_error.code}")
     appearance = fixed_appearance(idea, seed)
     # None is the caller's default. A same-place person series then follows the
     # first frame loosely enough that the pose can still change. With different
@@ -220,16 +216,20 @@ def _run_series(
             scenario, fail_code, source = _scenario(
                 idea, count, style, mode, rewrite, adult=adult, appearance=appearance, seed=seed,
             )
-        except Exception:
-            preload.close()
-            raise
         finally:
             # Every chunk shared one writer. It leaves the card before the prompt checks.
             _release_writer(rewrite)
             hot.deactivate("writer")
+            release_cuda_cache()
     if scenario is None or len(scenario.shots) < count:
-        preload.close()
         return _stop("scenario", "", fail_code if scenario is None else "scenario.count")
+    # The picture checks are read only after the writer is gone, so their load
+    # never overlaps the writer on the card. The read still overlaps the
+    # prompt checks, the encoder and the sampler.
+    preload = _CheckPreload.open(gate)
+    warm_error = preload.ready_error()
+    if warm_error is not None:
+        return _stop("error", warm_error.user_message, f"check.{warm_error.code}")
     lines = [
         single_frame(strip_series_words(assemble_line(
             scenario.subject_block, shot, include_camera=True, index=index, seed=seed,
@@ -675,11 +675,12 @@ _IMAGE_CHECK_NAMES = ("nsfw", "zeroshot", "faces", "ages", "fine")
 
 
 class _CheckPreload:
-    """SSD-to-RAM load of the picture checks, overlapped with the writer.
+    """SSD-to-RAM load of the picture checks, started after the writer is released.
 
     Gates whose components have no ``load`` (the unit-test doubles) run
     ``warm`` on this thread, which is the old prep behaviour. A real stack
-    loads on a side thread and stays on the CPU so the writer keeps the GPU.
+    loads on a side thread and stays on the CPU while the prompt checks and the
+    sampler use the GPU.
     The output check still places and runs the models itself.
     """
 

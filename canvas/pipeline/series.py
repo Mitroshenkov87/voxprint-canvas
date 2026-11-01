@@ -141,8 +141,13 @@ def run_series(
     adult: bool = False,
     container: OutputFormat | None = None,
     timings: StageTimes | None = None,
+    negative: str = "",
 ) -> SeriesResult:
     """Run series.
+
+    ``negative`` is the user's negative prompt. It is checked like the prompt,
+    before the writer, and a refusal stops the series with nothing drawn.
+    ``draw_frame`` is the one that applies it to the picture.
 
     ``timings`` collects per-stage seconds (stage names only). Without it the
     series keeps its own and writes one ``timing`` line to the generic log.
@@ -157,7 +162,7 @@ def run_series(
             include_camera=include_camera, rewrite=rewrite, age_gate=age_gate, draw_frame=draw_frame,
             cancelled=cancelled, folder=folder, on_scenario=on_scenario, line_for=line_for,
             on_status=on_status, adult=adult, container=container, clock=clock, own_clock=timings is None,
-            noted=noted, prep=prep,
+            noted=noted, prep=prep, negative=negative,
         )
     except DeviceRefused as exc:
         note_error(exc.code)
@@ -182,7 +187,7 @@ def _run_series(
     cancelled: Callable[[], bool], folder: Path, on_scenario: Callable[[Scenario], None] | None,
     line_for: Callable[[int], str] | None, on_status: Callable[[int, str], None] | None,
     adult: bool, container: OutputFormat | None, clock: StageTimes, own_clock: bool,
-    noted: list[bool], prep: Phase,
+    noted: list[bool], prep: Phase, negative: str = "",
 ) -> SeriesResult:
     hot.note_tier()
     gate = SerialGate.wrap(age_gate)
@@ -200,6 +205,9 @@ def _run_series(
     # writer and the sampler. They stay off the GPU until the output check.
     with clock.measure("prep"):
         reason = _refuse_prompt(gate, idea)
+        if not reason and negative.strip():
+            # The negative prompt is checked like the prompt.
+            reason = _refuse_prompt(gate, negative)
         # The writer needs the GPU to itself. Anything the check put on the card is dropped first.
         release_gate_weights(gate)
     if reason:

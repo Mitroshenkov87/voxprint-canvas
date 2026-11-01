@@ -138,6 +138,10 @@ def _parser() -> argparse.ArgumentParser:
     )
     photoshoot.add_argument("--prompt", required=True, help="theme or idea for the series")
     photoshoot.add_argument(
+        "--negative", default="",
+        help="negative prompt for every frame; it is checked like the prompt",
+    )
+    photoshoot.add_argument(
         "--frames",
         type=int,
         default=DEFAULT_FRAMES,
@@ -452,6 +456,7 @@ def _photoshoot(args: argparse.Namespace) -> int:
             gate = AgeGate(stack)
             serial = SerialGate.wrap(gate)
             clock = StageTimes()
+            negative = str(args.negative)
             payload, code = run_command(
                 idea=str(args.prompt),
                 folder=folder,
@@ -466,9 +471,11 @@ def _photoshoot(args: argparse.Namespace) -> int:
                     serial, gpu.tier, style, adult,
                     None if chosen is None else chosen[0],
                     0.7 if chosen is None else chosen[1],
+                    negative,
                 ),
                 timings=clock,
                 container=parse_export_format(str(args.export_format)),
+                negative=negative,
             )
     except GpuLockTimeout:
         return _emit_photoshoot(

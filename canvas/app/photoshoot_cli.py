@@ -88,7 +88,7 @@ def model_rewrite(tier: Tier, adult: bool) -> Callable[[str], str]:
 
 def model_generate(
     age_gate: AgeGate, tier: Tier, style: str, adult: bool,
-    lora: UserLora | None = None, lora_scale: float = 0.7,
+    lora: UserLora | None = None, lora_scale: float = 0.7, negative: str = "",
 ) -> Callable[[str, int, SeriesFrame | None, float | None], SeriesFrame | None]:
     """One frame through the same runner the window uses.
 
@@ -99,6 +99,10 @@ def model_generate(
         adult: Use the Expert adult-content prompt policy.
         lora: The LoRA for every frame of this series. None uses the base model.
         lora_scale: Strength for that LoRA.
+        negative: The user's negative prompt, added to every frame's negative. Pass the
+            same text to ``run_command`` so it is checked like the prompt. A picture
+            pipeline that takes no ``negative_prompt`` ignores it (see ``_accepting`` in
+            ``canvas.models.runtime``).
     """
     runner = ShellRunner(gate=age_gate, tier=tier, enlarge=EnlargeClient())
     runner.bound_lora = lora
@@ -123,10 +127,12 @@ def model_generate(
         line: str, seed: int, hero: SeriesFrame | None, strength: float | None,
     ) -> tuple[PictureJob, tuple[PendingInput, ...]]:
         prompt = _prompt(line)
-        negative = frame_negative(", ".join(part for part in (look.negative, policy.negatives) if part))
+        negative_text = frame_negative(", ".join(
+            part for part in (negative.strip(), look.negative, policy.negatives) if part
+        ))
         mode = Mode.TEXT if hero is None else Mode.RESTYLE
         job = PictureJob(
-            prompt, negative, mode, "1:1", "native", EXPORT_FORMAT, seed, 8, 0.0, "euler", 1,
+            prompt, negative_text, mode, "1:1", "native", EXPORT_FORMAT, seed, 8, 0.0, "euler", 1,
             adult_content=adult,
             lora_path="" if lora is None else str(lora.weights),
             lora_weight=lora_scale,
@@ -182,6 +188,7 @@ def run_command(
     strength: float | None = None,
     timings: StageTimes | None = None,
     container: OutputFormat | None = None,
+    negative: str = "",
 ) -> tuple[dict[str, object], int]:
     """Run one series into ``folder`` and describe what was written.
 
@@ -199,6 +206,8 @@ def run_command(
         strength: Loose reference for later frames. None leaves an object series as text
             and follows the first frame for a person series.
         container: Forge export format. PNG when omitted. AVIF stays available.
+        negative: Negative prompt. It is checked like the prompt before anything is
+            generated; a refusal stops the command like a refused prompt.
     """
     catalogs()
     if frames < 1 or frames > MAX_FRAMES:
@@ -207,7 +216,7 @@ def run_command(
     body, code = _run_command(
         idea=idea, folder=folder, frames=frames, seed=seed, style=style, places=places, adult=adult,
         age_gate=age_gate, rewrite=rewrite, generate=generate, strength=strength, clock=clock,
-        container=container,
+        container=container, negative=negative,
     )
     body["timings"] = clock.summary()
     note_timing(clock.log_line())
@@ -218,7 +227,7 @@ def _run_command(
     *, idea: str, folder: Path, frames: int, seed: int, style: str, places: str, adult: bool,
     age_gate: AgeGate, rewrite: Callable[[str], str],
     generate: Callable[[str, int, SeriesFrame | None, float | None], SeriesFrame | None],
-    strength: float | None, clock: StageTimes, container: OutputFormat | None,
+    strength: float | None, clock: StageTimes, container: OutputFormat | None, negative: str = "",
 ) -> tuple[dict[str, object], int]:
     fmt = EXPORT_FORMAT if container is None else container
     scenario_style = style if style in _SCENARIO_STYLES else "photo"
@@ -249,6 +258,7 @@ def _run_command(
         adult=adult,
         container=fmt,
         timings=clock,
+        negative=negative,
     )
     scenario = held.get("scenario")
     if (result.stopped in {"idea", "scenario"} and not result.kept) or scenario is None or result.folder is None:

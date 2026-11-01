@@ -285,7 +285,7 @@ def _run_command(
             False, "error", _english_stop_message(result.code or "internal"),
             frame_paths, str(scenario_path), frames, made, tuple(shots),
             result.code or "internal", result.source,
-        ), 1
+        ), 2 if (result.code or "").startswith("lora.") else 1
     if result.stopped == "scenario":
         return _body(
             False, "scenario", _series_message(result.code),
@@ -340,6 +340,8 @@ def _english_stop_message(code: str) -> str:
         return text("startup.lock", "en")
     if code == "vram":
         return text("error.vram", "en")
+    if code.startswith("lora."):
+        return text(code, "en")
     if code == "enlarge_unavailable":
         return text("enlarge.hint", "en", name=ENLARGE_NAME)
     return _series_message(code)

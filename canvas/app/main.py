@@ -432,6 +432,8 @@ def _generate(args: argparse.Namespace) -> int:
             pipeline = Pipeline(gate, generator, gpu.tier, use_gpu_lock=True, catalog=catalog, enlarge=EnlargeClient())
             fresh = _inputs(args, mode)
             pipeline.export(active, mode, fresh, path, fmt, aspect=args.aspect, output=output)
+    except LoraRejected as exc:
+        return _emit_lora(exc.code, as_json)
     except GpuLockTimeout as exc:
         return _emit({"ok": False, "error": str(exc), "code": "gpu_busy"}, as_json, 1)
     except (

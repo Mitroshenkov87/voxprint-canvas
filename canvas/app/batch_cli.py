@@ -224,6 +224,8 @@ def run_batch_command(
         "timings": clock.summary(),
     }
     (folder / SUMMARY_NAME).write_text(json.dumps(body, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    if any(str(row.get("code") or "").startswith("lora.") for row in rows):
+        return body, 2
     return body, 0 if ok else 1
 
 

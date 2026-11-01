@@ -14,7 +14,9 @@ The phases are the ones a single series uses, run once across all entries:
 5. Every picture is checked before it is saved. Nothing unchecked is written.
 
 A stop that belongs to one entry ends that entry only. A check that cannot
-finish stops every write after it, in every entry.
+finish stops every write after it, in every entry. An unexpected error ends the
+entry it happened in, or every entry that has no result yet when it is not tied
+to one entry. No entry is left without a result.
 """
 from __future__ import annotations
 
@@ -50,7 +52,7 @@ from canvas.pipeline.series import (
     shot_scenario,
     write_scenario,
 )
-from canvas.safety.gate import AgeGate
+from canvas.safety.gate import AgeGate, SafetyUnavailable
 
 
 @dataclass(frozen=True)
@@ -131,12 +133,16 @@ def run_batch(
     except ResidualVram as exc:
         note_error(exc.code)
         _fill(entries, results, SeriesResult("error", str(VramRefused()), (), None, exc.code))
+    except Exception as exc:
+        _fill(entries, results, _internal(exc))
     finally:
         _release_writer(rewrite)
         prep.finish()
         set_current(previous_clock)
         if timings is None:
             note_timing(clock.log_line())
+    if len(results) < len(entries):
+        _fill(entries, results, _internal(None))
     return [
         EntryResult(entry, folder / entry.name, results[index], scenarios.get(index))
         for index, entry in enumerate(entries)
@@ -174,9 +180,15 @@ def _run(
                 else:
                     written[index] = (shot, "")
                 continue
-            scenario, fail_code, source = write_scenario(
-                entry.prompt, entry.count, style, mode, rewrite, adult, entry.seed, clock,
-            )
+            try:
+                scenario, fail_code, source = write_scenario(
+                    entry.prompt, entry.count, style, mode, rewrite, adult, entry.seed, clock,
+                )
+            except (DeviceRefused, ResidualVram, SafetyUnavailable):
+                raise
+            except Exception as exc:
+                results[index] = _internal(exc)
+                continue
             if scenario is None or len(scenario.shots) < entry.count:
                 results[index] = _stop("scenario", "", fail_code if scenario is None else "scenario.count")
                 continue
@@ -199,12 +211,18 @@ def _run(
             def keep(found: Scenario, at: int = index) -> None:
                 scenarios[at] = found
 
-            planned = plan_series(
-                gate=gate, idea=entry.text, scenario=scenario, source=source, style=style, mode=mode,
-                seed=entry.seed, strength=series_strength(entry.text, mode, None), adult=adult,
-                include_camera=lambda: True, line_for=None, clock=clock, on_scenario=keep, on_status=None,
-                cancelled=lambda: False, folder=folder / entry.name, draw_frame=frame_for(entry),
-            )
+            try:
+                planned = plan_series(
+                    gate=gate, idea=entry.text, scenario=scenario, source=source, style=style, mode=mode,
+                    seed=entry.seed, strength=series_strength(entry.text, mode, None), adult=adult,
+                    include_camera=lambda: True, line_for=None, clock=clock, on_scenario=keep, on_status=None,
+                    cancelled=lambda: False, folder=folder / entry.name, draw_frame=frame_for(entry),
+                )
+            except (DeviceRefused, ResidualVram, SafetyUnavailable):
+                raise
+            except Exception as exc:
+                results[index] = _internal(exc)
+                continue
             if isinstance(planned, SeriesResult):
                 results[index] = planned
             else:
@@ -229,3 +247,10 @@ def _fill(entries: list[BatchEntry], results: dict[int, SeriesResult], result: S
     """Give every entry that has no result yet this one."""
     for index in range(len(entries)):
         results.setdefault(index, result)
+
+
+def _internal(exc: Exception | None) -> SeriesResult:
+    """The result for an entry that ended on an unexpected error. The reason names the error type."""
+    kind = type(exc).__name__ if exc is not None else "no result"
+    note_error("internal")
+    return SeriesResult("error", f"The entry failed with an unexpected error ({kind}).", (), None, "internal")

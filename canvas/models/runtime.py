@@ -33,9 +33,13 @@ from canvas.infra.stage_guard import (
     allocated_bytes,
     begin_stage,
     choose_encoder_storage,
+    TRANSFORMER_FP8_BYTES,
+    VAE_WEIGHT_BYTES,
     cosine,
+    decide_image_fit,
     finish_stage,
     guard_peak,
+    measure_free,
     note_image_fit,
     register_release,
 )
@@ -99,6 +103,8 @@ _BASE_PIPELINES = frozenset({PIPELINE_TEXT, PIPELINE_IMG2IMG, PIPELINE_INPAINT})
 # that is parked again immediately.
 _ENCODES_BEFORE_SAMPLE = frozenset({PIPELINE_IMG2IMG, PIPELINE_INPAINT, PIPELINE_CONTROL_INPAINT})
 _scope_depth = 0
+# Warm holds are scopes that outlive one run: the window holds one, and a batch holds one.
+_warm_holds = 0
 _lock = threading.RLock()
 
 
@@ -161,6 +167,83 @@ def pipeline_scope() -> Iterator[None]:
                 release_pipeline()
 
 
+def hold_warm() -> None:
+    """Keep the loaded pipeline between runs until ``drop_warm``.
+
+    This is a ``pipeline_scope`` that is not tied to one run. The window opens
+    one on its first generation and closes it when it closes. A model, tier, or
+    LoRA change still loads again (``_pipeline_for`` compares the key), and a
+    stage that needs the card still parks it (``park_pipeline``).
+    """
+    global _scope_depth, _warm_holds
+    with _lock:
+        _warm_holds += 1
+        _scope_depth += 1
+
+
+def drop_warm(*, release: bool = False) -> None:
+    """Close one ``hold_warm``. A second call with no hold open does nothing.
+
+    Args:
+        release: Drop the pipeline even on a tier that keeps it in RAM (window close).
+    """
+    global _scope_depth, _warm_holds
+    with _lock:
+        if _warm_holds <= 0:
+            return
+        _warm_holds -= 1
+        _scope_depth = max(0, _scope_depth - 1)
+        last = _scope_depth == 0
+    if release or (last and not _park_between_runs()):
+        release_pipeline()
+
+
+def warm_held() -> bool:
+    """True while a ``hold_warm`` is open."""
+    return _warm_holds > 0
+
+
+def trim_warm() -> bool:
+    """After a run inside a warm hold, keep the pipeline only when the card still has room.
+
+    The room is the existing picture fit check on real free VRAM. When it does
+    not pass, the pipeline is parked: ``ram64`` and ``ram96`` keep the RAM copy,
+    ``ram32`` drops it. A card whose free memory cannot be read is treated as
+    full. Without a CUDA device nothing is on the card, so the pipeline stays.
+
+    Returns:
+        True when a pipeline is still loaded.
+    """
+    with _lock:
+        held = _slot
+    if held is None:
+        return False
+    if _warm_fits():
+        return True
+    log_detail("warm", "park", "cuda", "reason=fit")
+    park_pipeline()
+    with _lock:
+        return _slot is not None
+
+
+def _warm_fits() -> bool:
+    torch = _optional_torch()
+    if torch is None or not _cuda_is_up(torch):
+        return True
+    span = measure_free()
+    if span is None:
+        return False
+    free, total = span
+    return decide_image_fit(
+        free_bytes=free,
+        total_bytes=total,
+        models=(
+            ("transformer", TRANSFORMER_FP8_BYTES, "float8_e4m3fn"),
+            ("vae", VAE_WEIGHT_BYTES, "bfloat16"),
+        ),
+    )
+
+
 def release_pipeline() -> None:
     """Drop the kept pipeline. Safe when nothing is loaded and when torch is absent.
 
@@ -195,11 +278,12 @@ def park_pipeline() -> None:
 
 def reset_pipeline_cache() -> None:
     """Drop a pipeline and a scope left open by a test."""
-    global _scope_depth
+    global _scope_depth, _warm_holds
     with _lock:
         release_pipeline()
         hot.reset()
         _scope_depth = 0
+        _warm_holds = 0
 
 
 def _weights_key(folder: Path, tier: Tier, dtype: object, control_file: Path | None) -> tuple[str, Tier, object, str]:

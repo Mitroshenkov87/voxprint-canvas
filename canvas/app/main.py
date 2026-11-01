@@ -39,6 +39,7 @@ from canvas.models.plan import BaseNotSelected, ModeUnavailable, build_plan
 from canvas.models.registry import load_catalog
 from canvas.models.snapshots import SnapshotError
 from canvas.app.photoshoot_bench import live_generate, live_rewrite, run_bench
+from canvas.app.batch_cli import ManifestInvalid, default_out, load_manifest, run_batch_command
 from canvas.app.photoshoot_cli import model_generate, model_rewrite, reject_frames, run_command
 from canvas.pipeline.photoshoot import DEFAULT_FRAMES, MAX_FRAMES, TEST_SERIES_CHARACTER
 from canvas.ui.styles import LOOKS
@@ -186,6 +187,56 @@ def _parser() -> argparse.ArgumentParser:
         help="frame file for Forge: png (default), jpg, webp, or avif",
     )
     photoshoot.add_argument("--json", action="store_true")
+    batch = commands.add_parser(
+        "batch",
+        help="run every entry of a manifest and exit",
+        description=(
+            "Run every entry of a JSON manifest. Each entry has a prompt or a shot line, and\n"
+            "optionally negative, seed, count and name. Every prompt and negative prompt is\n"
+            "checked like the prompt before anything is drawn; a refused entry is recorded in\n"
+            "batch.json and the other entries continue. Every picture is checked before it is saved."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=_EXIT_CODES,
+    )
+    batch.add_argument("--manifest", required=True, help="JSON file with an entries list")
+    batch.add_argument(
+        "--out", default="",
+        help="folder for the entry subfolders and batch.json (default: <manifest>_batch next to the manifest)",
+    )
+    batch.add_argument(
+        "--style",
+        default="photo",
+        choices=tuple(look.style_id for look in LOOKS),
+        help="style id for every entry, the same ids as the app",
+    )
+    batch.add_argument(
+        "--places",
+        default="same",
+        choices=("same", "different"),
+        help="one place, or a different place for each frame of an entry",
+    )
+    batch.add_argument("--adult", action="store_true", help="use the Expert adult-content prompt policy")
+    batch.add_argument(
+        "--vram-cap-gb",
+        type=float,
+        default=argparse.SUPPRESS,
+        help="plan as if the GPU had this many GB (CANVAS_VRAM_CAP_GB)",
+    )
+    batch.add_argument("--lora", default="", help="LoRA .safetensors file, .voxlora package, add-on folder, or imported LoRA name")
+    batch.add_argument("--lora-scale", type=float, default=0.7, help="LoRA strength, from 0 to 2")
+    batch.add_argument(
+        "--vram-trace",
+        action="store_true",
+        help="write a VRAM line to voxprint.log before and after each load, unload, and stage",
+    )
+    batch.add_argument(
+        "--export-format",
+        default="png",
+        choices=("png", "jpg", "jpeg", "webp", "avif"),
+        help="picture file for Forge: png (default), jpg, webp, or avif",
+    )
+    batch.add_argument("--json", action="store_true")
     return parser
 
 
@@ -490,6 +541,90 @@ def _photoshoot(args: argparse.Namespace) -> int:
     return _emit_photoshoot(_with_lora(payload, chosen), as_json, code)
 
 
+def _batch(args: argparse.Namespace) -> int:
+    """Run a manifest into --out. The manifest and the folder are checked before any model loads."""
+    if getattr(args, "vram_trace", False):
+        os.environ["VOXPRINT_VRAM_TRACE"] = "1"
+    as_json = bool(args.json)
+    manifest = Path(args.manifest)
+    try:
+        entries = load_manifest(manifest)
+    except ManifestInvalid as exc:
+        return _emit_batch({"ok": False, "error": "bad_manifest", "code": "bad_manifest", "message": str(exc)}, as_json, 2)
+    try:
+        chosen = _chosen_lora(args)
+    except LoraRejected as exc:
+        return _emit_lora(exc.code, as_json)
+    os_result = current_os_check()
+    if not os_result.ok:
+        return _emit({"ok": False, "error": os_result.message}, as_json, 2)
+    gpu = check_gpu(probe_gpu())
+    if not gpu.ok or gpu.tier is None:
+        return _emit({"ok": False, "error": gpu.message}, as_json, 2)
+    folder = Path(args.out) if str(args.out or "") else default_out(manifest)
+    try:
+        prepare_output_folder(folder)
+    except OutputFolderError as exc:
+        return _emit({"ok": False, "error": str(exc), "code": "output_folder"}, as_json, 2)
+    adult = bool(args.adult)
+    style = str(args.style)
+    tier = gpu.tier
+    lora = None if chosen is None else chosen[0]
+    scale = 0.7 if chosen is None else chosen[1]
+    try:
+        # One lock for the whole batch, taken before any weights load.
+        with pinned("canvas-batch"):
+            install_supporting(load_catalog(), lambda message: print(message, file=sys.stderr))
+            stack = load_catalog_stack(models_dir(), load_catalog())
+            serial = SerialGate.wrap(AgeGate(stack))
+            payload, code = run_batch_command(
+                entries=entries,
+                folder=folder,
+                style=style,
+                places=str(args.places),
+                adult=adult,
+                age_gate=serial,
+                # One writer session serves every entry, and the batch releases it once.
+                rewrite=model_rewrite(tier, adult),
+                frame_for=lambda entry: model_generate(serial, tier, style, adult, lora, scale, entry.negative),
+                timings=StageTimes(),
+                container=parse_export_format(str(args.export_format)),
+            )
+    except GpuLockTimeout:
+        return _emit_batch(
+            {"ok": False, "error": "gpu_busy", "code": "gpu_busy", "message": "the GPU is busy"}, as_json, 1,
+        )
+    except (
+        SafetyError, SnapshotError, DownloadDeclined, InferenceUnavailable, ModelNotReady,
+        ModeUnavailable, BaseNotSelected, JobError, CoolingDown, EnlargeMissing, EnlargeError, VramRefused, DeviceRefused,
+        OSError,
+    ) as exc:
+        return _emit({"ok": False, "error": str(exc)}, as_json, 1)
+    return _emit_batch(_with_lora(payload, chosen), as_json, code)
+
+
+def _emit_batch(payload: dict[str, object], as_json: bool, code: int) -> int:
+    if as_json:
+        print(json.dumps(payload))
+        return code
+    if payload.get("error"):
+        print(str(payload.get("message") or payload["error"]), file=sys.stderr)
+        return code
+    entries = payload.get("entries")
+    if isinstance(entries, list):
+        for row in entries:
+            if not isinstance(row, dict):
+                continue
+            for path in row.get("frames") or ():
+                print(path)
+            if row.get("status") != "ok":
+                print(f"{row.get('name')}: {row.get('status')}: {row.get('message', '')}", file=sys.stderr)
+    summary = payload.get("summary")
+    if isinstance(summary, str):
+        print(summary)
+    return code
+
+
 def _emit_photoshoot(payload: dict[str, object], as_json: bool, code: int) -> int:
     if as_json:
         print(json.dumps(payload))
@@ -559,6 +694,8 @@ def main(argv: list[str] | None = None) -> int:
         return _photoshoot_bench(args)
     if getattr(args, "command", None) == "photoshoot":
         return _photoshoot(args)
+    if getattr(args, "command", None) == "batch":
+        return _batch(args)
     if args.selftest:
         report = selftest_report(deep=bool(args.deep))
         if args.json:

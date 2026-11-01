@@ -37,7 +37,7 @@ from canvas.core.formats import extension, save_image
 from canvas.infra.enlarge import EnlargeClient
 from canvas.infra.vram import set_vram_cap_gb
 from canvas.models.mdl_registry import selectable
-from canvas.models.runtime import pipeline_scope
+from canvas.models.runtime import drop_warm, hold_warm, pipeline_scope, trim_warm
 from canvas.models.lora_library import LibraryEntry
 from canvas.models.user_lora import LoraIndex, discover, resolve_selected
 from canvas.ui.lora_panel import ImportedDialog, LibraryDialog, dark, import_with_dialog, library_loras
@@ -133,6 +133,8 @@ class ShellWindow(QMainWindow):
         self._pictures: dict[str, str] = {}
         self._series_folders: dict[str, str] = load_series_folders(shell.state_dir)
         self._busy = False
+        # The loaded pipeline stays between generations while this window is open.
+        self._warm = False
         self._chrome_ready = False
         self.setObjectName("shell")
         self.setWindowTitle(tr("splash.app.canvas"))
@@ -410,9 +412,26 @@ class ShellWindow(QMainWindow):
             return
         self._busy = True
         try:
+            if not self._warm:
+                hold_warm()
+                self._warm = True
             self._generate(settings)
         finally:
             self._busy = False
+            # The next generation reuses the pipeline when the card still has room for it.
+            trim_warm()
+
+    def release_warm(self) -> None:
+        """Drop the pipeline this window kept loaded. A second call does nothing."""
+        if not self._warm:
+            return
+        self._warm = False
+        drop_warm(release=True)
+
+    def closeEvent(self, event) -> None:  # noqa: N802 - Qt override
+        """Release the warm pipeline with the window."""
+        self.release_warm()
+        super().closeEvent(event)
 
     def _generate(self, settings: object = None) -> None:
         if self.photoshoot.enabled:

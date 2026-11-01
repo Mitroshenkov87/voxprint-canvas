@@ -38,6 +38,27 @@ Model Forge LoRAs live in `user-models/lora/<id>` under the shared models folder
 
 Weight files in the main registry are pinned by SHA-256. The loader refuses a missing file or a bad hash. A picture uses the pinned snapshot through diffusers 0.41.0 when those files are already on disk. The setup downloads the default Z-Image-Turbo pack. Z-Image-Turbo is taken from the public mirror first, then from the upstream repository.
 
+## Batch mode and the warm pipeline
+
+`voxprint-canvas-cli batch --manifest file.json [--out DIR]` runs every entry of a JSON manifest. An entry has a `prompt` (an idea the scenario writer turns into `count` shots) or a `shot` (one pose or shot line drawn `count` times with consecutive seeds), and optionally `negative`, `seed`, `count` and `name`. The manifest is validated strictly, and `--out` is created and proven writable, before any model loads; either failure exits with code 2. The GPU lock is taken once for the whole batch. Each entry writes into its own subfolder, named after its sanitised `name` or its 1-based index, and `batch.json` in `--out` records every entry.
+
+The batch runs the series phases once across all entries (`canvas/pipeline/batch.py`, on the phase helpers in `canvas/pipeline/series.py`):
+
+1. Every prompt, shot line and negative prompt is checked like the prompt before anything else. A refused entry is recorded as `refused` and draws nothing.
+2. One scenario writer session writes every prompt entry, then leaves the card once.
+3. Every shot line is checked, then every line is encoded in one text-encoder session.
+4. The picture pipeline loads once, renders every entry, and decodes every entry in one VAE session. The whole batch runs inside one `pipeline_scope()`.
+5. Every picture is checked before it is saved. Nothing unchecked is written.
+
+Decision: **a refused or stopped entry does not stop the batch.** The other entries continue, and the command exits 1 when any entry wrote nothing (0 when every entry wrote at least one picture). A check that cannot finish is the exception: it stops every write after it, in every entry, so nothing is saved without a finished check.
+
+Decision: **the window keeps the loaded pipeline between generations.** Before rc.32 each click ran in its own `pipeline_scope()`; on `ram32` the pipeline was released after the click and read from disk on the next one, and on `ram64`/`ram96` it was parked (VRAM copies dropped, RAM copies kept). Now the window opens a process-lifetime hold (`hold_warm()` in `canvas/models/runtime.py`) on its first generation and closes it when the window closes (`drop_warm(release=True)`), so the next generation in the same process reuses the loaded pipeline. Fail-safe rules:
+
+- After every generation `trim_warm()` runs the existing picture fit check on real free VRAM. When the card does not have that room, or its free memory cannot be read, the pipeline is parked: `ram64`/`ram96` keep the RAM copy, `ram32` drops it. Without a CUDA device nothing is on the card and the pipeline stays.
+- A model, tier or LoRA change loads again, as before: the pipeline key is compared on every call.
+- Stages that need the card still park the pipeline first: the scenario writer and the enhancer, the series before its output check, and the 4K chain before Enlarge (`Pipeline._release_models` parks it). On `ram32` parking drops it.
+- An error inside a run parks or releases it, as before.
+
 ## Content safety checks
 
 The app runs content safety checks on a request before it keeps an image.

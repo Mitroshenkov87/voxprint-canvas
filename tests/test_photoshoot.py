@@ -631,7 +631,7 @@ def test_numbered_lines_are_read_as_shots(tmp_path: Path) -> None:
     assert result.stopped == "" and result.source == "writer"
     assert len(result.kept) == 6
     assert document["appearance"] == ""
-    assert document["age"] is None
+    assert "age" not in document
     assert document["subject_block"] == IDEA
     assert document["lines"][0] == (
         f"A single photograph, view 0, soft light, 50 mm, eye level, still, of {IDEA}, kitchen table"
@@ -849,7 +849,7 @@ def test_a_person_series_repeats_one_appearance_and_anchors_the_hero(tmp_path: P
     assert all(item[1] is seen[1][1] for item in seen[1:])
     assert all(item[0].startswith("A single photograph, ") and f", of {PERSON}" in item[0] for item in seen)
     assert [item[2] for item in seen] == [REFERENCE_STRENGTH] * 6
-    assert document["age"] == 25
+    assert "age" not in document
 
 
 def test_a_blocked_frame_does_not_replace_the_hero(tmp_path: Path) -> None:

@@ -19,6 +19,7 @@ from typing import Any, Callable, assert_never
 from voxprint_common.model_park import ModelPark, reset_process_park
 from voxprint_common.ram_probe import RamTier, ram_tier, tier_for_gib
 
+from canvas.infra import settings
 from canvas.infra.stage_timer import log_detail, note_tag
 
 # Highest priority first. A smaller machine fills this list until the budget is gone.
@@ -69,6 +70,9 @@ def active_tier() -> RamTier:
     named = _named(os.environ.get("VOXPRINT_RAM_MODE", "").strip().lower())
     if named is not None:
         return named
+    chosen = _named(settings.get().placement or "")
+    if chosen is not None:
+        return chosen
     total = probed_bytes()
     if total > 0:
         return tier_for_gib(total / _GIB)

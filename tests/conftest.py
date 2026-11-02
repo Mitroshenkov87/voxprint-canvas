@@ -70,3 +70,14 @@ def _toy_lora_shapes(request, monkeypatch):
         except ImportError:  # the guide job installs only the doc tools
             return
         monkeypatch.setattr(user_lora, "_base_shapes", lambda: {})
+
+
+@pytest.fixture(autouse=True)
+def _fresh_worker_session():
+    """Each test starts the in-process worker session from scratch."""
+    yield
+    try:
+        from canvas import worker_jobs
+    except ImportError:
+        return
+    worker_jobs.install_session(None)

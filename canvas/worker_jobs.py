@@ -1,0 +1,584 @@
+"""Model work for the Canvas window. This module runs in the worker process.
+
+The window imports nothing from here. It names these handlers by string
+(``canvas.worker_jobs:run`` and ``canvas.worker_jobs:check``) and the
+``voxprint_common.worker`` host imports them in a spawned child. The child
+owns the gate, the generator, the warm pipeline, the rewriter and the GPU
+lock. Checks run in the worker, on every route, before anything is handed
+back.
+
+Requests and replies follow :mod:`canvas.ipc.schema`. A picture leaves this
+process only as a file written into the window's private session folder,
+after the checks for that picture passed.
+"""
+from __future__ import annotations
+
+import json
+import os
+import random
+import uuid
+from collections.abc import Callable, Mapping
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+
+from voxprint_common.worker import JobCancelled, JobContext
+
+from canvas.ipc.schema import PROTO, encode_event, refused, reply
+
+__all__ = ["Session", "check", "install_session", "run", "session"]
+
+
+@dataclass
+class Session:
+    """What the worker keeps between jobs.
+
+    ``check`` is the screen's review adapter (:class:`canvas.app.shell_gate.ContentCheck`)
+    around ``gate``. ``runner`` turns one picture job into pixels (a
+    :class:`canvas.app.shell_run.ShellRunner` in the app). ``improver`` rewrites
+    a prompt. ``series_writer`` replaces the scenario writer when it is set.
+    """
+
+    gate: object
+    check: object
+    tier: object
+    runner: object
+    improver: Callable[..., str]
+    series_writer: Callable[[str], str] | None = None
+    warm: bool = False
+    extras: dict[str, object] = field(default_factory=dict)
+
+
+_SESSION: Session | None = None
+
+
+def install_session(value: Session | None) -> None:
+    """Use ``value`` for the following jobs. None builds the default again on the next job."""
+    global _SESSION
+    _SESSION = value
+
+
+def session(tier_name: str) -> Session:
+    """The worker session, built on first use for ``tier_name``.
+
+    Raises:
+        Exception: The gate or the runner could not be built. The job then
+            ends as unavailable.
+    """
+    global _SESSION
+    if _SESSION is None:
+        _SESSION = _default_session(tier_name)
+    return _SESSION
+
+
+def _default_session(tier_name: str) -> Session:
+    from canvas.app.shell_gate import ContentCheck
+    from canvas.app.shell_run import ShellRunner, improve_prompt
+    from canvas.infra.enlarge import EnlargeClient
+    from canvas.infra.paths import models_dir
+    from canvas.models.loader import load_catalog_stack
+    from canvas.models.modes import Tier
+    from canvas.models.registry import load_catalog
+    from canvas.safety.gate import AgeGate
+
+    tier = Tier(tier_name)
+    gate = AgeGate(load_catalog_stack(models_dir(), load_catalog()))
+    runner = ShellRunner(gate=gate, tier=tier, enlarge=EnlargeClient())
+
+    def improver(*, prompt: str, adult: bool, progress: Callable[[str], None]) -> str:
+        return improve_prompt(gate=gate, prompt=prompt, tier=tier, adult=adult, progress=progress)
+
+    return Session(gate=gate, check=ContentCheck(gate=gate), tier=tier, runner=runner, improver=improver)
+
+
+# --- entry points -----------------------------------------------------------------------------------------------
+
+
+def run(ctx: JobContext) -> dict[str, object]:
+    """Run one window request. See :mod:`canvas.ipc.schema` for the ops."""
+    payload = ctx.payload
+    if not isinstance(payload, Mapping) or payload.get("proto") != PROTO:
+        return refused(str(getattr(payload, "get", lambda _k: "")("op") or "hello"), "proto_mismatch", "", unavailable=True)
+    op = str(payload.get("op") or "")
+    route = _ROUTES.get(op)
+    if route is None:
+        return refused(op or "hello", "proto_mismatch", "", unavailable=True)
+    try:
+        current = session(str(payload.get("tier") or ""))
+    except Exception as exc:  # noqa: BLE001 - any failure to build the checks ends the job as unavailable
+        return refused(op, "check.load", _unavailable_text(exc), unavailable=True)
+    return route(ctx, current, payload)
+
+
+def check(ctx: JobContext) -> dict[str, object]:
+    """A ``check`` job: review prompts before the window starts a picture."""
+    payload = ctx.payload
+    if not isinstance(payload, Mapping) or payload.get("proto") != PROTO or payload.get("op") != "prompts":
+        return refused("prompts", "proto_mismatch", "", unavailable=True)
+    try:
+        current = session(str(payload.get("tier") or ""))
+    except Exception as exc:  # noqa: BLE001
+        return refused("prompts", "check.load", _unavailable_text(exc), unavailable=True)
+    return _prompts(ctx, current, payload)
+
+
+# --- routes -------------------------------------------------------------------------------------------------------
+
+
+def _hello(ctx: JobContext, current: Session, payload: Mapping[str, object]) -> dict[str, object]:
+    del ctx, payload
+    tier = getattr(current.tier, "value", str(current.tier))
+    return reply("hello", tier=str(tier), pid=os.getpid())
+
+
+def _prompts(ctx: JobContext, current: Session, payload: Mapping[str, object]) -> dict[str, object]:
+    del ctx
+    prompts = payload.get("prompts")
+    if not isinstance(prompts, list) or not all(isinstance(item, str) for item in prompts):
+        return refused("prompts", "malformed", "", unavailable=True)
+    reason = _review_prompts(current, prompts)
+    if reason is not None:
+        return refused("prompts", "prompt", reason, unavailable=False)
+    return reply("prompts")
+
+
+def _generate(ctx: JobContext, current: Session, payload: Mapping[str, object]) -> dict[str, object]:
+    from canvas.app.shell_run import RunStopped
+    from canvas.core.formats import extension, save_image
+    from canvas.models.runtime import hold_warm, pipeline_scope, trim_warm
+
+    job = _job(payload.get("job"))
+    layout_prompt = str(payload.get("layout_prompt") or "")
+    out_dir = Path(str(payload.get("out_dir")))
+    _apply_vram(payload.get("vram"))
+    reason = _review_prompts(current, [layout_prompt, job.prompt])
+    if reason is not None:
+        return refused("generate", "prompt", reason, unavailable=False)
+    _stop_if_cancelled(ctx)
+    try:
+        inputs = _inputs(payload.get("inputs"))
+    except OSError:
+        from canvas.app.i18n import text
+
+        return refused("generate", "job", text("error.job"), unavailable=False)
+    ctx.progress(message="", step=0, total_steps=1)
+    if payload.get("warm") and not current.warm:
+        hold_warm()
+        current.warm = True
+    try:
+        with pipeline_scope():
+            raw = current.runner(job, inputs)  # type: ignore[operator]
+    except RunStopped as exc:
+        return refused("generate", exc.code or "job", exc.message, unavailable=exc.unavailable)
+    finally:
+        if current.warm:
+            trim_warm()
+    if ctx.cancelled():
+        _wipe(raw)
+        raise JobCancelled()
+    item_id = uuid.uuid4().hex
+    staged = _copy(raw)
+    _wipe(raw)
+    current.check.stage(item_id, staged)  # type: ignore[attr-defined]
+    reason = current.check.review_result(layout_prompt, item_id)  # type: ignore[attr-defined]
+    safe = current.check.kept.pop(item_id, None)  # type: ignore[attr-defined]
+    if reason is not None or safe is None:
+        return refused("generate", "output", reason or _unavailable_text(None), unavailable=reason is None)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / f"{item_id}{extension(job.fmt)}"
+    save_image(safe, path, job.fmt)
+    return reply("generate", item_id=item_id, path=str(path), width=int(safe.width), height=int(safe.height))
+
+
+def _improve(ctx: JobContext, current: Session, payload: Mapping[str, object]) -> dict[str, object]:
+    prompt = str(payload.get("prompt") or "")
+
+    def progress(message: str) -> None:
+        ctx.progress(message=encode_event("note", text=str(message)))
+
+    try:
+        rewritten = current.improver(prompt=prompt, adult=bool(payload.get("adult")), progress=progress)
+    except Exception as exc:  # noqa: BLE001 - the window keeps the old words and shows the reason
+        message = getattr(exc, "user_message", None)
+        code = getattr(exc, "code", "") or "internal"
+        return refused("improve", str(code), message if isinstance(message, str) else "", unavailable=False)
+    if not isinstance(rewritten, str):
+        return refused("improve", "internal", "", unavailable=True)
+    return reply("improve", prompt=rewritten)
+
+
+def _lora_import(ctx: JobContext, current: Session, payload: Mapping[str, object]) -> dict[str, object]:
+    from canvas.models.lora_library import import_lora
+    from canvas.models.user_lora import LoraRejected
+
+    asked: list[str] = []
+    confirmed = payload.get("confirmed") is True
+
+    def confirm(manifest: object) -> bool:
+        if confirmed:
+            return True
+        asked.append(str(getattr(manifest, "name", "")))
+        return False
+
+    def progress(line: str) -> None:
+        ctx.progress(message=encode_event("note", text=str(line)))
+
+    root = payload.get("root")
+    try:
+        entry = import_lora(
+            Path(str(payload.get("path"))),
+            current.gate,
+            root=Path(str(root)) if root else None,
+            confirm=confirm,
+            progress=progress,
+        )
+    except LoraRejected as exc:
+        return refused("lora_import", exc.code, "", unavailable=False)
+    if entry is None and asked:
+        return {"proto": PROTO, "op": "lora_import", "status": "needs_confirm", "name": asked[0]}
+    return reply("lora_import", entry_id=None if entry is None else entry.id)
+
+
+def _selftest(ctx: JobContext, current: Session, payload: Mapping[str, object]) -> dict[str, object]:
+    del ctx, current
+    from canvas.app.selftest import selftest_report
+
+    report = selftest_report(deep=bool(payload.get("deep")))
+    return reply("selftest", report=json.loads(json.dumps(report, default=str)))
+
+
+def _probe_gpu(ctx: JobContext, current: Session, payload: Mapping[str, object]) -> dict[str, object]:
+    del ctx, current, payload
+    from canvas.infra.gpu import probe_gpu
+
+    return reply("probe_gpu", gpu=probe_gpu() is not None)
+
+
+def _warm(ctx: JobContext, current: Session, payload: Mapping[str, object]) -> dict[str, object]:
+    del ctx
+    from canvas.models.runtime import drop_warm
+
+    if payload.get("action") == "drop" and current.warm:
+        current.warm = False
+        drop_warm(release=True)
+    return reply("warm", warm=current.warm)
+
+
+# --- Photoshoot series --------------------------------------------------------------------------------------------
+
+
+class _Halt(Exception):
+    """The series cannot continue because the machine stopped the picture."""
+
+    def __init__(self, message: str, *, unavailable: bool = False) -> None:
+        super().__init__(message)
+        self.message = message
+        self.unavailable = unavailable
+
+
+def _series(ctx: JobContext, current: Session, payload: Mapping[str, object]) -> dict[str, object]:
+    from canvas.app.shell_run import RunStopped, load_rgb
+    from canvas.core.formats import OutputFormat
+    from canvas.infra.gpu_lock import lock_path, release
+    from canvas.models.loader import ModelNotReady
+    from canvas.models.modes import Mode
+    from canvas.models.runtime import InferenceUnavailable
+    from canvas.pipeline.photoshoot import assemble_line, frame_negative
+    from canvas.pipeline.series import REFERENCE_STRENGTH, SeriesFrame, run_series
+    from canvas.safety.image import RawImage
+    from canvas.safety.inputs import ImageRole, PendingInput
+
+    base = _job(payload.get("job"))
+    idea = str(payload.get("idea") or "")
+    style = str(payload.get("style") or "photo")
+    template = str(payload.get("template") or "")
+    suffix = str(payload.get("suffix") or "")
+    seed_mode = str(payload.get("seed_mode") or "series")
+    base_seed = _whole(payload.get("seed"))
+    adult = bool(payload.get("adult"))
+    series_id = str(payload.get("series_id"))
+    session_dir = Path(str(payload.get("out_dir")))
+    folder = session_dir / "series" / series_id
+    manifest = session_dir / "series" / f"{series_id}.json"
+    strength = REFERENCE_STRENGTH if payload.get("strength") == "high" else None
+    container = OutputFormat(str(payload.get("container") or "png"))
+    runner = current.runner
+    reason = _review_prompts(current, [idea])
+    if reason is not None:
+        return refused("series", "prompt", reason, unavailable=False)
+
+    def compose(line: str) -> str:
+        return " ".join(part for part in (template, line.strip(), suffix) if part)
+
+    def note(message: str) -> None:
+        ctx.progress(message=encode_event("note", text=str(message)))
+
+    writer = _writer_session(current, adult, note)
+
+    def rewrite(prompt: str) -> str:
+        if current.series_writer is not None:
+            return current.series_writer(prompt)
+        return writer(prompt)
+
+    rewrite.release = writer.release  # type: ignore[attr-defined]
+    seeds: dict[int, int] = {}
+    scenario_box: dict[str, object] = {}
+
+    def job_for(line: str, seed: int, hero: SeriesFrame | None, frame_strength: float | None):
+        used = seeds.setdefault(seed, _series_seed(seed_mode, base_seed, seed))
+        picture = base._replace(
+            prompt=compose(line),
+            negative=frame_negative(base.negative),
+            seed=used,
+            mode=Mode.TEXT if hero is None else Mode.RESTYLE,
+            copies=1,
+            aspect="1:1",
+            output="native",
+        )
+        fresh: tuple[PendingInput, ...] = ()
+        if hero is None:
+            if hasattr(runner, "img2img_strength"):
+                runner.img2img_strength = None
+        else:
+            if hasattr(runner, "img2img_strength"):
+                runner.img2img_strength = frame_strength
+            # Always a copy: the pipeline wipes its inputs, and the hero is reused for every shot.
+            fresh = (PendingInput(ImageRole.INIT, RawImage(hero.width, hero.height, hero.to_bytes())),)
+        return picture, fresh
+
+    def generate(line: str, seed: int, hero: SeriesFrame | None, frame_strength: float | None):
+        picture, fresh = job_for(line, seed, hero, frame_strength)
+        try:
+            return runner(picture, fresh)  # type: ignore[operator]
+        except RunStopped as exc:
+            if exc.unavailable:
+                raise _Halt(exc.message, unavailable=True) from exc
+            raise
+
+    def sample(line: str, seed: int, hero: SeriesFrame | None, frame_strength: float | None) -> bool:
+        sampler = getattr(runner, "sample", None)
+        if not callable(sampler):
+            return False
+        picture, fresh = job_for(line, seed, hero, frame_strength)
+        try:
+            return sampler(picture, fresh) is True
+        except RunStopped as exc:
+            if exc.unavailable:
+                raise _Halt(exc.message, unavailable=True) from exc
+            raise
+
+    def prepare(lines: list[str]) -> None:
+        precompute = getattr(runner, "precompute", None)
+        if not callable(precompute):
+            return
+        try:
+            precompute(tuple(compose(line) for line in lines))
+        except (ImportError, ModelNotReady, InferenceUnavailable) as exc:
+            raise _Halt(str(exc), unavailable=True) from exc
+
+    generate.prepare = prepare  # type: ignore[attr-defined]
+    generate.sample = sample  # type: ignore[attr-defined]
+
+    def on_scenario(scenario: object) -> None:
+        scenario_box["scenario"] = scenario
+        ctx.progress(message=encode_event(
+            "scenario",
+            subject=str(getattr(scenario, "subject_block", "")),
+            shots=[asdict(shot) for shot in getattr(scenario, "shots", ())],
+            seed=base_seed,
+        ))
+
+    def on_status(index: int, status: str) -> None:
+        ctx.progress(message=encode_event("status", index=int(index), status=str(status)))
+
+    def line_for(index: int) -> str:
+        scenario = scenario_box.get("scenario")
+        shots = getattr(scenario, "shots", ())
+        return assemble_line(
+            str(getattr(scenario, "subject_block", "")), shots[index], include_camera=True, index=index, seed=base_seed,
+        )
+
+    if hasattr(runner, "cook"):
+        runner.cook = True
+    try:
+        result = run_series(
+            idea=idea,
+            count=max(1, _whole(payload.get("count"))),
+            style=style,
+            place_mode=str(payload.get("place") or "same"),
+            seed=base_seed,
+            strength=strength,
+            include_camera=lambda: True,
+            rewrite=rewrite,
+            age_gate=current.gate,  # type: ignore[arg-type]
+            draw_frame=generate,
+            cancelled=ctx.cancelled,
+            folder=folder,
+            on_scenario=on_scenario,
+            line_for=line_for,
+            on_status=on_status,
+            adult=adult,
+            container=container,
+        )
+    except _Halt as exc:
+        return refused("series", "halt", exc.message, unavailable=exc.unavailable)
+    finally:
+        writer.release()
+        if hasattr(runner, "cook"):
+            runner.cook = False
+        release(lock_path())
+    hero_released = False
+    hero_reason = ""
+    if result.kept and result.folder is not None:
+        item_id = f"series-{series_id}"
+        try:
+            raw = load_rgb(result.kept[0])
+        except OSError:
+            raw = None
+        if raw is not None:
+            current.check.stage(item_id, raw)  # type: ignore[attr-defined]
+            reason = current.check.review_result(idea, item_id)  # type: ignore[attr-defined]
+            safe = current.check.kept.pop(item_id, None)  # type: ignore[attr-defined]
+            hero_released = reason is None and safe is not None
+            hero_reason = "" if hero_released else (reason or _unavailable_text(None))
+    body = {
+        "stopped": result.stopped,
+        "reason": result.reason,
+        "code": result.code,
+        "source": result.source,
+        "folder": None if result.folder is None else str(result.folder),
+        "kept": [path.name for path in result.kept],
+        "hero_released": hero_released,
+        "hero_reason": hero_reason,
+    }
+    if ctx.cancelled():
+        # The host drops a cancelled job's return value. The same fields go to a noted file instead.
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        temporary = manifest.with_suffix(".tmp")
+        temporary.write_text(json.dumps({"proto": PROTO, "op": "series", "status": "ok", **body}), encoding="utf-8")
+        os.replace(temporary, manifest)
+        ctx.note_checkpoint(str(manifest))
+    return reply("series", **body)
+
+
+def _writer_session(current: Session, adult: bool, note: Callable[[str], None]):
+    from canvas.infra.paths import models_dir
+    from canvas.models.registry import load_catalog
+    from canvas.models.snapshots import SnapshotError
+    from canvas.pipeline.adult_direction import scenario_system
+    from canvas.pipeline.enhance import WriterSession, open_rewriter
+    from canvas.pipeline.photoshoot import SYSTEM_PROMPT, tokens_for_request
+
+    def open_writer(budget: int):
+        try:
+            return open_rewriter(load_catalog(), current.tier, models_dir(), note, max_new_tokens=budget)  # type: ignore[arg-type]
+        except (SnapshotError, OSError) as exc:
+            raise _Halt(str(exc), unavailable=True) from exc
+
+    return WriterSession(open_writer, scenario_system(SYSTEM_PROMPT, adult), tokens_for_request)
+
+
+def _series_seed(mode: str, base: int, series_seed: int) -> int:
+    if mode == "series":
+        return series_seed
+    if mode == "locked":
+        return base
+    if mode == "random":
+        return random.SystemRandom().randrange(1, 2**31)
+    raise ValueError(mode)
+
+
+# --- helpers ------------------------------------------------------------------------------------------------------
+
+
+def _review_prompts(current: Session, prompts: list[str]) -> str | None:
+    """The screen's prompt review for each prompt. The first reason stops."""
+    for prompt in prompts:
+        if not prompt.strip():
+            continue
+        reason = current.check.review_prompt(prompt)  # type: ignore[attr-defined]
+        if reason:
+            return str(reason)
+    return None
+
+
+def _job(value: object):
+    from canvas.core.formats import OutputFormat
+    from canvas.models.modes import Mode
+    from canvas.ui.shell_layout import PictureJob
+
+    if not isinstance(value, Mapping):
+        raise ValueError("the job is missing")
+    fields = dict(value)
+    fields["mode"] = Mode(str(fields["mode"]))
+    fields["fmt"] = OutputFormat(str(fields["fmt"]))
+    return PictureJob(**fields)
+
+
+def _inputs(value: object) -> tuple[object, ...]:
+    from canvas.app.shell_run import load_rgb
+    from canvas.safety.inputs import ImageRole, PendingInput
+
+    if not value:
+        return ()
+    if not isinstance(value, list):
+        raise OSError("inputs must be a list")
+    found = []
+    for item in value:
+        if not isinstance(item, Mapping):
+            raise OSError("bad input")
+        found.append(PendingInput(ImageRole(str(item.get("role"))), load_rgb(Path(str(item.get("path"))))))
+    return tuple(found)
+
+
+def _apply_vram(value: object) -> None:
+    from canvas.infra.vram import set_vram_cap_gb
+
+    if value == "auto":
+        set_vram_cap_gb(None)
+    elif value in {"8", "12", "16", "24"}:
+        set_vram_cap_gb(float(str(value)))
+
+
+def _whole(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return 0
+    return value
+
+
+def _copy(raw: object):
+    from canvas.safety.image import RawImage
+
+    return RawImage(raw.width, raw.height, raw.to_bytes())  # type: ignore[attr-defined]
+
+
+def _wipe(raw: object) -> None:
+    wipe = getattr(raw, "wipe", None)
+    if callable(wipe):
+        wipe()
+
+
+def _stop_if_cancelled(ctx: JobContext) -> None:
+    if ctx.cancelled():
+        raise JobCancelled()
+
+
+def _unavailable_text(exc: BaseException | None) -> str:
+    from canvas.app.i18n import text
+
+    message = getattr(exc, "user_message", None)
+    if isinstance(message, str) and message:
+        return message
+    return text("gate.unavailable")
+
+
+_ROUTES: dict[str, Callable[[JobContext, Session, Mapping[str, object]], dict[str, object]]] = {
+    "hello": _hello,
+    "prompts": _prompts,
+    "generate": _generate,
+    "series": _series,
+    "improve": _improve,
+    "lora_import": _lora_import,
+    "selftest": _selftest,
+    "probe_gpu": _probe_gpu,
+    "warm": _warm,
+}

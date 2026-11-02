@@ -26,7 +26,7 @@ from canvas.safety.inputs import ImageRole, PendingInput
 from canvas.infra.enlarge import EnlargeClient, EnlargeError
 from canvas.infra.gpu import probe_gpu
 from canvas.infra import settings
-from canvas.infra.gpu_lock import GpuLockTimeout, forget_device_key, pinned, prepare_startup_lock
+from canvas.infra.gpu_lock import GpuLockTimeout, forget_device_key, pinned
 from canvas.infra.manifest import ManifestError
 from canvas.infra.models_users import register, unregister
 from canvas.infra.paths import OutputFolderError, models_dir, prepare_output_folder, shared_dir
@@ -58,6 +58,7 @@ from canvas.ipc.client import WorkerClient, default_host
 from canvas.ui.shell_layout import canvas_state_dir, open_worker_layout
 from canvas.ui.shell_screen import ShellWindow
 from canvas.ui.worker_checks import WorkerChecks
+from voxprint_common.ui.simple_image import Phase
 from voxprint_common.worker.qt import install_crash_bar
 from canvas.ui.splash import Splash, show_splash
 
@@ -290,7 +291,8 @@ def _launch(tier: Tier, splash: Splash | None = None, app: QApplication | None =
         app = _application()
     if splash is None:
         splash = show_splash()
-    lock_note = prepare_startup_lock()
+    # The GPU lock is keyed by the worker's CUDA device; the worker clears a stale one at hello.
+    lock_note = None
 
     def stage(message: str) -> None:
         print(message, file=sys.stderr)
@@ -320,8 +322,13 @@ def _launch(tier: Tier, splash: Splash | None = None, app: QApplication | None =
         window.shell.layout.unavailable(text("startup.lock"))
         window.view.refresh()
     splash.finish(window)
+    def note_lock() -> None:
+        if worker.hello.get("lock") == "busy" and window.shell.layout.phase is not Phase.BUSY:
+            window.shell.layout.unavailable(text("startup.lock"))
+            window.view.refresh()
+
     # The worker starts once the event loop runs; models still load on first use.
-    QTimer.singleShot(0, worker.start)
+    QTimer.singleShot(0, lambda: worker.when_ready(note_lock, lambda _reason: None))
     try:
         app.exec()
     finally:

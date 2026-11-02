@@ -126,8 +126,12 @@ def check(ctx: JobContext) -> dict[str, object]:
 
 def _hello(ctx: JobContext, current: Session, payload: Mapping[str, object]) -> dict[str, object]:
     del ctx, payload
+    from canvas.infra.gpu_lock import prepare_startup_lock
+
+    # The lock file is keyed by the CUDA device this process sees, so it is read here, not in the window.
+    lock = prepare_startup_lock() or ""
     tier = getattr(current.tier, "value", str(current.tier))
-    return reply("hello", tier=str(tier), pid=os.getpid())
+    return reply("hello", tier=str(tier), pid=os.getpid(), lock=lock)
 
 
 def _prompts(ctx: JobContext, current: Session, payload: Mapping[str, object]) -> dict[str, object]:

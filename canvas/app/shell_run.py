@@ -160,7 +160,8 @@ class ShellRunner:
             except LoraLoadError as exc:
                 _halt(str(exc), exc, "lora", unavailable=True)
             except LoraRejected as exc:
-                _halt(text(exc.code), exc, exc.code, unavailable=False)
+                # A LoRA that does not fit fails the same way on every frame: end the run.
+                _halt(text(exc.code), exc, exc.code, unavailable=True, crash=False)
             except (
                 ModelNotReady,
                 InferenceUnavailable,
@@ -286,9 +287,9 @@ def load_rgb(path: Path) -> RawImage:
         raise OSError(str(exc)) from exc
 
 
-def _halt(message: str, exc: BaseException, code: str, *, unavailable: bool) -> NoReturn:
-    """Stop one picture. An unavailable stop is written to the crash log once."""
-    if unavailable:
+def _halt(message: str, exc: BaseException, code: str, *, unavailable: bool, crash: bool = True) -> NoReturn:
+    """Stop one picture. An unavailable stop is written to the crash log once, unless ``crash`` is False."""
+    if unavailable and crash:
         note_crash(code or "internal", exc)
     raise RunStopped(message, unavailable=unavailable, code=code) from exc
 

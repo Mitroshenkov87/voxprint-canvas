@@ -13,13 +13,15 @@ from __future__ import annotations
 
 import os
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Callable, assert_never
 
 from voxprint_common.model_park import ModelPark, reset_process_park
 from voxprint_common.ram_probe import RamTier, ram_tier, tier_for_gib
 
-from canvas.infra import settings
+from canvas.infra import ram_ledger, settings
 from canvas.infra.stage_timer import log_detail, note_tag
 
 # Highest priority first. A smaller machine fills this list until the budget is gone.
@@ -41,11 +43,25 @@ _RESERVE = 12 * _GIB
 # Free RAM left after a park. A second Canvas job on another card shares the RAM.
 _FREE_FLOOR = 8 * _GIB
 
+# RAM the picture models take once parked, from the Z-Image-Turbo bf16 parks on the 4090 test machine.
+_FOOTPRINT = {
+    "text_encoder": 8_044_936_704,
+    "transformer": 12_309_817_472,
+    "vae": 167_639_366,
+}
+# What a job uses besides its parked copies: loads from disk, the checks, CUDA host memory.
+# A solo ram96 job peaked at 57 GB with about 28 GB parked.
+_JOB_RESERVE = 32 * _GIB
+_TIER_RANK = {RamTier.RAM32: 0, RamTier.RAM64: 1, RamTier.RAM96: 2}
+
 _cache: dict[str, "_Resident"] = {}
 _bundles: dict[str, Any] = {}
 _committed = 0
 _tier_noted = False
 _planned: set[str] = set()
+_job: RamTier | None = None
+_job_budget: int | None = None
+_job_depth = 0
 _ssd_logged: set[str] = set()
 
 
@@ -83,7 +99,7 @@ def active_tier() -> RamTier:
 
 def keeps_main_tier() -> bool:
     """True when the picture models stay in RAM between runs."""
-    tier = active_tier()
+    tier = job_tier()
     match tier:
         case RamTier.RAM32:
             return False
@@ -96,11 +112,70 @@ def keeps_main_tier() -> bool:
 def note_tier() -> RamTier:
     """Log the tier once per process."""
     global _tier_noted
-    tier = active_tier()
+    tier = job_tier()
     if not _tier_noted:
         _tier_noted = True
         note_tag("ram", tier.value)
         log_detail("hot", "tier", "cpu", f"tier={tier.value}")
+    return tier
+
+
+def job_tier() -> RamTier:
+    """The tier this job runs at: the suite tier, lowered when free RAM was short at the start."""
+    wanted = active_tier()
+    if _job is None:
+        return plan_job()
+    return _job if _TIER_RANK[_job] < _TIER_RANK[wanted] else wanted
+
+
+def begin_job() -> RamTier:
+    """Plan a new job, unless a ``job_scope`` already planned the one this is part of."""
+    if _job_depth > 0 and _job is not None:
+        return job_tier()
+    return plan_job()
+
+
+@contextmanager
+def job_scope() -> Iterator[RamTier]:
+    """One RAM plan for everything inside, such as every entry of a batch."""
+    global _job_depth
+    tier = plan_job() if _job_depth == 0 else job_tier()
+    _job_depth += 1
+    try:
+        yield tier
+    finally:
+        _job_depth -= 1
+
+
+def plan_job() -> RamTier:
+    """Choose the tier for the whole job from free RAM now.
+
+    The picture models not parked yet, plus ``_JOB_RESERVE`` and ``_FREE_FLOOR``,
+    must fit in free RAM minus what other Canvas jobs still expect to take
+    (``ram_ledger``). Otherwise the job keeps what fits, highest priority first
+    (``ram64``), or reads every model from disk (``ram32``). Unknown free RAM
+    keeps the suite tier.
+    """
+    global _job, _job_budget
+    wanted = active_tier()
+    pending = sum(size for name, size in _FOOTPRINT.items() if name not in _cache)
+    free = free_bytes()
+    others = ram_ledger.others_pending()
+    tier = wanted
+    budget: int | None = None
+    if free > 0 and wanted is not RamTier.RAM32:
+        room = free - others - _JOB_RESERVE - _FREE_FLOOR
+        if room < pending:
+            first = 0 if "transformer" in _cache else _FOOTPRINT["transformer"]
+            tier = RamTier.RAM64 if room >= first else RamTier.RAM32
+            budget = _committed + max(0, room)
+    _job, _job_budget = tier, budget
+    keep = 0 if tier is RamTier.RAM32 else min(pending, budget if budget is not None else pending)
+    ram_ledger.publish(ram_ledger.process_bytes(os.getpid()) + keep + _JOB_RESERVE)
+    log_detail(
+        "hot", "job", "cpu",
+        f"pid={os.getpid()} tier={tier.value} wanted={wanted.value} free={free} others={others} need={pending}",
+    )
     return tier
 
 
@@ -278,7 +353,7 @@ def forget(*names: str) -> None:
 
 def reset() -> None:
     """Drop every RAM copy. Tests call this between cases."""
-    global _committed, _tier_noted
+    global _committed, _tier_noted, _job, _job_budget, _job_depth
     for resident in _cache.values():
         if resident.parked is not None:
             _release_quietly(resident.parked)
@@ -288,12 +363,15 @@ def reset() -> None:
     _ssd_logged.clear()
     _committed = 0
     _tier_noted = False
+    _job = None
+    _job_budget = None
+    _job_depth = 0
     reset_process_park()
 
 
 def plan(sizes: dict[str, int]) -> dict[str, str]:
     """``ram`` or ``disk`` for each name, in priority order, for the current tier."""
-    tier = active_tier()
+    tier = job_tier()
     match tier:
         case RamTier.RAM32:
             return {name: "disk" for name in sizes}
@@ -317,7 +395,7 @@ def _fill(sizes: dict[str, int], budget: int) -> dict[str, str]:
 
 
 def _seat(name: str, size: int) -> bool:
-    tier = active_tier()
+    tier = job_tier()
     match tier:
         case RamTier.RAM32:
             return False
@@ -340,7 +418,8 @@ def _keep_budget() -> int:
     total = probed_bytes()
     if total <= 0:
         total = int(ram_tier_total())
-    return max(0, total - _RESERVE)
+    budget = max(0, total - _RESERVE)
+    return budget if _job_budget is None else min(budget, _job_budget)
 
 
 def ram_tier_total() -> float:
@@ -365,7 +444,7 @@ def _park_state(name: str, state: dict[str, Any], declared: int) -> Any:
 
 
 def _park() -> ModelPark:
-    tier = active_tier()
+    tier = job_tier()
     park = ModelPark.for_process(tier, app="voxprint-canvas")
     if park.tier is not tier:
         reset_process_park()
@@ -403,11 +482,14 @@ def free_bytes() -> int:
 
 
 def _fits_now(size: int) -> bool:
-    """True when parking ``size`` bytes still leaves ``_FREE_FLOOR`` free. Unknown free RAM fits."""
+    """True when parking ``size`` bytes still leaves ``_FREE_FLOOR`` free. Unknown free RAM fits.
+
+    RAM that other Canvas jobs still expect to take counts as used.
+    """
     free = free_bytes()
     if free <= 0:
         return True
-    return free - max(0, int(size)) >= _FREE_FLOOR
+    return free - ram_ledger.others_pending() - max(0, int(size)) >= _FREE_FLOOR
 
 
 def _release_quietly(parked: Any) -> None:

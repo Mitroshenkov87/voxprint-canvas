@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -267,8 +268,15 @@ def prepare_cli_lora(path: str | Path) -> UserLora:
             or the name of an imported LoRA.
 
     Raises:
-        LoraRejected: The file is unreadable or its base does not match.
+        LoraRejected: The file is unreadable, its base does not match, or a
+            matrix does not fit its Z-Image-Turbo layer.
     """
+    opened = _cli_lora(path)
+    fits_layers(opened.weights)
+    return opened
+
+
+def _cli_lora(path: str | Path) -> UserLora:
     from canvas.models.lora_library import PACKAGE_SUFFIX, open_package_weights, resolve_library
 
     imported = resolve_library(str(path))
@@ -403,7 +411,14 @@ def apply_lora(transformer: object, lora: UserLora, strength: float) -> float:
         loader = getattr(transformer, "load_lora_weights", None)
     if not callable(loader):
         raise RuntimeError("the transformer has no adapter loader")
-    loader(str(lora.weights), adapter_name=_ADAPTER)
+    fits_layers(lora.weights, _live_shapes(transformer))
+    try:
+        _load_adapter(loader, str(lora.weights))
+    except RuntimeError as exc:
+        unload_lora(transformer)
+        if "size mismatch" in str(exc):
+            raise LoraRejected(CODE_INVALID) from exc
+        raise
     if not _adapter_attached(transformer):
         # diffusers only warns when no key matches a layer of the right shape.
         unload_lora(transformer)
@@ -416,6 +431,74 @@ def apply_lora(transformer: object, lora: UserLora, strength: float) -> float:
     except TypeError:
         setter([_ADAPTER], adapter_weights=[applied])
     return applied
+
+
+def _load_adapter(loader: Callable[..., object], weights: str) -> None:
+    """Load with names relative to the transformer, as Model Forge and ``_peft_key`` write them.
+
+    diffusers keeps only keys that start with ``prefix``; its default ``transformer``
+    drops every key of such a file.
+    """
+    try:
+        loader(weights, adapter_name=_ADAPTER, prefix=None)
+    except TypeError as exc:
+        if "prefix" not in str(exc):
+            raise
+        loader(weights, adapter_name=_ADAPTER)
+
+
+def _live_shapes(transformer: object) -> dict[str, tuple[int, int]]:
+    """``(out, in)`` of each linear layer of the loaded transformer. Empty for a model without modules."""
+    modules = getattr(transformer, "named_modules", None)
+    if not callable(modules):
+        return {}
+    shapes: dict[str, tuple[int, int]] = {}
+    for name, module in modules():
+        out_size = getattr(module, "out_features", None)
+        in_size = getattr(module, "in_features", None)
+        if isinstance(out_size, int) and isinstance(in_size, int):
+            shapes[str(name)] = (out_size, in_size)
+    return shapes
+
+
+def fits_layers(path: Path, shapes: dict[str, tuple[int, int]] | None = None) -> None:
+    """Every ``lora_A`` / ``lora_B`` matrix must fit the layer it targets.
+
+    Args:
+        path: The adapter file.
+        shapes: ``(out, in)`` per layer. Defaults to the shipped Z-Image-Turbo table.
+            A layer that is not listed, and a tensor that is not a matrix, are left to the loader.
+
+    Raises:
+        LoraRejected: ``lora.invalid`` when a matrix does not fit.
+    """
+    table = _base_shapes() if shapes is None else shapes
+    if not table:
+        return
+    opened = _safetensors(path)
+    if opened is None:
+        raise LoraRejected(CODE_INVALID)
+    pairs: dict[str, dict[str, list[object]]] = {}
+    for key, entry in opened[0].items():
+        if key == "__metadata__" or not isinstance(entry, dict):
+            continue
+        shape = entry.get("shape")
+        name = _peft_key(str(key))
+        for suffix in (_A_WEIGHT, _B_WEIGHT):
+            if name.endswith(suffix) and isinstance(shape, list) and len(shape) == 2:
+                pairs.setdefault(name[: -len(suffix)], {})[suffix] = shape
+    for stem, pair in pairs.items():
+        layer = table.get(stem)
+        if layer is None:
+            continue
+        down = pair.get(_A_WEIGHT)
+        up = pair.get(_B_WEIGHT)
+        if down is not None and down[1] != layer[1]:
+            raise LoraRejected(CODE_INVALID)
+        if up is not None and up[0] != layer[0]:
+            raise LoraRejected(CODE_INVALID)
+        if down is not None and up is not None and down[0] != up[1]:
+            raise LoraRejected(CODE_INVALID)
 
 
 def _adapter_attached(transformer: object) -> bool:
@@ -698,6 +781,7 @@ def _peft_key(key: str) -> str:
 
 
 _MODULES: frozenset[str] | None = None
+_SHAPES: dict[str, tuple[int, int]] | None = None
 _KOHYA_TABLE: dict[str, str] | None = None
 
 
@@ -709,6 +793,16 @@ def _modules() -> frozenset[str]:
         raw = json.loads(index.read_text(encoding="utf-8"))
         _MODULES = frozenset(str(key) for key in raw.get("weight_map", {}))
     return _MODULES
+
+
+def _base_shapes() -> dict[str, tuple[int, int]]:
+    """``(out, in)`` of each linear layer of the Z-Image-Turbo transformer, from the shipped table."""
+    global _SHAPES
+    if _SHAPES is None:
+        table = Path(__file__).with_name("turbo_transformer_shapes.json")
+        raw = json.loads(table.read_text(encoding="utf-8"))
+        _SHAPES = {str(name): (int(shape[0]), int(shape[1])) for name, shape in raw.items()}
+    return _SHAPES
 
 
 def _kohya_table() -> dict[str, str]:

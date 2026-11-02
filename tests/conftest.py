@@ -65,6 +65,8 @@ def pytest_configure(config) -> None:
 def _toy_lora_shapes(request, monkeypatch):
     """Toy LoRAs use real layer names with small matrices, so the shipped shape table is off unless asked for."""
     if request.node.get_closest_marker("real_shapes") is None:
-        from canvas.models import user_lora
-
+        try:
+            from canvas.models import user_lora
+        except ImportError:  # the guide job installs only the doc tools
+            return
         monkeypatch.setattr(user_lora, "_base_shapes", lambda: {})

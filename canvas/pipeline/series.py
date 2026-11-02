@@ -222,6 +222,7 @@ def _run_series(
     adult: bool, container: OutputFormat | None, clock: StageTimes, own_clock: bool,
     noted: list[bool], prep: Phase, negative: str = "",
 ) -> SeriesResult:
+    hot.begin_job()
     hot.note_tier()
     gate = SerialGate.wrap(age_gate)
     mode = place_mode_of(place_mode)
@@ -610,13 +611,16 @@ def _cook_groups(groups: list[_Plan], cancelled: Callable[[], bool], clock: Stag
             group.stopped = True
 
 
-# The card or the lock stopped a picture: the next group would load the model again and fail the same way.
+# The card, the lock, or the LoRA stopped a picture: the next group would load the model again and fail the same way.
 _MACHINE_STOPS = frozenset({"vram", "gpu_busy"})
 
 
 def _machine_stop(stop: RunStopped | None) -> RunStopped | None:
     """The stop when it ends every group, otherwise None."""
-    if stop is not None and stop.unavailable and stop.code in _MACHINE_STOPS:
+    if stop is None or not stop.unavailable:
+        return None
+    code = stop.code or ""
+    if code in _MACHINE_STOPS or code == "lora" or code.startswith("lora."):
         return stop
     return None
 

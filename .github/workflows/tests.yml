@@ -157,7 +157,7 @@ jobs:
       - name: Encoder compatibility
         env:
           VOXPRINT_REQUIRE_GEN: "1"
-        run: .venv/bin/python -m pytest tests/test_transformers_compat.py
+        run: .venv/bin/python -m pytest tests/test_transformers_compat.py tests/test_lora_diffusers.py
   gate-weights:
     runs-on: ubuntu-latest
     timeout-minutes: 60

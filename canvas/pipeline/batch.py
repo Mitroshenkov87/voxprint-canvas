@@ -120,9 +120,9 @@ def run_batch(
     results: dict[int, SeriesResult] = {}
     scenarios: dict[int, Scenario] = {}
     try:
-        hot.note_tier()
-        # One scope for the batch: the picture pipeline loads once for every entry.
-        with pipeline_scope():
+        # One RAM plan and one pipeline for every entry of the batch.
+        with hot.job_scope(), pipeline_scope():
+            hot.note_tier()
             _run(
                 entries, folder, style, place_mode, adult, gate, rewrite, frame_for, container, clock,
                 prep, results, scenarios,

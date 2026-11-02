@@ -20,12 +20,17 @@ from voxprint_common.ui.safety import adult_prompt_policy
 from voxprint_common.ui.simple_image import SimpleImageLayout as SimpleLayout
 from voxprint_common.ui.variants import AppSurface, settings_for, state_names, surface_for, variant_presets
 
-from canvas.app.shell_gate import ContentCheck
+from typing import TYPE_CHECKING
+
 from canvas.core.formats import OutputFormat
 from canvas.models.modes import Mode
 from canvas.models.pins import TURBO_GUIDANCE, TURBO_STEPS
-from canvas.safety.gate import AgeGate
 from canvas.ui.styles import LOOKS, look_for, style_label
+from canvas.ui.worker_checks import WorkerChecks
+
+if TYPE_CHECKING:
+    from canvas.app.shell_gate import ContentCheck
+    from canvas.safety.gate import AgeGate
 
 
 class PictureJob(NamedTuple):
@@ -53,7 +58,7 @@ class CanvasShell:
 
     layout: SimpleLayout
     settings: Settings
-    gate: ContentCheck
+    gate: ContentCheck | WorkerChecks
     state_dir: Path
     surface: AppSurface
 
@@ -66,10 +71,10 @@ def canvas_state_dir() -> Path:
 
 
 def open_layout(state_dir_path: Path, *, gate: AgeGate, enlarge_installed: bool = False) -> CanvasShell:
-    """Build the image screen for Canvas.
+    """Build the image screen around an in-process gate (headless tools and tests).
 
     ``gate`` is required. ``None`` and any stand-in are refused before the
-    shared screen is constructed.
+    shared screen is constructed. The window uses :func:`open_worker_layout`.
 
     Args:
         state_dir_path: Directory for ``image-settings.json`` and history.
@@ -79,15 +84,37 @@ def open_layout(state_dir_path: Path, *, gate: AgeGate, enlarge_installed: bool 
     Raises:
         TypeError: ``gate`` is missing or is not the Canvas content gate.
     """
+    from canvas.app.shell_gate import ContentCheck
+    from canvas.safety.gate import AgeGate
+
     if not isinstance(gate, AgeGate):
         raise TypeError("the screen needs the always-on content gate")
+    return _open(state_dir_path, ContentCheck(gate=gate), enlarge_installed)
+
+
+def open_worker_layout(state_dir_path: Path, *, checks: WorkerChecks, enlarge_installed: bool = False) -> CanvasShell:
+    """Build the image screen for the window. Checks run in the worker.
+
+    Args:
+        state_dir_path: Directory for ``image-settings.json`` and history.
+        checks: Answers the screen's review hooks from worker replies.
+        enlarge_installed: True when the 4K chip can be selected.
+
+    Raises:
+        TypeError: ``checks`` is not a :class:`WorkerChecks`.
+    """
+    if not isinstance(checks, WorkerChecks):
+        raise TypeError("the window screen answers its checks from the worker")
+    return _open(state_dir_path, checks, enlarge_installed)
+
+
+def _open(state_dir_path: Path, check: ContentCheck | WorkerChecks, enlarge_installed: bool) -> CanvasShell:
     surface = surface_for("canvas")
     settings = _settings()
     presets = _presets(settings, enlarge_installed=enlarge_installed)
     names = state_names(surface)
     state_dir_path.mkdir(parents=True, exist_ok=True)
     migrate_old_defaults(state_dir_path / names[0])
-    check = ContentCheck(gate=gate)
     layout = SimpleLayout(
         presets=presets,
         settings=settings,

@@ -14,9 +14,9 @@ from PySide6.QtWidgets import QAbstractSpinBox, QApplication, QCheckBox, QLabel,
 
 from canvas.models.modes import Mode, Tier
 from canvas.safety.gate import SafetyUnavailable
-from canvas.ui.shell_layout import open_layout
 from canvas.ui.shell_screen import ShellWindow
-from tests.fakes import World, rgb
+from tests.fakes import rgb
+from tests.worker_support import inline_window, settle
 from tests.test_photoshoot import IDEA, _payload
 from voxprint_common.i18n import set_language
 
@@ -36,8 +36,9 @@ def home(monkeypatch, tmp_path: Path):
 
 
 def _window(home: Path, runner) -> ShellWindow:
-    shell = open_layout(home / "state", gate=World().gate(), enlarge_installed=False)
-    return ShellWindow(shell, tier=Tier.GB16, enlarge=object(), runner=runner, improver=lambda text: text)
+    return inline_window(
+        home / "state", runner=runner, improver=lambda text: text, tier=Tier.GB16, enlarge=object(),
+    )
 
 
 def test_the_frame_count_starts_at_six(app, home: Path) -> None:
@@ -117,13 +118,13 @@ def test_progress_uses_the_chosen_frame_count(app, home: Path, monkeypatch) -> N
 
     monkeypatch.setattr("canvas.ui.photoshoot_run.selectable", lambda: (object(),))
     window = _window(home, runner)
-    window.photoshoot.writer = writer
+    window.session.series_writer = writer
     window.view.set_prompt_text(IDEA)
     window.show()
     window.findChild(QCheckBox, "photoshootMode").click()
     window.findChild(QSpinBox, "photoshootFrames").setValue(4)
     window.findChild(QPushButton, "generate").click()
-    app.processEvents()
+    settle(window)
     lines = window.findChildren(QLabel, "photoshootLine")
     assert len(lines) == 4
     assert window.findChild(QLabel, "photoshootFrame").text() == "Shot 4 of 4"
@@ -159,12 +160,12 @@ def test_generate_writes_a_read_only_series(app, home: Path, monkeypatch) -> Non
 
     monkeypatch.setattr("canvas.ui.photoshoot_run.selectable", lambda: (object(),))
     window = _window(home, runner)
-    window.photoshoot.writer = lambda _prompt: _payload(IDEA)
+    window.session.series_writer = lambda _prompt: _payload(IDEA)
     window.view.set_prompt_text(IDEA)
     window.show()
     window.findChild(QCheckBox, "photoshootMode").click()
     window.findChild(QPushButton, "generate").click()
-    app.processEvents()
+    settle(window)
     assert len(prompts) == 6
     assert all(
         "A single photograph, " in prompt and "50 mm, still, " in prompt and prompt.index("50 mm, still, ") < prompt.index(IDEA)
@@ -195,13 +196,13 @@ def test_expert_does_not_add_a_camera_control(app, home: Path, monkeypatch) -> N
 
     monkeypatch.setattr("canvas.ui.photoshoot_run.selectable", lambda: (object(),))
     window = _window(home, runner)
-    window.photoshoot.writer = lambda _prompt: _payload(IDEA)
+    window.session.series_writer = lambda _prompt: _payload(IDEA)
     window.view.set_prompt_text(IDEA)
     window.set_expert(True)
     window.show()
     window.findChild(QCheckBox, "photoshootMode").click()
     window.findChild(QPushButton, "generate").click()
-    app.processEvents()
+    settle(window)
     assert prompts and all("50 mm" in prompt for prompt in prompts)
     assert window.findChild(QLineEdit, "photoshootCamera") is None
     assert window.findChild(QPushButton, "photoshootMenu") is None
@@ -217,7 +218,7 @@ def test_a_blocked_frame_is_labelled_and_is_not_the_hero(app, home: Path, monkey
 
     monkeypatch.setattr("canvas.ui.photoshoot_run.selectable", lambda: (object(),))
     window = _window(home, runner)
-    gate = window.shell.gate.age_gate
+    gate = window.session.gate
     real = gate.review_image
 
     def review_image(raw, prompt=""):
@@ -226,12 +227,12 @@ def test_a_blocked_frame_is_labelled_and_is_not_the_hero(app, home: Path, monkey
         return real(raw, prompt)
 
     gate.review_image = review_image
-    window.photoshoot.writer = lambda _prompt: _payload(IDEA)
+    window.session.series_writer = lambda _prompt: _payload(IDEA)
     window.view.set_prompt_text(IDEA)
     window.show()
     window.findChild(QCheckBox, "photoshootMode").click()
     window.findChild(QPushButton, "generate").click()
-    app.processEvents()
+    settle(window)
     labels = [label.text() for label in window.findChildren(QLabel, "photoshootLine")]
     assert any("Shot blocked" in text for text in labels)
     assert modes[0] is Mode.TEXT
@@ -253,12 +254,12 @@ def test_cancel_keeps_the_frames_already_finished(app, home: Path, monkeypatch) 
 
     monkeypatch.setattr("canvas.ui.photoshoot_run.selectable", lambda: (object(),))
     window = _window(home, runner)
-    window.photoshoot.writer = lambda _prompt: _payload(IDEA)
+    window.session.series_writer = lambda _prompt: _payload(IDEA)
     window.view.set_prompt_text(IDEA)
     window.show()
     window.findChild(QCheckBox, "photoshootMode").click()
     window.findChild(QPushButton, "generate").click()
-    app.processEvents()
+    settle(window)
     assert len(prompts) == 1
     folder = next(path for path in (home / "state" / "pictures" / "series").iterdir() if path.is_dir())
     assert (folder / "01.png").is_file()

@@ -16,9 +16,8 @@ from canvas.models import runtime
 from canvas.pipeline.series import REFERENCE_MIN, REFERENCE_STRENGTH
 from canvas.models.modes import Tier
 from canvas.models.plan import PIPELINE_IMG2IMG, PIPELINE_TEXT, CallPlan
-from canvas.ui.shell_layout import open_layout
-from canvas.ui.shell_screen import ShellWindow
 from tests.fakes import World
+from tests.worker_support import inline_window, settle
 from tests.test_photoshoot import IDEA, PERSON, _payload, fixed_appearance
 from voxprint_common.i18n import set_language
 
@@ -99,16 +98,15 @@ def test_hero_frame_feeds_img2img_at_045_and_the_series_is_one_history_entry(app
     monkeypatch.setattr(runtime, "reset_peak_allocated", lambda: None)
     monkeypatch.setattr("canvas.ui.photoshoot_run.selectable", lambda: (object(),))
     gate = World().gate()
-    shell = open_layout(home / "state", gate=gate)
     runner = _RenderRunner(gate, tmp_path)
-    window = ShellWindow(shell, tier=Tier.GB16, enlarge=object(), runner=runner)
-    window.photoshoot.writer = lambda _prompt: _payload(IDEA)
+    window = inline_window(home / "state", gate=gate, tier=Tier.GB16, enlarge=object(), runner=runner)
+    window.session.series_writer = lambda _prompt: _payload(IDEA)
     window.photoshoot.strength = "high"
     window.view.set_prompt_text(IDEA)
     window.show()
     window.findChild(QCheckBox, "photoshootMode").click()
     window.findChild(QPushButton, "generate").click()
-    QApplication.processEvents()
+    settle(window)
 
     names = [name for name, _ in _Pipe.calls]
     assert names[0] == "text"
@@ -141,15 +139,14 @@ def test_a_person_series_anchors_at_the_default_strength(app, home: Path, tmp_pa
     monkeypatch.setattr(runtime, "reset_peak_allocated", lambda: None)
     monkeypatch.setattr("canvas.ui.photoshoot_run.selectable", lambda: (object(),))
     gate = World().gate()
-    shell = open_layout(home / "state", gate=gate)
-    window = ShellWindow(shell, tier=Tier.GB16, enlarge=object(), runner=_RenderRunner(gate, tmp_path))
-    window.photoshoot.writer = lambda _prompt: _payload(PERSON)
+    window = inline_window(home / "state", gate=gate, tier=Tier.GB16, enlarge=object(), runner=_RenderRunner(gate, tmp_path))
+    window.session.series_writer = lambda _prompt: _payload(PERSON)
     assert window.photoshoot.strength == "medium"
     window.view.set_prompt_text(PERSON)
     window.show()
     window.findChild(QCheckBox, "photoshootMode").click()
     window.findChild(QPushButton, "generate").click()
-    QApplication.processEvents()
+    settle(window)
 
     look = PERSON
     assert fixed_appearance(PERSON, int(window.shell.layout.seed)) == ""

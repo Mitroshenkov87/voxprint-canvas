@@ -319,7 +319,7 @@ class AddonsWizard(QDialog):
         selected: str,
         strength: float,
         on_save: Callable[[str, float], None],
-        on_import: Callable[[], UserLora | None] | None = None,
+        on_import: Callable[[Callable[[UserLora], None]], None] | None = None,
     ) -> None:
         """Build the add-ons screen.
 
@@ -329,7 +329,7 @@ class AddonsWizard(QDialog):
             selected: The current expert folder, or empty.
             strength: The current expert strength.
             on_save: Writes the folder and the strength into the shared state.
-            on_import: Runs «Import LoRA» and returns the imported LoRA, or None.
+            on_import: Runs «Import LoRA». It calls the given function with the imported LoRA.
         """
         super().__init__(parent)
         self.setObjectName("addonsWizard")
@@ -427,7 +427,10 @@ class AddonsWizard(QDialog):
     def _import(self) -> None:
         if self._on_import is None:
             return
-        lora = self._on_import()
+        self._on_import(self.add_imported)
+
+    def add_imported(self, lora: UserLora | None) -> None:
+        """Add a LoRA the import just stored, and select it."""
         if lora is None:
             return
         button = QRadioButton(_lora_label(lora))

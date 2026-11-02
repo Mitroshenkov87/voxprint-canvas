@@ -161,6 +161,8 @@ def _improve_split(window, improve, revert) -> QWidget:
     back.clicked.connect(go_back)
     prompt.textChanged.connect(edited)
     window._revert_segment = back
+    # The rewrite arrives from the worker after the click; the window calls this again then.
+    window._after_improve = after_improve
     return box
 
 

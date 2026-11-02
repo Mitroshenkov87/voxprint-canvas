@@ -9,9 +9,9 @@ from PySide6.QtWidgets import QApplication, QPushButton
 from canvas.models import runtime
 from canvas.models.modes import Tier
 from canvas.pipeline.pipeline import Pipeline
-from canvas.ui.shell_layout import open_layout
 from canvas.ui.shell_screen import ShellWindow
 from tests.fakes import World
+from tests.worker_support import inline_window, settle
 from tests.test_photoshoot import IDEA
 from tests.test_runtime_reuse import _GB64, _install, _render
 
@@ -25,9 +25,8 @@ def _window(tmp_path: Path, monkeypatch, gate) -> ShellWindow:
     monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path / "home"))
     monkeypatch.setattr("canvas.ui.shell_screen.selectable", lambda: (object(),))
     weights = tmp_path / "weights"
-    shell = open_layout(tmp_path / "state", gate=gate)
-    return ShellWindow(
-        shell, tier=Tier.GB16, enlarge=object(),
+    return inline_window(
+        tmp_path / "state", gate=gate, tier=Tier.GB16, enlarge=object(),
         runner=lambda job, inputs: _render(gate, weights, job.prompt, None),
     )
 
@@ -37,6 +36,12 @@ def _click(window: ShellWindow) -> None:
     button = window.findChild(QPushButton, "generate")
     assert button is not None
     button.click()
+    settle(window)
+
+
+def _close(window: ShellWindow) -> None:
+    window.close()
+    settle(window)
 
 
 def test_the_window_keeps_the_pipeline_between_two_generations(app, tmp_path: Path, monkeypatch) -> None:
@@ -50,7 +55,7 @@ def test_the_window_keeps_the_pipeline_between_two_generations(app, tmp_path: Pa
     _click(window)
     assert loads[0] == 1
     assert len(window.shell.layout.history) == 2
-    window.close()
+    _close(window)
     assert runtime._slot is None
     assert not runtime.warm_held()
 
@@ -64,7 +69,7 @@ def test_a_card_without_room_lets_the_pipeline_go(app, tmp_path: Path, monkeypat
     assert runtime._slot is None
     _click(window)
     assert loads[0] == 2
-    window.close()
+    _close(window)
 
 
 def test_closing_releases_also_on_a_tier_that_parks(app, tmp_path: Path, monkeypatch) -> None:
@@ -75,7 +80,7 @@ def test_closing_releases_also_on_a_tier_that_parks(app, tmp_path: Path, monkeyp
     _click(window)
     _click(window)
     assert loads[0] == 1
-    window.close()
+    _close(window)
     assert runtime._slot is None
 
 

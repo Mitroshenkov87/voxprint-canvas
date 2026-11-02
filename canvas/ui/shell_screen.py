@@ -5,7 +5,7 @@ import shutil
 import subprocess
 import sys
 import uuid
-from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import assert_never
 
@@ -26,28 +26,23 @@ from PySide6.QtWidgets import (
 from voxprint_common.i18n import add_catalogs, set_language, tr
 from voxprint_common.mdl.names import CLI_NAME
 from voxprint_common.ui.expert import ExpertMode
+from voxprint_common.ui.safety import ReviewedOutput
 from voxprint_common.ui.simple_image import Phase, SimpleImageWidget as SimpleWidget
 from canvas.app.i18n import text
 from canvas.app.info import APP_VERSION, ENLARGE_NAME
-from canvas.app.selftest import selftest_report
-from canvas.app.shell_gate import reviewed_output
-from canvas.app.shell_run import RunStopped, ShellRunner, improve_prompt, load_rgb
 from canvas.app.updates import check_for_update
-from canvas.core.formats import extension, save_image
 from canvas.infra.enlarge import EnlargeClient
-from canvas.infra.vram import set_vram_cap_gb
-from canvas.infra.gpu import probe_gpu
+from canvas.ipc.client import WorkerClient, default_host
+from canvas.ipc.schema import Reply, decode_event
 from canvas.models.mdl_layout import on_disk_manifest
 from canvas.models.mdl_registry import selectable
-from canvas.models.runtime import drop_warm, hold_warm, pipeline_scope, trim_warm
 from canvas.models.lora_library import LibraryEntry
 from canvas.models.user_lora import LoraIndex, discover, resolve_selected
 from canvas.ui.lora_panel import ImportedDialog, LibraryDialog, dark, import_with_dialog, library_loras
 from canvas.models.modes import Mode, Tier
 from canvas.models.sizes import closest_aspect
-from canvas.safety.image import RawImage
-from canvas.safety.inputs import ImageRole, PendingInput
 from canvas.ui.about import AboutDialog
+from canvas.ui.picture_file import RawImage, load_rgb
 from canvas.ui.enlarge_flow import (
     EnlargeConfirm,
     EnlargeError,
@@ -68,13 +63,10 @@ from canvas.ui.shell_chrome import (
     show_real_pictures,
 )
 from canvas.ui.photoshoot_bar import PhotoshootBar
-from canvas.ui.photoshoot_run import adult_content, busy_progress, load_series_folders, run_photoshoot
-from canvas.ui.ui_call import run_off_ui
+from canvas.ui.photoshoot_run import adult_content, load_series_folders, run_photoshoot, stop_series
 from canvas.ui.shell_layout import CanvasShell, PictureJob, job_from
 from canvas.ui.wizards import AddonsWizard, DiagnosticsWizard, MaskWizard, PictureWizard, SetupWizard
-
-Runner = Callable[[PictureJob, tuple[PendingInput, ...]], RawImage]
-Improver = Callable[[str], str]
+from canvas.ui.worker_checks import WorkerChecks
 
 
 class _NeedImage(Exception):
@@ -83,6 +75,26 @@ class _NeedImage(Exception):
     def __init__(self, message: str) -> None:
         super().__init__(message)
         self.message = message
+
+
+@dataclass
+class _Run:
+    """One Generate press: the job, and which copy the worker is drawing."""
+
+    job: PictureJob
+    total: int
+    base_seed: int
+    layout_prompt: str
+    index: int = 0
+    job_id: str = ""
+
+
+def job_fields(job: PictureJob) -> dict[str, object]:
+    """``job`` as plain values the worker request can carry."""
+    fields = job._asdict()
+    fields["mode"] = job.mode.value
+    fields["fmt"] = job.fmt.value
+    return fields
 
 
 class ShellWindow(QMainWindow):
@@ -94,18 +106,16 @@ class ShellWindow(QMainWindow):
         *,
         tier: Tier,
         enlarge: object | None = None,
-        runner: Runner | None = None,
-        improver: Improver | None = None,
+        worker: WorkerClient | None = None,
         installer: Installer | None = None,
     ) -> None:
         """Place the shared screen in the Canvas window.
 
         Args:
-            shell: Headless state from :func:`canvas.ui.shell_layout.open_layout`.
+            shell: Headless state from :func:`canvas.ui.shell_layout.open_worker_layout`.
             tier: The tier chosen at startup.
-            enlarge: Enlarge client. A missing client is opened here.
-            runner: Generates one picture. The default uses the pipeline.
-            improver: Rewrites the prompt in place. The default uses the same gate.
+            enlarge: Enlarge client. Only its ``ready`` answer is read here; the worker runs Enlarge.
+            worker: The model worker. The default spawns ``canvas.worker_jobs`` on first use.
             installer: Installs Enlarge. The default uses the shared model queue.
         """
         super().__init__()
@@ -115,29 +125,20 @@ class ShellWindow(QMainWindow):
         self.tier = tier
         self._enlarge = enlarge if enlarge is not None else EnlargeClient()
         self._enlarge_ready = bool(getattr(self._enlarge, "ready", lambda: False)())
-        self._runner = runner if runner is not None else ShellRunner(
-            gate=shell.gate.age_gate,
-            tier=tier,
-            enlarge=self._enlarge,
-        )
-        if improver is None:
-            def improver(prompt: str) -> str:
-                return improve_prompt(
-                    gate=shell.gate.age_gate,
-                    prompt=prompt,
-                    tier=tier,
-                    adult=adult_content(shell.layout),
-                    progress=busy_progress(self),
-                )
-        self._improver = improver
+        self.worker = worker if worker is not None else WorkerClient(default_host(), tier=tier.value)
+        if isinstance(shell.gate, WorkerChecks) and shell.gate.client is None:
+            shell.gate.client = self.worker
         self._installer = installer if installer is not None else run_shared_enlarge
+        self._run: _Run | None = None
+        self._series: object | None = None
+        self._diagnostics: DiagnosticsWizard | None = None
         self._picture: Path | None = None
         self._mask: RawImage | None = None
         self._mask_file: Path | None = None
         self._pictures: dict[str, str] = {}
         self._series_folders: dict[str, str] = load_series_folders(shell.state_dir)
         self._busy = False
-        # The loaded pipeline stays between generations while this window is open.
+        # The worker keeps the loaded pipeline between generations while this window is open.
         self._warm = False
         self._chrome_ready = False
         self.setObjectName("shell")
@@ -190,6 +191,13 @@ class ShellWindow(QMainWindow):
             polish(self)
         if getattr(self, "photoshoot", None) is not None:
             self.photoshoot.sync()
+        if self.shell.layout.phase is not Phase.BUSY:
+            # Cancel in the shared screen: the worker stops; a picture that still arrives is deleted.
+            run = getattr(self, "_run", None)
+            if run is not None and run.job_id:
+                self.worker.cancel(run.job_id)
+            if getattr(self, "_series", None) is not None:
+                stop_series(self)
 
     def use_picture(self, path: Path) -> None:
         """Use ``path`` as the source picture and match its shape.
@@ -249,29 +257,34 @@ class ShellWindow(QMainWindow):
 
     def lora_library(self) -> LibraryDialog:
         """The LoRA library: «Import LoRA», previews and remove."""
-        return LibraryDialog(self, self.shell.gate.age_gate, self._library_changed)
+        return LibraryDialog(self, self.worker, self._library_changed)
 
     def _library_changed(self) -> None:
         self.refresh_loras()
         self.view.refresh()
 
-    def import_lora(self, path: Path | None = None) -> LibraryEntry | str | None:
-        """Import one Model Forge export into the library and show what was added.
+    def import_lora(self, path: Path | None = None, on_done=None) -> None:
+        """Import one Model Forge export into the library in the worker, then show what was added.
 
-        Returns:
-            The entry, a refusal code, or None when the file dialog was cancelled.
+        Args:
+            path: The file. A file dialog asks when omitted.
+            on_done: Called with the entry, a refusal code, or None when nothing was imported.
         """
-        result = import_with_dialog(self, self.shell.gate.age_gate, path)
-        if isinstance(result, str):
-            box = QMessageBox(QMessageBox.Icon.Warning, text("canvas.lora.import"), text(result),
-                              QMessageBox.StandardButton.Ok, self)
-            box.setObjectName("loraRefused")
-            dark(box)
-            box.exec()
-        elif result is not None:
-            self.refresh_loras()
-            ImportedDialog(self, result).exec()
-        return result
+
+        def finished(result: LibraryEntry | str | None) -> None:
+            if isinstance(result, str):
+                box = QMessageBox(QMessageBox.Icon.Warning, text("canvas.lora.import"), text(result),
+                                  QMessageBox.StandardButton.Ok, self)
+                box.setObjectName("loraRefused")
+                dark(box)
+                box.exec()
+            elif result is not None:
+                self.refresh_loras()
+                ImportedDialog(self, result).exec()
+            if on_done is not None:
+                on_done(result)
+
+        import_with_dialog(self, self.worker, path, on_done=finished)
 
     def refresh_loras(self) -> None:
         """Re-read the library into the generate panel's LoRA pick."""
@@ -283,11 +296,15 @@ class ShellWindow(QMainWindow):
         number = float(strength) if isinstance(strength, int | float) and not isinstance(strength, bool) else None
         picker.reload(str(layout.get("shell.addons") or ""), number)
 
-    def _import_from_addons(self):
-        result = self.import_lora()
-        if result is None or isinstance(result, str):
-            return None
-        return result.as_lora()
+    def _import_from_addons(self, add=None):
+        def finished(result: LibraryEntry | str | None) -> None:
+            if add is not None and isinstance(result, LibraryEntry):
+                try:
+                    add(result.as_lora())
+                except RuntimeError:
+                    return  # the add-ons screen was closed while the worker checked the file
+
+        self.import_lora(on_done=finished)
 
     def _pick_lora(self, key: str, strength: float) -> None:
         changed = str(self.shell.layout.get("shell.addons") or "") != key
@@ -322,8 +339,10 @@ class ShellWindow(QMainWindow):
         self.shell.layout.set_prompt(box.toPlainText())
 
     def diagnostics_wizard(self) -> DiagnosticsWizard:
-        """The PC check. It does not run until a button is pressed."""
-        return DiagnosticsWizard(self, self._run_check, self._run_update)
+        """The PC check. It does not run until a button is pressed; then it runs in the worker."""
+        wizard = DiagnosticsWizard(self, self._run_check, self._run_update)
+        self._diagnostics = wizard
+        return wizard
 
     def enlarge_confirm(self) -> EnlargeConfirm:
         """The question shown when 4K is chosen before Enlarge is installed."""
@@ -366,8 +385,22 @@ class ShellWindow(QMainWindow):
         self.refresh_loras()
 
     def _run_check(self, deep: bool) -> str:
-        report = selftest_report(deep=deep)
-        return _check_text(report)
+        """Queue the self-test in the worker. The wizard shows the report when it arrives."""
+        wizard = self._diagnostics
+
+        def done(reply: Reply) -> None:
+            if wizard is None:
+                return
+            try:
+                if reply.ok and isinstance(reply.data.get("report"), dict):
+                    wizard.show_report(_check_text(reply.data["report"]))  # type: ignore[arg-type]
+                else:
+                    wizard.show_report(text("canvas.check.failed"))
+            except RuntimeError:
+                return  # the wizard was closed
+
+        self.worker.submit("selftest", {"deep": bool(deep)}, on_done=done)
+        return ""
 
     def _run_update(self) -> str:
         tag = check_for_update(APP_VERSION)
@@ -376,18 +409,58 @@ class ShellWindow(QMainWindow):
         return text("canvas.check.newer", tag=tag)
 
     def _on_improve(self, current: str) -> str:
+        """Queue the rewrite in the worker. The field changes when the reply arrives."""
         if self._busy:
             return current
         self._busy = True
-        try:
-            return run_off_ui(lambda: self._improver(current))
-        except Exception as exc:
-            message = getattr(exc, "user_message", None)
-            self.shell.layout.block(message if isinstance(message, str) and message else text("gate.unavailable"))
-            self.view.refresh()
-            return current
-        finally:
+        adult = adult_content(self.shell.layout)
+
+        def progress(event) -> None:
+            decoded = decode_event(event.message)
+            if decoded is not None and decoded[0] == "note":
+                self.show_progress_note(str(decoded[1].get("text", "")))
+
+        def done(reply: Reply) -> None:
             self._busy = False
+            if not reply.ok:
+                self.shell.layout.block(reply.message or text("gate.unavailable"))
+                self.view.refresh()
+                return
+            improved = str(reply.data.get("prompt", current))
+            self._apply_improved(current, improved)
+
+        def fail(reason: str) -> None:
+            done(Reply("improve", "refused", "worker_unavailable", reason, True))
+
+        def go() -> None:
+            self.worker.submit("improve", {"prompt": current, "adult": adult}, on_done=done, on_progress=progress)
+
+        self.worker.when_ready(go, fail)
+        return current
+
+    def _apply_improved(self, current: str, improved: str) -> None:
+        """Put the rewrite in the field the way the shared screen does, while the field still holds ``current``."""
+        view = self.view
+        box = getattr(view, "_prompt", None)
+        if improved == current or box is None or box.toPlainText() != current:
+            return
+        view._previous_prompt = current
+        self.shell.layout.set_prompt(improved)
+        box.setPlainText(improved)
+        view._revert.setEnabled(True)
+        view.set_note("")
+        joined = getattr(self, "_after_improve", None)
+        if callable(joined):
+            joined()
+
+    def show_progress_note(self, message: str) -> None:
+        """Show a worker status line: in the progress row while busy, else as a note."""
+        if not message:
+            return
+        if self.shell.layout.phase is Phase.BUSY:
+            self._advance(0, 1, message)
+        else:
+            self.view.set_note(message)
 
     def _write_mask(self, image: RawImage) -> Path | None:
         """Save the mask beside the state and store it in the Yitro mask slot."""
@@ -416,93 +489,147 @@ class ShellWindow(QMainWindow):
         if self._busy:
             return
         self._busy = True
-        try:
-            if not self._warm:
-                hold_warm()
-                self._warm = True
-            self._generate(settings)
-        finally:
+        if not self._generate(settings):
             self._busy = False
-            # The next generation reuses the pipeline when the card still has room for it.
-            trim_warm()
 
     def release_warm(self) -> None:
-        """Drop the pipeline this window kept loaded. A second call does nothing."""
+        """Ask the worker to drop the pipeline it kept for this window. A second call does nothing.
+
+        The worker exiting releases it too, so a window that closes with the app needs nothing more.
+        """
         if not self._warm:
             return
         self._warm = False
-        drop_warm(release=True)
+        if self.worker.state == "ready":
+            self.worker.submit("warm", {"action": "drop"}, on_done=lambda _reply: None)
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt override
         """Release the warm pipeline with the window."""
         self.release_warm()
         super().closeEvent(event)
 
-    def _generate(self, settings: object = None) -> None:
+    def _generate(self, settings: object = None) -> bool:
+        """Start one Generate press in the worker. True while the worker has the job."""
         if self.photoshoot.enabled:
-            run_photoshoot(self)
-            return
+            return run_photoshoot(self)
         layout = self.shell.layout
         live = dict(settings) if isinstance(settings, dict) else layout.live_settings()
         self._adopt_slots(live)
         if not selectable():
             layout.unavailable(text("canvas.models.missing"))
             self.view.refresh()
-            return
+            return False
         try:
             job = job_from(layout, live)
         except (ValueError, KeyError):
             layout.block(text("gate.unavailable"))
             self.view.refresh()
+            return False
+        run = _Run(job=job, total=max(1, job.copies), base_seed=layout.seed, layout_prompt=layout.prompt.strip())
+        self._run = run
+        self.worker.when_ready(lambda: self._check_prompts(run), lambda reason: self._stop_run(run, reason))
+        return True
+
+    def _check_prompts(self, run: _Run) -> None:
+        self.worker.check_prompts(
+            [run.layout_prompt, run.job.prompt], on_done=lambda reply: self._prompts_checked(run, reply),
+        )
+
+    def _prompts_checked(self, run: _Run, reply: Reply) -> None:
+        layout = self.shell.layout
+        if self._run is not run:
             return
-        reason = self.shell.gate.review_prompt(job.prompt)
-        if reason:
-            layout.block(reason)
+        if layout.phase is not Phase.BUSY:
+            self._end_run(run)
             self.view.refresh()
             return
-        if job.output == "4k" and not self._enlarge_ready:
-            layout.unavailable(text("enlarge.hint", name=ENLARGE_NAME))
+        if not reply.ok:
+            self._stop_run(run, reply.message, unavailable=reply.unavailable)
+            return
+        if run.job.output == "4k" and not self._enlarge_ready:
+            self._stop_run(run, text("enlarge.hint", name=ENLARGE_NAME))
+            return
+        self._warm = True
+        self._start_copy(run)
+
+    def _start_copy(self, run: _Run) -> None:
+        layout = self.shell.layout
+        index = run.index
+        if index:
+            layout.seed = run.base_seed + index
+            if not layout.generate():
+                self.view.refresh()
+                self._end_run(run)
+                return
+        count_label = text("canvas.progress.count", current=index + 1, total=run.total)
+        if not self._advance(index, run.total, count_label):
+            self._end_run(run)
+            return
+        try:
+            inputs = self._input_files(run.job.mode)
+        except _NeedImage as exc:
+            layout.block(exc.message)
+            self.view.refresh()
+            self._end_run(run)
+            return
+        run.job_id = self.worker.submit(
+            "generate",
+            {
+                "job": job_fields(run.job),
+                "layout_prompt": run.layout_prompt,
+                "inputs": inputs,
+                "vram": str(layout.get("shell.vram")),
+                "warm": True,
+            },
+            on_done=lambda reply: self._copy_done(run, reply),
+        )
+
+    def _copy_done(self, run: _Run, reply: Reply) -> None:
+        layout = self.shell.layout
+        run.job_id = ""
+        if self._run is not run or layout.phase is not Phase.BUSY:
+            self._discard(reply)
+            self._end_run(run)
             self.view.refresh()
             return
-        self._apply_vram()
-        total = max(1, job.copies)
-        base_seed = layout.seed
-        with pipeline_scope():
-            self._draw_copies(layout, job, total, base_seed)
+        if not reply.ok:
+            self._stop_run(run, reply.message, unavailable=reply.unavailable)
+            return
+        count_label = text("canvas.progress.count", current=run.index + 1, total=run.total)
+        if not self._advance(run.index + 1, run.total, count_label):
+            self._discard(reply)
+            self._end_run(run)
+            return
+        if not self._keep(reply, run.job):
+            self._end_run(run)
+            return
+        run.index += 1
+        if run.index >= run.total:
+            self.view.refresh()
+            self._end_run(run)
+            return
+        self._start_copy(run)
 
-    def _draw_copies(self, layout, job: PictureJob, total: int, base_seed: int) -> None:
-        for index in range(total):
-            if index:
-                layout.seed = base_seed + index
-                if not layout.generate():
-                    self.view.refresh()
-                    return
-            count_label = text("canvas.progress.count", current=index + 1, total=total)
-            if not self._advance(index, total, count_label):
-                return
-            try:
-                fresh = self._fresh_inputs(job.mode)
-
-                def draw() -> RawImage:
-                    return self._runner(job, fresh)
-
-                raw = run_off_ui(draw)
-            except _NeedImage as exc:
-                layout.block(exc.message)
-                self.view.refresh()
-                return
-            except RunStopped as exc:
-                if exc.unavailable:
-                    layout.unavailable(exc.message)
-                else:
-                    layout.block(exc.message)
-                self.view.refresh()
-                return
-            if not self._advance(index + 1, total, count_label):
-                return
-            if not self._keep(raw, job):
-                return
+    def _stop_run(self, run: _Run, message: str, *, unavailable: bool = True) -> None:
+        """End ``run`` with a reason. Unavailable is the default for anything the worker could not answer."""
+        layout = self.shell.layout
+        if layout.phase is Phase.BUSY:
+            reason = message or text("gate.unavailable")
+            if unavailable:
+                layout.unavailable(reason)
+            else:
+                layout.block(reason)
         self.view.refresh()
+        self._end_run(run)
+
+    def _end_run(self, run: _Run) -> None:
+        if self._run is run:
+            self._run = None
+            self._busy = False
+
+    def _discard(self, reply: Reply) -> None:
+        if reply.ok:
+            self.worker.discard(reply.data)
 
     def _advance(self, step: int, total: int, label: str) -> bool:
         try:
@@ -510,57 +637,50 @@ class ShellWindow(QMainWindow):
         except ValueError:
             self.view.refresh()
             return False
-        app = QApplication.instance()
-        if app is not None:
-            app.processEvents()
         if self.shell.layout.phase is not Phase.BUSY:
             self.view.refresh()
             return False
+        self.view.refresh()
         return True
 
-    def _keep(self, raw: RawImage, job: PictureJob) -> bool:
+    def _keep(self, reply: Reply, job: PictureJob) -> bool:
+        """Store a picture the worker released. The screen accepts only that file."""
+        del job
         layout = self.shell.layout
-        item_id = uuid.uuid4().hex
-        self.shell.gate.stage(item_id, RawImage(raw.width, raw.height, raw.to_bytes()))
-        if layout.finish(item_id, reviewed_output(raw)) is None:
+        item_id = str(reply.data["item_id"])
+        path = Path(str(reply.data["path"]))
+        checks = self.shell.gate
+        if isinstance(checks, WorkerChecks):
+            checks.release(item_id, path)
+        if layout.finish(item_id, ReviewedOutput(path=path)) is None:
             self.view.refresh()
-            return False
-        safe = self.shell.gate.kept.pop(item_id, None)
-        if safe is None:
-            layout.block(text("gate.unavailable"))
-            self.view.refresh()
+            self.worker.discard(reply.data)
             return False
         folder = self.shell.state_dir / "pictures"
         folder.mkdir(parents=True, exist_ok=True)
-        path = folder / f"{item_id}{extension(job.fmt)}"
-        save_image(safe, path, job.fmt)
-        self._pictures[item_id] = str(path)
+        target = folder / f"{item_id}{path.suffix}"
+        shutil.move(str(path), target)
+        self._pictures[item_id] = str(target)
         refresh_pictures(self)
         return True
 
-    def _fresh_inputs(self, mode: Mode) -> tuple[PendingInput, ...]:
+    def _input_files(self, mode: Mode) -> list[dict[str, str]]:
+        """The source picture and mask as files the worker reads. The worker decodes and checks them."""
         if mode is Mode.TEXT or mode is Mode.TEXT_CREATIVE:
-            return ()
+            return []
         if self._picture is None:
             raise _NeedImage(text("error.job"))
-        source = load_rgb(self._picture)
+        source = {"role": "init", "path": str(self._picture)}
         if mode is Mode.INPAINT or mode is Mode.OUTPAINT:
             if self._mask is None:
                 raise _NeedImage(text("error.job"))
-            mask = RawImage(self._mask.width, self._mask.height, self._mask.to_bytes())
-            return (
-                PendingInput(ImageRole.INIT, source),
-                PendingInput(ImageRole.MASK, mask),
-            )
-        return (PendingInput(_role(mode), source),)
-
-    def _apply_vram(self) -> None:
-        value = str(self.shell.layout.get("shell.vram"))
-        if value == "auto":
-            set_vram_cap_gb(None)
-            return
-        if value in {"8", "12", "16", "24"}:
-            set_vram_cap_gb(float(value))
+            mask = self.worker.session_dir / f"mask-{uuid.uuid4().hex}.png"
+            try:
+                Image.frombytes("RGB", (self._mask.width, self._mask.height), self._mask.to_bytes()).save(mask)
+            except OSError as exc:
+                raise _NeedImage(text("error.job")) from exc
+            return [source, {"role": "mask", "path": str(mask)}]
+        return [{"role": _role(mode), "path": str(self._picture)}]
 
     def _on_command(self, command_id: str) -> None:
         if command_id == "file.save":
@@ -647,14 +767,19 @@ class ShellWindow(QMainWindow):
             shutil.copyfile(source, chosen)
 
     def _manage_models(self) -> None:
-        manifest = None
-        if probe_gpu() is None:
-            # No CUDA: list the models that are on disk whatever card they were made for.
-            manifest = on_disk_manifest(self.shell.state_dir / "mdl-on-disk.json")
-        try:
-            subprocess.Popen(mdl_argv(manifest))
-        except OSError:
-            self.view.set_note(text("canvas.models.missing"))
+        """Ask the worker whether a GPU is visible, then start MDL. The window never touches CUDA."""
+
+        def done(reply: Reply) -> None:
+            manifest = None
+            if not (reply.ok and reply.data.get("gpu") is True):
+                # No CUDA: list the models that are on disk whatever card they were made for.
+                manifest = on_disk_manifest(self.shell.state_dir / "mdl-on-disk.json")
+            try:
+                subprocess.Popen(mdl_argv(manifest))
+            except OSError:
+                self.view.set_note(text("canvas.models.missing"))
+
+        self.worker.submit("probe_gpu", {}, on_done=done)
 
 
 def mdl_argv(manifest: Path | None = None) -> list[str]:
@@ -672,15 +797,15 @@ def mdl_argv(manifest: Path | None = None) -> list[str]:
     return argv
 
 
-def _role(mode: Mode) -> ImageRole:
+def _role(mode: Mode) -> str:
     if mode is Mode.RESTYLE:
-        return ImageRole.INIT
+        return "init"
     if mode is Mode.POSE:
-        return ImageRole.POSE
+        return "pose"
     if mode is Mode.DEPTH:
-        return ImageRole.DEPTH
+        return "depth"
     if mode is Mode.EDGE:
-        return ImageRole.EDGE
+        return "edge"
     if (
         mode is Mode.TEXT
         or mode is Mode.TEXT_CREATIVE

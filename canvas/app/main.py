@@ -8,6 +8,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from PIL import Image
+from PySide6.QtCore import QTimer
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QMessageBox
 from voxprint_common.i18n import set_language, tr
@@ -53,8 +54,11 @@ from canvas.pipeline.enhance import EnhanceResult, fallback_message, open_rewrit
 from canvas.pipeline.schedule import last_image_seconds, reset_image_seconds
 from canvas.pipeline.pipeline import CoolingDown, EnlargeMissing, JobError, Pipeline
 from canvas.safety.gate import AgeGate, SafetyError
-from canvas.ui.shell_layout import canvas_state_dir, open_layout
+from canvas.ipc.client import WorkerClient, default_host
+from canvas.ui.shell_layout import canvas_state_dir, open_worker_layout
 from canvas.ui.shell_screen import ShellWindow
+from canvas.ui.worker_checks import WorkerChecks
+from voxprint_common.worker.qt import install_crash_bar
 from canvas.ui.splash import Splash, show_splash
 
 
@@ -299,26 +303,29 @@ def _launch(tier: Tier, splash: Splash | None = None, app: QApplication | None =
     except (SnapshotError, OSError) as exc:
         stage(str(exc))
     enlarge = EnlargeClient()
-    try:
-        stack = load_catalog_stack(models_dir(), load_catalog())
-        gate = AgeGate(stack)
-    except ManifestError:
-        return _stop_startup(splash, text("startup.lock"))
-    except Exception as exc:
-        message = str(exc).strip() or text("gate.unavailable")
-        return _stop_startup(splash, message)
-    # Models load on first use, not while the window sits idle.
+    # Checks and model work run in the worker process. Generation waits for its hello;
+    # a worker that cannot start leaves the window up and shows unavailable.
+    worker = WorkerClient(default_host(), tier=tier.value)
     window = ShellWindow(
-        open_layout(canvas_state_dir(), gate=gate, enlarge_installed=enlarge.ready()),
+        open_worker_layout(canvas_state_dir(), checks=WorkerChecks(worker), enlarge_installed=enlarge.ready()),
         tier=tier,
         enlarge=enlarge,
+        worker=worker,
     )
+    install_crash_bar(window, worker.adapter, title=text("app.name"), body=text("gate.unavailable"))
+    if isinstance(app, QApplication):
+        app.aboutToQuit.connect(worker.shutdown)
     window.show()
     if lock_note == "busy":
         window.shell.layout.unavailable(text("startup.lock"))
         window.view.refresh()
     splash.finish(window)
-    app.exec()
+    # The worker starts once the event loop runs; models still load on first use.
+    QTimer.singleShot(0, worker.start)
+    try:
+        app.exec()
+    finally:
+        worker.shutdown()
     return 0
 
 

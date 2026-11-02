@@ -33,11 +33,10 @@ from canvas.app.identity import splash_line, version_label
 from canvas.models.mdl_registry import enlarge_download_bytes
 from canvas.ui.enlarge_flow import enlarge_question
 from canvas.models.modes import Tier
-from canvas.ui.shell_layout import open_layout
 from canvas.ui.about import AboutDialog
 from canvas.ui.shell_screen import ShellWindow, mdl_argv
 from canvas.ui.splash import Splash
-from tests.fakes import World
+from tests.worker_support import inline_window, settle
 from tools.grab_shell_screens import prepare
 from voxprint_common.i18n import set_language, tr
 from voxprint_common.mdl.present import format_size
@@ -85,14 +84,14 @@ def _assert_chips_whole(window, chips) -> None:
 
 
 def _window(home: Path, *, runner=None, improver=None, installer=None, enlarge_installed: bool = False) -> ShellWindow:
-    shell = open_layout(home / "state", gate=World().gate(), enlarge_installed=enlarge_installed)
-    return ShellWindow(
-        shell,
+    return inline_window(
+        home / "state",
         tier=Tier.GB16,
         enlarge=object(),
         runner=runner,
         improver=improver,
         installer=installer,
+        enlarge_installed=enlarge_installed,
     )
 
 
@@ -196,6 +195,7 @@ def test_improve_and_revert_stay_in_the_same_field(app, home: Path) -> None:
     assert back.toolTip() == back.accessibleName() == "Revert to my prompt"
     assert back.isHidden()
     improve.click()
+    settle(window)
     box = window.findChild(QPlainTextEdit, "promptBox")
     assert "warm light" in box.toPlainText()
     assert not back.isHidden()
@@ -209,6 +209,7 @@ def test_a_manual_edit_hides_the_back_segment(app, home: Path) -> None:
     window = _window(home, improver=lambda prompt: prompt + " in warm light")
     window.view.set_prompt_text("a red bicycle")
     window.findChild(QPushButton, "improvePrompt").click()
+    settle(window)
     back = window.findChild(QPushButton, "revertSegment")
     assert not back.isHidden()
     box = window.findChild(QPlainTextEdit, "promptBox")
@@ -526,7 +527,7 @@ def test_yitro_slots_and_live_settings_reach_the_job(app, home: Path, tmp_path: 
     job = job_from(layout, live)
     assert job.steps == 7
     assert job.sampler == "euler"
-    assert window.shell.gate.age_gate is not None
+    assert window.session.gate is not None
 
 
 def test_picture_count_is_typed_and_cancel_keeps_finished_pictures(app, home: Path, monkeypatch) -> None:
@@ -577,7 +578,7 @@ def test_picture_count_is_typed_and_cancel_keeps_finished_pictures(app, home: Pa
     monkeypatch.setattr(ShellWindow, "_advance", wrapped)
     window.view.set_prompt_text("a red bicycle")
     window.findChild(QPushButton, "generate").click()
-    app.processEvents()
+    settle(window)
     assert drawn["n"] == 1
     assert labels[0] == text("canvas.progress.count", current=1, total=3)
     assert len(window.shell.layout.history) == 1
@@ -597,6 +598,7 @@ def test_generate_keeps_the_picture_through_the_gate(app, home: Path, monkeypatc
     window = _window(home, runner=lambda job, inputs: rgb(8, 8))
     window.view.set_prompt_text("a red bicycle")
     window.findChild(QPushButton, "generate").click()
+    settle(window)
     layout = window.shell.layout
     assert layout.phase is Phase.READY, layout.reason
     assert len(layout.history) == 1
@@ -671,9 +673,10 @@ def test_manage_models_starts_mdl_beside_the_interpreter(app, home: Path, monkey
     assert mdl_argv() == [str(launcher), "--gui", "--app", "canvas"]
     seen: list[list[str]] = []
     monkeypatch.setattr("canvas.ui.shell_screen.subprocess.Popen", lambda argv: seen.append(list(argv)))
-    monkeypatch.setattr("canvas.ui.shell_screen.probe_gpu", lambda: object())
+    monkeypatch.setattr("canvas.infra.gpu.probe_gpu", lambda: object())
     window = _window(home)
     window._on_command("models.manage")
+    settle(window)
     assert seen == [[str(launcher), "--gui", "--app", "canvas"]]
     launcher.unlink()
     assert mdl_argv()[0] == "voxprint-mdl"
@@ -697,9 +700,10 @@ def test_manage_models_without_cuda_lists_models_on_disk(app, home: Path, monkey
     del app
     seen: list[list[str]] = []
     monkeypatch.setattr("canvas.ui.shell_screen.subprocess.Popen", lambda argv: seen.append(list(argv)))
-    monkeypatch.setattr("canvas.ui.shell_screen.probe_gpu", lambda: None)
+    monkeypatch.setattr("canvas.infra.gpu.probe_gpu", lambda: None)
     window = _window(home)
     window._on_command("models.manage")
+    settle(window)
     assert seen[0][-2] == "--manifest"
     assert Path(seen[0][-1]).is_file()
     window.close()

@@ -70,3 +70,26 @@ def _toy_lora_shapes(request, monkeypatch):
         except ImportError:  # the guide job installs only the doc tools
             return
         monkeypatch.setattr(user_lora, "_base_shapes", lambda: {})
+
+
+@pytest.fixture(autouse=True)
+def _fresh_worker_session():
+    """Each test starts the in-process worker session from scratch."""
+    yield
+    try:
+        from canvas import worker_jobs
+    except ImportError:
+        return
+    worker_jobs.install_session(None)
+
+
+@pytest.fixture(autouse=True)
+def _cuda_context_usable():
+    """A test that marks the CUDA context lost does not end later tests' processes."""
+    yield
+    try:
+        from canvas.infra import cuda_health
+    except ImportError:
+        return
+    if cuda_health.lost():
+        cuda_health.reset()

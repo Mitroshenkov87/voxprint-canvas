@@ -1,6 +1,6 @@
 # Architecture
 
-VOXPrint AI Canvas is a local image application. It runs on the machine's NVIDIA GPU. The window, the checks, and the generator live in one Python package.
+VOXPrint AI Canvas is a local image application. It runs on the machine's NVIDIA GPU. The window, the checks, and the generator live in one Python package. The window process runs Qt only; model work and the checks run in a worker process (`voxprint_common.worker`, see below).
 
 ## Layout
 
@@ -13,6 +13,8 @@ VOXPrint AI Canvas is a local image application. It runs on the machine's NVIDIA
 | `canvas/models` | Registry, tier, diffusers plan, download pins |
 | `canvas/safety` | Content safety checks |
 | `canvas/pipeline` | In-process job and the worker-process boundary |
+| `canvas/worker_jobs.py` | Handlers the worker process runs for the window |
+| `canvas/ipc` | Window-to-worker request and reply schema, and the window's worker client |
 | `installer` | Windows setup and Linux archive |
 | `tools/audit.py` | Release audit |
 | `tools/bakeoff.py` | Text-base comparison on a supported GPU |
@@ -52,12 +54,21 @@ The batch runs the series phases once across all entries (`canvas/pipeline/batch
 
 Decision: **a refused or stopped entry does not stop the batch.** The other entries continue, and the command exits 1 when any entry wrote nothing (0 when every entry wrote at least one picture). A check that cannot finish is the exception: it stops every write after it, in every entry, so nothing is saved without a finished check.
 
-Decision: **the window keeps the loaded pipeline between generations.** Before rc.32 each click ran in its own `pipeline_scope()`; on `ram32` the pipeline was released after the click and read from disk on the next one, and on `ram64`/`ram96` it was parked (VRAM copies dropped, RAM copies kept). Now the window opens a process-lifetime hold (`hold_warm()` in `canvas/models/runtime.py`) on its first generation and closes it when the window closes (`drop_warm(release=True)`), so the next generation in the same process reuses the loaded pipeline. Fail-safe rules:
+Decision: **the window keeps the loaded pipeline between generations.** Before rc.32 each click ran in its own `pipeline_scope()`; on `ram32` the pipeline was released after the click and read from disk on the next one, and on `ram64`/`ram96` it was parked (VRAM copies dropped, RAM copies kept). Now the worker opens a process-lifetime hold (`hold_warm()` in `canvas/models/runtime.py`) on the window's first generation and closes it when the window closes (`drop_warm(release=True)`, sent as a `warm` request) or when the worker exits, so the next generation in the same worker reuses the loaded pipeline. Fail-safe rules:
 
 - After every generation `trim_warm()` runs the existing picture fit check on real free VRAM. When the card does not have that room, or its free memory cannot be read, the pipeline is parked: `ram64`/`ram96` keep the RAM copy, `ram32` drops it. Without a CUDA device nothing is on the card and the pipeline stays.
 - A model, tier or LoRA change loads again, as before: the pipeline key is compared on every call.
 - Stages that need the card still park the pipeline first: the scenario writer and the enhancer, the series before its output check, and the 4K chain before Enlarge (`Pipeline._release_models` parks it). On `ram32` parking drops it.
 - An error inside a run parks or releases it, as before.
+
+## Window and worker process
+
+The window never loads a model. It sends requests (`canvas/ipc/schema.py`, protocol `canvas.worker/1`) to one long-lived worker process started by `voxprint_common.worker.WorkerHost` with the `spawn` method; the handlers are `canvas.worker_jobs:run` and `canvas.worker_jobs:check`. Generate, Photoshoot, Improve, LoRA import, the Diagnostics self-test, the GPU probe and the warm pipeline all run there, and checks run in the worker on every route. Every job is kind `inference`, so a crash fails the job and is not retried. The window reads events through `QtWorkerHost` on the UI thread and never waits on the worker.
+
+- A picture crosses as a file in a private per-session temporary folder, written by the worker after its checks for that picture passed. The window moves it into the pictures folder.
+- A crash, a missed heartbeat, a missed deadline, a reply that does not match the schema, or a worker that cannot start ends the job as unavailable, with nothing shown or saved. A crash shows a bar on the window; the window stays open and the worker starts again.
+- Generate waits for the worker's hello. The worker clears a stale GPU lock at hello, because the lock file is keyed by the CUDA device the worker uses.
+- Closing the app shuts the worker down, which releases its GPU memory.
 
 ## Content safety checks
 

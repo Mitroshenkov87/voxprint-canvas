@@ -23,9 +23,9 @@ from canvas.infra.gpu_lock import lock_path, prepare_startup_lock, read_lock, tr
 from canvas.infra.manifest import manifest_lock
 from canvas.models.modes import Mode, Tier
 from canvas.safety.gate import SafetyUnavailable, _wait
-from canvas.ui.shell_layout import PictureJob, open_layout
+from canvas.ui.shell_layout import PictureJob
 from canvas.ui.shell_screen import ShellWindow
-from tests.fakes import World, rgb
+from tests.fakes import World
 from tests.test_infra import _dead_pid
 
 
@@ -42,29 +42,45 @@ def home(monkeypatch, tmp_path: Path):
 
 
 def test_the_event_loop_runs_while_a_check_blocks(app, home: Path, monkeypatch) -> None:
-    order: list[str] = []
+    """The prompt check runs in the worker process; the window keeps ticking until the reply."""
+    import json
 
-    def slow(prompt: str) -> None:
-        del prompt
-        order.append("start")
-        time.sleep(0.25)
-        order.append("end")
+    from voxprint_common.worker import Handlers, WorkerHost
+
+    from canvas.ipc.client import WorkerClient
+    from canvas.ui.shell_layout import open_worker_layout
+    from canvas.ui.worker_checks import WorkerChecks
+    from tests.worker_handlers import FIXTURE_ENV
+    from tests.worker_support import settle
 
     monkeypatch.setattr("canvas.ui.shell_screen.selectable", lambda: (object(),))
-    shell = open_layout(home / "state", gate=World().gate(), enlarge_installed=False)
-    shell.gate.age_gate.review_prompt = slow  # type: ignore[method-assign]
-    window = ShellWindow(shell, tier=Tier.GB16, enlarge=object(), runner=lambda job, inputs: rgb())
-    window.view.set_prompt_text("a red boat")
-    window.show()
-    timer = QTimer()
-    timer.timeout.connect(lambda: order.append("tick"))
-    timer.start(20)
-    window.findChild(QPushButton, "generate").click()
-    timer.stop()
-    assert "start" in order and "end" in order
-    assert "tick" in order
-    assert order.index("tick") < order.index("end")
-    window.close()
+    monkeypatch.setenv(FIXTURE_ENV, json.dumps({"fault": "sleep", "sleep": 0.6, "fault_ops": ["prompts"]}))
+    host = WorkerHost(Handlers(run="tests.worker_handlers:run", check="tests.worker_handlers:check"),
+                      state_dir=home / "worker")
+    client = WorkerClient(host, tier=Tier.GB16.value)
+    window = ShellWindow(
+        open_worker_layout(home / "state", checks=WorkerChecks(client)), tier=Tier.GB16, enlarge=object(), worker=client,
+    )
+    try:
+        client.start()
+        settle(window, timeout=60)
+        assert client.state == "ready"
+        window.view.set_prompt_text("a red boat")
+        window.show()
+        ticks: list[float] = []
+        timer = QTimer()
+        timer.timeout.connect(lambda: ticks.append(time.monotonic()))
+        timer.start(20)
+        started = time.monotonic()
+        window.findChild(QPushButton, "generate").click()
+        clicked = time.monotonic()
+        settle(window, timeout=60)
+        timer.stop()
+        assert clicked - started < 0.2
+        assert len([tick for tick in ticks if tick > clicked]) >= 5
+        window.close()
+    finally:
+        client.shutdown()
 
 
 def test_a_timed_out_check_leaves_no_non_daemon_thread() -> None:

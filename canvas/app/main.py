@@ -8,6 +8,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from PIL import Image
+from PySide6.QtCore import QTimer
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QMessageBox
 from voxprint_common.i18n import set_language, tr
@@ -24,8 +25,8 @@ from canvas.safety.image import RawImage
 from canvas.safety.inputs import ImageRole, PendingInput
 from canvas.infra.enlarge import EnlargeClient, EnlargeError
 from canvas.infra.gpu import probe_gpu
-from canvas.infra import settings
-from canvas.infra.gpu_lock import GpuLockTimeout, forget_device_key, pinned, prepare_startup_lock
+from canvas.infra import cuda_health, settings
+from canvas.infra.gpu_lock import GpuLockTimeout, forget_device_key, pinned
 from canvas.infra.manifest import ManifestError
 from canvas.infra.models_users import register, unregister
 from canvas.infra.paths import OutputFolderError, models_dir, prepare_output_folder, shared_dir
@@ -53,8 +54,12 @@ from canvas.pipeline.enhance import EnhanceResult, fallback_message, open_rewrit
 from canvas.pipeline.schedule import last_image_seconds, reset_image_seconds
 from canvas.pipeline.pipeline import CoolingDown, EnlargeMissing, JobError, Pipeline
 from canvas.safety.gate import AgeGate, SafetyError
-from canvas.ui.shell_layout import canvas_state_dir, open_layout
+from canvas.ipc.client import WorkerClient, default_host
+from canvas.ui.shell_layout import canvas_state_dir, open_worker_layout
 from canvas.ui.shell_screen import ShellWindow
+from canvas.ui.worker_checks import WorkerChecks
+from voxprint_common.ui.simple_image import Phase
+from voxprint_common.worker.qt import install_crash_bar
 from canvas.ui.splash import Splash, show_splash
 
 
@@ -286,7 +291,8 @@ def _launch(tier: Tier, splash: Splash | None = None, app: QApplication | None =
         app = _application()
     if splash is None:
         splash = show_splash()
-    lock_note = prepare_startup_lock()
+    # The GPU lock is keyed by the worker's CUDA device; the worker clears a stale one at hello.
+    lock_note = None
 
     def stage(message: str) -> None:
         print(message, file=sys.stderr)
@@ -299,26 +305,34 @@ def _launch(tier: Tier, splash: Splash | None = None, app: QApplication | None =
     except (SnapshotError, OSError) as exc:
         stage(str(exc))
     enlarge = EnlargeClient()
-    try:
-        stack = load_catalog_stack(models_dir(), load_catalog())
-        gate = AgeGate(stack)
-    except ManifestError:
-        return _stop_startup(splash, text("startup.lock"))
-    except Exception as exc:
-        message = str(exc).strip() or text("gate.unavailable")
-        return _stop_startup(splash, message)
-    # Models load on first use, not while the window sits idle.
+    # Checks and model work run in the worker process. Generation waits for its hello;
+    # a worker that cannot start leaves the window up and shows unavailable.
+    worker = WorkerClient(default_host(), tier=tier.value)
     window = ShellWindow(
-        open_layout(canvas_state_dir(), gate=gate, enlarge_installed=enlarge.ready()),
+        open_worker_layout(canvas_state_dir(), checks=WorkerChecks(worker), enlarge_installed=enlarge.ready()),
         tier=tier,
         enlarge=enlarge,
+        worker=worker,
     )
+    install_crash_bar(window, worker.adapter, title=text("app.name"), body=text("gate.unavailable"))
+    if isinstance(app, QApplication):
+        app.aboutToQuit.connect(worker.shutdown)
     window.show()
     if lock_note == "busy":
         window.shell.layout.unavailable(text("startup.lock"))
         window.view.refresh()
     splash.finish(window)
-    app.exec()
+    def note_lock() -> None:
+        if worker.hello.get("lock") == "busy" and window.shell.layout.phase is not Phase.BUSY:
+            window.shell.layout.unavailable(text("startup.lock"))
+            window.view.refresh()
+
+    # The worker starts once the event loop runs; models still load on first use.
+    QTimer.singleShot(0, lambda: worker.when_ready(note_lock, lambda _reason: None))
+    try:
+        app.exec()
+    finally:
+        worker.shutdown()
     return 0
 
 
@@ -619,7 +633,9 @@ def _batch(args: argparse.Namespace) -> int:
         write_failed(folder, entries, code_name, str(exc))
         return _emit({"ok": False, "error": str(exc), "code": code_name}, as_json, 1)
     except Exception as exc:
-        if not is_out_of_memory(exc):
+        if cuda_health.is_cuda_fault(exc):
+            cuda_health.mark_lost(exc)
+        if not (is_out_of_memory(exc) or cuda_health.lost()):
             raise
         message = str(VramRefused())
         write_failed(folder, entries, "vram", message)
@@ -701,6 +717,16 @@ def _photoshoot_console(payload: dict[str, object]) -> str:
     return error
 
 
+def _leave_if_cuda_lost(code: int) -> int:
+    """Return ``code``, or leave with it now when the CUDA context was lost.
+
+    Interpreter teardown would free tensors of the broken context, and the driver aborts on that.
+    """
+    if cuda_health.lost():
+        cuda_health.exit_now(code)
+    return code
+
+
 def main(argv: list[str] | None = None) -> int:
     """Register the shared model folder, check for a release, or open the window."""
     # The shared catalogs follow the system locale or VOXPRINT_LANG; Canvas is English.
@@ -713,14 +739,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.version:
         print(splash_line())
         return 0
-    if getattr(args, "command", None) == "generate":
-        return _generate(args)
-    if getattr(args, "command", None) == "photoshoot-bench":
-        return _photoshoot_bench(args)
-    if getattr(args, "command", None) == "photoshoot":
-        return _photoshoot(args)
-    if getattr(args, "command", None) == "batch":
-        return _batch(args)
+    commands = {"generate": _generate, "photoshoot-bench": _photoshoot_bench, "photoshoot": _photoshoot, "batch": _batch}
+    command = commands.get(str(getattr(args, "command", None) or ""))
+    if command is not None:
+        return _leave_if_cuda_lost(command(args))
     if args.selftest:
         report = selftest_report(deep=bool(args.deep))
         if args.json:

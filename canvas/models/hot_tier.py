@@ -21,7 +21,7 @@ from typing import Any, Callable, assert_never
 from voxprint_common.model_park import ModelPark, reset_process_park
 from voxprint_common.ram_probe import RamTier, ram_tier, tier_for_gib
 
-from canvas.infra import ram_ledger, settings
+from canvas.infra import cuda_health, ram_ledger, settings
 from canvas.infra.stage_timer import log_detail, note_tag
 
 # Highest priority first. A smaller machine fills this list until the budget is gone.
@@ -53,6 +53,10 @@ _FOOTPRINT = {
 # A solo ram96 job peaked at 57 GB with about 28 GB parked.
 _JOB_RESERVE = 32 * _GIB
 _TIER_RANK = {RamTier.RAM32: 0, RamTier.RAM64: 1, RamTier.RAM96: 2}
+# A job that does not fit next to another job's plan waits this long, then reads from disk.
+_WAIT_LIMIT_S = 300.0
+_WAIT_STEP_S = 2.0
+_wait_listener: Callable[[str, float], None] | None = None
 
 _cache: dict[str, "_Resident"] = {}
 _bundles: dict[str, Any] = {}
@@ -132,14 +136,14 @@ def begin_job() -> RamTier:
     """Plan a new job, unless a ``job_scope`` already planned the one this is part of."""
     if _job_depth > 0 and _job is not None:
         return job_tier()
-    return plan_job()
+    return plan_job(wait=True)
 
 
 @contextmanager
 def job_scope() -> Iterator[RamTier]:
     """One RAM plan for everything inside, such as every entry of a batch."""
     global _job_depth
-    tier = plan_job() if _job_depth == 0 else job_tier()
+    tier = plan_job(wait=True) if _job_depth == 0 else job_tier()
     _job_depth += 1
     try:
         yield tier
@@ -147,7 +151,20 @@ def job_scope() -> Iterator[RamTier]:
         _job_depth -= 1
 
 
-def plan_job() -> RamTier:
+def set_wait_listener(listener: Callable[[str, float], None] | None) -> Callable[[str, float], None] | None:
+    """Call ``listener(stage, seconds_left)`` while a job waits for RAM. Returns the previous one.
+
+    The stage is ``waiting_gpu``. A listener may raise to stop waiting, for
+    example when the job was cancelled; the error reaches the caller of
+    :func:`begin_job`.
+    """
+    global _wait_listener
+    previous = _wait_listener
+    _wait_listener = listener
+    return previous
+
+
+def plan_job(*, wait: bool = False) -> RamTier:
     """Choose the tier for the whole job from free RAM now.
 
     The picture models not parked yet, plus ``_JOB_RESERVE`` and ``_FREE_FLOOR``,
@@ -155,12 +172,41 @@ def plan_job() -> RamTier:
     (``ram_ledger``). Otherwise the job keeps what fits, highest priority first
     (``ram64``), or reads every model from disk (``ram32``). Unknown free RAM
     keeps the suite tier.
+
+    Reading the ledger and publishing this plan happen under one
+    cross-process lock. With ``wait``, a job for which even ``ram32`` does not
+    fit next to the other jobs waits up to ``_wait_limit()`` seconds for them
+    to finish, then runs at ``ram32``.
     """
+    deadline: float | None = None
+    while True:
+        with ram_ledger.plan_lock():
+            free = free_bytes()
+            others = ram_ledger.others_pending()
+            starved = _starved(free, others)
+            if not (wait and starved) or (deadline is not None and _clock() >= deadline):
+                return _commit_plan(free, others, waited=deadline is not None)
+        now = _clock()
+        if deadline is None:
+            deadline = now + _wait_limit()
+            log_detail("hot", "wait", "cpu", f"pid={os.getpid()} free={free} others={others}")
+        left = max(0.0, deadline - now)
+        if _wait_listener is not None:
+            _wait_listener("waiting_gpu", left)
+        _sleep(min(_WAIT_STEP_S, left) if left > 0 else 0.0)
+
+
+def _starved(free: int, others: int) -> bool:
+    """True when another job's plan leaves no room for this job's own working set."""
+    if free <= 0 or others <= 0:
+        return False
+    return free - others - _JOB_RESERVE - _FREE_FLOOR < 0
+
+
+def _commit_plan(free: int, others: int, *, waited: bool) -> RamTier:
     global _job, _job_budget
     wanted = active_tier()
     pending = sum(size for name, size in _FOOTPRINT.items() if name not in _cache)
-    free = free_bytes()
-    others = ram_ledger.others_pending()
     tier = wanted
     budget: int | None = None
     if free > 0 and wanted is not RamTier.RAM32:
@@ -174,9 +220,27 @@ def plan_job() -> RamTier:
     ram_ledger.publish(ram_ledger.process_bytes(os.getpid()) + keep + _JOB_RESERVE)
     log_detail(
         "hot", "job", "cpu",
-        f"pid={os.getpid()} tier={tier.value} wanted={wanted.value} free={free} others={others} need={pending}",
+        f"pid={os.getpid()} tier={tier.value} wanted={wanted.value} free={free} others={others} need={pending}"
+        + (" waited=1" if waited else ""),
     )
     return tier
+
+
+def _wait_limit() -> float:
+    """Seconds a job waits for RAM held by other jobs. ``VOXPRINT_RAM_WAIT_S`` overrides."""
+    raw = os.environ.get("VOXPRINT_RAM_WAIT_S", "").strip()
+    try:
+        return max(0.0, float(raw)) if raw else _WAIT_LIMIT_S
+    except ValueError:
+        return _WAIT_LIMIT_S
+
+
+def _clock() -> float:
+    return time.monotonic()
+
+
+def _sleep(seconds: float) -> None:
+    time.sleep(seconds)
 
 
 def probed_bytes() -> int:
@@ -270,7 +334,7 @@ def activate(name: str, device: str, *, blocking: bool = False) -> bool:
     output was where that fault surfaced.
     """
     resident = _cache.get(name)
-    if resident is None or resident.hooked:
+    if resident is None or resident.hooked or cuda_health.lost():
         return False
     kind = "cuda" if "cuda" in str(device) else "cpu"
     if kind == "cpu":
@@ -287,9 +351,12 @@ def activate(name: str, device: str, *, blocking: bool = False) -> bool:
 
 
 def deactivate(name: str) -> None:
-    """Drop the VRAM copy and point the module at the RAM tensors again."""
+    """Drop the VRAM copy and point the module at the RAM tensors again.
+
+    Nothing moves once the CUDA context is lost: dropping those tensors would free them.
+    """
     resident = _cache.get(name)
-    if resident is None or resident.hooked:
+    if resident is None or resident.hooked or cuda_health.lost():
         return
     started = time.perf_counter()
     _assign(resident.module, _cpu_view(resident.parked, resident.state))
@@ -731,6 +798,8 @@ def _token(name: str) -> str:
 
 
 def _empty_cuda() -> None:
+    if cuda_health.lost():
+        return
     try:
         import torch
     except ImportError:
@@ -741,5 +810,7 @@ def _empty_cuda() -> None:
     try:
         if cuda.is_available():
             cuda.empty_cache()
-    except (TypeError, RuntimeError, AttributeError):
+    except (TypeError, RuntimeError, AttributeError) as exc:
+        if cuda_health.is_cuda_fault(exc):
+            cuda_health.mark_lost(exc)
         return

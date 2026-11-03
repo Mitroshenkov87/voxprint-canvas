@@ -22,9 +22,9 @@ from PySide6.QtWidgets import QApplication, QCheckBox, QComboBox, QLabel, QProgr
 from canvas.models.mdl_registry import Model
 from canvas.models.modes import Tier
 from canvas.ui import photoshoot_run
-from canvas.ui.shell_layout import open_layout
 from canvas.ui.shell_screen import ShellWindow
-from tests.fakes import World, rgb
+from tests.fakes import rgb
+from tests.worker_support import inline_window, settle
 from voxprint_common.i18n import set_language, tr
 from voxprint_common.ui.simple_image import Phase
 
@@ -97,8 +97,8 @@ def _open(state: Path, tier: Tier, name: str) -> ShellWindow:
 def _window(state: Path, tier: Tier, history_count: int = 50) -> ShellWindow:
     state.mkdir(parents=True, exist_ok=True)
     _history(state / "image-history.json", history_count)
-    shell = open_layout(state, gate=World().gate(), enlarge_installed=False)
-    return ShellWindow(shell, tier=tier, enlarge=object(), runner=lambda *_args: rgb(), improver=lambda prompt: prompt)
+    # The worker runs in this process with fakes, so the shots need no models and no second process.
+    return inline_window(state, tier=tier, enlarge=object(), runner=lambda *_args: rgb(), improver=lambda prompt: prompt)
 
 
 def _history(path: Path, count: int = 50) -> None:
@@ -298,8 +298,8 @@ def photoshoot_shots(destination: Path) -> None:
 
 def _photoshoot_window(state: Path, idea: str) -> ShellWindow:
     state.mkdir(parents=True, exist_ok=True)
-    shell = open_layout(state, gate=World().gate(), enlarge_installed=False)
-    window = ShellWindow(shell, tier=Tier.GB16, enlarge=object(), runner=lambda *_args: rgb(), improver=lambda prompt: prompt)
+    window = inline_window(state, tier=Tier.GB16, enlarge=object(), runner=lambda *_args: rgb(),
+                           improver=lambda prompt: prompt)
     window.view.set_prompt_text(idea)
     return window
 
@@ -330,17 +330,20 @@ def _run_smoke(app: QApplication, window: ShellWindow, idea: str, path: Path) ->
         del job, inputs
         calls["n"] += 1
         if calls["n"] == 2:
+            # Deliver the worker's scenario and status events so far, then grab the window mid-series.
+            window.worker.adapter._bridge._on_timeout()
+            app.processEvents()
             _save_smoke(app, window, path)
         return rgb()
 
-    window._runner = runner
-    window.photoshoot.writer = lambda _prompt: _scenario(idea)
+    window.session.runner = runner
+    window.session.series_writer = lambda _prompt: _scenario(idea)
     window.setFixedSize(SHOT)
     window.show()
     _mode(window).click()
     app.processEvents()
     _button(window, "generate").click()
-    app.processEvents()
+    settle(window)
     if calls["n"] < 2 or not path.is_file():
         raise SystemExit(f"{path.name} was not saved during the series")
 

@@ -31,6 +31,7 @@ from canvas.ui.about import AboutDialog
 from canvas.ui.shell_screen import ShellWindow
 from canvas.ui.splash import show_splash
 from tests.lora_files import write_lora
+from tests.worker_support import settle
 from tools.grab_shell_screens import SHOT, _sample, _save, _save_dialog, _window, prepare
 from voxprint_common.i18n import set_language, tr
 from voxprint_common.ui.simple_image import Phase
@@ -249,7 +250,7 @@ def _photoshoot(app: QApplication, state: Path, idea: str, folder: Path) -> None
 
 def _finish_series(app: QApplication, window: ShellWindow, idea: str, path: Path) -> None:
     photoshoot_run.selectable = _ready
-    window.photoshoot.writer = lambda _prompt: _scenario(idea)
+    window.session.series_writer = lambda _prompt: _scenario(idea)
     window.photoshoot.enabled = True
     mode = window.findChild(QCheckBox, "photoshootMode")
     if mode is not None:
@@ -259,14 +260,14 @@ def _finish_series(app: QApplication, window: ShellWindow, idea: str, path: Path
         del job, inputs
         return _kettle()
 
-    window._runner = runner
+    window.session.runner = runner
     _prompt(window, idea)
     window.photoshoot._showing = False
     generate = window.findChild(QPushButton, "generate")
     if generate is None:
         raise SystemExit("missing Generate")
     generate.click()
-    app.processEvents()
+    settle(window)
     window.photoshoot._showing = False
     window.photoshoot.sync()
     window.view.refresh()

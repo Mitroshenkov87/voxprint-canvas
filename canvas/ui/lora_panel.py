@@ -5,11 +5,10 @@ Import takes a Model Forge ``.voxlora`` package or a ``.safetensors`` with its
 """
 from __future__ import annotations
 
-import threading
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import QEventLoop, QSize, Qt, QTimer
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
@@ -34,11 +33,10 @@ from PySide6.QtWidgets import (
 from voxprint_common.ui.theme import CONTROL_BG, CONTROL_BORDER
 
 from canvas.app.i18n import text
+from canvas.ipc.schema import Reply, decode_event
 from canvas.models.lora_library import (
     THIRD_PARTY_KIND,
     LibraryEntry,
-    Manifest,
-    import_lora,
     list_library,
     remove_entry,
     set_trigger,
@@ -102,63 +100,36 @@ def pick_file(parent: QWidget | None) -> str:
         dialog.deleteLater()
 
 
-def import_with_dialog(parent: QWidget, gate: object, path: Path | None = None, **options) -> LibraryEntry | str | None:
-    """Ask for a file, import it, and return the entry, a refusal code, or None when cancelled.
+def import_with_dialog(
+    parent: QWidget | None,
+    worker: object,
+    path: Path | None = None,
+    *,
+    on_done: Callable[[LibraryEntry | str | None], None] | None = None,
+    root: Path | None = None,
+    progress: Callable[[str], None] | None = None,
+) -> None:
+    """Ask for a file and import it in the worker. ``on_done`` gets the entry, a refusal code, or None.
+
+    The worker checks every preview before anything is stored. A LoRA made
+    outside Model Forge is asked about here, on the UI thread, and then
+    imported with a second request.
 
     Args:
         parent: The window that owns the dialogs.
-        gate: The app's check stack.
+        worker: The window's :class:`canvas.ipc.client.WorkerClient`.
         path: The file to import. A file dialog asks when omitted.
-        options: Passed to :func:`canvas.models.lora_library.import_lora`.
+        on_done: Receives the result once.
+        root: Library folder. The app data folder is used when omitted.
+        progress: Status lines while the base model is requested.
     """
+    done = on_done or (lambda _result: None)
     if path is None:
         chosen = pick_file(parent)
         if not chosen:
-            return None
+            done(None)
+            return
         path = Path(chosen)
-    progress = options.pop("progress", None)
-    confirm = options.pop("confirm", None)
-
-    def ask(manifest: Manifest) -> bool:
-        return ThirdPartyDialog(parent, manifest.name).exec() == QDialog.DialogCode.Accepted
-
-    def work(confirm_here: Callable[[Manifest], bool], report: Callable[[str], None]) -> LibraryEntry | None:
-        return import_lora(Path(path), gate, confirm=confirm or confirm_here, progress=report, **options)
-
-    try:
-        return run_in_background(parent, work, ask, progress)
-    except LoraRejected as exc:
-        return exc.code
-
-
-def run_in_background(
-    parent: QWidget | None,
-    work: Callable[[Callable[[Manifest], bool], Callable[[str], None]], LibraryEntry | None],
-    ask: Callable[[Manifest], bool],
-    progress: Callable[[str], None] | None = None,
-) -> LibraryEntry | None:
-    """Run an import on a worker thread while the window keeps handling events.
-
-    A busy indicator is shown. A question for the user is asked on the UI thread.
-    """
-    state: dict[str, object] = {"done": False, "result": None, "error": None, "ask": None}
-    lines: list[str] = []
-    answered = threading.Event()
-    reply = {"ok": False}
-
-    def confirm_from_worker(manifest: Manifest) -> bool:
-        state["ask"] = manifest
-        answered.wait()
-        return reply["ok"]
-
-    def run() -> None:
-        try:
-            state["result"] = work(confirm_from_worker, lines.append)
-        except BaseException as exc:  # noqa: BLE001 - re-raised on the UI thread
-            state["error"] = exc
-        finally:
-            state["done"] = True
-
     busy = QProgressDialog(text("canvas.lora.checking"), "", 0, 0, parent)
     busy.setObjectName("loraBusy")
     dark(busy)
@@ -166,39 +137,56 @@ def run_in_background(
     busy.setCancelButton(None)
     busy.setWindowModality(Qt.WindowModality.WindowModal)
     busy.setMinimumDuration(200)
-    loop = QEventLoop()
-    timer = QTimer()
-    timer.setInterval(30)
+    fields: dict[str, object] = {"path": str(path), "root": None if root is None else str(root)}
 
-    def tick() -> None:
-        while lines:
-            line = lines.pop(0)
-            busy.setLabelText(line)
-            if progress is not None:
-                progress(line)
-        manifest = state["ask"]
-        if manifest is not None:
-            state["ask"] = None
+    def lines(event) -> None:
+        decoded = decode_event(event.message)
+        if decoded is None or decoded[0] != "note":
+            return
+        line = str(decoded[1].get("text", ""))
+        busy.setLabelText(line)
+        if progress is not None:
+            progress(line)
+
+    def close_busy() -> None:
+        busy.close()
+        busy.deleteLater()
+
+    def replied(reply: Reply, confirmed: bool) -> None:
+        if reply.status == "needs_confirm" and not confirmed:
             busy.hide()
-            reply["ok"] = bool(ask(manifest))  # type: ignore[arg-type]
-            answered.set()
-        if state["done"]:
-            loop.quit()
+            name = str(reply.data.get("name", ""))
+            if ThirdPartyDialog(parent, name).exec() != QDialog.DialogCode.Accepted:
+                close_busy()
+                done(None)
+                return
+            busy.show()
+            submit(confirmed=True)
+            return
+        close_busy()
+        if not reply.ok:
+            # A refusal code from the import, or the same refusal when the worker could not answer.
+            done(reply.code if not reply.unavailable else "gate.unavailable")
+            return
+        entry_id = reply.data.get("entry_id")
+        if not isinstance(entry_id, str):
+            done(None)
+            return
+        entry = next((item for item in list_library(root) if item.id == entry_id), None)
+        done(entry if entry is not None else "lora.invalid")
 
-    timer.timeout.connect(tick)
-    worker = threading.Thread(target=run, name="canvas-lora-import", daemon=True)
-    worker.start()
-    timer.start()
-    loop.exec()
-    timer.stop()
-    tick()
-    busy.close()
-    busy.deleteLater()
-    worker.join()
-    error = state["error"]
-    if isinstance(error, BaseException):
-        raise error
-    return state["result"]  # type: ignore[return-value]
+    def submit(*, confirmed: bool) -> None:
+        worker.submit(  # type: ignore[attr-defined]
+            "lora_import",
+            {**fields, "confirmed": confirmed},
+            on_done=lambda reply: replied(reply, confirmed),
+            on_progress=lines,
+        )
+
+    worker.when_ready(  # type: ignore[attr-defined]
+        lambda: submit(confirmed=False),
+        lambda _reason: replied(Reply("lora_import", "refused", "worker_unavailable", "", True), True),
+    )
 
 
 class ThirdPartyDialog(QDialog):
@@ -329,17 +317,16 @@ class ImportedDialog(QDialog):
 class LibraryDialog(QDialog):
     """The LoRA library: import, previews and remove."""
 
-    def __init__(self, parent: QWidget | None, gate: object, on_change: Callable[[], None] | None = None,
-                 root: Path | None = None, **options) -> None:
+    def __init__(self, parent: QWidget | None, worker: object, on_change: Callable[[], None] | None = None,
+                 root: Path | None = None) -> None:
         super().__init__(parent)
         from canvas.ui.shell_chrome import shell_style
 
         self.setObjectName("loraLibrary")
         self.setWindowTitle(text("canvas.lora.library"))
         self.setStyleSheet(shell_style())
-        self._gate = gate
+        self._worker = worker
         self._root = root
-        self._options = options
         self._on_change = on_change or (lambda: None)
         self._import = QPushButton(text("canvas.lora.import"))
         self._import.setObjectName("loraImport")
@@ -383,20 +370,27 @@ class LibraryDialog(QDialog):
             self._rows.addWidget(self._row(entry))
         self._rows.addStretch(1)
 
-    def run_import(self, path: Path | None = None) -> LibraryEntry | str | None:
-        """Import one file and show the result here."""
+    def run_import(self, path: Path | None = None, on_done: Callable[[object], None] | None = None) -> None:
+        """Import one file in the worker and show the result here."""
         self._status.setText(text("canvas.lora.checking"))
-        result = import_with_dialog(self, self._gate, path, root=self._root,
-                                    progress=self._status.setText, **self._options)
-        if result is None:
-            self._status.setText("")
-        elif isinstance(result, str):
-            self._status.setText(text(result))
-        else:
-            self._status.setText(text("canvas.lora.imported", name=result.manifest.name))
-            self.refresh()
-            self._on_change()
-        return result
+
+        def finished(result: LibraryEntry | str | None) -> None:
+            try:
+                if result is None:
+                    self._status.setText("")
+                elif isinstance(result, str):
+                    self._status.setText(text(result))
+                else:
+                    self._status.setText(text("canvas.lora.imported", name=result.manifest.name))
+                    self.refresh()
+                    self._on_change()
+            except RuntimeError:
+                pass  # the dialog was closed while the worker checked the file
+            if on_done is not None:
+                on_done(result)
+
+        import_with_dialog(self, self._worker, path, on_done=finished, root=self._root,
+                           progress=self._status.setText)
 
     def _row(self, entry: LibraryEntry) -> QWidget:
         card = QFrame()

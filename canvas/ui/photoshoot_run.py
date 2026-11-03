@@ -1,55 +1,64 @@
-"""Generate a Photoshoot series from the prompt field."""
+"""Start a Photoshoot series from the prompt field. The series runs in the worker.
+
+The window sends one ``series`` request. The worker writes the scenario,
+runs its checks, draws the frames and writes the frames it released into the
+window's private session folder. The window shows the scenario and the frame
+status from worker events, then moves the released frames into the pictures
+folder.
+"""
 from __future__ import annotations
 
 import json
-import random
+import shutil
 import uuid
-from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, assert_never
+from typing import TYPE_CHECKING
 
 from voxprint_common.i18n import tr
+from voxprint_common.ui.safety import ReviewedOutput
 from voxprint_common.ui.simple_image import Phase
 
 from canvas.app.i18n import text
 from canvas.core.formats import EXPORT_FORMAT, OutputFormat, UnsupportedFormat, parse_export_format
 from canvas.app.info import ENLARGE_NAME
-from canvas.app.shell_gate import reviewed_output
+from canvas.ipc.schema import Reply, decode_event, inside, series_fields
 from canvas.ui.shell_chrome import refresh_pictures
-from canvas.app.shell_run import RunStopped, load_rgb
-from canvas.models.loader import ModelNotReady
-from canvas.models.runtime import InferenceUnavailable
-from canvas.infra.gpu_lock import lock_path, release
-from canvas.infra.paths import models_dir
 from canvas.models.mdl_registry import selectable
-from canvas.models.modes import Mode
-from canvas.models.registry import load_catalog
-from canvas.models.snapshots import SnapshotError
-from canvas.pipeline.adult_direction import scenario_system
-from canvas.pipeline.enhance import QwenRewriter, WriterSession, open_rewriter
-from canvas.pipeline.photoshoot import SYSTEM_PROMPT, Scenario, frame_negative, tokens_for_request
-from canvas.pipeline.series import REFERENCE_STRENGTH, SeriesFrame, SeriesResult, run_series
+from canvas.pipeline.photoshoot import Shot
+from canvas.ui.worker_checks import WorkerChecks
 
 if TYPE_CHECKING:
     from canvas.ui.shell_screen import ShellWindow
-from canvas.safety.image import RawImage
-from canvas.safety.inputs import ImageRole, PendingInput
-from canvas.ui.shell_layout import PictureJob, SimpleLayout, job_from
+from canvas.ui.shell_layout import SimpleLayout, job_from
 from canvas.ui.styles import look_for
-from canvas.ui.ui_call import on_ui, run_off_ui
 
 
-class _Halt(Exception):
-    """The series cannot continue because the machine stopped the picture."""
+@dataclass(frozen=True)
+class SeriesOutcome:
+    """A finished or stopped series, as the worker reported it."""
 
-    def __init__(self, message: str, *, unavailable: bool = False) -> None:
-        super().__init__(message)
-        self.message = message
-        self.unavailable = unavailable
+    stopped: str
+    reason: str
+    kept: tuple[Path, ...]
+    folder: Path | None
+    code: str = ""
+    source: str = ""
+    hero_released: bool = False
+    hero_reason: str = ""
 
 
-def run_photoshoot(window: ShellWindow) -> None:
-    """Write the scenario, check it, and generate the series.
+class _SeriesRun:
+    """The series the window is waiting for."""
+
+    def __init__(self, series_id: str, idea: str) -> None:
+        self.series_id = series_id
+        self.idea = idea
+        self.job_id = ""
+
+
+def run_photoshoot(window: ShellWindow) -> bool:
+    """Send the series to the worker. True while the worker has it.
 
     Args:
         window: The open shell window. Its Photoshoot option is selected.
@@ -60,7 +69,7 @@ def run_photoshoot(window: ShellWindow) -> None:
         layout.unavailable(text("canvas.models.missing"))
         window.view.refresh()
         bar.sync()
-        return
+        return False
     idea = layout.prompt.strip()
     style = str(layout.get("canvas.style"))
     if style not in {"photo", "cinematic", "portrait"}:
@@ -71,156 +80,165 @@ def run_photoshoot(window: ShellWindow) -> None:
         layout.block(text("gate.unavailable"))
         window.view.refresh()
         bar.sync()
-        return
+        return False
     if job.output == "4k" and not window._enlarge_ready:
         layout.unavailable(text("enlarge.hint", name=ENLARGE_NAME))
         window.view.refresh()
         bar.sync()
-        return
-    folder = window.shell.state_dir / "pictures" / "series" / uuid.uuid4().hex
-    bar.folder = folder
+        return False
+    from canvas.ui.shell_screen import job_fields
+
+    series_id = uuid.uuid4().hex
+    bar.folder = window.shell.state_dir / "pictures" / "series" / series_id
     bar._stop = False
     base_seed = int(layout.seed)
-    adult = adult_content(layout)
+    run = _SeriesRun(series_id, idea)
+    window._series = run
+    fields = {
+        "idea": idea,
+        "count": bar.count,
+        "style": style,
+        "place": bar.place,
+        "seed_mode": bar.seed_mode,
+        "strength": bar.strength,
+        "seed": base_seed,
+        "adult": adult_content(layout),
+        "container": _export_format(layout).value,
+        "job": job_fields(job),
+        "template": layout.prompt_policy().template,
+        "suffix": look_for(style).suffix,
+        "series_id": series_id,
+    }
 
-    writer = _writer_session(window, adult)
-
-    def rewrite(prompt: str) -> str:
-        if bar.writer is not None:
-            return bar.writer(prompt)
-        return writer(prompt)
-
-    rewrite.release = writer.release  # type: ignore[attr-defined]
-    # The sample pass and the decode pass of one frame use the same seed, also in random mode.
-    seeds: dict[int, int] = {}
-
-    def job_for(
-        line: str, seed: int, hero: SeriesFrame | None, strength: float | None,
-    ) -> tuple[PictureJob, tuple[PendingInput, ...]]:
-        used = seeds.setdefault(seed, _seed(bar.seed_mode, base_seed, seed))
-        prompt = _compose(layout, line, style)
-        # Later shots can follow the first kept frame. The first frame itself is text.
-        picture = job._replace(
-            prompt=prompt,
-            negative=frame_negative(job.negative),
-            seed=used,
-            mode=Mode.TEXT if hero is None else Mode.RESTYLE,
-            copies=1,
-            aspect="1:1",
-            output="native",
-        )
-        runner = window._runner
-        fresh: tuple[PendingInput, ...] = ()
-        if hero is None:
-            if hasattr(runner, "img2img_strength"):
-                runner.img2img_strength = None
-        else:
-            if hasattr(runner, "img2img_strength"):
-                runner.img2img_strength = strength
-            # Always a copy: the pipeline wipes its inputs, and the hero is reused for every shot.
-            raw_hero = RawImage(hero.width, hero.height, hero.to_bytes())
-            fresh = (PendingInput(ImageRole.INIT, raw_hero),)
-        return picture, fresh
-
-    def generate(line: str, seed: int, hero: SeriesFrame | None, strength: float | None) -> RawImage | None:
-        picture, fresh = job_for(line, seed, hero, strength)
-        try:
-            raw = window._runner(picture, fresh)
-        except RunStopped as exc:
-            if exc.unavailable:
-                raise _Halt(exc.message, unavailable=True) from exc
-            raise
-        return raw
-
-    def sample(line: str, seed: int, hero: SeriesFrame | None, strength: float | None) -> bool:
-        sampler = getattr(window._runner, "sample", None)
-        if not callable(sampler):
-            return False
-        picture, fresh = job_for(line, seed, hero, strength)
-        try:
-            return sampler(picture, fresh) is True
-        except RunStopped as exc:
-            if exc.unavailable:
-                raise _Halt(exc.message, unavailable=True) from exc
-            raise
-
-    def prepare(lines: list[str]) -> None:
-        precompute = getattr(window._runner, "precompute", None)
-        if not callable(precompute):
+    def progress(event) -> None:
+        if window._series is not run:
             return
-        prompts = tuple(_compose(layout, line, style) for line in lines)
-        try:
-            precompute(prompts)
-        except (ImportError, ModelNotReady, InferenceUnavailable) as exc:
-            raise _Halt(str(exc), unavailable=True) from exc
-
-    generate.prepare = prepare  # type: ignore[attr-defined]
-    generate.sample = sample  # type: ignore[attr-defined]
-
-    def on_scenario(scenario: Scenario) -> None:
-        def show(scenario: Scenario = scenario) -> None:
-            bar.show_scenario(scenario.subject_block, scenario.shots, seed=base_seed)
+        decoded = decode_event(event.message)
+        if decoded is None:
+            return
+        kind, data = decoded
+        if kind == "scenario":
+            listed = data.get("shots")
+            shots = tuple(Shot(**shot) for shot in (listed if isinstance(listed, list) else []) if isinstance(shot, dict))
+            bar.show_scenario(str(data.get("subject", "")), shots, seed=base_seed)
             window.view.refresh()
             bar.sync()
-
-        on_ui(show)
-
-    def on_status(index: int, status: str) -> None:
-        def show(index: int = index, status: str = status) -> None:
+        elif kind == "status":
+            found = data.get("index")
+            index = found if isinstance(found, int) and not isinstance(found, bool) else -1
+            status = str(data.get("status", ""))
             total = max(len(bar.rows), 1)
             if status == "drawing":
                 window._advance(index, total, tr("photoshoot.progress.frame", current=index + 1, total=total))
             bar.mark(index, status)
             window.view.refresh()
             bar.sync()
+        elif kind == "note":
+            window.show_progress_note(str(data.get("text", "")))
 
-        on_ui(show)
+    def done(reply: Reply) -> None:
+        _series_done(window, run, reply)
 
-    def stopped() -> bool:
-        return bool(on_ui(lambda: bar._stop or layout.phase is not Phase.BUSY))
+    def go() -> None:
+        if window._series is not run:
+            return
+        if layout.phase is not Phase.BUSY:
+            _end(window, run)
+            return
+        run.job_id = window.worker.submit("series", fields, on_done=done, on_progress=progress)
 
-    runner = window._runner
-    if hasattr(runner, "cook"):
-        runner.cook = True
-    try:
-        result = run_off_ui(
-            lambda: run_series(
-                idea=idea,
-                count=bar.count,
-                style=style,
-                place_mode=bar.place,
-                seed=base_seed,
-                strength=_strength(bar.strength),
-                include_camera=lambda: True,
-                rewrite=rewrite,
-                age_gate=window.shell.gate.age_gate,
-                draw_frame=generate,
-                cancelled=stopped,
-                folder=folder,
-                on_scenario=on_scenario,
-                line_for=bar.line_for,
-                on_status=on_status,
-                adult=adult,
-                container=_export_format(layout),
-            ),
-        )
-    except _Halt as exc:
-        if exc.unavailable:
-            layout.unavailable(exc.message)
-        else:
-            layout.block(exc.message)
-        window.view.refresh()
-        bar.sync()
+    def fail(reason: str) -> None:
+        done(Reply("series", "refused", "worker_unavailable", reason, True))
+
+    window.worker.when_ready(go, fail)
+    return True
+
+
+def stop_series(window: ShellWindow) -> None:
+    """Ask the worker to stop after the frame that already finished. Finished frames stay."""
+    run = window._series
+    if isinstance(run, _SeriesRun) and run.job_id:
+        window.worker.cancel(run.job_id)
+
+
+def _end(window: ShellWindow, run: _SeriesRun) -> None:
+    if window._series is run:
+        window._series = None
+        window._busy = False
+    window.view.refresh()
+    window.photoshoot.sync()
+
+
+def _series_done(window: ShellWindow, run: _SeriesRun, reply: Reply) -> None:
+    layout = window.shell.layout
+    if window._series is not run:
         return
+    data: dict[str, object] | None = None
+    if reply.ok:
+        data = dict(reply.data)
+    elif reply.code == "cancelled":
+        data = _cancelled_manifest(window, reply)
+    if data is None:
+        if layout.phase is Phase.BUSY:
+            message = reply.message or text("gate.unavailable")
+            if reply.unavailable:
+                layout.unavailable(message)
+            else:
+                layout.block(message)
+        _end(window, run)
+        return
+    outcome = _adopt(window, run, data)
+    _end(window, run)
+    _finish(window, outcome, run.idea)
+
+
+def _cancelled_manifest(window: ShellWindow, reply: Reply) -> dict[str, object] | None:
+    """The fields a cancelled series noted before it stopped, or None when they cannot be trusted."""
+    session = window.worker.session_dir
+    path = inside(reply.data.get("checkpoint"), session)
+    if path is None or not path.is_file():
+        return None
+    try:
+        body = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
     finally:
-        writer.release()
-        if hasattr(runner, "cook"):
-            runner.cook = False
-        release(lock_path())
-    _finish(window, result, idea)
+        path.unlink(missing_ok=True)
+    if not isinstance(body, dict) or body.get("op") != "series" or body.get("status") != "ok":
+        return None
+    if not series_fields(body, session):
+        return None
+    return body
 
 
-def _finish(window: ShellWindow, result: SeriesResult, idea: str) -> None:
+def _adopt(window: ShellWindow, run: _SeriesRun, data: dict[str, object]) -> SeriesOutcome:
+    """Move the released frames out of the session folder into the pictures folder."""
+    session = window.worker.session_dir
+    listed = data.get("kept")
+    names = [str(name) for name in (listed if isinstance(listed, list) else [])]
+    source = inside(data.get("folder"), session)
+    folder: Path | None = None
+    kept: tuple[Path, ...] = ()
+    if source is not None and source.is_dir():
+        folder = window.shell.state_dir / "pictures" / "series" / run.series_id
+        folder.parent.mkdir(parents=True, exist_ok=True)
+        if folder.exists():
+            shutil.rmtree(folder)
+        shutil.move(str(source), folder)
+        kept = tuple(folder / name for name in names)
+    return SeriesOutcome(
+        stopped=str(data.get("stopped", "")),
+        reason=str(data.get("reason", "")),
+        kept=kept,
+        folder=folder,
+        code=str(data.get("code", "")),
+        source=str(data.get("source", "")),
+        hero_released=data.get("hero_released") is True,
+        hero_reason=str(data.get("hero_reason", "")),
+    )
+
+
+def _finish(window: ShellWindow, result: SeriesOutcome, idea: str) -> None:
     layout = window.shell.layout
     layout.set_prompt(idea)
     if result.stopped == "cancelled":
@@ -236,16 +254,16 @@ def _finish(window: ShellWindow, result: SeriesResult, idea: str) -> None:
         if not _record_series(window, result, idea) and layout.phase is Phase.BUSY:
             layout.cancel()
     else:
-        assert_never(result.stopped)
+        layout.unavailable(text("gate.unavailable"))
     window.view.refresh()
     window.photoshoot.sync()
 
 
-def _record_series(window: ShellWindow, result: SeriesResult, idea: str) -> bool:
+def _record_series(window: ShellWindow, result: SeriesOutcome, idea: str) -> bool:
     """Add the kept frames to the history as one grouped series entry.
 
-    The hero frame is staged so the content gate reviews it again through
-    ``finish``; every frame was already released by the gate in ``run_series``.
+    The screen keeps the hero frame only when the worker released it again
+    as the series entry; every frame was already released in the worker.
 
     Returns:
         True when the series entry was added.
@@ -254,16 +272,19 @@ def _record_series(window: ShellWindow, result: SeriesResult, idea: str) -> bool
         return False
     layout = window.shell.layout
     hero = result.kept[0]
-    try:
-        raw = load_rgb(hero)
-    except OSError:
+    if not hero.is_file():
         return False
     if layout.phase is not Phase.BUSY and not layout.generate():
         return False
     item_id = f"series-{result.folder.name}"
-    window.shell.gate.stage(item_id, RawImage(raw.width, raw.height, raw.to_bytes()))
+    checks = window.shell.gate
+    if isinstance(checks, WorkerChecks):
+        if result.hero_released:
+            checks.release(item_id, hero)
+        else:
+            checks.refuse(item_id, result.hero_reason or text("gate.unavailable"))
     try:
-        kept = layout.finish(item_id, reviewed_output(raw))
+        kept = layout.finish(item_id, ReviewedOutput(path=hero))
     except ValueError:
         return False
     if kept is None:
@@ -343,62 +364,9 @@ def _export_format(layout: SimpleLayout) -> OutputFormat:
         return EXPORT_FORMAT
 
 
-def _compose(layout: SimpleLayout, line: str, style: str) -> str:
-    look = look_for(style)
-    policy = layout.prompt_policy()
-    return " ".join(part for part in (policy.template, line.strip(), look.suffix) if part)
-
-
-def _seed(mode: str, base: int, series_seed: int) -> int:
-    if mode == "series":
-        return series_seed
-    if mode == "locked":
-        return base
-    if mode == "random":
-        return random.SystemRandom().randrange(1, 2**31)
-    raise ValueError(mode)
-
-
-def _strength(name: str) -> float | None:
-    if name == "low" or name == "medium":
-        return None
-    if name == "high":
-        return REFERENCE_STRENGTH
-    raise ValueError(name)
-
-
-def busy_progress(window: ShellWindow) -> Callable[[str], None]:
-    """Show download text on the window thread while a job is running."""
-
-    def report(message: str) -> None:
-        def show() -> None:
-            if window.shell.layout.phase is Phase.BUSY:
-                window._advance(0, 1, message)
-            else:
-                window.view.set_note(message)
-
-        on_ui(show)
-
-    return report
-
-
 def adult_content(layout: SimpleLayout) -> bool:
     """True when the Expert «Для взрослых (18+)» prompt policy is on."""
     try:
         return layout.get("image.adult_content") is True
     except KeyError:
         return False
-
-
-def _writer_session(window: ShellWindow, adult: bool) -> WriterSession:
-    """The scenario writer for one series. It opens on the first chunk."""
-
-    def open_writer(budget: int) -> QwenRewriter:
-        try:
-            return open_rewriter(
-                load_catalog(), window.tier, models_dir(), busy_progress(window), max_new_tokens=budget,
-            )
-        except (SnapshotError, OSError) as exc:
-            raise _Halt(str(exc), unavailable=True) from exc
-
-    return WriterSession(open_writer, scenario_system(SYSTEM_PROMPT, adult), tokens_for_request)

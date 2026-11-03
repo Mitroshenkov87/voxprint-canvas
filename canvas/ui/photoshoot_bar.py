@@ -147,6 +147,9 @@ class PhotoshootBar:
         """Stop after the frame that already finished. Finished frames stay."""
         self._stop = True
         self.window.shell.layout.cancel()
+        from canvas.ui.photoshoot_run import stop_series
+
+        stop_series(self.window)
 
     def _mount_mode(self) -> None:
         improve = self.window.view.root.findChild(QPushButton, "improvePrompt")

@@ -8,6 +8,7 @@ from typing import NoReturn, TypeVar
 from PIL import Image
 
 from canvas.app.i18n import text
+from canvas.infra import cuda_health
 from canvas.infra.enlarge import EnlargeError
 from canvas.infra.errors import note_crash
 from canvas.infra.gpu_lock import GpuLockTimeout, lock_path, release, try_acquire
@@ -173,7 +174,9 @@ class ShellRunner:
             except MemoryError as exc:
                 _halt(str(VramRefused()), exc, "vram", unavailable=True)
             except Exception as exc:
-                if is_out_of_memory(exc):
+                if cuda_health.is_cuda_fault(exc):
+                    cuda_health.mark_lost(exc)
+                if is_out_of_memory(exc) or cuda_health.lost():
                     refused = VramRefused()
                     _halt(str(refused), exc, "vram", unavailable=True)
                 _halt(f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__, exc, "internal", unavailable=True)

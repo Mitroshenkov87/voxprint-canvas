@@ -7,6 +7,7 @@ import sys
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
+from collections.abc import Callable
 from typing import assert_never
 
 from PIL import Image
@@ -263,7 +264,7 @@ class ShellWindow(QMainWindow):
         self.refresh_loras()
         self.view.refresh()
 
-    def import_lora(self, path: Path | None = None, on_done=None) -> None:
+    def import_lora(self, path: Path | None = None, on_done: Callable[..., None] | None = None) -> None:
         """Import one Model Forge export into the library in the worker, then show what was added.
 
         Args:

@@ -336,8 +336,8 @@ def _run_smoke(app: QApplication, window: ShellWindow, idea: str, path: Path) ->
             _save_smoke(app, window, path)
         return rgb()
 
-    window.session.runner = runner  # type: ignore[attr-defined]
-    window.session.series_writer = lambda _prompt: _scenario(idea)  # type: ignore[attr-defined]
+    window.session.runner = runner
+    window.session.series_writer = lambda _prompt: _scenario(idea)
     window.setFixedSize(SHOT)
     window.show()
     _mode(window).click()

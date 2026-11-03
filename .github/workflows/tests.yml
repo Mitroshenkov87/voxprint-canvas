@@ -220,7 +220,7 @@ jobs:
       - name: Encoder compatibility
         env:
           VOXPRINT_REQUIRE_GEN: "1"
-        run: .venv/bin/python -m pytest tests/test_transformers_compat.py tests/test_lora_diffusers.py
+        run: .venv/bin/python -m pytest -p no:pytestqt tests/test_transformers_compat.py tests/test_lora_diffusers.py
   gate-weights:
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -258,7 +258,7 @@ jobs:
         env:
           VOXPRINT_REQUIRE_GATE: "1"
           VOXPRINT_HOME: /home/runner/.cache/voxprint-gate
-        run: .venv/bin/python -m pytest tests/test_gate_weights.py
+        run: .venv/bin/python -m pytest -p no:pytestqt tests/test_gate_weights.py
   enhance-weights:
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -299,7 +299,7 @@ jobs:
           OMP_NUM_THREADS: "1"
           MKL_NUM_THREADS: "1"
           TOKENIZERS_PARALLELISM: "false"
-        run: .venv/bin/python -m pytest tests/test_enhance_weights.py
+        run: .venv/bin/python -m pytest -p no:pytestqt tests/test_enhance_weights.py
   pdf-guide:
     runs-on: ubuntu-latest
     timeout-minutes: 20

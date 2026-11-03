@@ -250,7 +250,7 @@ def _photoshoot(app: QApplication, state: Path, idea: str, folder: Path) -> None
 
 def _finish_series(app: QApplication, window: ShellWindow, idea: str, path: Path) -> None:
     photoshoot_run.selectable = _ready
-    window.session.series_writer = lambda _prompt: _scenario(idea)  # type: ignore[attr-defined]
+    window.session.series_writer = lambda _prompt: _scenario(idea)
     window.photoshoot.enabled = True
     mode = window.findChild(QCheckBox, "photoshootMode")
     if mode is not None:
@@ -260,7 +260,7 @@ def _finish_series(app: QApplication, window: ShellWindow, idea: str, path: Path
         del job, inputs
         return _kettle()
 
-    window.session.runner = runner  # type: ignore[attr-defined]
+    window.session.runner = runner
     _prompt(window, idea)
     window.photoshoot._showing = False
     generate = window.findChild(QPushButton, "generate")

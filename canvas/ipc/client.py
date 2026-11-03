@@ -101,12 +101,12 @@ class WorkerClient:
         """
         self.host = host
         self.tier = tier
-        self.adapter = QtWorkerHost(host, interval_ms=interval_ms)  # type: ignore[arg-type]
+        self.adapter = QtWorkerHost(host, interval_ms=interval_ms)
         self.adapter.progress.connect(self._on_progress)
         self.adapter.finished.connect(self._on_finished)
         self.adapter.failed.connect(self._on_failed)
         self.adapter.crashed.connect(self._on_crashed)
-        self.hook = CheckHook(host)  # type: ignore[arg-type]
+        self.hook = CheckHook(host)
         self.state = "idle"
         self.failure = ""
         self.hello: dict[str, object] = {}

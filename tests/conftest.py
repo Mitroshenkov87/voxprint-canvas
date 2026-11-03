@@ -81,3 +81,15 @@ def _fresh_worker_session():
     except ImportError:
         return
     worker_jobs.install_session(None)
+
+
+@pytest.fixture(autouse=True)
+def _cuda_context_usable():
+    """A test that marks the CUDA context lost does not end later tests' processes."""
+    yield
+    try:
+        from canvas.infra import cuda_health
+    except ImportError:
+        return
+    if cuda_health.lost():
+        cuda_health.reset()

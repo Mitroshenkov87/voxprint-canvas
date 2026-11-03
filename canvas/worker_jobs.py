@@ -95,6 +95,7 @@ def _default_session(tier_name: str) -> Session:
 
 def run(ctx: JobContext) -> dict[str, object]:
     """Run one window request. See :mod:`canvas.ipc.schema` for the ops."""
+    _leave_if_cuda_lost()
     payload = ctx.payload
     if not isinstance(payload, Mapping) or payload.get("proto") != PROTO:
         return refused(str(getattr(payload, "get", lambda _k: "")("op") or "hello"), "proto_mismatch", "", unavailable=True)
@@ -106,11 +107,14 @@ def run(ctx: JobContext) -> dict[str, object]:
         current = session(str(payload.get("tier") or ""))
     except Exception as exc:  # noqa: BLE001 - any failure to build the checks ends the job as unavailable
         return refused(op, "check.load", _unavailable_text(exc), unavailable=True)
-    return route(ctx, current, payload)
+    if op not in _GPU_ROUTES:
+        return route(ctx, current, payload)
+    return _gpu_route(ctx, op, lambda: route(ctx, current, payload))
 
 
 def check(ctx: JobContext) -> dict[str, object]:
     """A ``check`` job: review prompts before the window starts a picture."""
+    _leave_if_cuda_lost()
     payload = ctx.payload
     if not isinstance(payload, Mapping) or payload.get("proto") != PROTO or payload.get("op") != "prompts":
         return refused("prompts", "proto_mismatch", "", unavailable=True)
@@ -119,6 +123,88 @@ def check(ctx: JobContext) -> dict[str, object]:
     except Exception as exc:  # noqa: BLE001
         return refused("prompts", "check.load", _unavailable_text(exc), unavailable=True)
     return _prompts(ctx, current, payload)
+
+
+# --- GPU failures -------------------------------------------------------------------------------------------------
+
+
+def _gpu_route(ctx: JobContext, op: str, body: Callable[[], dict[str, object]]) -> dict[str, object]:
+    """Run a route that uses the GPU. A GPU memory failure ends this job with code ``vram``.
+
+    While the job waits for RAM held by another Canvas job, a ``note`` event
+    with stage ``waiting_gpu`` goes to the window. When the CUDA context is
+    lost the reply is sent and this process leaves (see :func:`_reply_then_exit`).
+    """
+    from canvas.infra import cuda_health
+    from canvas.models import hot_tier
+    from canvas.pipeline.bf16_schedule import VramRefused, is_out_of_memory
+
+    def waiting(stage: str, seconds_left: float) -> None:
+        _stop_if_cancelled(ctx)
+        ctx.progress(message=encode_event("note", text="", stage=stage, seconds_left=round(seconds_left, 1)))
+
+    previous = hot_tier.set_wait_listener(waiting)
+    try:
+        result = body()
+    except JobCancelled:
+        raise
+    except Exception as exc:
+        if cuda_health.is_cuda_fault(exc):
+            cuda_health.mark_lost(exc)
+        if not (cuda_health.lost() or isinstance(exc, (VramRefused, MemoryError)) or is_out_of_memory(exc)):
+            raise
+        result = refused(op, "vram", str(VramRefused()), unavailable=True)
+    finally:
+        hot_tier.set_wait_listener(previous)
+    if cuda_health.lost():
+        _reply_then_exit(ctx, _fail_closed(op, result, str(VramRefused())))
+    return result
+
+
+def _fail_closed(op: str, result: dict[str, object], message: str) -> dict[str, object]:
+    """A ``vram`` refusal in place of ``result``. Any picture file it named is removed."""
+    names: list[Path] = []
+    if isinstance(result.get("path"), str):
+        names.append(Path(str(result["path"])))
+    folder = result.get("folder")
+    kept = result.get("kept")
+    if isinstance(folder, str) and isinstance(kept, list):
+        names.extend(Path(folder) / str(name) for name in kept)
+    for path in names:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+    return refused(op, "vram", message, unavailable=True)
+
+
+def _reply_then_exit(ctx: JobContext, result: dict[str, object]) -> None:
+    """Send ``result`` to the window, then leave with ``EXIT_CUDA_LOST``. The host starts a new worker.
+
+    The host 0.6.0 has no "exit after this reply" option, so the reply goes out
+    through the context's own channel first. Without that channel the result
+    is returned as usual and the next job leaves instead.
+    """
+    from canvas.infra import cuda_health
+
+    emit = getattr(ctx, "_emit", None)
+    if not callable(emit):
+        return
+    try:
+        from voxprint_common.worker.wire import DidFinish
+
+        emit(DidFinish(ctx.job_id, result, ctx.checkpoint_out))
+    except Exception:  # noqa: BLE001 - the process leaves either way; the window then sees a crash
+        pass
+    cuda_health.exit_now(cuda_health.EXIT_CUDA_LOST)
+
+
+def _leave_if_cuda_lost() -> None:
+    """A worker whose CUDA context broke takes no further jobs."""
+    from canvas.infra import cuda_health
+
+    if cuda_health.lost():
+        cuda_health.exit_now(cuda_health.EXIT_CUDA_LOST)
 
 
 # --- routes -------------------------------------------------------------------------------------------------------
@@ -148,6 +234,8 @@ def _prompts(ctx: JobContext, current: Session, payload: Mapping[str, object]) -
 def _generate(ctx: JobContext, current: Session, payload: Mapping[str, object]) -> dict[str, object]:
     from canvas.app.shell_run import RunStopped
     from canvas.core.formats import extension, save_image
+    from canvas.infra import cuda_health
+    from canvas.models import hot_tier
     from canvas.models.runtime import hold_warm, pipeline_scope, trim_warm
 
     job = _job(payload.get("job"))
@@ -165,6 +253,8 @@ def _generate(ctx: JobContext, current: Session, payload: Mapping[str, object]) 
 
         return refused("generate", "job", text("error.job"), unavailable=False)
     ctx.progress(message="", step=0, total_steps=1)
+    # One RAM plan per picture. It counts every other Canvas job on this machine, and may wait for one.
+    hot_tier.begin_job()
     if payload.get("warm") and not current.warm:
         hold_warm()
         current.warm = True
@@ -179,6 +269,11 @@ def _generate(ctx: JobContext, current: Session, payload: Mapping[str, object]) 
     if ctx.cancelled():
         _wipe(raw)
         raise JobCancelled()
+    if cuda_health.lost():
+        _wipe(raw)
+        from canvas.pipeline.bf16_schedule import VramRefused
+
+        return refused("generate", "vram", str(VramRefused()), unavailable=True)
     item_id = uuid.uuid4().hex
     staged = _copy(raw)
     _wipe(raw)
@@ -574,6 +669,9 @@ def _unavailable_text(exc: BaseException | None) -> str:
         return message
     return text("gate.unavailable")
 
+
+# Routes that put models on the GPU.
+_GPU_ROUTES = frozenset({"generate", "series", "improve"})
 
 _ROUTES: dict[str, Callable[[JobContext, Session, Mapping[str, object]], dict[str, object]]] = {
     "hello": _hello,

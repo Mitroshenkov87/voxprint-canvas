@@ -25,12 +25,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from canvas.core.formats import OutputFormat
+from canvas.infra import cuda_health
 from canvas.infra.errors import note_error, note_timing
 from canvas.infra.phase_vram import Phase, ResidualVram, start_phase
 from canvas.infra.stage_timer import StageTimes, set_current
 from canvas.models import hot_tier as hot
 from canvas.models.runtime import pipeline_scope
-from canvas.pipeline.bf16_schedule import VramRefused
+from canvas.pipeline.bf16_schedule import VramRefused, is_out_of_memory
 from canvas.pipeline.device_guard import DeviceRefused
 from canvas.pipeline.photoshoot import Scenario, scenario_request
 from canvas.pipeline.series import (
@@ -143,6 +144,12 @@ def run_batch(
             note_timing(clock.log_line())
     if len(results) < len(entries):
         _fill(entries, results, _internal(None))
+    if cuda_health.lost():
+        # Every entry that failed after the CUDA context broke reports the GPU, not a side effect.
+        vram = SeriesResult("error", str(VramRefused()), (), None, "vram")
+        for index, result in results.items():
+            if result.stopped == "error" and not result.kept:
+                results[index] = vram
     return [
         EntryResult(entry, folder / entry.name, results[index], scenarios.get(index))
         for index, entry in enumerate(entries)
@@ -250,7 +257,15 @@ def _fill(entries: list[BatchEntry], results: dict[int, SeriesResult], result: S
 
 
 def _internal(exc: Exception | None) -> SeriesResult:
-    """The result for an entry that ended on an unexpected error. The reason names the error type."""
+    """The result for an entry that ended on an unexpected error. The reason names the error type.
+
+    A GPU memory failure, or any error once the CUDA context is lost, is a ``vram`` result instead.
+    """
+    if exc is not None and cuda_health.is_cuda_fault(exc):
+        cuda_health.mark_lost(exc)
+    if cuda_health.lost() or isinstance(exc, (VramRefused, MemoryError)) or (exc is not None and is_out_of_memory(exc)):
+        note_error("vram")
+        return SeriesResult("error", str(VramRefused()), (), None, "vram")
     kind = type(exc).__name__ if exc is not None else "no result"
     note_error("internal")
     return SeriesResult("error", f"The entry failed with an unexpected error ({kind}).", (), None, "internal")

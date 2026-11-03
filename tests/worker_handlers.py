@@ -10,7 +10,9 @@ fake generator, so input and output checks run exactly as in the app.
 
 Some fixture keys make the handler misbehave on purpose, for the fail-closed
 tests: ``fault`` is ``raise``, ``exit``, ``malformed``, ``outside`` or
-``sleep``.
+``sleep``. ``gpu_fault`` makes the runner fail like the GPU: ``vram`` raises
+``VramRefused``; ``release`` also makes the following CUDA cache release fail
+with an ``AcceleratorError``, as in the rc.34/35 logs.
 """
 from __future__ import annotations
 
@@ -47,9 +49,10 @@ class FakeGenerator:
 class PipelineRunner(ShellRunner):
     """The app's runner (refusal mapping, GPU lock release) around the real pipeline and a fake generator."""
 
-    def __init__(self, *, gate, tier: Tier, delay: float = 0.0) -> None:
+    def __init__(self, *, gate, tier: Tier, delay: float = 0.0, gpu_fault: str = "") -> None:
         super().__init__(gate=gate, tier=tier, enlarge=None)
         self.delay = delay
+        self.gpu_fault = gpu_fault
 
     def _generator(self, job):
         del job
@@ -61,10 +64,42 @@ class PipelineRunner(ShellRunner):
     def _through_pipeline(self, job, inputs):
         if self.delay:
             time.sleep(self.delay)
+        if self.gpu_fault:
+            _gpu_fault(self.gpu_fault)
         pipeline = Pipeline(gate=self.gate, generator=FakeGenerator(), tier=self.tier)
         return pipeline.generate(
             job.prompt, job.mode, inputs, aspect=job.aspect, output=job.output, explicit=job.adult_content,
         )
+
+
+class AcceleratorError(RuntimeError):
+    """Same type name as torch.AcceleratorError."""
+
+
+class _BrokenCuda:
+    """A CUDA module whose cache release fails."""
+
+    @staticmethod
+    def is_available() -> bool:
+        return True
+
+    @staticmethod
+    def empty_cache() -> None:
+        raise AcceleratorError("CUDA error: an illegal memory access was encountered")
+
+
+class _BrokenTorch:
+    cuda = _BrokenCuda()
+
+
+def _gpu_fault(kind: str) -> None:
+    from canvas.pipeline import gpu_release
+    from canvas.pipeline.bf16_schedule import VramRefused
+
+    if kind == "release":
+        gpu_release._torch = lambda: _BrokenTorch()  # type: ignore[assignment]
+        gpu_release.release_cuda_cache()
+    raise VramRefused()
 
 
 def world_from(fixture: Mapping[str, object]) -> World:
@@ -92,7 +127,10 @@ def session_from(fixture: Mapping[str, object]) -> worker_jobs.Session:
         raise OSError("the check models could not be loaded")
     tier = Tier(str(fixture.get("tier", Tier.GB24.value)))
     gate = world_from(fixture).gate()
-    runner = PipelineRunner(gate=gate, tier=tier, delay=float(fixture.get("delay", 0.0)))  # type: ignore[arg-type]
+    runner = PipelineRunner(
+        gate=gate, tier=tier, delay=float(fixture.get("delay", 0.0)),  # type: ignore[arg-type]
+        gpu_fault=str(fixture.get("gpu_fault", "")),
+    )
 
     def improve(*, prompt: str, adult: bool, progress) -> str:
         del adult, progress

@@ -9,6 +9,7 @@ from __future__ import annotations
 import gc
 from typing import Any
 
+from canvas.infra import cuda_health
 from canvas.infra.errors import note_error
 from canvas.infra.stage_timer import log_detail
 from canvas.infra.vram_trace import note_vram
@@ -27,8 +28,12 @@ def release_gate_weights(gate: object) -> None:
 def release_cuda_cache() -> bool:
     """Collect dropped models and return their CUDA blocks to the driver.
 
-    Returns True when a CUDA cache was released.
+    Returns True when a CUDA cache was released. A failed release marks the
+    CUDA context lost (:mod:`canvas.infra.cuda_health`): nothing is collected or
+    released after that, and the caller ends the job with code ``vram``.
     """
+    if cuda_health.lost():
+        return False
     gc.collect()
     torch = _torch()
     if torch is None or not torch.cuda.is_available():
@@ -41,6 +46,7 @@ def release_cuda_cache() -> bool:
     except Exception as exc:  # an out-of-memory or driver error must not end the process
         note_error("cuda.release")
         log_detail("cuda", "release_failed", "cuda", f"{type(exc).__name__}")
+        cuda_health.mark_lost(exc)
         return False
     return True
 
@@ -48,7 +54,7 @@ def release_cuda_cache() -> bool:
 def free_vram_gb() -> float | None:
     """Free GPU memory in GB, or None when this process has no CUDA device."""
     torch = _torch()
-    if torch is None or not torch.cuda.is_available():
+    if cuda_health.lost() or torch is None or not torch.cuda.is_available():
         return None
     free, _total = torch.cuda.mem_get_info()
     return float(free) / (1024 ** 3)

@@ -25,7 +25,7 @@ from canvas.safety.image import RawImage
 from canvas.safety.inputs import ImageRole, PendingInput
 from canvas.infra.enlarge import EnlargeClient, EnlargeError
 from canvas.infra.gpu import probe_gpu
-from canvas.infra import settings
+from canvas.infra import cuda_health, settings
 from canvas.infra.gpu_lock import GpuLockTimeout, forget_device_key, pinned
 from canvas.infra.manifest import ManifestError
 from canvas.infra.models_users import register, unregister
@@ -633,7 +633,9 @@ def _batch(args: argparse.Namespace) -> int:
         write_failed(folder, entries, code_name, str(exc))
         return _emit({"ok": False, "error": str(exc), "code": code_name}, as_json, 1)
     except Exception as exc:
-        if not is_out_of_memory(exc):
+        if cuda_health.is_cuda_fault(exc):
+            cuda_health.mark_lost(exc)
+        if not (is_out_of_memory(exc) or cuda_health.lost()):
             raise
         message = str(VramRefused())
         write_failed(folder, entries, "vram", message)
@@ -715,6 +717,16 @@ def _photoshoot_console(payload: dict[str, object]) -> str:
     return error
 
 
+def _leave_if_cuda_lost(code: int) -> int:
+    """Return ``code``, or leave with it now when the CUDA context was lost.
+
+    Interpreter teardown would free tensors of the broken context, and the driver aborts on that.
+    """
+    if cuda_health.lost():
+        cuda_health.exit_now(code)
+    return code
+
+
 def main(argv: list[str] | None = None) -> int:
     """Register the shared model folder, check for a release, or open the window."""
     # The shared catalogs follow the system locale or VOXPRINT_LANG; Canvas is English.
@@ -727,14 +739,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.version:
         print(splash_line())
         return 0
-    if getattr(args, "command", None) == "generate":
-        return _generate(args)
-    if getattr(args, "command", None) == "photoshoot-bench":
-        return _photoshoot_bench(args)
-    if getattr(args, "command", None) == "photoshoot":
-        return _photoshoot(args)
-    if getattr(args, "command", None) == "batch":
-        return _batch(args)
+    commands = {"generate": _generate, "photoshoot-bench": _photoshoot_bench, "photoshoot": _photoshoot, "batch": _batch}
+    command = commands.get(str(getattr(args, "command", None) or ""))
+    if command is not None:
+        return _leave_if_cuda_lost(command(args))
     if args.selftest:
         report = selftest_report(deep=bool(args.deep))
         if args.json:

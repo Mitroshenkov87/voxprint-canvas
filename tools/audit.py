@@ -192,11 +192,6 @@ def score_band(score: float) -> str:
     return "low"
 
 
-def severity_from_osv(payload: Mapping[str, Any]) -> str:
-    """Map one OSV document to critical/high/medium/low. A reviewed label wins over a raw CVSS vector."""
-    return _reviewed_label(payload) or _cvss_label(payload)
-
-
 def _reviewed_label(payload: Mapping[str, Any]) -> str:
     specific = payload.get("database_specific")
     if not isinstance(specific, dict):

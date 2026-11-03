@@ -10,7 +10,7 @@ from pathlib import Path
 from PIL import Image
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication
 from voxprint_common.i18n import set_language, tr
 
 from canvas.app.branding import icon_path, set_app_user_model_id
@@ -270,19 +270,6 @@ def _application() -> QApplication:
     if icon.is_file():
         app.setWindowIcon(QIcon(str(icon)))
     return app
-
-
-def _stop_startup(splash: Splash, message: str) -> int:
-    """Show ``message`` and leave. The splash alone closes before it can be read."""
-    print(message, file=sys.stderr)
-    splash.set_stage(message)
-    box = QMessageBox()
-    box.setIcon(QMessageBox.Icon.Warning)
-    box.setWindowTitle(text("app.name"))
-    box.setText(message)
-    box.exec()
-    splash.close()
-    return 1
 
 
 def _launch(tier: Tier, splash: Splash | None = None, app: QApplication | None = None) -> int:

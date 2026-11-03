@@ -7,7 +7,6 @@ build is not installed there.
 """
 from __future__ import annotations
 
-import hashlib
 import shutil
 import subprocess
 import sys
@@ -136,37 +135,6 @@ def _pip(args: list[str]) -> None:
     completed = subprocess.run(args, stdout=sys.stderr, stderr=sys.stderr, check=False)
     if completed.returncode != 0:
         raise OSError(text("error.package"))
-
-
-def file_sha256(path: Path) -> str:
-    """SHA-256 of one file."""
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        while True:
-            chunk = handle.read(1024 * 1024)
-            if not chunk:
-                break
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def hash_tree(folder: Path) -> dict[str, str]:
-    """SHA-256 of each file under ``folder``, keyed by the relative path."""
-    if not folder.is_dir():
-        return {}
-    found: dict[str, str] = {}
-    for path in sorted(folder.rglob("*")):
-        if not path.is_file() or path.name.endswith(".partial"):
-            continue
-        digest = hashlib.sha256()
-        with path.open("rb") as handle:
-            while True:
-                chunk = handle.read(1024 * 1024)
-                if not chunk:
-                    break
-                digest.update(chunk)
-        found[path.relative_to(folder).as_posix()] = digest.hexdigest()
-    return found
 
 
 def _restore_linux() -> None:

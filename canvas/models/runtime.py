@@ -1464,12 +1464,6 @@ def pending_latents() -> int:
         return len(_pending_latents)
 
 
-def clear_pending_latents() -> None:
-    """Forget latents a stopped series did not decode."""
-    with _lock:
-        _pending_latents.clear()
-
-
 def _activate_once(pipe: Any, name: str, device: str) -> None:
     """Unpark ``name`` unless a render phase already left it on the card."""
     if _resident_cook and _module_on_cuda(getattr(pipe, name, None)):

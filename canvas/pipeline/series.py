@@ -819,27 +819,6 @@ def _stop(stopped: StopCode, reason: str, code: str, source: Source = "") -> Ser
     return SeriesResult(stopped, reason, (), None, code, source)
 
 
-def _stop_kept(
-    stopped: StopCode,
-    reason: str,
-    code: str,
-    source: Source,
-    folder: Path,
-    idea: str,
-    scenario: Scenario,
-    style: str,
-    mode: PlaceMode,
-    lines: list[str],
-    seeds: list[int],
-    blocked: list[int],
-    kept: list[Path],
-) -> SeriesResult:
-    """Stop the series with frames already on disk. No later frame is drawn."""
-    _write_meta(folder, idea, scenario, style, mode, lines, seeds, blocked, kept)
-    note_error(code)
-    return SeriesResult(stopped, reason, tuple(kept), folder, code, source)
-
-
 def _with_idea(idea: str, line: str) -> str:
     return f"{idea}\n{line}"
 

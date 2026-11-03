@@ -47,16 +47,6 @@ def pipe_name(ipc_base: str, sid: str) -> str:
     return f"{ipc_base}-{digest}"
 
 
-def socket_path(app: str, ipc_base: str) -> str:
-    """Standard socket for ``app``."""
-    if sys.platform == "win32":
-        return pipe_name(ipc_base, _windows_user_sid())
-    runtime = os.environ.get("XDG_RUNTIME_DIR", "").strip()
-    if not runtime:
-        raise OSError("XDG_RUNTIME_DIR is not set")
-    return str(Path(runtime) / "voxprint" / f"{app}.sock")
-
-
 def find_app(pascal: str, kebab: str) -> AppInstall | None:
     """Override, then the suite manifest, the suite registry, the default path, and PATH.
 

@@ -44,21 +44,6 @@ def _ui_bridge() -> _Bridge:
     return _bridge
 
 
-def on_ui(fn: Callable[[], T]) -> T:
-    """Run ``fn`` on the window thread and return its value."""
-    app = QApplication.instance()
-    if not isinstance(app, QApplication) or QThread.currentThread() is app.thread():
-        return fn()
-    box: dict[str, object] = {}
-    done = threading.Event()
-    _ui_bridge().call.emit((fn, box, done))
-    done.wait()
-    error = box.get("error")
-    if isinstance(error, Exception):
-        raise error
-    return box.get("value")  # type: ignore[return-value]
-
-
 def run_off_ui(fn: Callable[[], T]) -> T:
     """Run ``fn`` off the window thread while that thread keeps handling events."""
     app = QApplication.instance()

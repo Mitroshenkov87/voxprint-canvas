@@ -307,8 +307,3 @@ def _features(raw: object) -> dict[str, FeatureFlag]:
 def _is_z_image(spec: ModelSpec) -> bool:
     blob = f"{spec.id} {spec.repo} {spec.text_base}".casefold()
     return "z-image" in blob
-
-
-def source_order(spec: ModelSpec) -> tuple[str, ...]:
-    """Source kinds in the order the downloader tries them. Empty URIs are skipped later."""
-    return tuple(source.kind for source in spec.sources)

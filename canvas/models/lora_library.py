@@ -161,11 +161,6 @@ def import_lora(
     return _store(staged, library_root(root))
 
 
-def read_export(source: Path) -> Manifest:
-    """Validate one export without checking previews or storing it."""
-    return _stage(source).manifest
-
-
 def open_package_weights(source: Path) -> UserLora:
     """Open the weights of a ``.voxlora`` for one command. Previews are not read or kept.
 
@@ -602,11 +597,6 @@ def _fetch_with_mdl(progress: Callable[[str], None]) -> bool:
 
     progress(text("canvas.lora.base_queued"))
     return True
-
-
-def is_third_party(manifest_record: dict[str, object]) -> bool:
-    """True for a LoRA made outside Model Forge."""
-    return manifest_record.get("source") == THIRD_PARTY_SOURCE
 
 
 def set_trigger(entry_id: str, trigger: str, root: Path | None = None) -> LibraryEntry | None:

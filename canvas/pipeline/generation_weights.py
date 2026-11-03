@@ -33,18 +33,6 @@ def generation_dtype(bf16_bytes: int) -> GenerationDtype:
     return "fp8"
 
 
-def module_bf16_bytes(module: Any) -> int:
-    """Parameter bytes as BF16, whatever dtype is stored now."""
-    total = 0
-    for param in _parameters(module):
-        count = _numel(param)
-        if count > 0:
-            total += count * 2
-            continue
-        total += _nbytes(param)
-    return total
-
-
 def prepare_generation(module: Any, torch: Any) -> tuple[GenerationDtype, bool]:
     """Drop offload hooks and keep one resident BF16 copy.
 
@@ -69,49 +57,6 @@ def drop_offload_hooks(module: Any) -> None:
     for sub in targets:
         _drop_hf_hook(sub)
         _drop_layerwise(sub)
-
-
-def install_fp8_matmul(module: Any, torch: Any) -> bool:
-    """Store linear weights as FP8 and multiply with ``_scaled_mm``.
-
-    False when this torch has no FP8 matmul, or when the module has no linear
-    layers. A failed layer is restored, so a False result leaves the module as
-    it was.
-    """
-    storage = getattr(torch, "float8_e4m3fn", None)
-    scaled = getattr(torch, "_scaled_mm", None)
-    nn = getattr(torch, "nn", None)
-    linear_type = getattr(nn, "Linear", None) if nn is not None else None
-    compute = getattr(torch, "bfloat16", None)
-    if storage is None or compute is None or not callable(scaled) or linear_type is None:
-        return False
-    finfo = getattr(torch, "finfo", None)
-    if not callable(finfo):
-        return False
-    try:
-        fp8_max = float(finfo(storage).max)
-    except (TypeError, ValueError, RuntimeError):
-        return False
-    if fp8_max <= 0:
-        return False
-    modules = getattr(module, "modules", None)
-    if not callable(modules):
-        return False
-    linears = [sub for sub in list(modules()) if type(sub) is linear_type]
-    if not linears:
-        return False
-    done: list[Any] = []
-    try:
-        for sub in linears:
-            _convert_linear(sub, torch, storage, compute, scaled, fp8_max)
-            done.append(sub)
-    except (RuntimeError, TypeError, AttributeError, ValueError):
-        for sub in done:
-            restore = getattr(sub, "_canvas_fp8_restore", None)
-            if callable(restore):
-                restore()
-        return False
-    return True
 
 
 def dtype_label(module: Any, fallback: str) -> str:
@@ -191,30 +136,6 @@ def _scaled_linear(
 def _weight_scale(weight: Any, torch: Any, fp8_max: float) -> Any:
     amax = weight.detach().abs().amax().clamp(min=1e-12)
     return (amax / fp8_max).to(torch.float32)
-
-
-def _materialize_bf16(module: Any, torch: Any) -> None:
-    """One BF16 copy of any FP8 parameter. Later tokens read that copy."""
-    target = getattr(torch, "bfloat16", None)
-    if target is None:
-        return
-    for param in _parameters(module):
-        label = _dtype_text(getattr(param, "dtype", None))
-        if label != "fp8":
-            continue
-        data = getattr(param, "data", None)
-        caster = getattr(data, "to", None)
-        if not callable(caster):
-            continue
-        try:
-            param.data = caster(dtype=target)
-        except TypeError:
-            try:
-                param.data = caster(target)
-            except (TypeError, RuntimeError, AttributeError):
-                continue
-        except (RuntimeError, AttributeError):
-            continue
 
 
 def _freeze(module: Any) -> None:

@@ -276,26 +276,6 @@ def _distance(one: tuple[int, int, int], other: tuple[int, int, int]) -> int:
     return abs(one[0] - other[0]) + abs(one[1] - other[1]) + abs(one[2] - other[2])
 
 
-def photoshoot_shots(destination: Path) -> None:
-    """Write one plain smoke grab at 1280×800.
-
-    Args:
-        destination: Directory for ``photoshoot-en.png``.
-    """
-    destination.mkdir(parents=True, exist_ok=True)
-    existing = QApplication.instance()
-    app = existing if isinstance(existing, QApplication) else QApplication([])
-    os.environ["LANG"] = "en_US.UTF-8"
-    os.environ["LC_ALL"] = "en_US.UTF-8"
-    set_language("en")
-    idea = "A yellow kettle with a blue handle"
-    home = Path(tempfile.mkdtemp(prefix="photoshoot-shot-en-"))
-    os.environ["VOXPRINT_HOME"] = str(home)
-    window = _photoshoot_window(home, idea)
-    _run_smoke(app, window, idea, destination / "photoshoot-en.png")
-    window.close()
-
-
 def _photoshoot_window(state: Path, idea: str) -> ShellWindow:
     state.mkdir(parents=True, exist_ok=True)
     window = inline_window(state, tier=Tier.GB16, enlarge=object(), runner=lambda *_args: rgb(),

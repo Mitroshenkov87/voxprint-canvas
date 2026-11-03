@@ -214,20 +214,6 @@ def download_snapshot(
     return folder
 
 
-def download_files(
-    spec: ModelSpec, root: Path, names: tuple[str, ...], progress: Callable[[str], None] | None = None,
-) -> Path:
-    """Queue the model with MDL and return its view when every named file is there."""
-    missing = [name for name in names if name not in spec.files]
-    if not names or missing:
-        raise SnapshotError("a requested file is not pinned")
-    request_download(spec.id)
-    folder = snapshot_ready(spec, root)
-    if folder is None or any(not (folder / name).is_file() for name in names):
-        _missing(progress)
-    return folder
-
-
 def _missing(progress: Callable[[str], None] | None) -> NoReturn:
     message = text("model.missing")
     if progress is not None:

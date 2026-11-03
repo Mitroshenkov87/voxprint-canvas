@@ -90,14 +90,3 @@ def required_roles(mode: Mode) -> tuple[ImageRole, ...]:
     if mode is Mode.EDGE:
         return (ImageRole.EDGE,)
     assert_never(mode)
-
-
-def mode_group(mode: Mode) -> str:
-    """``text`` or ``image`` for the two UI tabs."""
-    if mode is Mode.TEXT or mode is Mode.TEXT_CREATIVE:
-        return "text"
-    if mode is Mode.RESTYLE or mode is Mode.INPAINT or mode is Mode.OUTPAINT:
-        return "image"
-    if mode is Mode.POSE or mode is Mode.DEPTH or mode is Mode.EDGE:
-        return "image"
-    assert_never(mode)

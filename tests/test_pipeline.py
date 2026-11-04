@@ -114,7 +114,7 @@ def test_stub_generator_becomes_unavailable_after_the_plan():
     try:
         generator.generate(screened)
     except ModelNotReady as exc:
-        assert exc.plan.pipeline_class == "ZImagePipeline"
+        assert exc.plan.pipeline_class == "MOSSImagePipeline"
         assert exc.plan.diffusers == "0.41.0"
     else:
         raise AssertionError("expected the stub to refuse")

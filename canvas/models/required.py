@@ -9,24 +9,35 @@ from canvas.models.mdl_fetch import MANIFEST
 from canvas.models.registry import Catalog, ModelSpec, RegistryError, load_catalog
 from canvas.models.views import ViewError, blobs_present, ensure_view
 
-# The check models, both Z-Image-Turbo packs, and the scenario writer.
+# The check models, the default text generator, the optional Turbo packs, and the writer.
 _GATE_ROLES = ("prompt-guard", "zero-shot", "face-detector", "age", "nsfw", "age-fine")
-_MODEL_IDS = ("z-image-turbo-bf16-16gb", "z-image-turbo-bf16", "qwen3-4b-writer")
+_MODEL_IDS = (
+    "qwen3-4b-writer",
+    "moss-image-sft-compact-16gb",
+    "z-image-turbo-bf16-16gb",
+    "z-image-turbo-bf16",
+)
 
 
 def required_specs(catalog: Catalog | None = None) -> tuple[ModelSpec, ...]:
-    """Gate models, both Turbo packs, and the writer. A missing id is skipped."""
+    """Gate models, the default text generator, and the writer.
+
+    Optional rows are not required. A missing id is skipped.
+    """
     chosen = catalog or load_catalog()
     specs: list[ModelSpec] = []
     for role in _GATE_ROLES:
         rows = chosen.by_role(role)
-        if len(rows) == 1:
+        if len(rows) == 1 and not rows[0].optional:
             specs.append(rows[0])
     for model_id in _MODEL_IDS:
         try:
-            specs.append(chosen.by_id(model_id))
+            spec = chosen.by_id(model_id)
         except RegistryError:
             continue
+        if spec.optional:
+            continue
+        specs.append(spec)
     return tuple(specs)
 
 

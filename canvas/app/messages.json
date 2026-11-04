@@ -487,6 +487,9 @@
     "lora.base_mismatch": {
       "en": "This LoRA is for a different base model."
     },
+    "lora.retrain": {
+      "en": "This LoRA was trained on {base}, which Canvas cannot run. Retrain it for MOSS-Image in Model Forge (voxprint-forge prepare --base moss)."
+    },
     "lora.invalid": {
       "en": "This LoRA file cannot be read."
     },
@@ -510,6 +513,18 @@
     },
     "canvas.lora.base_note": {
       "en": "This LoRA was trained on {base}, which Canvas does not have. The picture runs on the default base and may look different."
+    },
+    "canvas.lora.retrain_title": {
+      "en": "Retrain this LoRA"
+    },
+    "canvas.lora.retrain_note": {
+      "en": "This LoRA was trained on {base}, which Canvas cannot run. Retrain it for {target}."
+    },
+    "canvas.lora.retrain_action": {
+      "en": "Retrain in Forge"
+    },
+    "canvas.lora.retrain_queued": {
+      "en": "Retrain requested. Model Forge will pick it up from its inbox."
     },
     "canvas.lora.import": {
       "en": "Import LoRA"

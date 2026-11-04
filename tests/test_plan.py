@@ -29,8 +29,8 @@ def _screened(mode: Mode, *roles: ImageRole):
 def test_pin_and_visibility():
     catalog = load_catalog()
     assert catalog.diffusers == "0.41.0"
-    assert catalog.default_text_base == "z-image-turbo"
-    assert catalog.text_bases == ("z-image-turbo",)
+    assert catalog.default_text_base == "moss-image-sft"
+    assert catalog.text_bases == ("moss-image-sft", "z-image-turbo")
     assert DIFFUSERS_PIN == "0.41.0"
     assert Mode.RESTYLE in visible_modes(Tier.GB16)
     assert Mode.TEXT_CREATIVE not in visible_modes(Tier.GB16)
@@ -56,7 +56,7 @@ def test_text_plan_waits_until_a_base_is_chosen():
 
 def test_text_and_restyle_plans():
     catalog = load_catalog()
-    text = build_plan(catalog, _screened(Mode.TEXT), Tier.GB16)
+    text = build_plan(catalog, _screened(Mode.TEXT), Tier.GB16, base="z-image-turbo")
     assert text.diffusers == "0.41.0"
     assert text.pipeline_class == PIPELINE_TEXT
     assert text.repos == (REPO_TURBO,)
@@ -64,7 +64,7 @@ def test_text_and_restyle_plans():
     assert text.steps == 8 and text.guidance_scale == 0.0
     assert text.text_encoder == "Qwen/Qwen3-4B"
     assert text.text_encoder_offload == "free-after-encode"
-    larger = build_plan(catalog, _screened(Mode.TEXT), Tier.GB24)
+    larger = build_plan(catalog, _screened(Mode.TEXT), Tier.GB24, base="z-image-turbo")
     assert larger.quant == "bf16" and larger.text_encoder_offload == ""
     restyle = build_plan(catalog, _screened(Mode.RESTYLE, ImageRole.INIT), Tier.GB16)
     assert restyle.pipeline_class == PIPELINE_IMG2IMG

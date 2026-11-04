@@ -33,7 +33,15 @@ from canvas.infra.paths import OutputFolderError, models_dir, prepare_output_fol
 from canvas.infra.vram import peak_allocated_bytes, set_vram_cap_gb
 from canvas.models.views import remove_views
 from canvas.models.provision import DownloadDeclined, ensure_plan, install_defaults, install_supporting, repair
-from canvas.models.user_lora import LoraRejected, UserLora, cli_scale, prepare_cli_lora
+from canvas.models.user_lora import (
+    CODE_RETRAIN,
+    MOSS_IMAGE_SFT,
+    LoraRejected,
+    UserLora,
+    cli_scale,
+    prepare_cli_lora,
+    retrain_rejection,
+)
 from canvas.models.modes import Mode, Tier
 from canvas.models.plan import BaseNotSelected, ModeUnavailable, build_plan
 from canvas.models.registry import load_catalog
@@ -408,10 +416,9 @@ def _generate(args: argparse.Namespace) -> int:
     as_json = bool(args.json)
     if str(args.edit_instruction or ""):
         return _instruction_removed(as_json)
-    try:
-        chosen = _chosen_lora(args)
-    except LoraRejected as exc:
-        return _emit_lora(exc.code, as_json)
+    chosen, stopped = _take_lora(args, as_json)
+    if stopped is not None:
+        return stopped
     os_result = current_os_check()
     if not os_result.ok:
         return _emit({"ok": False, "error": os_result.message}, as_json, 2)
@@ -482,7 +489,7 @@ def _generate(args: argparse.Namespace) -> int:
             fresh = _inputs(args, mode)
             pipeline.export(active, mode, fresh, path, fmt, aspect=args.aspect, output=output)
     except LoraRejected as exc:
-        return _emit_lora(exc.code, as_json)
+        return _emit_lora(exc.code, as_json, **exc.details)
     except GpuLockTimeout as exc:
         return _emit({"ok": False, "error": str(exc), "code": "gpu_busy"}, as_json, 1)
     except (
@@ -549,10 +556,9 @@ def _photoshoot(args: argparse.Namespace) -> int:
     frames = int(args.frames)
     if frames < 1 or frames > MAX_FRAMES:
         return _emit_photoshoot(reject_frames(frames), as_json, 2)
-    try:
-        chosen = _chosen_lora(args)
-    except LoraRejected as exc:
-        return _emit_lora(exc.code, as_json)
+    chosen, stopped = _take_lora(args, as_json)
+    if stopped is not None:
+        return stopped
     os_result = current_os_check()
     if not os_result.ok:
         return _emit({"ok": False, "error": os_result.message}, as_json, 2)
@@ -618,10 +624,9 @@ def _batch(args: argparse.Namespace) -> int:
         entries = load_manifest(manifest)
     except ManifestInvalid as exc:
         return _emit_batch({"ok": False, "error": "bad_manifest", "code": "bad_manifest", "message": str(exc)}, as_json, 2)
-    try:
-        chosen = _chosen_lora(args)
-    except LoraRejected as exc:
-        return _emit_lora(exc.code, as_json)
+    chosen, stopped = _take_lora(args, as_json)
+    if stopped is not None:
+        return stopped
     os_result = current_os_check()
     if not os_result.ok:
         return _emit({"ok": False, "error": os_result.message}, as_json, 2)
@@ -838,11 +843,33 @@ def _chosen_lora(args: argparse.Namespace) -> tuple[UserLora, float] | None:
     return lora, scale
 
 
-def _emit_lora(code: str, as_json: bool) -> int:
-    """Exit 2. ``--json`` prints the stable code and the English sentence."""
-    message = text(code, "en")
+def _take_lora(args: argparse.Namespace, as_json: bool) -> tuple[tuple[UserLora, float] | None, int | None]:
+    """The chosen LoRA, or an exit code when it cannot be used.
+
+    A base Canvas cannot run exits 2 before any model is opened.
+    """
+    try:
+        chosen = _chosen_lora(args)
+    except LoraRejected as exc:
+        return None, _emit_lora(exc.code, as_json, **exc.details)
+    if chosen is not None:
+        rejected = retrain_rejection(chosen[0])
+        if rejected is not None:
+            return None, _emit_lora(rejected.code, as_json, **rejected.details)
+    return chosen, None
+
+
+def _emit_lora(code: str, as_json: bool, **values: object) -> int:
+    """Exit 2. ``--json`` prints the stable code and the English sentence.
+
+    ``lora.retrain`` also names the trained base and the MOSS target.
+    """
+    message = text(code, "en", **values) if values else text(code, "en")
     if as_json:
-        print(json.dumps({"ok": False, "error": code, "message": message}))
+        body: dict[str, object] = {"ok": False, "error": code, "message": message}
+        if code == CODE_RETRAIN:
+            body["retrain"] = {"from": str(values.get("base") or ""), "to": MOSS_IMAGE_SFT}
+        print(json.dumps(body))
     else:
         print(message, file=sys.stderr)
     return 2

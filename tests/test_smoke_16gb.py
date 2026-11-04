@@ -52,7 +52,7 @@ def test_manifest_failures_cover_empty_missing_and_hash(tmp_path):
 
 def test_shipped_manifest_requires_no_optional_entry():
     ids = manifest_ids()
-    assert "z-image-turbo-bf16-16gb" in ids
+    assert "z-image-turbo-bf16-16gb" not in ids  # Z-Image is an optional download now
     assert not {i for i in ids if i.endswith("-upstream")}
     assert "z-image-creative-bf16" not in ids
 

@@ -18,6 +18,8 @@ from canvas.models.registry import Catalog, ModelSpec, RegistryError
 from canvas.safety.image import ScreenedInput
 from canvas.safety.inputs import ImageRole
 
+PIPELINE_MOSS = "MOSSImagePipeline"
+
 
 class ModeUnavailable(Exception):
     """This GPU tier does not offer the mode. The UI hides it."""
@@ -61,8 +63,11 @@ def _one(catalog: Catalog, model_id: str) -> ModelSpec:
     return catalog.by_id(model_id)
 
 
-def build_plan(catalog: Catalog, screened: ScreenedInput, tier: Tier) -> CallPlan:
-    """Return the diffusers call for one screened request. Hidden modes raise."""
+def build_plan(catalog: Catalog, screened: ScreenedInput, tier: Tier, *, base: str | None = None) -> CallPlan:
+    """Return the diffusers call for one screened request. Hidden modes raise.
+
+    ``base`` selects the text-to-image family. Other modes ignore it and stay on Z-Image.
+    """
     if type(screened) is not ScreenedInput:
         raise TypeError("a generation plan requires a screened request")
     mode = Mode(screened.mode)
@@ -83,7 +88,7 @@ def build_plan(catalog: Catalog, screened: ScreenedInput, tier: Tier) -> CallPla
         if tier is not Tier.GB24:
             raise ModeUnavailable()
     if mode is Mode.TEXT:
-        spec, pipeline = _text_model(catalog, tier)
+        spec, pipeline = _text_model(catalog, tier, base)
         return _plan(mode, tier, pipeline, (spec,), spec.steps, spec.guidance_scale, spec.text_encoder_offload)
     if mode is Mode.TEXT_CREATIVE:
         creative = _one(catalog, "z-image-creative-bf16")
@@ -104,20 +109,26 @@ def build_plan(catalog: Catalog, screened: ScreenedInput, tier: Tier) -> CallPla
     assert_never(mode)
 
 
-def _text_model(catalog: Catalog, tier: Tier) -> tuple[ModelSpec, str]:
-    """Z-Image-Turbo BF16, the text-to-image generator on every tier."""
-    family = catalog.default_text_base
+def _text_model(catalog: Catalog, tier: Tier, base: str | None = None) -> tuple[ModelSpec, str]:
+    """The text-to-image row for ``base``, or the catalog default when ``base`` is omitted."""
+    family = base or catalog.default_text_base
     if family is None:
         raise BaseNotSelected()
     if family not in catalog.text_bases:
         raise RegistryError("the default text model is not in the registry")
-    if family != "z-image-turbo":
-        raise RegistryError("the default text model has no plan")
-    if tier is Tier.GB16:
-        return _one(catalog, "z-image-turbo-bf16-16gb"), PIPELINE_TEXT
-    if tier is Tier.GB24:
-        return _one(catalog, "z-image-turbo-bf16"), PIPELINE_TEXT
-    assert_never(tier)
+    if family == "z-image-turbo":
+        if tier is Tier.GB16:
+            return _one(catalog, "z-image-turbo-bf16-16gb"), PIPELINE_TEXT
+        if tier is Tier.GB24:
+            return _one(catalog, "z-image-turbo-bf16"), PIPELINE_TEXT
+        assert_never(tier)
+    if family == "moss-image-sft":
+        if tier is Tier.GB16:
+            return _one(catalog, "moss-image-sft-compact-16gb"), PIPELINE_MOSS
+        if tier is Tier.GB24:
+            return _one(catalog, "moss-image-sft-bf16"), PIPELINE_MOSS
+        assert_never(tier)
+    raise RegistryError("the default text model has no plan")
 
 
 def _plan(mode: Mode, tier: Tier, pipeline: str, specs: tuple[ModelSpec, ...], steps: int | None,

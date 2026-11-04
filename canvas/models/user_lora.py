@@ -18,12 +18,15 @@ from canvas.models.registry import load_catalog
 SCHEMA = "voxprint-model/1"
 ZIMAGE_TURBO_MDL_ID = "z-image-turbo"
 FORGE_BASE_ID = "z-image"
+MOSS_IMAGE_SFT = "moss-image-sft"
+_MOSS_ALIASES = frozenset({"moss-image", "moss-image-base"})
 # Strength for a LoRA whose record names none.
 CLI_DEFAULT_STRENGTH = 0.7
 CLI_STRENGTH_RANGE = (0.0, 2.0)
 CODE_BASE_MISMATCH = "lora.base_mismatch"
 CODE_INVALID = "lora.invalid"
 CODE_SCALE = "lora.scale"
+CODE_RETRAIN = "lora.retrain"
 _KINDS = frozenset({"person", "object", "style"})
 _ADAPTER = "canvas-lora"
 _A_WEIGHT = ".lora_A.weight"
@@ -94,11 +97,15 @@ class LoraIndex:
 
 
 class LoraRejected(Exception):
-    """A LoRA file cannot be loaded. ``code`` is a stable catalog key."""
+    """A LoRA file cannot be loaded. ``code`` is a stable catalog key.
 
-    def __init__(self, code: str) -> None:
+    ``details`` fills the catalog sentence. ``lora.retrain`` carries ``base``.
+    """
+
+    def __init__(self, code: str, **details: str) -> None:
         super().__init__(code)
         self.code = code
+        self.details = details
 
 
 def discover(root: Path | None = None) -> LoraIndex:
@@ -229,7 +236,8 @@ def base_matches(mdl_id: str, expected: str | None = None) -> bool:
     """True when ``mdl_id`` is the base this app runs.
 
     Model Forge records a Z-Image LoRA as ``z-image``. That id matches the
-    Z-Image-Turbo base this app runs.
+    Z-Image-Turbo base. ``moss-image`` and ``moss-image-base`` match
+    ``moss-image-sft``.
 
     Args:
         mdl_id: ``base.mdl_id`` or the ``voxprint.lora.base`` header value.
@@ -241,7 +249,9 @@ def base_matches(mdl_id: str, expected: str | None = None) -> bool:
         return False
     if mdl_id == expected:
         return True
-    return expected == ZIMAGE_TURBO_MDL_ID and mdl_id == FORGE_BASE_ID
+    if expected == ZIMAGE_TURBO_MDL_ID and mdl_id == FORGE_BASE_ID:
+        return True
+    return expected == MOSS_IMAGE_SFT and mdl_id in _MOSS_ALIASES
 
 
 def cli_scale(value: object) -> float:
@@ -373,11 +383,12 @@ def open_weights(path: Path) -> UserLora:
 
 
 def running_base_id() -> str:
-    """The Z-Image-Turbo base id this app runs, or empty when the registry differs."""
-    base = load_catalog().default_text_base or ""
-    if base != ZIMAGE_TURBO_MDL_ID:
-        return ""
-    return ZIMAGE_TURBO_MDL_ID
+    """The catalog's default text base, or empty when the registry sets none.
+
+    An untagged LoRA is a Z-Image LoRA. :func:`detect_base` applies that.
+    This function does not.
+    """
+    return load_catalog().default_text_base or ""
 
 
 def strength_or_default(lora: UserLora, requested: object) -> float:
@@ -392,13 +403,169 @@ def strength_or_default(lora: UserLora, requested: object) -> float:
     return float(requested)
 
 
+_META_ARCHITECTURE = "modelspec.architecture"
+_META_BASE_VERSION = "ss_base_model_version"
+_FILENAME_BASES = (
+    (".moss.safetensors", MOSS_IMAGE_SFT),
+    (".z-image.safetensors", ZIMAGE_TURBO_MDL_ID),
+)
+
+
+def _canonical_base(raw: str) -> str:
+    """``moss-image-sft`` or ``z-image-turbo`` when ``raw`` is one of those families.
+
+    Any other id is kept as written, so ``sdxl`` stays ``sdxl``.
+    """
+    token = raw.strip()
+    folded = token.casefold()
+    if base_matches(token, MOSS_IMAGE_SFT) or base_matches(folded, MOSS_IMAGE_SFT):
+        return MOSS_IMAGE_SFT
+    if base_matches(token, ZIMAGE_TURBO_MDL_ID) or base_matches(folded, ZIMAGE_TURBO_MDL_ID):
+        return ZIMAGE_TURBO_MDL_ID
+    return token
+
+
+def _detect_target(path_or_lora: Path | UserLora | str) -> tuple[Path | None, str]:
+    """The weight file and a recorded base id, when the caller passed a LoRA."""
+    if isinstance(path_or_lora, UserLora):
+        return path_or_lora.weights, str(path_or_lora.base or "").strip()
+    return Path(path_or_lora), ""
+
+
+def _string_metadata(path: Path | None) -> dict[str, str]:
+    """String entries of a safetensors header. Empty when the file cannot be read."""
+    if path is None or not path.is_file():
+        return {}
+    opened = _safetensors(path)
+    if opened is None:
+        return {}
+    raw = opened[0].get("__metadata__") or {}
+    if not isinstance(raw, dict):
+        return {}
+    return {str(key): value for key, value in raw.items() if isinstance(key, str) and isinstance(value, str)}
+
+
+def _filename_base(path: Path | None) -> str:
+    """A ``<name>.moss`` or ``<name>.z-image`` tag on the weight file name."""
+    if path is None:
+        return ""
+    name = path.name.casefold()
+    for suffix, base in _FILENAME_BASES:
+        if name.endswith(suffix):
+            return base
+    return ""
+
+
+def _family_token(value: str) -> str:
+    """A MOSS or Z-Image family id found inside one metadata string."""
+    folded = value.casefold()
+    if not folded:
+        return ""
+    if "moss" in folded:
+        return MOSS_IMAGE_SFT
+    compact = folded.replace("-", "").replace("_", "").replace(" ", "")
+    if "z-image" in folded or "zimage" in compact:
+        return ZIMAGE_TURBO_MDL_ID
+    return ""
+
+
+def _metadata_family(meta: dict[str, str]) -> str:
+    """The family named by ``modelspec.architecture`` or ``ss_base_model_version``."""
+    for key in (_META_ARCHITECTURE, _META_BASE_VERSION):
+        found = _family_token(meta.get(key, ""))
+        if found:
+            return found
+    return ""
+
+
+def detect_base(path_or_lora: Path | UserLora | str) -> str:
+    """The base a LoRA was trained on.
+
+    ``voxprint.lora.base`` wins, including over a filename tag, and is
+    normalised to ``moss-image-sft`` or ``z-image-turbo``. Any other header
+    value is kept, so ``sdxl`` stays ``sdxl``. A recorded base on a
+    :class:`UserLora` is that header when the file does not carry one.
+
+    Otherwise ``modelspec.architecture`` and ``ss_base_model_version`` are
+    read: ``moss`` is ``moss-image-sft``, and ``z-image`` or ``zimage`` is
+    ``z-image-turbo``. A filename ``<name>.moss.safetensors`` or
+    ``<name>.z-image.safetensors`` is used when those strings are absent.
+    An untagged file, including an older LoRA, is ``z-image-turbo``.
+
+    Args:
+        path_or_lora: A weight file, or a LoRA whose ``weights`` file is read.
+    """
+    path, recorded = _detect_target(path_or_lora)
+    meta = _string_metadata(path)
+    header = meta.get(_HEADER_BASE, "").strip() or recorded
+    if header:
+        return _canonical_base(header)
+    found = _metadata_family(meta)
+    if found:
+        return found
+    named = _filename_base(path)
+    if named:
+        return named
+    return ZIMAGE_TURBO_MDL_ID
+
+
 @dataclass(frozen=True)
-class BaseChoice:
-    """Which base a LoRA runs on, and the trained base to mention when they differ.
+class LoraRoute:
+    """Where a LoRA is allowed to run.
 
     Attributes:
-        run_on: The text base the job uses.
-        note_base: The trained base id when it is not available here, else empty.
+        base: A text base this app can run. Empty when the LoRA must not load.
+        retrain_from: The trained base when ``base`` is empty.
+    """
+
+    base: str
+    retrain_from: str = ""
+
+
+def route_lora(lora: UserLora, text_bases: tuple[str, ...] | None = None, default: str | None = None) -> LoraRoute:
+    """Route ``lora`` onto one listed text base. A different base is not loaded.
+
+    Args:
+        lora: The selected LoRA.
+        text_bases: Text bases the catalog lists. The catalog is read when omitted.
+        default: The catalog default. Accepted so :func:`base_choice` can pass
+            it through. A mismatch does not run on it.
+
+    Returns:
+        ``LoraRoute(base)`` when the trained base is one of ``text_bases``.
+        ``LoraRoute("", retrain_from=trained)`` otherwise.
+    """
+    if text_bases is None:
+        catalog = load_catalog()
+        text_bases = catalog.text_bases
+        if default is None:
+            default = catalog.default_text_base or ""
+    # ``default`` is not a substitute base. Cross-base loads are refused.
+    del default
+    trained = detect_base(lora)
+    for candidate in text_bases:
+        if trained == candidate or base_matches(trained, candidate):
+            return LoraRoute(candidate)
+    return LoraRoute("", trained)
+
+
+def retrain_rejection(
+    lora: UserLora, text_bases: tuple[str, ...] | None = None, default: str | None = None,
+) -> LoraRejected | None:
+    """``lora.retrain`` when ``lora`` cannot run here. None when it can."""
+    route = route_lora(lora, text_bases, default)
+    if route.base:
+        return None
+    return LoraRejected(CODE_RETRAIN, base=route.retrain_from)
+
+
+@dataclass(frozen=True)
+class BaseChoice:
+    """Which base a LoRA runs on, and the trained base to mention when it cannot.
+
+    Attributes:
+        run_on: The text base the job uses. Empty when the LoRA must not load.
+        note_base: :attr:`LoraRoute.retrain_from`. Empty when ``run_on`` is set.
     """
 
     run_on: str
@@ -406,24 +573,15 @@ class BaseChoice:
 
 
 def base_choice(lora: UserLora, text_bases: tuple[str, ...] | None = None, default: str | None = None) -> BaseChoice:
-    """Pick the base for ``lora``: its trained base when this app has it, else the default with a note.
+    """The route for ``lora``. ``note_base`` is the trained base when a retrain is required.
 
     Args:
         lora: The selected LoRA.
         text_bases: Text bases the catalog lists. The catalog is read when omitted.
-        default: The default text base. The catalog default is used when omitted.
+        default: The default text base. Passed through to :func:`route_lora`.
     """
-    if text_bases is None or default is None:
-        catalog = load_catalog()
-        text_bases = catalog.text_bases if text_bases is None else text_bases
-        default = (catalog.default_text_base or "") if default is None else default
-    trained = str(lora.base or "").strip()
-    if not trained:
-        return BaseChoice(default)
-    for candidate in text_bases:
-        if base_matches(trained, candidate):
-            return BaseChoice(candidate)
-    return BaseChoice(default, trained)
+    route = route_lora(lora, text_bases, default)
+    return BaseChoice(route.base, route.retrain_from)
 
 
 def clamp_strength(lora: UserLora, requested: float) -> float:
@@ -714,15 +872,20 @@ def _opened_weights(path: Path) -> tuple[dict[str, str], Path]:
 
 
 def fits_base(path: Path) -> None:
-    """Every adapter must target a weight of the z-image transformer.
+    """Every Z-Image adapter must target a weight of the z-image transformer.
+
+    Module names are checked only when :func:`detect_base` is Z-Image. A
+    MOSS-tagged file is not rejected for naming other modules.
 
     Raises:
         LoraRejected: ``lora.invalid`` for a damaged file, ``lora.base_mismatch``
-            when an adapter names a module the base does not have.
+            when a Z-Image adapter names a module the base does not have.
     """
     opened = _safetensors(path)
     if opened is None:
         raise LoraRejected(CODE_INVALID)
+    if detect_base(path) != ZIMAGE_TURBO_MDL_ID:
+        return
     modules = _modules()
     for key in opened[0]:
         if key == "__metadata__":

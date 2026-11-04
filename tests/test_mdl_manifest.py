@@ -32,7 +32,7 @@ def test_every_gate_model_and_the_default_generator_are_required_downloads():
         assert row["optional"] is False
         assert {f["path"]: f["sha256"] for f in row["files"]} == dict(spec.files)
     for spec in default_specs(catalog):
-        assert rows[spec.id]["optional"] is False
+        assert rows[spec.id]["optional"] is spec.optional
         for item in rows[spec.id]["files"]:
             assert len(item["sha256"]) == 64 and item["size"] > 0 and item["mirrors"]
             assert all(url.startswith("https://") for url in item["mirrors"])
@@ -105,4 +105,5 @@ def test_mdl_accepts_the_manifest_and_plans_the_default_pack():
     planned = catalog_mod.plan_files([manifest], gpu.VramTier.GB16, models_root=Path("/nonexistent-models"))
     ids = {item.model_id for item in planned}
     catalog = load_catalog()
-    assert {spec.id for spec in default_specs(catalog)} <= ids
+    assert {spec.id for spec in default_specs(catalog) if not spec.optional} <= ids
+    assert "z-image-turbo-bf16-16gb" not in ids

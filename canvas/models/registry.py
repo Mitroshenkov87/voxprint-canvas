@@ -63,6 +63,8 @@ class ModelSpec:
     fallback_revision: str = ""
     fallback_mirror_revision: str = ""
     nbytes: int = 0
+    optional: bool = False
+    pin_note: str = ""
 
     def pinned(self) -> bool:
         """True when every listed file has a 64-character SHA-256."""
@@ -188,6 +190,8 @@ def _spec(row: dict[str, Any]) -> ModelSpec:
         fallback_revision=str(fallback.get("revision") or ""),
         fallback_mirror_revision=str(fallback.get("mirror_revision") or ""),
         nbytes=_nbytes(files),
+        optional=row.get("optional") is True,
+        pin_note=str(row.get("pin_note") or ""),
     )
 
 

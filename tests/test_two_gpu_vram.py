@@ -112,9 +112,7 @@ def test_a_failed_cuda_release_sends_the_vram_reply_then_the_worker_leaves_with_
     process = host._process
     assert process is not None
     job_id = _submit(host, folder, {"tier": Tier.GB24.value, "gpu_fault": "release"})
-    events = _until(
-        host, lambda seen: host.outcome(job_id) is not None and any(e.kind is EventKind.CRASHED for e in seen),
-    )
+    events = _until(host, lambda _seen: host.outcome(job_id) is not None)
     outcome = host.outcome(job_id)
     assert outcome is not None and outcome.state is JobState.FINISHED, outcome
     reply = parse_reply("generate", outcome.value, session_dir=folder)
@@ -123,8 +121,8 @@ def test_a_failed_cuda_release_sends_the_vram_reply_then_the_worker_leaves_with_
     process.join(10)
     # A clean, distinct exit: not the driver abort (3 / -6) and not a job failure.
     assert process.exitcode == cuda_health.EXIT_CUDA_LOST
-    crashed = [event for event in events if event.kind is EventKind.CRASHED]
-    assert crashed and crashed[0].exit_code == cuda_health.EXIT_CUDA_LOST
+    # 0.6.1: a clean reply then exit 75 is a planned restart, not a crash.
+    assert not [event for event in events if event.kind is EventKind.CRASHED]
     # The host starts a fresh worker, and it draws.
     again = _submit(host, folder, {"tier": Tier.GB24.value})
     _until(host, lambda _seen: host.outcome(again) is not None)
@@ -204,10 +202,13 @@ class _Ctx:
         self.job_id = "job-1"
         self.checkpoint_out = None
         self.sent: list[object] = []
+        self.codes: list[int] = []
         self.notes: list[str] = []
 
-    def _emit(self, message: object) -> None:
-        self.sent.append(message)
+    def reply_and_exit(self, result: object, code: int) -> None:
+        self.sent.append(result)
+        self.codes.append(code)
+        raise SystemExit(code)
 
     def progress(self, *, message: str = "", **_fields: object) -> None:
         self.notes.append(message)
@@ -217,7 +218,7 @@ class _Ctx:
 
 
 def test_a_lost_context_replies_vram_with_no_picture_then_leaves(monkeypatch, tmp_path: Path, exits) -> None:
-    from voxprint_common.worker.wire import DidFinish
+    from voxprint_common.worker import EXIT_GPU_UNRECOVERABLE
 
     picture = tmp_path / ("a" * 32 + ".webp")
 
@@ -232,12 +233,11 @@ def test_a_lost_context_replies_vram_with_no_picture_then_leaves(monkeypatch, tm
     ctx = _Ctx(request("generate", tier=Tier.GB24.value))
     with pytest.raises(SystemExit):
         worker_jobs.run(ctx)  # type: ignore[arg-type]
-    assert exits == [cuda_health.EXIT_CUDA_LOST]
+    assert ctx.codes == [EXIT_GPU_UNRECOVERABLE] == [cuda_health.EXIT_CUDA_LOST]
     assert not picture.exists()
     [sent] = ctx.sent
-    assert isinstance(sent, DidFinish) and sent.job_id == "job-1"
-    assert sent.value["status"] == "refused" and sent.value["code"] == "vram"
-    assert "path" not in sent.value
+    assert sent["status"] == "refused" and sent["code"] == "vram"
+    assert "path" not in sent
 
 
 def test_a_worker_with_a_lost_context_takes_no_new_job(monkeypatch, exits) -> None:

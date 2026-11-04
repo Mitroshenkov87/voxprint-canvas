@@ -11,7 +11,7 @@ from canvas.safety.classifiers import Face
 from canvas.safety.gate import GenerationBlocked
 from canvas.safety.image import RawImage, SafeImage, ScreenedInput
 from canvas.safety.inputs import ImageRole, PendingInput
-from tests.fakes import World, avif_file, rgb
+from tests.fakes import World, rgb
 
 
 class _Gen:
@@ -67,7 +67,7 @@ def test_allowed_job_saves_only_a_released_image_and_wipes_the_request(tmp_path)
     world = World()
     gen = _Gen(rgb(color=(3, 3, 3)))
     pipeline = Pipeline(world.gate(), gen, Tier.GB16)
-    path = tmp_path / "out.avif"
+    path = tmp_path / "out.webp"
     image = pipeline.generate(
         "a red boat",
         Mode.RESTYLE,
@@ -77,7 +77,7 @@ def test_allowed_job_saves_only_a_released_image_and_wipes_the_request(tmp_path)
     assert gen.calls == 1
     assert world.calls.count("nsfw") == 3  # two inputs and the output (two-stage gate: NSFW pass only)
     pipeline.export("a red boat", Mode.TEXT, (), path)
-    assert avif_file(path.read_bytes())
+    assert path.read_bytes()[8:12] == b"WEBP"
 
 
 def test_blocked_output_is_wiped_and_not_saved(tmp_path):

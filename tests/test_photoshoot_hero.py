@@ -111,7 +111,7 @@ def test_hero_frame_feeds_img2img_at_045_and_the_series_is_one_history_entry(app
     names = [name for name, _ in _Pipe.calls]
     assert names[0] == "text"
     assert len(names) == 6 and set(names[1:]) == {"img2img"}
-    hero_pixels = Image.open(next((home / "state" / "pictures" / "series").iterdir()) / "01.png").convert("RGB")
+    hero_pixels = Image.open(next((home / "state" / "pictures" / "series").iterdir()) / "01.webp").convert("RGB")
     for _name, kwargs in _Pipe.calls[1:]:
         assert kwargs["strength"] == pytest.approx(REFERENCE_STRENGTH)
         assert kwargs["strength"] >= REFERENCE_MIN
@@ -126,7 +126,7 @@ def test_hero_frame_feeds_img2img_at_045_and_the_series_is_one_history_entry(app
     recorded = json.loads((home / "state" / "pictures" / "series-map.json").read_text(encoding="utf-8"))
     assert list(recorded) == [entry.item_id]
     assert recorded[entry.item_id]["kind"] == "series"
-    assert recorded[entry.item_id]["frames"] == [f"{index:02}.png" for index in range(1, 7)]
+    assert recorded[entry.item_id]["frames"] == [f"{index:02}.webp" for index in range(1, 7)]
     assert window._series_folders[entry.item_id] == recorded[entry.item_id]["folder"]
 
 
@@ -153,7 +153,7 @@ def test_a_person_series_anchors_at_the_default_strength(app, home: Path, tmp_pa
     names = [name for name, _ in _Pipe.calls]
     assert names[0] == "text"
     assert len(names) == 6 and set(names[1:]) == {"img2img"}
-    hero_pixels = Image.open(next((home / "state" / "pictures" / "series").iterdir()) / "01.png").convert("RGB")
+    hero_pixels = Image.open(next((home / "state" / "pictures" / "series").iterdir()) / "01.webp").convert("RGB")
     for _name, kwargs in _Pipe.calls:
         assert "A single photograph, " in kwargs["prompt"]
         assert kwargs["prompt"].index("A single photograph, ") < kwargs["prompt"].index(PERSON)

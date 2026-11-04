@@ -1,7 +1,7 @@
 """Pictures handed to Enlarge and to Forge.
 
 The 4K handoff into Enlarge is a lossless PNG. The Forge hand-off defaults to
-PNG and can be AVIF, JPEG or WebP. ``write_rgb`` remains for tests that pass a
+WebP and can be PNG, AVIF or JPEG. ``write_rgb`` remains for tests that pass a
 raw buffer.
 """
 from __future__ import annotations
@@ -26,13 +26,13 @@ def write_rgb(path: Path, width: int, height: int, data: bytes) -> None:
 
 
 def handoff_image(image: SafeImage, path: Path, fmt: OutputFormat = EXPORT_FORMAT) -> None:
-    """Write one picture for Forge. PNG is the default. AVIF stays available.
+    """Write one picture for Forge. Lossless WebP is the default. PNG stays an option.
 
     Forge opens PNG, JPEG and WebP. Any other container is refused.
     """
     if fmt not in FORGE_EXPORTS:
         raise UnsupportedFormat("Forge export accepts PNG, JPEG, WebP or AVIF")
-    save_image(image, path, fmt)
+    save_image(image, path, fmt, lossless=True)
 
 
 def write_png(path: Path, width: int, height: int, data: bytes) -> None:

@@ -183,24 +183,14 @@ def _fail_closed(op: str, result: dict[str, object], message: str) -> dict[str, 
 
 
 def _reply_then_exit(ctx: JobContext, result: dict[str, object]) -> None:
-    """Send ``result`` to the window, then leave with ``EXIT_CUDA_LOST``. The host starts a new worker.
+    """Send ``result`` to the window, then leave with ``EXIT_GPU_UNRECOVERABLE`` (75).
 
-    The host 0.6.0 has no "exit after this reply" option, so the reply goes out
-    through the context's own channel first. Without that channel the result
-    is returned as usual and the next job leaves instead.
+    voxprint-common 0.6.1 treats a clean final reply followed by exit 75 as a
+    planned restart: the job is delivered as finished and no crash bar shows.
     """
-    from canvas.infra import cuda_health
+    from voxprint_common.worker import EXIT_GPU_UNRECOVERABLE
 
-    emit = getattr(ctx, "_emit", None)
-    if not callable(emit):
-        return
-    try:
-        from voxprint_common.worker.wire import DidFinish
-
-        emit(DidFinish(ctx.job_id, result, ctx.checkpoint_out))
-    except Exception:  # noqa: BLE001 - the process leaves either way; the window then sees a crash
-        pass
-    cuda_health.exit_now(cuda_health.EXIT_CUDA_LOST)
+    ctx.reply_and_exit(result, code=EXIT_GPU_UNRECOVERABLE)
 
 
 def _leave_if_cuda_lost() -> None:

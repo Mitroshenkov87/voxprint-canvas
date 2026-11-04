@@ -1043,10 +1043,10 @@ def _released_frame(
 
 
 def _store_frame(folder: Path, index: int, released: _Released, container: OutputFormat | None) -> Path:
-    """Write one frame in the export format. PNG is the Forge default.
+    """Write one frame in the export format. WebP is the Forge default.
 
-    PNG stays a filter-0 file so the contact sheet can read it. AVIF, JPEG and
-    WebP go through the Forge hand-off. Nothing here runs before the check.
+    PNG, AVIF, JPEG and WebP go through the Forge hand-off; the contact sheet
+    reads any of them. Nothing here runs before the check.
     """
     fmt = EXPORT_FORMAT if container is None else container
     with timed("encode"):
@@ -1183,17 +1183,18 @@ def _write_meta(
         "appearance": scenario.appearance,
     }
     (folder / "series.json").write_text(json.dumps(document, ensure_ascii=False, indent=2), encoding="utf-8")
-    if not kept or any(path.suffix.lower() != ".png" for path in kept):
+    if not kept:
         return
-    _write_sheet(folder / "overview.png", kept)
+    overview = folder / f"overview{kept[0].suffix.lower()}"
+    _write_sheet(overview, kept)
     with zipfile.ZipFile(folder / "series.zip", "w") as archive:
         for path in kept:
             archive.write(path, path.name)
-        archive.write(folder / "overview.png", "overview.png")
+        archive.write(overview, overview.name)
 
 
 def _write_sheet(path: Path, frames: list[Path]) -> None:
-    images = [_read_png(frame) for frame in frames]
+    images = [_read_frame(frame) for frame in frames]
     cell = 64
     gap = 8
     width = len(images) * cell + (len(images) + 1) * gap
@@ -1208,13 +1209,18 @@ def _write_sheet(path: Path, frames: list[Path]) -> None:
                 pixel = src[(sy * src_w + sx) * 3:(sy * src_w + sx) * 3 + 3]
                 dest = ((gap + y) * width + left + x) * 3
                 canvas[dest:dest + 3] = pixel
-    _write_png(path, width, height, bytes(canvas))
+    _write_overview(path, width, height, bytes(canvas))
 
 
-def _read_png(path: Path) -> tuple[int, int, bytes]:
+def _read_frame(path: Path) -> tuple[int, int, bytes]:
+    """8-bit RGB of one saved frame in any container the series writes."""
     raw = path.read_bytes()
     if raw[:8] != b"\x89PNG\r\n\x1a\n":
-        raise ValueError("overview sheet needs a png frame")
+        from PIL import Image
+
+        with Image.open(path) as image:
+            rgb = image.convert("RGB")
+            return rgb.width, rgb.height, rgb.tobytes()
     pos = 8
     width = height = 0
     compressed = b""
@@ -1238,6 +1244,18 @@ def _read_png(path: Path) -> tuple[int, int, bytes]:
         rows.append(inflated[cursor:cursor + stride])
         cursor += stride
     return width, height, b"".join(rows)
+
+
+def _write_overview(path: Path, width: int, height: int, rgb: bytes) -> None:
+    """The contact sheet, in the same container as the frames."""
+    if path.suffix.lower() == ".png":
+        _write_png(path, width, height, rgb)
+        return
+    from PIL import Image
+
+    fmt = {".jpg": "JPEG", ".jpeg": "JPEG", ".webp": "WEBP", ".avif": "AVIF"}[path.suffix.lower()]
+    options = {"lossless": True} if fmt == "WEBP" else {"quality": 90}
+    Image.frombytes("RGB", (width, height), rgb).save(path, format=fmt, **options)
 
 
 def _write_png(path: Path, width: int, height: int, rgb: bytes) -> None:

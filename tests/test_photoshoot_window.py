@@ -179,7 +179,7 @@ def test_generate_writes_a_read_only_series(app, home: Path, monkeypatch) -> Non
     assert window.findChild(QPushButton, "generate").isVisible()
     assert (home / "state" / "pictures" / "series").exists()
     assert window._series_folders
-    assert all(path.endswith(".png") for path in window._pictures.values())
+    assert all(path.endswith(".webp") for path in window._pictures.values())
     recorded = json.loads((home / "state" / "pictures" / "series-map.json").read_text(encoding="utf-8"))
     assert set(recorded) == set(window._series_folders)
     again = _window(home, runner)
@@ -239,7 +239,7 @@ def test_a_blocked_frame_is_labelled_and_is_not_the_hero(app, home: Path, monkey
     assert all(mode is Mode.TEXT for mode in modes)
     folder = next(path for path in (home / "state" / "pictures" / "series").iterdir() if path.is_dir())
     assert not (folder / "02.png").exists()
-    assert (folder / "01.png").is_file()
+    assert (folder / "01.webp").is_file()
 
 
 def test_cancel_keeps_the_frames_already_finished(app, home: Path, monkeypatch) -> None:
@@ -262,7 +262,7 @@ def test_cancel_keeps_the_frames_already_finished(app, home: Path, monkeypatch) 
     settle(window)
     assert len(prompts) == 1
     folder = next(path for path in (home / "state" / "pictures" / "series").iterdir() if path.is_dir())
-    assert (folder / "01.png").is_file()
+    assert (folder / "01.webp").is_file()
     assert not (folder / "02.png").exists()
     cancel = window.findChild(QPushButton, "photoshootCancel")
     assert cancel is not None and cancel.text() == "Cancel"

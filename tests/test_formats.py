@@ -1,4 +1,4 @@
-"""AVIF is the default. PNG is a lossless output format."""
+"""WebP is the default. PNG is a lossless output format."""
 from pathlib import Path
 
 import numpy as np
@@ -24,7 +24,7 @@ _DETAIL_FLOOR = 700_000
 
 
 def test_parse_and_default():
-    assert DEFAULT_FORMAT is OutputFormat.AVIF
+    assert DEFAULT_FORMAT is OutputFormat.WEBP
     assert parse_format("AVIF") is OutputFormat.AVIF
     assert parse_format("jxl") is OutputFormat.JXL
     assert parse_format("webp") is OutputFormat.WEBP
@@ -52,7 +52,7 @@ def test_png_output_is_lossless(tmp_path: Path):
 def test_save_requires_a_released_image(tmp_path: Path):
     image = issue(rgb())
     path = tmp_path / "picture.avif"
-    save_image(image, path)
+    save_image(image, path, OutputFormat.AVIF)
     body = path.read_bytes()
     assert avif_file(body)
     with pytest.raises(TypeError):
@@ -94,9 +94,9 @@ def test_default_2k_encodes_stay_above_the_size_floor(tmp_path: Path):
         assert size > _DETAIL_FLOOR, f"{fmt.value} default encode is {size} bytes"
 
 
-def test_forge_export_defaults_to_png_and_still_accepts_avif(tmp_path: Path):
+def test_forge_export_defaults_to_webp_and_still_accepts_avif(tmp_path: Path):
     image = issue(rgb(8, 8))
-    assert EXPORT_FORMAT is OutputFormat.PNG
+    assert EXPORT_FORMAT is OutputFormat.WEBP
     assert parse_export_format("png") is OutputFormat.PNG
     assert parse_export_format("jpg") is OutputFormat.JPEG
     assert parse_export_format("JPEG") is OutputFormat.JPEG
@@ -105,8 +105,15 @@ def test_forge_export_defaults_to_png_and_still_accepts_avif(tmp_path: Path):
     with pytest.raises(UnsupportedFormat):
         parse_export_format("jxl")
     png = tmp_path / "frame.png"
-    handoff_image(image, png)
+    handoff_image(image, png, OutputFormat.PNG)
     assert png.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+    webp = tmp_path / "frame.webp"
+    handoff_image(image, webp)
+    assert webp.read_bytes()[8:12] == b"WEBP"
+    from PIL import Image
+
+    with Image.open(webp) as reread:
+        assert reread.convert("RGB").tobytes() == image.data  # series/Forge WebP is lossless
     avif = tmp_path / "frame.avif"
     handoff_image(image, avif, OutputFormat.AVIF)
     assert avif_file(avif.read_bytes())

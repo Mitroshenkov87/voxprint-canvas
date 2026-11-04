@@ -148,7 +148,7 @@ def _parser() -> argparse.ArgumentParser:
     generate.add_argument("--aspect", default="1:1")
     generate.add_argument(
         "--out", required=True,
-        help="picture file: .avif, .jxl, .webp, .jpg, .heic or .png (lossless); missing folders are created",
+        help="picture file: .webp (default), .avif, .jxl, .jpg, .heic or .png (lossless); missing folders are created",
     )
     generate.add_argument("--mask", default="", help="mask image for inpaint, used with --input")
     generate.add_argument("--output-size", default="native", choices=("native", "2k", "4k"))

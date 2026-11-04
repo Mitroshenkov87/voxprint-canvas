@@ -39,10 +39,10 @@ def test_an_output_picture_verdict_stops_before_the_next_render(tmp_path: Path) 
     assert result.stopped == "scenario"
     assert result.code == "scenario.minor"
     assert len(drawn) == 6
-    assert (tmp_path / "01.png").is_file()
-    assert not (tmp_path / "02.png").exists()
-    assert not (tmp_path / "03.png").exists()
-    assert [path.name for path in result.kept] == ["01.png"]
+    assert (tmp_path / "01.webp").is_file()
+    assert not (tmp_path / "02.webp").exists()
+    assert not (tmp_path / "03.webp").exists()
+    assert [path.name for path in result.kept] == ["01.webp"]
 
 
 def test_saving_overlaps_the_next_render_and_follows_the_check(tmp_path: Path, monkeypatch) -> None:
@@ -104,7 +104,7 @@ def test_no_file_is_written_before_its_output_check(tmp_path: Path) -> None:
 
     def generate(line: str, seed: int, hero: object | None, strength: float | None) -> object:
         # Any frame file present now must already have been checked.
-        on_disk = sorted(tmp_path.glob("0*.png"))
+        on_disk = sorted(tmp_path.glob("0*.webp"))
         with lock:
             assert len(on_disk) <= len(checked)
         return _frame()
@@ -289,6 +289,7 @@ def test_a_background_check_load_that_fails_saves_nothing(tmp_path: Path) -> Non
     assert result.kept == ()
     assert list(tmp_path.glob("*.png")) == []
     assert list(tmp_path.glob("*.avif")) == []
+    assert list(tmp_path.glob("*.webp")) == []
 
 
 def test_stage_times_report_names_and_seconds_only() -> None:

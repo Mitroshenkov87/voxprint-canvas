@@ -323,9 +323,9 @@ def test_every_saved_picture_was_checked_and_a_failed_check_writes_nothing(tmp_p
     checked = events.of("image_check")
     assert len(checked) == len(rendered) == 4
     assert events.last("render") < events.first("image_check")
-    saved = sorted((tmp_path / "out").rglob("0*.png"))
-    assert [path.relative_to(tmp_path / "out").as_posix() for path in saved] == ["cup/01.png", "cup/02.png"]
-    assert list((tmp_path / "out" / "lamp").glob("0*.png")) == []
+    saved = sorted((tmp_path / "out").rglob("0*.webp"))
+    assert [path.relative_to(tmp_path / "out").as_posix() for path in saved] == ["cup/01.webp", "cup/02.webp"]
+    assert list((tmp_path / "out" / "lamp").glob("0*.webp")) == []
     rows = {row["name"]: row for row in _rows(body)}
     assert rows["lamp"]["made"] == 0 and rows["lamp"]["status"] != "ok"
 
@@ -335,7 +335,7 @@ def test_a_check_that_cannot_finish_stops_every_later_write(tmp_path: Path) -> N
     entries = _entries({"shot": CUP, "name": "cup", "count": 2}, {"shot": LAMP, "name": "lamp"})
     body, code = _run(tmp_path, entries, _gate(events, unavailable=True), events)
     assert code == 1
-    assert list((tmp_path / "out").rglob("0*.png")) == []
+    assert list((tmp_path / "out").rglob("0*.webp")) == []
     assert len(events.of("image_check")) == 3
     assert {row["status"] for row in _rows(body)} == {"error"}
     assert {row["code"] for row in _rows(body)} == {"check.load"}

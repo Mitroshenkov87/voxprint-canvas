@@ -355,7 +355,7 @@ def _series_map(state_dir: Path) -> dict[str, object]:
 
 
 def _export_format(layout: SimpleLayout) -> OutputFormat:
-    """Forge file type for this series. PNG when the setting is missing."""
+    """Forge file type for this series. WebP when the setting is missing."""
     raw = layout.get("canvas.export")
     if not isinstance(raw, str) or not raw.strip():
         return EXPORT_FORMAT

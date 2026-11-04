@@ -35,7 +35,7 @@ def test_catalog_loads_with_moss_as_the_default_text_base():
     assert catalog.text_bases[0] == "moss-image-sft"
     assert "z-image-turbo" in catalog.text_bases
     assert "moss-image-sft" in catalog.sizes
-    compact = catalog.by_id("moss-image-sft-compact-16gb")
+    compact = catalog.by_id("voxprint-moss-image-sft-compact")
     assert compact.pinned() is False
     assert compact.optional is False
     assert compact.quant == "compact-tbd"
@@ -48,6 +48,8 @@ def test_catalog_loads_with_moss_as_the_default_text_base():
     assert compact.text_base == "moss-image-sft"
     assert compact.pipeline_classes == ("MOSSImagePipeline",)
     assert compact.pin_note.startswith("PENDING:")
+    assert compact_row["notes"] == "(fp8/int8/nf4, chosen by moss-prequant)"
+    assert "(fp8/int8/nf4, chosen by moss-prequant)" in compact.pin_note
     for model_id, offload, hint, minimum in (
         ("moss-image-sft-bf16-16gb", "release-after-encode", 11, 16),
         ("moss-image-sft-bf16", "none", 27, 24),
@@ -62,7 +64,8 @@ def test_catalog_loads_with_moss_as_the_default_text_base():
         assert spec.vram_hint_gb == hint and spec.min_vram_gb == minimum
         assert spec.pin_note.startswith("TBD:")
     required = {spec.id for spec in required_specs(catalog)}
-    assert "moss-image-sft-compact-16gb" in required
+    assert "voxprint-moss-image-sft-compact" in required
+    assert "moss-image-sft-compact-16gb" not in required
     for model_id in (
         "moss-image-sft-bf16-16gb",
         "moss-image-sft-bf16",
@@ -80,7 +83,7 @@ def test_catalog_loads_with_moss_as_the_default_text_base():
 def test_text_plans_pick_moss_unless_the_caller_asks_for_z_image():
     catalog = load_catalog()
     small = build_plan(catalog, _screened(), Tier.GB16)
-    assert small.model_id == "moss-image-sft-compact-16gb"
+    assert small.model_id == "voxprint-moss-image-sft-compact"
     assert small.pipeline_class == PIPELINE_MOSS
     assert small.repos == ("voxprint/moss-image-sft-compact",)
     assert small.steps == 50 and small.guidance_scale == 3.0
@@ -106,13 +109,15 @@ def test_unpinned_rows_are_pending_and_z_image_rows_are_optional():
     listed = {row["id"] for row in document["models"]}
     pending = {item["id"]: item["note"] for item in document["pending"]}
     for model_id in (
-        "moss-image-sft-compact-16gb",
+        "voxprint-moss-image-sft-compact",
         "moss-image-sft-bf16-16gb",
         "moss-image-sft-bf16",
     ):
         assert model_id not in listed
         assert model_id in pending
         assert pending[model_id]
+    assert "moss-image-sft-compact-16gb" not in pending
+    assert "(fp8/int8/nf4, chosen by moss-prequant)" in pending["voxprint-moss-image-sft-compact"]
     rows = {row["id"]: row for row in document["models"]}
     for model_id in (
         "z-image-turbo-bf16-16gb",
@@ -127,8 +132,13 @@ def test_unpinned_rows_are_pending_and_z_image_rows_are_optional():
 def test_running_base_id_follows_the_catalog_and_moss_aliases_match():
     assert running_base_id() == "moss-image-sft"
     assert base_matches("moss-image-sft")
+    assert base_matches("moss")
     assert base_matches("moss-image")
     assert base_matches("moss-image-base")
+    assert base_matches("moss5b")
+    assert base_matches("moss", "moss5b")
+    assert base_matches("moss-image", "moss5b")
+    assert base_matches("moss5b", "moss-image-sft")
     assert base_matches("z-image", "z-image-turbo")
     assert base_matches("z-image-turbo", "z-image-turbo")
     assert base_matches("z-image") is False
@@ -227,7 +237,7 @@ def test_moss_generate_skips_the_z_image_schedule(monkeypatch: pytest.MonkeyPatc
         "16gb",
         "text",
         text_encoder=TEXT_ENCODER,
-        model_id="moss-image-sft-compact-16gb",
+        model_id="voxprint-moss-image-sft-compact",
     )
     generator._schedule(plan, Mode.TEXT, 64, 64, "a red teapot on a table")
     assert "schedule" not in calls

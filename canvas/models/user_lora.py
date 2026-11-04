@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -18,8 +19,20 @@ from canvas.models.registry import load_catalog
 SCHEMA = "voxprint-model/1"
 ZIMAGE_TURBO_MDL_ID = "z-image-turbo"
 FORGE_BASE_ID = "z-image"
+# LoRA base tag for a MOSS adapter. The catalog text base stays ``moss-image-sft``.
+MOSS_LORA_BASE = "moss5b"
 MOSS_IMAGE_SFT = "moss-image-sft"
-_MOSS_ALIASES = frozenset({"moss-image", "moss-image-base"})
+# Expected ``voxprint.lora.base_variant`` on a moss5b file. ``moss-image-base`` still loads.
+EXPECTED_BASE_VARIANT = "moss-image-sft"
+_VARIANT_BASE = "moss-image-base"
+# User-facing values and older header ids. All of them normalise to ``moss5b``.
+_MOSS_TAGS = frozenset({
+    "moss",
+    "moss-image",
+    "moss-image-base",
+    "moss-image-sft",
+    "moss5b",
+})
 # Strength for a LoRA whose record names none.
 CLI_DEFAULT_STRENGTH = 0.7
 CLI_STRENGTH_RANGE = (0.0, 2.0)
@@ -37,15 +50,22 @@ _B_WEIGHT = ".lora_B.weight"
 _HEADER_TRIGGER = "voxprint.subject.trigger"
 _HEADER_KIND = "voxprint.lora.kind"
 _HEADER_BASE = "voxprint.lora.base"
+_HEADER_BASE_VARIANT = "voxprint.lora.base_variant"
+_HEADER_BASE_SHA256 = "voxprint.lora.base_sha256"
+_HEADER_BASE_SHA256_ALT = "base_sha256"
 _HEADER_CONSENT = "voxprint.subject.consent_obtained"
 _HEADER_CONFIRMED = "voxprint.subject.adult_confirmed"
 _ADULT_LABEL = "voxprint.lora.adult_content"
+_LOG = logging.getLogger(__name__)
 # Older Model Forge exports wrote "thing" for an object LoRA; a .voxlora package maps it the same way.
 _HEADER_KIND_ALIAS = {"thing": "object"}
 _HEADER_KEYS = (
     _HEADER_TRIGGER,
     _HEADER_KIND,
     _HEADER_BASE,
+    _HEADER_BASE_VARIANT,
+    _HEADER_BASE_SHA256,
+    _HEADER_BASE_SHA256_ALT,
     _HEADER_CONSENT,
     _HEADER_CONFIRMED,
     _ADULT_LABEL,
@@ -78,6 +98,9 @@ class UserLora:
     previews: tuple[Path, ...] = ()
     base: str = ""
     sha256: str = ""
+    base_variant: str = ""
+    base_sha256: str = ""
+    warnings: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -186,6 +209,7 @@ def inspect_folder(folder: Path) -> tuple[UserLora | None, str | None]:
     licence = document.get("licence")
     if not isinstance(licence, str) or not licence.strip():
         return None, REASON_RECORD
+    variant, base_sha, warnings = _provenance(header, weights, mdl_id)
     return UserLora(
         lora_id,
         str(kind),
@@ -197,6 +221,9 @@ def inspect_folder(folder: Path) -> tuple[UserLora | None, str | None]:
         adult,
         base=mdl_id,
         sha256=str(document.get("sha256") or ""),
+        base_variant=variant,
+        base_sha256=base_sha,
+        warnings=warnings,
     ), None
 
 
@@ -232,12 +259,29 @@ def resolve_selected(path: str | Path, root: Path | None = None) -> UserLora | N
     return found
 
 
+def _is_moss_tag(value: str) -> bool:
+    """True when ``value`` is a MOSS LoRA tag or a user-facing alias of one."""
+    token = value.strip()
+    folded = token.casefold()
+    return token in _MOSS_TAGS or folded in _MOSS_TAGS
+
+
+def _is_zimage_tag(value: str) -> bool:
+    """True when ``value`` is the Z-Image LoRA tag. The tag itself is unchanged."""
+    token = value.strip()
+    folded = token.casefold()
+    names = {ZIMAGE_TURBO_MDL_ID, FORGE_BASE_ID}
+    return token in names or folded in names
+
+
 def base_matches(mdl_id: str, expected: str | None = None) -> bool:
     """True when ``mdl_id`` is the base this app runs.
 
     Model Forge records a Z-Image LoRA as ``z-image``. That id matches the
-    Z-Image-Turbo base. ``moss-image`` and ``moss-image-base`` match
-    ``moss-image-sft``.
+    Z-Image-Turbo base. A MOSS LoRA's tag is ``moss5b``. The user-facing
+    values ``moss`` and ``moss-image``, and the older ids ``moss-image-sft``
+    and ``moss-image-base``, match ``moss5b`` and the ``moss-image-sft``
+    catalog base.
 
     Args:
         mdl_id: ``base.mdl_id`` or the ``voxprint.lora.base`` header value.
@@ -249,9 +293,9 @@ def base_matches(mdl_id: str, expected: str | None = None) -> bool:
         return False
     if mdl_id == expected:
         return True
-    if expected == ZIMAGE_TURBO_MDL_ID and mdl_id == FORGE_BASE_ID:
+    if _is_zimage_tag(expected) and _is_zimage_tag(mdl_id):
         return True
-    return expected == MOSS_IMAGE_SFT and mdl_id in _MOSS_ALIASES
+    return _is_moss_tag(expected) and _is_moss_tag(mdl_id)
 
 
 def cli_scale(value: object) -> float:
@@ -368,6 +412,7 @@ def open_weights(path: Path) -> UserLora:
         adult = labelled
     if kind not in _KINDS or _bad_id(lora_id):
         raise LoraRejected(CODE_INVALID)
+    variant, base_sha, warnings = _provenance(meta, path, base)
     return UserLora(
         lora_id,
         kind,
@@ -379,6 +424,9 @@ def open_weights(path: Path) -> UserLora:
         adult,
         base=base,
         sha256=_sha256(path),
+        base_variant=variant,
+        base_sha256=base_sha,
+        warnings=warnings,
     )
 
 
@@ -406,20 +454,22 @@ def strength_or_default(lora: UserLora, requested: object) -> float:
 _META_ARCHITECTURE = "modelspec.architecture"
 _META_BASE_VERSION = "ss_base_model_version"
 _FILENAME_BASES = (
-    (".moss.safetensors", MOSS_IMAGE_SFT),
+    (".moss.safetensors", MOSS_LORA_BASE),
     (".z-image.safetensors", ZIMAGE_TURBO_MDL_ID),
 )
 
 
 def _canonical_base(raw: str) -> str:
-    """``moss-image-sft`` or ``z-image-turbo`` when ``raw`` is one of those families.
+    """``moss5b`` or ``z-image-turbo`` when ``raw`` is one of those families.
 
-    Any other id is kept as written, so ``sdxl`` stays ``sdxl``.
+    ``moss`` and ``moss-image`` are the user-facing MOSS values. Older headers
+    ``moss-image-sft`` and ``moss-image-base`` normalise to ``moss5b`` too.
+    The Z-Image tag is unchanged. Any other id is kept, so ``sdxl`` stays ``sdxl``.
     """
     token = raw.strip()
     folded = token.casefold()
-    if base_matches(token, MOSS_IMAGE_SFT) or base_matches(folded, MOSS_IMAGE_SFT):
-        return MOSS_IMAGE_SFT
+    if base_matches(token, MOSS_LORA_BASE) or base_matches(folded, MOSS_LORA_BASE):
+        return MOSS_LORA_BASE
     if base_matches(token, ZIMAGE_TURBO_MDL_ID) or base_matches(folded, ZIMAGE_TURBO_MDL_ID):
         return ZIMAGE_TURBO_MDL_ID
     return token
@@ -457,12 +507,16 @@ def _filename_base(path: Path | None) -> str:
 
 
 def _family_token(value: str) -> str:
-    """A MOSS or Z-Image family id found inside one metadata string."""
+    """A MOSS or Z-Image family id found inside one metadata string.
+
+    A string that names MOSS, including the user-facing values ``moss`` and
+    ``moss-image``, is the ``moss5b`` tag. Z-Image stays ``z-image-turbo``.
+    """
     folded = value.casefold()
     if not folded:
         return ""
     if "moss" in folded:
-        return MOSS_IMAGE_SFT
+        return MOSS_LORA_BASE
     compact = folded.replace("-", "").replace("_", "").replace(" ", "")
     if "z-image" in folded or "zimage" in compact:
         return ZIMAGE_TURBO_MDL_ID
@@ -478,26 +532,9 @@ def _metadata_family(meta: dict[str, str]) -> str:
     return ""
 
 
-def detect_base(path_or_lora: Path | UserLora | str) -> str:
-    """The base a LoRA was trained on.
-
-    ``voxprint.lora.base`` wins, including over a filename tag, and is
-    normalised to ``moss-image-sft`` or ``z-image-turbo``. Any other header
-    value is kept, so ``sdxl`` stays ``sdxl``. A recorded base on a
-    :class:`UserLora` is that header when the file does not carry one.
-
-    Otherwise ``modelspec.architecture`` and ``ss_base_model_version`` are
-    read: ``moss`` is ``moss-image-sft``, and ``z-image`` or ``zimage`` is
-    ``z-image-turbo``. A filename ``<name>.moss.safetensors`` or
-    ``<name>.z-image.safetensors`` is used when those strings are absent.
-    An untagged file, including an older LoRA, is ``z-image-turbo``.
-
-    Args:
-        path_or_lora: A weight file, or a LoRA whose ``weights`` file is read.
-    """
-    path, recorded = _detect_target(path_or_lora)
-    meta = _string_metadata(path)
-    header = meta.get(_HEADER_BASE, "").strip() or recorded
+def _trained_tag(meta: dict[str, str], path: Path | None, recorded: str = "") -> str:
+    """The normalised base tag for one header, filename, or recorded id."""
+    header = meta.get(_HEADER_BASE, "").strip() or recorded.strip()
     if header:
         return _canonical_base(header)
     found = _metadata_family(meta)
@@ -507,6 +544,52 @@ def detect_base(path_or_lora: Path | UserLora | str) -> str:
     if named:
         return named
     return ZIMAGE_TURBO_MDL_ID
+
+
+def detect_base(path_or_lora: Path | UserLora | str) -> str:
+    """The base a LoRA was trained on.
+
+    ``voxprint.lora.base`` wins, including over a filename tag, and is
+    normalised to ``moss5b`` or ``z-image-turbo``. ``moss`` and ``moss-image``
+    both become ``moss5b``. Any other header value is kept, so ``sdxl`` stays
+    ``sdxl``. A recorded base on a :class:`UserLora` is that header when the
+    file does not carry one.
+
+    Otherwise ``modelspec.architecture`` and ``ss_base_model_version`` are
+    read: ``moss`` is ``moss5b``, and ``z-image`` or ``zimage`` is
+    ``z-image-turbo``. A filename ``<name>.moss.safetensors`` or
+    ``<name>.z-image.safetensors`` is used when those strings are absent.
+    An untagged file, including an older LoRA, is ``z-image-turbo``.
+
+    Args:
+        path_or_lora: A weight file, or a LoRA whose ``weights`` file is read.
+    """
+    path, recorded = _detect_target(path_or_lora)
+    return _trained_tag(_string_metadata(path), path, recorded)
+
+
+def _variant_warnings(tag: str, variant: str) -> tuple[str, ...]:
+    """A warning when a moss5b LoRA names the pre-SFT base. The file still loads."""
+    written = variant.strip()
+    if tag != MOSS_LORA_BASE or written.casefold() != _VARIANT_BASE:
+        return ()
+    message = (
+        f"LoRA base tag is {MOSS_LORA_BASE} but {_HEADER_BASE_VARIANT} is {written}; "
+        f"expected {EXPECTED_BASE_VARIANT}. The file still loads."
+    )
+    _LOG.warning("%s", message)
+    return (message,)
+
+
+def _provenance(meta: dict[str, str], path: Path, recorded: str = "") -> tuple[str, str, tuple[str, ...]]:
+    """``base_variant``, ``base_sha256``, and warnings from one safetensors header.
+
+    ``voxprint.lora.base_sha256`` wins. A file that only carries ``base_sha256``
+    is read the same way.
+    """
+    variant = meta.get(_HEADER_BASE_VARIANT, "").strip()
+    digest = meta.get(_HEADER_BASE_SHA256, "").strip() or meta.get(_HEADER_BASE_SHA256_ALT, "").strip()
+    return variant, digest, _variant_warnings(_trained_tag(meta, path, recorded), variant)
 
 
 @dataclass(frozen=True)
@@ -525,6 +608,10 @@ class LoraRoute:
 def route_lora(lora: UserLora, text_bases: tuple[str, ...] | None = None, default: str | None = None) -> LoraRoute:
     """Route ``lora`` onto one listed text base. A different base is not loaded.
 
+    A LoRA tagged ``moss5b`` (including user-facing ``moss`` and ``moss-image``)
+    runs on the catalog base ``moss-image-sft``. The Z-Image tag still runs on
+    ``z-image-turbo``.
+
     Args:
         lora: The selected LoRA.
         text_bases: Text bases the catalog lists. The catalog is read when omitted.
@@ -533,7 +620,8 @@ def route_lora(lora: UserLora, text_bases: tuple[str, ...] | None = None, defaul
 
     Returns:
         ``LoraRoute(base)`` when the trained base is one of ``text_bases``.
-        ``LoraRoute("", retrain_from=trained)`` otherwise.
+        ``LoraRoute("", retrain_from=trained)`` otherwise. ``retrain_from`` is
+        the normalised tag, so a MOSS file reports ``moss5b``.
     """
     if text_bases is None:
         catalog = load_catalog()
@@ -913,6 +1001,7 @@ def open_third_party(path: Path) -> UserLora:
     meta, weights = _opened_weights(path)
     base = meta.get(_HEADER_BASE, "")
     fits_base(path)
+    variant, base_sha, warnings = _provenance(meta, path, base)
     return UserLora(
         path.stem,
         THIRD_PARTY_KIND,
@@ -925,6 +1014,9 @@ def open_third_party(path: Path) -> UserLora:
         name=path.stem,
         base=base,
         sha256=_sha256(path),
+        base_variant=variant,
+        base_sha256=base_sha,
+        warnings=warnings,
     )
 
 

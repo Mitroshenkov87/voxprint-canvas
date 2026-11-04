@@ -15,7 +15,7 @@ from PySide6.QtWidgets import QApplication, QLabel, QPushButton
 
 from canvas.app.i18n import text
 from voxprint_common.i18n import set_language
-from canvas.app.main import main
+from canvas.app.main import _with_lora, main
 from canvas.models.forge_retrain import request_retrain
 from canvas.models.loader import ZImageGenerator
 from canvas.models.modes import Tier
@@ -23,7 +23,9 @@ from canvas.models.registry import load_catalog
 from canvas.models.user_lora import (
     CODE_BASE_MISMATCH,
     CODE_RETRAIN,
+    EXPECTED_BASE_VARIANT,
     MOSS_IMAGE_SFT,
+    MOSS_LORA_BASE,
     ZIMAGE_TURBO_MDL_ID,
     LoraRejected,
     LoraRoute,
@@ -31,6 +33,7 @@ from canvas.models.user_lora import (
     base_choice,
     detect_base,
     fits_base,
+    prepare_cli_lora,
     route_lora,
 )
 from canvas.safety.image import RawImage
@@ -99,25 +102,27 @@ def _patch_draw(monkeypatch, tmp_path: Path) -> list[str]:
 
 def test_detect_base_reads_the_header_then_metadata_then_the_filename(tmp_path: Path) -> None:
     moss = _file(tmp_path / "header", "cup.safetensors", {"voxprint.lora.base": "moss-image"})
-    assert detect_base(moss) == MOSS_IMAGE_SFT
-    assert detect_base(_file(tmp_path / "sft", "cup.safetensors", {"voxprint.lora.base": "moss-image-sft"})) == MOSS_IMAGE_SFT
-    assert detect_base(_file(tmp_path / "base", "cup.safetensors", {"voxprint.lora.base": "moss-image-base"})) == MOSS_IMAGE_SFT
+    assert detect_base(moss) == MOSS_LORA_BASE
+    assert detect_base(_file(tmp_path / "word", "cup.safetensors", {"voxprint.lora.base": "moss"})) == MOSS_LORA_BASE
+    assert detect_base(_file(tmp_path / "tag", "cup.safetensors", {"voxprint.lora.base": "moss5b"})) == MOSS_LORA_BASE
+    assert detect_base(_file(tmp_path / "sft", "cup.safetensors", {"voxprint.lora.base": "moss-image-sft"})) == MOSS_LORA_BASE
+    assert detect_base(_file(tmp_path / "base", "cup.safetensors", {"voxprint.lora.base": "moss-image-base"})) == MOSS_LORA_BASE
     assert detect_base(_file(tmp_path / "turbo", "cup.safetensors", {"voxprint.lora.base": "z-image"})) == ZIMAGE_TURBO_MDL_ID
     assert detect_base(_file(tmp_path / "sdxl", "cup.safetensors", {"voxprint.lora.base": "sdxl"})) == "sdxl"
     # The header wins over a filename tag.
     tagged = _file(tmp_path / "both", "cup.moss.safetensors", {"voxprint.lora.base": "sdxl"})
     assert detect_base(tagged) == "sdxl"
     architecture = _file(tmp_path / "arch", "cup.safetensors", {"modelspec.architecture": "MOSS-Image"})
-    assert detect_base(architecture) == MOSS_IMAGE_SFT
+    assert detect_base(architecture) == MOSS_LORA_BASE
     version = _file(tmp_path / "version", "cup.safetensors", {"ss_base_model_version": "ZImageTurbo"})
     assert detect_base(version) == ZIMAGE_TURBO_MDL_ID
     # A metadata family wins over the filename. A string that names neither falls through to it.
     mixed = _file(tmp_path / "mixed", "cup.moss.safetensors", {"modelspec.architecture": "z-image"})
     assert detect_base(mixed) == ZIMAGE_TURBO_MDL_ID
     named = _file(tmp_path / "named", "cup.moss.safetensors", {"modelspec.architecture": "sdxl"})
-    assert detect_base(named) == MOSS_IMAGE_SFT
+    assert detect_base(named) == MOSS_LORA_BASE
     assert detect_base(_file(tmp_path / "zname", "cup.z-image.safetensors", {})) == ZIMAGE_TURBO_MDL_ID
-    assert detect_base(_file(tmp_path / "case", "cup.MOSS.safetensors", {})) == MOSS_IMAGE_SFT
+    assert detect_base(_file(tmp_path / "case", "cup.MOSS.safetensors", {})) == MOSS_LORA_BASE
     untagged = _file(tmp_path / "old", "cup.safetensors", {})
     assert detect_base(untagged) == ZIMAGE_TURBO_MDL_ID
     recorded = _entry(_file(tmp_path / "side", "cup.moss.safetensors", {}), "sdxl")
@@ -127,7 +132,12 @@ def test_detect_base_reads_the_header_then_metadata_then_the_filename(tmp_path: 
 def test_route_lora_loads_a_listed_base_and_asks_for_a_retrain_otherwise(tmp_path: Path) -> None:
     bases = (MOSS_IMAGE_SFT, ZIMAGE_TURBO_MDL_ID)
     moss = _entry(_file(tmp_path / "moss", "cup.safetensors", {"voxprint.lora.base": "moss-image"}))
+    assert detect_base(moss) == MOSS_LORA_BASE
     assert route_lora(moss, bases, MOSS_IMAGE_SFT) == LoraRoute(MOSS_IMAGE_SFT)
+    tagged = _entry(_file(tmp_path / "tag", "cup.safetensors", {"voxprint.lora.base": "moss5b"}))
+    assert route_lora(tagged, bases, MOSS_IMAGE_SFT) == LoraRoute(MOSS_IMAGE_SFT)
+    word = _entry(_file(tmp_path / "word", "cup.safetensors", {"voxprint.lora.base": "moss"}))
+    assert route_lora(word, bases, MOSS_IMAGE_SFT) == LoraRoute(MOSS_IMAGE_SFT)
     assert base_choice(moss, bases, MOSS_IMAGE_SFT).run_on == MOSS_IMAGE_SFT
     assert base_choice(moss, bases, MOSS_IMAGE_SFT).note_base == ""
     zimage = _entry(_file(tmp_path / "z", "cup.safetensors", {"voxprint.lora.base": "z-image"}))
@@ -138,6 +148,64 @@ def test_route_lora_loads_a_listed_base_and_asks_for_a_retrain_otherwise(tmp_pat
     assert route_lora(other, bases, MOSS_IMAGE_SFT) == LoraRoute("", "sdxl")
     choice = base_choice(other, bases, MOSS_IMAGE_SFT)
     assert choice.run_on == "" and choice.note_base == "sdxl"
+
+
+def test_a_moss5b_lora_keeps_its_base_variant_and_warns_for_the_pre_sft_base(tmp_path: Path, caplog) -> None:
+    digest = "ab" * 32
+    expected = _forge_with(
+        tmp_path / "sft",
+        {
+            "voxprint.lora.base": "moss5b",
+            "voxprint.lora.base_variant": EXPECTED_BASE_VARIANT,
+            "voxprint.lora.base_sha256": digest,
+        },
+    )
+    matched = prepare_cli_lora(expected)
+    assert matched.base_variant == EXPECTED_BASE_VARIANT
+    assert matched.base_sha256 == digest
+    assert matched.warnings == ()
+    assert "warnings" not in _with_lora({"ok": True}, (matched, 0.7))
+    plain = _forge_with(tmp_path / "plain", {"voxprint.lora.base": "moss", "base_sha256": "cd" * 32})
+    alias = prepare_cli_lora(plain)
+    assert detect_base(alias) == MOSS_LORA_BASE
+    assert alias.base_sha256 == "cd" * 32
+    assert alias.base_variant == ""
+    warned_path = _forge_with(
+        tmp_path / "base",
+        {
+            "voxprint.lora.base": "moss-image",
+            "voxprint.lora.base_variant": "moss-image-base",
+            "base_sha256": "ef" * 32,
+            "voxprint.lora.base_sha256": digest,
+        },
+    )
+    with caplog.at_level("WARNING", logger="canvas.models.user_lora"):
+        warned = prepare_cli_lora(warned_path)
+    assert warned.base == "moss-image"
+    assert detect_base(warned) == MOSS_LORA_BASE
+    assert warned.base_variant == "moss-image-base"
+    assert warned.base_sha256 == digest
+    assert warned.warnings
+    assert "moss-image-base" in warned.warnings[0]
+    assert EXPECTED_BASE_VARIANT in warned.warnings[0]
+    assert any("moss-image-base" in record.message for record in caplog.records)
+    payload = _with_lora({"ok": True, "path": "picture.webp"}, (warned, 0.7))
+    assert payload["warnings"] == list(warned.warnings)
+    assert payload["lora"] == warned.id
+
+
+def _forge_with(folder: Path, extra: dict[str, str]) -> Path:
+    """A Forge file whose header carries the extra safetensors metadata."""
+    return _file(
+        folder,
+        "cup.safetensors",
+        {
+            "voxprint.lora.base": extra.get("voxprint.lora.base", "moss5b"),
+            "voxprint.lora.kind": "object",
+            "voxprint.subject.trigger": "teapot",
+            **extra,
+        },
+    )
 
 
 def test_fits_base_checks_z_image_module_names_only(tmp_path: Path) -> None:

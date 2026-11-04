@@ -36,11 +36,11 @@ One-page map of the VOXPrint AI Canvas repository. Read this before touching cod
 
 ### canvas/models — model registry, tiers, loading
 - `registry.py` — `load_catalog()` reads the shared model registry.
-- `plan.py` — `build_plan()`: registry entries and diffusers classes per mode; loads nothing.
+- `plan.py` — `build_plan()`: registry entries and diffusers classes per mode; loads nothing. The 16 GB MOSS row is `voxprint-moss-image-sft-compact` (formerly `moss-image-sft-compact-16gb`).
 - `loader.py` — `ZImageGenerator`, `load_catalog_stack()`.
 - `runtime.py` — diffusers inference; heavy libraries load only when a snapshot is on disk.
 - `snapshots.py` — resolves a model through its MDL view and refuses a bad hash.
-- `user_lora.py` — user LoRAs: `prepare_cli_lora()`, `resolve_selected()`, `running_base_id()`.
+- `user_lora.py` — user LoRAs: `prepare_cli_lora()`, `resolve_selected()`, `running_base_id()`. A MOSS LoRA's base tag is `moss5b`. User-facing `moss` and `moss-image` (and the older tags `moss-image-sft` and `moss-image-base`) map to it; the Z-Image tag stays `z-image-turbo`. Safetensors metadata `voxprint.lora.base_variant` (expected `moss-image-sft`) and `voxprint.lora.base_sha256` / `base_sha256` are stored on the entry. A `moss5b` file whose variant is `moss-image-base` still loads, logs a warning, and returns it on `warnings` (also in `--json`).
 - `tiers.py`, `modes.py`, `sizes.py` — VRAM tiers, `Mode`, aspect-ratio maps.
 - `provision.py`, `install_fetch.py`, `downloader.py`, `mdl_*.py` — install, download, MDL views.
 

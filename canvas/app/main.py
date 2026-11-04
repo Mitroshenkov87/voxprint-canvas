@@ -883,6 +883,8 @@ def _with_lora(payload: dict[str, object], chosen: tuple[UserLora, float] | None
     payload["lora"] = lora.id
     payload["lora_scale"] = scale
     payload["lora_trigger"] = lora.trigger
+    if lora.warnings:
+        payload["warnings"] = list(lora.warnings)
     return payload
 
 

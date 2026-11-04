@@ -13,7 +13,7 @@ from canvas.models.views import ViewError, blobs_present, ensure_view
 _GATE_ROLES = ("prompt-guard", "zero-shot", "face-detector", "age", "nsfw", "age-fine")
 _MODEL_IDS = (
     "qwen3-4b-writer",
-    "moss-image-sft-compact-16gb",
+    "voxprint-moss-image-sft-compact",
     "z-image-turbo-bf16-16gb",
     "z-image-turbo-bf16",
 )

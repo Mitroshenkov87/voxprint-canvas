@@ -124,7 +124,7 @@ def _text_model(catalog: Catalog, tier: Tier, base: str | None = None) -> tuple[
         assert_never(tier)
     if family == "moss-image-sft":
         if tier is Tier.GB16:
-            return _one(catalog, "moss-image-sft-compact-16gb"), PIPELINE_MOSS
+            return _one(catalog, "voxprint-moss-image-sft-compact"), PIPELINE_MOSS
         if tier is Tier.GB24:
             return _one(catalog, "moss-image-sft-bf16"), PIPELINE_MOSS
         assert_never(tier)

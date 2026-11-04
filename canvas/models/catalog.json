@@ -677,7 +677,7 @@
       "text_base": "moss-image-sft"
     },
     {
-      "id": "moss-image-sft-compact-16gb",
+      "id": "voxprint-moss-image-sft-compact",
       "role": "generator",
       "tier": "16gb",
       "repo": "voxprint/moss-image-sft-compact",
@@ -689,6 +689,7 @@
         "MOSSImagePipeline"
       ],
       "quant": "compact-tbd",
+      "notes": "(fp8/int8/nf4, chosen by moss-prequant)",
       "quant_backend": "",
       "quality_gate": "pending",
       "steps": 50,
@@ -702,7 +703,7 @@
       "min_vram_gb": 16,
       "status": "ready",
       "files": {},
-      "pin_note": "PENDING: compressed once by VOXPrint on the test VM; repo, revision and sha256 TBD; MDL will not download until pinned",
+      "pin_note": "PENDING: compressed once by VOXPrint on the test VM; repo, revision and sha256 TBD; MDL will not download until pinned. Quant (fp8/int8/nf4, chosen by moss-prequant).",
       "sources": [
         {
           "kind": "local",

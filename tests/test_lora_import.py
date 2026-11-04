@@ -111,6 +111,23 @@ def test_a_header_that_disagrees_with_the_json_is_invalid(home: Path):
     assert _code(write_voxlora(home / "c", header=header)) == "lora.invalid"
 
 
+def test_moss_and_moss5b_agree_and_the_pre_sft_variant_warns(home: Path):
+    header = {
+        "voxprint.lora.kind": "object",
+        "voxprint.lora.base": "moss5b",
+        "voxprint.lora.base_variant": "moss-image-base",
+        "voxprint.lora.base_sha256": "ab" * 32,
+        "voxprint.subject.trigger": "brsslmp",
+    }
+    package = write_voxlora(home / "in", record=manifest(base="moss-image"), header=header)
+    entry = _import(package)
+    lora = entry.as_lora()
+    assert entry.manifest.base == "moss-image"
+    assert lora.base_variant == "moss-image-base"
+    assert lora.base_sha256 == "ab" * 32
+    assert lora.warnings and "moss-image-base" in lora.warnings[0]
+
+
 def test_a_different_base_is_imported_with_its_trained_base(home: Path):
     package = write_voxlora(home / "in", record=manifest(base="flux-dev"))
     _import(package)

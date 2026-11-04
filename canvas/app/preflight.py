@@ -1,6 +1,7 @@
 """Fail fast before a heavy model load.
 
-Every picture model and every gate model must already have a complete view.
+Every pinned picture model and every gate model must already have a complete view.
+An unpinned row stays in the required list and is not fetched until its hashes exist.
 A legacy folder is not fetched again: the installer adopts it, and a failed
 adopt stays a missing view. Free disk, installed RAM, and this check's own
 time budget are read without hashing weight bytes. One log line records the result.
@@ -114,7 +115,10 @@ def _enqueue(spec: ModelSpec, root: Path) -> None:
 
 
 def _missing(specs: tuple[ModelSpec, ...], root: Path) -> ModelSpec | None:
+    """The first pinned row whose view is incomplete. Unpinned rows are not fetched."""
     for spec in specs:
+        if not spec.pinned():
+            continue
         if not view_complete(spec, root):
             return spec
     return None

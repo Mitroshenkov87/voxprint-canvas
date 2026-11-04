@@ -250,6 +250,7 @@ def test_generator_passes_the_selected_lora_and_leaves_the_prompt(monkeypatch, t
     monkeypatch.setattr("canvas.models.loader.snapshot_ready", lambda *args, **kwargs: tmp_path)
     monkeypatch.setattr("canvas.models.loader.render", fake_render)
     generator = ZImageGenerator(load_catalog(), Tier.GB24)
+    generator.base = "z-image-turbo"
     generator.lora_path = str(folder)
     generator.lora_strength = 2.0
     screened = World().gate().release_request("a red boat", "text")
@@ -268,6 +269,7 @@ def _decision(path: str, prompt: str, configure) -> str:
     if configure is not None:
         configure(world)
     generator = ZImageGenerator(load_catalog(), Tier.GB24)
+    generator.base = "z-image-turbo"
     generator.lora_path = path
     generator.lora_strength = 0.8
     pipeline = Pipeline(world.gate(), generator, Tier.GB16, use_gpu_lock=False)

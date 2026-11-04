@@ -110,8 +110,10 @@ def build(catalog: Catalog | None = None) -> dict[str, object]:
     raw = json.loads((ROOT / "canvas" / "models" / "catalog.json").read_text(encoding="utf-8"))
     rows = {row["id"]: row for row in raw["models"]}
     models: list[dict[str, object]] = []
+    pending: list[dict[str, str]] = []
     for spec in catalog.models:
-        if not spec.files:
+        if not spec.pinned():
+            pending.append({"id": spec.id, "note": spec.pin_note})
             continue
         row = rows[spec.id]
         files: list[dict[str, object]] = []
@@ -120,7 +122,7 @@ def build(catalog: Catalog | None = None) -> dict[str, object]:
             if not urls:
                 raise ValueError(f"{spec.id}/{name} has no download address")
             files.append({"path": name, "size": int(meta["size"]), "sha256": meta["sha256"], "mirrors": urls})
-        optional = spec.id in OPTIONAL_IDS or spec.id not in defaults
+        optional = spec.optional or spec.id in OPTIONAL_IDS or spec.id not in defaults
         models.append(_entry(spec.id, spec.revision, _tier(spec), files,
                              optional=optional, licence=spec.licence, source="primary"))
         fallback = row.get("fallback")
@@ -139,6 +141,7 @@ def build(catalog: Catalog | None = None) -> dict[str, object]:
         "app": "canvas",
         "generated_from": "canvas/models/catalog.json",
         "models": models,
+        "pending": pending,
     }
 
 

@@ -1,8 +1,9 @@
 {
   "schema": 1,
   "diffusers": "0.41.0",
-  "default_text_base": "z-image-turbo",
+  "default_text_base": "moss-image-sft",
   "text_bases": [
+    "moss-image-sft",
     "z-image-turbo"
   ],
   "sizes": {
@@ -55,11 +56,37 @@
         "21:9": [1920, 816],
         "9:21": [816, 1920]
       }
+    },
+    "moss-image-sft": {
+      "multiple": 16,
+      "native": {
+        "1:1": [1024, 1024],
+        "16:9": [1280, 720],
+        "9:16": [720, 1280],
+        "4:3": [1152, 864],
+        "3:4": [864, 1152],
+        "3:2": [1248, 832],
+        "2:3": [832, 1248],
+        "21:9": [1344, 576],
+        "9:21": [576, 1344]
+      },
+      "twok": {
+        "1:1": [1920, 1920],
+        "16:9": [1920, 1088],
+        "9:16": [1088, 1920],
+        "4:3": [1920, 1440],
+        "3:4": [1440, 1920],
+        "3:2": [1920, 1280],
+        "2:3": [1280, 1920],
+        "21:9": [1920, 816],
+        "9:21": [816, 1920]
+      }
     }
   },
   "models": [
     {
       "id": "z-image-turbo-bf16-16gb",
+      "optional": true,
       "role": "generator",
       "tier": "16gb",
       "repo": "Tongyi-MAI/Z-Image-Turbo",
@@ -309,6 +336,7 @@
     },
     {
       "id": "z-image-turbo-bf16",
+      "optional": true,
       "role": "generator",
       "tier": "24gb",
       "repo": "Tongyi-MAI/Z-Image-Turbo",
@@ -557,7 +585,148 @@
       }
     },
     {
+      "id": "moss-image-sft-bf16-16gb",
+      "optional": true,
+      "role": "generator",
+      "tier": "16gb",
+      "repo": "OpenMOSS-Team/MOSS-Image-SFT",
+      "revision": "",
+      "licence": "Apache-2.0",
+      "runtime": "diffusers",
+      "pipeline_classes": [
+        "MOSSImagePipeline"
+      ],
+      "quant": "bf16",
+      "quant_backend": "",
+      "quality_gate": "pending",
+      "steps": 50,
+      "guidance_scale": 3.0,
+      "guidance_kind": "guidance_scale",
+      "text_encoder": "Qwen/Qwen3.5-9B",
+      "text_encoder_licence": "Apache-2.0",
+      "text_encoder_offload": "release-after-encode",
+      "vram_hint_gb": 11,
+      "min_vram_gb": 16,
+      "status": "ready",
+      "files": {},
+      "pin_note": "TBD: revision and sha256 not pinned yet; MDL will not download until pinned",
+      "sources": [
+        {
+          "kind": "local",
+          "uri": ""
+        },
+        {
+          "kind": "huggingface",
+          "uri": "https://huggingface.co/OpenMOSS-Team/MOSS-Image-SFT"
+        },
+        {
+          "kind": "kaggle",
+          "uri": ""
+        },
+        {
+          "kind": "torrent",
+          "uri": ""
+        }
+      ],
+      "text_base": "moss-image-sft"
+    },
+    {
+      "id": "moss-image-sft-bf16",
+      "optional": true,
+      "role": "generator",
+      "tier": "24gb",
+      "repo": "OpenMOSS-Team/MOSS-Image-SFT",
+      "revision": "",
+      "licence": "Apache-2.0",
+      "runtime": "diffusers",
+      "pipeline_classes": [
+        "MOSSImagePipeline"
+      ],
+      "quant": "bf16",
+      "quant_backend": "",
+      "quality_gate": "pending",
+      "steps": 50,
+      "guidance_scale": 3.0,
+      "guidance_kind": "guidance_scale",
+      "text_encoder": "Qwen/Qwen3.5-9B",
+      "text_encoder_licence": "Apache-2.0",
+      "text_encoder_offload": "none",
+      "vram_hint_gb": 27,
+      "min_vram_gb": 24,
+      "status": "ready",
+      "files": {},
+      "pin_note": "TBD: revision and sha256 not pinned yet; MDL will not download until pinned",
+      "sources": [
+        {
+          "kind": "local",
+          "uri": ""
+        },
+        {
+          "kind": "huggingface",
+          "uri": "https://huggingface.co/OpenMOSS-Team/MOSS-Image-SFT"
+        },
+        {
+          "kind": "kaggle",
+          "uri": ""
+        },
+        {
+          "kind": "torrent",
+          "uri": ""
+        }
+      ],
+      "text_base": "moss-image-sft"
+    },
+    {
+      "id": "voxprint-moss-image-sft-compact",
+      "role": "generator",
+      "tier": "16gb",
+      "repo": "voxprint/moss-image-sft-compact",
+      "revision": "",
+      "licence": "Apache-2.0",
+      "credit": "OpenMOSS-Team/MOSS-Image-SFT, Qwen/Qwen3.5-9B, Apache-2.0",
+      "runtime": "diffusers",
+      "pipeline_classes": [
+        "MOSSImagePipeline"
+      ],
+      "quant": "compact-tbd",
+      "notes": "(fp8/int8/nf4, chosen by moss-prequant)",
+      "quant_backend": "",
+      "quality_gate": "pending",
+      "steps": 50,
+      "guidance_scale": 3.0,
+      "guidance_kind": "guidance_scale",
+      "text_encoder": "Qwen/Qwen3.5-9B",
+      "text_encoder_licence": "Apache-2.0",
+      "text_encoder_offload": "release-after-encode",
+      "vram_hint_gb": 13,
+      "peak_vram_gb": 14,
+      "min_vram_gb": 16,
+      "status": "ready",
+      "files": {},
+      "pin_note": "PENDING: compressed once by VOXPrint on the test VM; repo, revision and sha256 TBD; MDL will not download until pinned. Quant (fp8/int8/nf4, chosen by moss-prequant).",
+      "sources": [
+        {
+          "kind": "local",
+          "uri": ""
+        },
+        {
+          "kind": "huggingface",
+          "uri": "https://huggingface.co/voxprint/moss-image-sft-compact"
+        },
+        {
+          "kind": "kaggle",
+          "uri": ""
+        },
+        {
+          "kind": "torrent",
+          "uri": ""
+        }
+      ],
+      "text_base": "moss-image-sft"
+    },
+    {
       "id": "z-image-creative-bf16",
+      "optional": true,
       "role": "generator",
       "tier": "24gb",
       "repo": "Tongyi-MAI/Z-Image",
@@ -715,6 +884,7 @@
     },
     {
       "id": "z-image-turbo-fun-controlnet-union-bf16-lite",
+      "optional": true,
       "role": "control",
       "tier": "16gb",
       "repo": "alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union-2.1",
@@ -770,6 +940,7 @@
     },
     {
       "id": "z-image-turbo-fun-controlnet-union-bf16",
+      "optional": true,
       "role": "control",
       "tier": "24gb",
       "repo": "alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union-2.1",

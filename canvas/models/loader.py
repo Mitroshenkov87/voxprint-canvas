@@ -12,10 +12,10 @@ from canvas.app.preflight import PreflightFailed, Reason, preflight
 from canvas.infra.paths import models_dir
 from canvas.models.modes import Mode, Tier
 from canvas.models.pin import PinError, require_pin, verify_file
-from canvas.models.plan import CallPlan, build_plan
+from canvas.models.plan import PIPELINE_MOSS, CallPlan, build_plan
 from canvas.models.registry import Catalog, ModelSpec, RegistryError, load_catalog
 from canvas.models.runtime import WeightsLoadError, render, sample_latent
-from canvas.models.user_lora import UserLora, resolve_selected
+from canvas.models.user_lora import CODE_RETRAIN, LoraRejected, UserLora, resolve_selected, route_lora
 from canvas.models.snapshots import SnapshotError, fallback_ready, request_download, snapshot_ready
 from canvas.models.verified import VerifiedCache, flush_process_cache, process_cache
 from canvas.pipeline.bf16_schedule import (
@@ -147,11 +147,17 @@ def request_fp32(spec: ModelSpec) -> bool:
 
 
 class ZImageGenerator:
-    """Diffusers generator. ``generate`` accepts only a ``ScreenedInput``."""
+    """Diffusers generator. ``generate`` accepts only a ``ScreenedInput``.
+
+    ``base`` selects the text-to-image family. ``None`` uses the catalog default.
+    """
+
+    base: str | None = None
 
     def __init__(self, catalog: Catalog, tier: Tier, ledger: GpuLedger | None = None) -> None:
         self.catalog = catalog
         self.tier = tier
+        self.base = None
         self.last_plan: CallPlan | None = None
         self.last_size: tuple[int, int] | None = None
         self.unloaded = False
@@ -180,7 +186,16 @@ class ZImageGenerator:
         return self._draw(render, screened, width, height)
 
     def sample(self, screened: ScreenedInput, width: int, height: int) -> None:
-        """Sample the frame and keep its latent. ``generate`` with the same input decodes it."""
+        """Sample the frame and keep its latent. ``generate`` with the same input decodes it.
+
+        MOSS renders the whole picture in ``generate``, so sampling is a no-op.
+        """
+        if type(screened) is not ScreenedInput:
+            raise TypeError("the generator only accepts a ScreenedInput")
+        self._apply_lora_route()
+        plan = build_plan(self.catalog, screened, self.tier, base=self.base)
+        if plan.pipeline_class == PIPELINE_MOSS:
+            return
         self._draw(sample_latent, screened, width, height)
 
     def _draw(
@@ -188,12 +203,14 @@ class ZImageGenerator:
     ) -> Any:
         if type(screened) is not ScreenedInput:
             raise TypeError("the generator only accepts a ScreenedInput")
+        self._apply_lora_route()
         if width is not None and height is not None:
             self.last_size = (width, height)
-        plan = build_plan(self.catalog, screened, self.tier)
+        plan = build_plan(self.catalog, screened, self.tier, base=self.base)
         self.last_plan = plan
         mode = Mode(plan.mode)
         self._schedule(plan, mode, 1024 if width is None else width, 1024 if height is None else height, screened.prompt)
+        painter = _painter(plan, draw)
         root = self.models if self.models is not None else models_dir()
         spec = _spec_for(self.catalog, plan)
         cache = process_cache()
@@ -207,7 +224,7 @@ class ZImageGenerator:
             control_file = _control_file(self.catalog, plan, root, cache)
             lora, lora_strength = self._selected_lora()
             try:
-                return draw(
+                return painter(
                     plan, folder, screened, width, height, self.tier,
                     seed=self.seed, control_file=control_file,
                     strength=self.img2img_strength,
@@ -220,7 +237,7 @@ class ZImageGenerator:
                 if fp32 is None or fp32 == folder:
                     request_fp32(spec)
                     raise ModelNotReady(plan, missing=True) from None
-                return draw(
+                return painter(
                     plan, fp32, screened, width, height, self.tier,
                     seed=self.seed, control_file=control_file,
                     strength=self.img2img_strength,
@@ -234,18 +251,40 @@ class ZImageGenerator:
 
     def _selected_lora(self) -> tuple[UserLora | None, float | None]:
         """The listed LoRA for the expert field, and the strength to apply."""
-        if self.bound_lora is not None:
-            return self.bound_lora, self.lora_strength
-        if not self.lora_path:
-            return None, None
-        selected = resolve_selected(self.lora_path, self.models)
+        selected = self._bound_or_selected()
         if selected is None:
             return None, None
         return selected, self.lora_strength
 
+    def _bound_or_selected(self) -> UserLora | None:
+        """The LoRA bound for this job, or the one named by ``lora_path``."""
+        if self.bound_lora is not None:
+            return self.bound_lora
+        if not self.lora_path:
+            return None
+        return resolve_selected(self.lora_path, self.models)
+
+    def _apply_lora_route(self) -> None:
+        """Point ``base`` at the LoRA's trained base.
+
+        A base this app does not run raises :class:`LoraRejected` before any
+        snapshot or pipeline is opened.
+        """
+        lora = self._bound_or_selected()
+        if lora is None:
+            return
+        route = route_lora(lora, self.catalog.text_bases, self.catalog.default_text_base or "")
+        if not route.base:
+            raise LoraRejected(CODE_RETRAIN, base=route.retrain_from)
+        self.base = route.base
+
     def _schedule(self, plan: CallPlan, mode: Mode, width: int, height: int, prompt: str) -> None:
-        """Plan memory before weights move. 24 GB stays resident and does not mark stages."""
-        if self.tier is Tier.GB24:
+        """Plan memory before weights move. 24 GB stays resident and does not mark stages.
+
+        MOSS frees its own encoder before the pipeline loads, so the Z-Image
+        16 GB schedule does not run.
+        """
+        if plan.pipeline_class == PIPELINE_MOSS or self.tier is Tier.GB24:
             return
         choice = choose_schedule(16.0, mode, 0.0)
         if choice.placement is Placement.RESIDENT:
@@ -264,6 +303,14 @@ class ZImageGenerator:
                 )
             return
         assert_never(choice.placement)
+
+
+def _painter(plan: CallPlan, draw: Callable[..., Any]) -> Callable[..., Any]:
+    """MOSS text rendering. Every other plan uses the callable ``draw``."""
+    if plan.pipeline_class != PIPELINE_MOSS or draw is not render:
+        return draw
+    from canvas.models.moss import render_moss
+    return render_moss
 
 
 def plan_specs(catalog: Catalog, plan: CallPlan) -> tuple[ModelSpec, ...]:
@@ -308,6 +355,9 @@ def _control_spec(catalog: Catalog, plan: CallPlan) -> ModelSpec | None:
     if matches:
         return matches[0]
     return None
+
+
+Generator = ZImageGenerator
 
 
 def _control_file(

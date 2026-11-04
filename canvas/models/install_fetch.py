@@ -47,7 +47,7 @@ def fetch(manifest: Path, *, app: str = "canvas", extra: tuple[str, ...] = (), r
     """
     models = root if root is not None else models_dir()
     catalog = load_catalog()
-    specs = required_specs(catalog)
+    specs = required_specs(catalog) + _installed_optional(catalog, models)
     binary = _binary()
     failed = _adopt(binary, app, manifest, models, specs)
     wanted = _missing(manifest, models, catalog, specs, failed, extra)
@@ -62,6 +62,14 @@ def fetch(manifest: Path, *, app: str = "canvas", extra: tuple[str, ...] = (), r
         command.extend(["--model", model_id])
     completed = subprocess.run(command, check=False)
     return int(completed.returncode)
+
+
+def _installed_optional(catalog: Catalog, root: Path) -> tuple[ModelSpec, ...]:
+    """Optional pinned rows (Z-Image) whose legacy folder is already on disk stay managed."""
+    return tuple(
+        spec for spec in catalog.models
+        if spec.optional and spec.pinned() and weight_dir(root, spec.repo).is_dir()
+    )
 
 
 def _adopt(

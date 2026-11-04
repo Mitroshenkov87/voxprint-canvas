@@ -225,6 +225,30 @@ def _prompts(ctx: JobContext, current: Session, payload: Mapping[str, object]) -
     return reply("prompts")
 
 
+def _retrain_refusal(op: str, lora_path: str, runner: object) -> dict[str, object] | None:
+    """Refuse a job whose LoRA was trained on a base Canvas cannot run.
+
+    The diffusion model is not opened.
+    """
+    from canvas.app.i18n import text
+    from canvas.models.user_lora import MOSS_IMAGE_SFT, UserLora, retrain_rejection, resolve_selected
+
+    lora = getattr(runner, "bound_lora", None)
+    if not isinstance(lora, UserLora) and lora_path:
+        try:
+            lora = resolve_selected(lora_path)
+        except Exception:  # noqa: BLE001 - a lookup failure is not a retrain
+            lora = None
+    if not isinstance(lora, UserLora):
+        return None
+    rejected = retrain_rejection(lora)
+    if rejected is None:
+        return None
+    body = refused(op, rejected.code, text(rejected.code, **rejected.details), unavailable=True)
+    body["retrain"] = {"from": str(rejected.details.get("base") or ""), "to": MOSS_IMAGE_SFT}
+    return body
+
+
 def _generate(ctx: JobContext, current: Session, payload: Mapping[str, object]) -> dict[str, object]:
     from canvas.app.shell_run import RunStopped
     from canvas.core.formats import extension, save_image
@@ -233,6 +257,9 @@ def _generate(ctx: JobContext, current: Session, payload: Mapping[str, object]) 
     from canvas.models.runtime import hold_warm, pipeline_scope, trim_warm
 
     job = _job(payload.get("job"))
+    stopped = _retrain_refusal("generate", job.lora_path, current.runner)
+    if stopped is not None:
+        return stopped
     layout_prompt = str(payload.get("layout_prompt") or "")
     out_dir = Path(str(payload.get("out_dir")))
     _apply_vram(payload.get("vram"))
@@ -381,6 +408,9 @@ def _series(ctx: JobContext, current: Session, payload: Mapping[str, object]) ->
     from canvas.safety.inputs import ImageRole, PendingInput
 
     base = _job(payload.get("job"))
+    stopped = _retrain_refusal("series", base.lora_path, current.runner)
+    if stopped is not None:
+        return stopped
     idea = str(payload.get("idea") or "")
     style = str(payload.get("style") or "photo")
     template = str(payload.get("template") or "")

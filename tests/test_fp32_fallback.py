@@ -41,7 +41,9 @@ def _generator(monkeypatch, fp32: Path | None, calls: list[Path], fail_bf16: boo
         return RawImage(1, 1, b"\x00\x00\x00")
 
     monkeypatch.setattr(loader_mod, "render", render)
-    return ZImageGenerator(load_catalog(), Tier.GB24), queued
+    generator = ZImageGenerator(load_catalog(), Tier.GB24)
+    generator.base = "z-image-turbo"
+    return generator, queued
 
 
 def test_a_bf16_load_failure_uses_the_fp32_entry(monkeypatch):

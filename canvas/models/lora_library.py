@@ -30,7 +30,10 @@ from canvas.models.user_lora import (
     ZIMAGE_TURBO_MDL_ID,
     LoraRejected,
     UserLora,
+    _canonical_base,
     _opened_weights,
+    _provenance,
+    _string_metadata,
 )
 
 PACKAGE_SUFFIX = ".voxlora"
@@ -93,6 +96,9 @@ class LibraryEntry:
         """The entry as a selectable LoRA. The weight keys are normalised for the loader."""
         loader_weights = _loader_path(self.weights)
         low, high = _clamped_range(self.manifest)
+        variant, base_sha, warnings = _provenance(
+            _string_metadata(self.weights), self.weights, self.manifest.base,
+        )
         return UserLora(
             self.id,
             self.manifest.kind,
@@ -106,6 +112,9 @@ class LibraryEntry:
             previews=self.previews,
             base=self.manifest.base,
             sha256=self.manifest.weights_sha256 or "",
+            base_variant=variant,
+            base_sha256=base_sha,
+            warnings=warnings,
         )
 
 
@@ -172,9 +181,10 @@ def open_package_weights(source: Path) -> UserLora:
     folder.mkdir(parents=True, exist_ok=True)
     weights = folder / WEIGHTS_NAME
     weights.write_bytes(staged.weights)
-    _meta, loader_weights = _opened_weights(weights)
+    meta, loader_weights = _opened_weights(weights)
     low, high = _clamped_range(staged.manifest)
     manifest = staged.manifest
+    variant, base_sha, warnings = _provenance(meta, weights, manifest.base)
     return UserLora(
         _slug(manifest.name) or "lora",
         manifest.kind,
@@ -187,6 +197,9 @@ def open_package_weights(source: Path) -> UserLora:
         name=manifest.name,
         base=manifest.base,
         sha256=manifest.weights_sha256 or "",
+        base_variant=variant,
+        base_sha256=base_sha,
+        warnings=warnings,
     )
 
 
@@ -470,7 +483,8 @@ def _agree(manifest: Manifest, meta: dict[str, str]) -> None:
 
 
 def _base_family(base: str) -> str:
-    return FORGE_BASE_ID if base in {FORGE_BASE_ID, ZIMAGE_TURBO_MDL_ID} else base
+    """The normalised tag. ``moss`` and ``moss-image`` agree with ``moss5b``."""
+    return _canonical_base(base)
 
 
 def _previews(files: dict[str, bytes], raw: dict[str, object], *, package: bool) -> list[tuple[str, bytes]]:

@@ -41,9 +41,10 @@ def test_same_prompts_and_seeds_and_kept_images_stay_in_temp(tmp_path: Path):
     by_base: dict[str, list[tuple[str, int]]] = {}
     for row in rows:
         by_base.setdefault(row.base, []).append((row.prompt, row.seed))
-    assert list(by_base) == ["z-image-turbo"]
-    assert by_base["z-image-turbo"] == pairs
-    assert seen == [("z-image-turbo", prompt, seed) for prompt, seed in pairs]
+    bases = ["moss-image-sft", "z-image-turbo"]
+    assert list(by_base) == bases
+    assert all(by_base[base] == pairs for base in bases)
+    assert seen == [(base, prompt, seed) for base in bases for prompt, seed in pairs]
     assert {row.status for row in rows} == {"kept"}
     assert {row.peak_vram_mb for row in rows} == {140}
     repo = Path(".").resolve()

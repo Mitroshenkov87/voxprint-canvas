@@ -14,7 +14,7 @@ from canvas.infra.errors import note_crash
 from canvas.infra.gpu_lock import GpuLockTimeout, lock_path, release, try_acquire
 from canvas.infra.paths import models_dir
 from canvas.models.loader import ModelNotReady, ZImageGenerator, plan_specs
-from canvas.models.user_lora import LoraRejected, UserLora
+from canvas.models.user_lora import CODE_RETRAIN, LoraRejected, UserLora, route_lora
 from canvas.models.mdl_registry import selectable
 from canvas.models.modes import Tier
 from canvas.models.plan import BaseNotSelected, ModeUnavailable, build_plan
@@ -81,7 +81,10 @@ class ShellRunner:
         catalog = load_catalog()
         screened = issue_input(prompts[0] if prompts else "", "text", ())
         try:
-            plan = build_plan(catalog, screened, self.tier)
+            base = _lora_base_of(self)
+            plan = build_plan(catalog, screened, self.tier) if base is None else build_plan(
+                catalog, screened, self.tier, base=base,
+            )
             spec = plan_specs(catalog, plan)[0]
             folder = snapshot_ready(spec, models_dir(), process_cache())
             if folder is None:
@@ -162,7 +165,7 @@ class ShellRunner:
                 _halt(str(exc), exc, "lora", unavailable=True)
             except LoraRejected as exc:
                 # A LoRA that does not fit fails the same way on every frame: end the run.
-                _halt(text(exc.code), exc, exc.code, unavailable=True, crash=False)
+                _halt(text(exc.code, **exc.details), exc, exc.code, unavailable=True, crash=False)
             except (
                 ModelNotReady,
                 InferenceUnavailable,
@@ -236,6 +239,9 @@ class ShellRunner:
         if self.img2img_strength is not None:
             generator.img2img_strength = self.img2img_strength
         generator.models = models_dir()
+        apply_route = getattr(generator, "_apply_lora_route", None)
+        if callable(apply_route):
+            apply_route()
         _offer(generator, "steps", job.steps)
         _offer(generator, "guidance", job.guidance)
         _offer(generator, "sampler", job.sampler)
@@ -295,6 +301,20 @@ def _halt(message: str, exc: BaseException, code: str, *, unavailable: bool, cra
     if unavailable and crash:
         note_crash(code or "internal", exc)
     raise RunStopped(message, unavailable=unavailable, code=code) from exc
+
+
+def _lora_base_of(runner: ShellRunner) -> str | None:
+    """The base a bound LoRA routes to. None when no LoRA is bound.
+
+    Raises:
+        LoraRejected: The LoRA needs a retrain. Nothing is loaded.
+    """
+    if runner.bound_lora is None:
+        return None
+    route = route_lora(runner.bound_lora)
+    if not route.base:
+        raise LoraRejected(CODE_RETRAIN, base=route.retrain_from)
+    return route.base
 
 
 def _offer(generator: object, name: str, value: object) -> None:

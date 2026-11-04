@@ -8,6 +8,7 @@ not a row.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, replace
 from pathlib import Path
 from collections.abc import Mapping
@@ -50,8 +51,8 @@ class PictureJob(NamedTuple):
     adult_content: bool = False
     lora_path: str = ""
     lora_weight: float = 0.7
-    # Seed, steps, prompt and LoRA go into PNG text fields when True.
-    save_metadata: bool = True
+    # XMP/PNG text is written only when this is on.
+    save_metadata: bool = False
 
 
 @dataclass
@@ -164,6 +165,21 @@ def migrate_old_defaults(path: Path) -> bool:
     return True
 
 
+def metadata_enabled(setting: object = None) -> bool:
+    """Whether saved pictures record how they were made.
+
+    The ``VOXPRINT_CANVAS_SAVE_METADATA`` environment variable wins
+    (``1/true/yes/on`` turns it on, ``0/false/no/off`` turns it off);
+    otherwise a bool setting decides. Off by default.
+    """
+    env = os.environ.get("VOXPRINT_CANVAS_SAVE_METADATA")
+    if env is not None:
+        return env.strip().lower() in ("1", "true", "yes", "on")
+    if isinstance(setting, bool):
+        return setting
+    return False
+
+
 def job_from(layout: SimpleLayout, live: Mapping[str, object] | None = None) -> PictureJob:
     """Read the live chips and expert values into one job.
 
@@ -192,6 +208,7 @@ def job_from(layout: SimpleLayout, live: Mapping[str, object] | None = None) -> 
         adult_content=layout.prompt_policy() == adult_prompt_policy(allowed=True),
         lora_path=str(pick("shell.addons") or ""),
         lora_weight=_decimal(pick("shell.lora_weight")),
+        save_metadata=metadata_enabled(layout.get("canvas.save_metadata")),
     )
 
 
@@ -303,6 +320,7 @@ def _settings() -> Settings:
             (("avif", "canvas.format.avif"), ("jxl", "canvas.format.jxl"), ("webp", "canvas.format.webp")),
         )
     )
+    settings.add(_bool("canvas.save_metadata", False))
     settings.add(
         _enum(
             "canvas.export",
@@ -357,6 +375,18 @@ def _enum(
         expert=expert,
         group="image" if expert else "",
         choices=tuple(Choice(value, label) for value, label in choices),
+    )
+
+
+def _bool(setting_id: str, default: bool, *, expert: bool = False) -> SettingSpec:
+    return SettingSpec(
+        setting_id,
+        setting_id,
+        f"{setting_id}.help",
+        SettingType.BOOL,
+        default,
+        expert=expert,
+        group="image" if expert else "",
     )
 
 

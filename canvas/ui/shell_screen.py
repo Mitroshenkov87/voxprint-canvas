@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QButtonGroup,
     QDialog,
     QFileDialog,
+    QLabel,
     QMainWindow,
     QPlainTextEdit,
     QPushButton,
@@ -37,8 +38,9 @@ from canvas.ipc.client import WorkerClient, default_host
 from canvas.ipc.schema import Reply, decode_event
 from canvas.models.mdl_layout import on_disk_manifest
 from canvas.models.mdl_registry import selectable
+from canvas.models.forge_retrain import request_retrain
 from canvas.models.lora_library import LibraryEntry
-from canvas.models.user_lora import LoraIndex, base_choice, discover, resolve_selected
+from canvas.models.user_lora import LoraIndex, UserLora, discover, resolve_selected, route_lora
 from canvas.ui.lora_panel import ImportedDialog, LibraryDialog, dark, import_with_dialog, library_loras
 from canvas.models.modes import Mode, Tier
 from canvas.models.sizes import closest_aspect
@@ -70,7 +72,8 @@ from canvas.ui.wizards import AddonsWizard, DiagnosticsWizard, MaskWizard, Pictu
 from canvas.ui.worker_checks import WorkerChecks
 
 LORA_NOTE_MS = 12_000
-"""How long the LoRA base InfoBar stays up."""
+"""How long the queued retrain note stays up."""
+_RETRAIN_TARGET = "MOSS-Image"
 
 
 class _NeedImage(Exception):
@@ -319,27 +322,79 @@ class ShellWindow(QMainWindow):
             self.view.refresh()
             self._show_lora_base_note(key)
 
-    def _show_lora_base_note(self, key: str) -> None:
-        """Show an InfoBar when the pick was trained on a base model this app does not have.
-
-        The job still runs on the default base. The bar hides on the next
-        matching pick, or after ``LORA_NOTE_MS``.
-        """
+    def _hide_lora_bar(self) -> None:
         old = getattr(self, "_lora_bar", None)
-        if old is not None:
-            old.widget.hide()
-            old.widget.deleteLater()
-            self._lora_bar = None
-        try:
-            selected = resolve_selected(key) if key else None
-            trained = base_choice(selected).note_base if selected is not None else ""
-        except Exception:  # noqa: BLE001 - the note is advisory; a lookup failure shows nothing
-            trained = ""
-        if not trained:
+        if old is None:
             return
-        bar = InfoBar(self, text("canvas.lora.base_title"), text("canvas.lora.base_note", base=trained))
+        old.widget.hide()
+        old.widget.deleteLater()
+        self._lora_bar = None
+
+    def _selected_retrain(self, key: str | None = None) -> tuple[UserLora, str] | None:
+        """The selected LoRA and its trained base, when Canvas cannot run that base."""
+        if key is None:
+            key = str(self.shell.layout.get("shell.addons") or "")
+        if not key:
+            return None
+        try:
+            selected = resolve_selected(key)
+            route = route_lora(selected) if selected is not None else None
+        except Exception:  # noqa: BLE001 - a lookup failure shows nothing and does not start a job
+            return None
+        if selected is None or route is None or route.base:
+            return None
+        return selected, route.retrain_from
+
+    def _show_lora_base_note(self, key: str) -> None:
+        """Offer a Forge retrain when the pick was trained on a base Canvas cannot run.
+
+        The job does not run with that LoRA. A later matching pick hides the bar.
+        """
+        found = self._selected_retrain(key)
+        if found is None:
+            self._hide_lora_bar()
+            return
+        self._present_retrain(found[0], found[1])
+
+    def _present_retrain(self, lora: UserLora, trained: str) -> None:
+        """Show the retrain title, note, and Forge button for ``lora``."""
+        self._hide_lora_bar()
+        self._retrain_lora = lora
+        self._retrain_from = trained
+        bar = InfoBar(
+            self,
+            text("canvas.lora.retrain_title"),
+            text("canvas.lora.retrain_note", base=trained, target=_RETRAIN_TARGET),
+        )
+        button = QPushButton(text("canvas.lora.retrain_action"), bar.widget)
+        button.setObjectName("loraRetrain")
+        button.clicked.connect(self._queue_retrain)
+        layout = bar.widget.layout()
+        if layout is not None:
+            layout.addWidget(button)
         bar.present()
         self._lora_bar = bar
+
+    def _queue_retrain(self) -> None:
+        """Write a Forge inbox request, then show the short queued note."""
+        lora = getattr(self, "_retrain_lora", None)
+        trained = str(getattr(self, "_retrain_from", "") or "")
+        if not isinstance(lora, UserLora):
+            return
+        try:
+            request_retrain(lora.weights, trained)
+        except OSError:
+            return
+        bar = getattr(self, "_lora_bar", None)
+        if bar is None:
+            return
+        body = bar.widget.findChild(QLabel, "InfoBarBody")
+        if body is not None:
+            body.setText(text("canvas.lora.retrain_queued"))
+        button = bar.widget.findChild(QPushButton, "loraRetrain")
+        if button is not None:
+            button.hide()
+        bar.present()
         QTimer.singleShot(LORA_NOTE_MS, bar.widget.hide)
 
     def lora_trigger(self) -> str:
@@ -541,6 +596,13 @@ class ShellWindow(QMainWindow):
 
     def _generate(self, settings: object = None) -> bool:
         """Start one Generate press in the worker. True while the worker has the job."""
+        blocked = self._selected_retrain()
+        if blocked is not None:
+            lora, trained = blocked
+            self._present_retrain(lora, trained)
+            self.shell.layout.block(text("lora.retrain", base=trained))
+            self.view.refresh()
+            return False
         if self.photoshoot.enabled:
             return run_photoshoot(self)
         layout = self.shell.layout

@@ -225,7 +225,8 @@ def test_the_generator_schedules_16gb_bf16_then_stays_a_stub():
 def test_24gb_bf16_skips_the_16gb_sequence():
     world = World()
     screened = world.gate().release_request("a red boat", Mode.TEXT.value, ())
-    roomy = ZImageGenerator(load_catalog(), Tier.GB24)
+    catalog = replace(load_catalog(), default_text_base="z-image-turbo")
+    roomy = ZImageGenerator(catalog, Tier.GB24)
     roomy_probe = PeakVramProbe()
     roomy.attach_probe(roomy_probe)
     with pytest.raises(ModelNotReady) as caught:

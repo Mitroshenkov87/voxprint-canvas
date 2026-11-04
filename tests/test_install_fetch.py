@@ -13,7 +13,7 @@ from canvas.models.snapshots import weight_dir
 
 def _turbos() -> list:
     catalog = load_catalog()
-    return [spec for spec in required_specs(catalog) if spec.repo == "Tongyi-MAI/Z-Image-Turbo"]
+    return [spec for spec in catalog.models if spec.repo == "Tongyi-MAI/Z-Image-Turbo"]
 
 
 def test_one_adopt_per_legacy_directory_then_a_download(tmp_path: Path, monkeypatch, capsys) -> None:

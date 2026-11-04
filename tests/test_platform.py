@@ -61,7 +61,7 @@ def test_installer_selects_a_tier_and_shares_the_voxprint_group(monkeypatch, cap
     windows = Path("installer/windows/install.ps1").read_text(encoding="utf-8")
     assert "canvas.models.tiers" in windows
     assert "canvas.models.install_fetch" in windows
-    assert "99e63a713303b78cbe9025d3434aa4fb2a29c26395ad5af7aee33893d59bc54f" in windows
+    assert "a18e5760863e34042c6eb16dd25d37d28055b9eb90a460c62407cdc2a09b43e4" in windows
     assert "Checking Python..." in windows
     assert "uv.exe" in windows
     assert "could not install Python" in windows
@@ -72,5 +72,5 @@ def test_installer_selects_a_tier_and_shares_the_voxprint_group(monkeypatch, cap
     assert "/opt/voxprint-ai-suite/canvas" in script
     assert "canvas.models.tiers" in script
     assert "canvas.models.install_fetch" in script
-    assert "99e63a713303b78cbe9025d3434aa4fb2a29c26395ad5af7aee33893d59bc54f" in script
+    assert "a18e5760863e34042c6eb16dd25d37d28055b9eb90a460c62407cdc2a09b43e4" in script
     assert "Checking Python..." in script

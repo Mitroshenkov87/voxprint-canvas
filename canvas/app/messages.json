@@ -718,6 +718,12 @@
     "canvas.format.help": {
       "en": "The file type of a saved picture."
     },
+    "canvas.save_metadata": {
+      "en": "Save prompt in file"
+    },
+    "canvas.save_metadata.help": {
+      "en": "Write the prompt, seed, steps and LoRA into each saved picture. Off by default."
+    },
     "canvas.export": {
       "en": "Export"
     },

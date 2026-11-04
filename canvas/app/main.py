@@ -127,6 +127,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--selftest", action="store_true", help="check the GPU, model files and encoders")
     parser.add_argument("--deep", action="store_true", help="re-hash every model file during --selftest")
     parser.add_argument(
+        "--save-metadata",
+        action="store_true",
+        help="write prompt, seed and LoRA metadata into saved pictures (or set VOXPRINT_CANVAS_SAVE_METADATA=1)",
+    )
+    parser.add_argument(
         "--vram-cap-gb",
         type=float,
         default=None,
@@ -765,6 +770,8 @@ def main(argv: list[str] | None = None) -> int:
     # The shared catalogs follow the system locale or VOXPRINT_LANG; Canvas is English.
     set_language("en")
     args = _parser().parse_args(argv)
+    if args.save_metadata:
+        os.environ["VOXPRINT_CANVAS_SAVE_METADATA"] = "1"
     _apply_gpu_setting(args)
     refused = _apply_vram_cap(args)
     if refused is not None:

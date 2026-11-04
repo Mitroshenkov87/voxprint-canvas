@@ -91,6 +91,8 @@
   "canvas.format.jxl": "JPEG XL",
   "canvas.format.webp": "WebP",
   "canvas.format.help": "The file type of a saved picture.",
+  "canvas.save_metadata": "Save prompt in file",
+  "canvas.save_metadata.help": "Write the prompt, seed, steps and LoRA into each saved picture. Off by default.",
   "canvas.export": "Export",
   "canvas.export.png": "PNG",
   "canvas.export.jpg": "JPEG",

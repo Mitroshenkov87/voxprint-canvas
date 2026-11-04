@@ -304,8 +304,8 @@ def test_a_scenario_minor_frame_stops_the_series(tmp_path: Path) -> None:
     assert result.folder == tmp_path
     assert len(result.kept) == 1
     assert len(drawn) == 1
-    assert (tmp_path / "01.png").is_file()
-    assert not (tmp_path / "02.png").exists()
+    assert (tmp_path / "01.webp").is_file()
+    assert not (tmp_path / "02.webp").exists()
     assert document["blocked"] == [1]
     assert all("loli" not in line for line in document["lines"])
 
@@ -339,9 +339,9 @@ def test_blocked_frame_is_dropped_without_a_rewrite(tmp_path: Path) -> None:
     assert len(heroes) == 6
     assert len(result.kept) == 1
     assert all(hero is None for hero in heroes)
-    assert all(path.suffix == ".png" for path in result.kept)
+    assert all(path.suffix == ".webp" for path in result.kept)
     assert (tmp_path / "series.json").is_file()
-    assert (tmp_path / "overview.png").is_file()
+    assert (tmp_path / "overview.webp").is_file()
     assert (tmp_path / "series.zip").is_file()
 
 
@@ -412,8 +412,8 @@ def test_cancel_keeps_finished_frames(tmp_path: Path) -> None:
     assert result.stopped == "cancelled"
     assert len(result.kept) == 1
     assert produced["n"] == 1
-    assert (tmp_path / "01.png").is_file()
-    assert not (tmp_path / "02.png").exists()
+    assert (tmp_path / "01.webp").is_file()
+    assert not (tmp_path / "02.webp").exists()
 
 
 def test_object_reads_prose_around_json_and_rejects_a_refusal() -> None:

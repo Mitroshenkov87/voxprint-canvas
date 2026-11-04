@@ -734,7 +734,7 @@
       "en": "AVIF"
     },
     "canvas.export.help": {
-      "en": "The file type handed to Forge. PNG is the default."
+      "en": "The file type handed to Forge. WebP is the default."
     },
     "canvas.style": {
       "en": "Look"

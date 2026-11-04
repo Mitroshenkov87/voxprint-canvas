@@ -9,7 +9,7 @@ from canvas.pipeline.worker import handle_message, main, release_worker_image, w
 from canvas.safety.classifiers import Face
 from canvas.safety.gate import GenerationBlocked
 from canvas.safety.image import ScreenedInput
-from tests.fakes import World, avif_file, rgb
+from tests.fakes import World, rgb
 
 
 class _Gen:
@@ -44,9 +44,9 @@ def test_parent_reviews_worker_bytes_before_anything_is_kept(tmp_path):
     payload = handle_message({"prompt": "a red boat", "mode": "text"}, world.gate(), _Gen())
     assert payload["ok"] is True
     released = release_worker_image(world.gate(), payload)
-    path = tmp_path / "out.avif"
+    path = tmp_path / "out.webp"
     save_image(released, path)
-    assert avif_file(path.read_bytes())
+    assert path.read_bytes()[8:12] == b"WEBP"
     world.nsfw = 0.99
     world.faces = [Face(0, 0, 1, 1)]
     world.ages = [(1.0, 0.0)]

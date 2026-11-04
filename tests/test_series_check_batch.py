@@ -18,7 +18,7 @@ from tests.test_photoshoot import IDEA, PERSON, _payload
 def _frames(folder: Path) -> list[str]:
     if not folder.is_dir():
         return []
-    return sorted(path.name for path in folder.iterdir() if path.suffix == ".png" and path.stem.isdigit())
+    return sorted(path.name for path in folder.iterdir() if path.suffix == ".webp" and path.stem.isdigit())
 
 
 class _Watch:
@@ -76,7 +76,7 @@ def test_every_frame_is_checked_before_any_frame_is_saved_or_shown(tmp_path: Pat
 
     assert result.stopped == ""
     assert watch.checks == 4
-    assert _frames(watch.folder) == ["01.png", "02.png", "03.png", "04.png"]
+    assert _frames(watch.folder) == ["01.webp", "02.webp", "03.webp", "04.webp"]
     kinds = [kind for kind, _index in watch.events]
     last_draw = max(index for index, kind in enumerate(kinds) if kind == "draw")
     checks = [index for index, kind in enumerate(kinds) if kind == "check"]
@@ -95,8 +95,8 @@ def test_a_raising_check_drops_only_that_frame(tmp_path: Path) -> None:
     result = _series(tmp_path, watch)
 
     assert watch.checks == 4
-    assert _frames(watch.folder) == ["01.png", "03.png", "04.png"]
-    assert [path.name for path in result.kept] == ["01.png", "03.png", "04.png"]
+    assert _frames(watch.folder) == ["01.webp", "03.webp", "04.webp"]
+    assert [path.name for path in result.kept] == ["01.webp", "03.webp", "04.webp"]
     assert ("blocked", 1) in watch.events
     assert ("kept", 1) not in watch.events
     document = json.loads((watch.folder / "series.json").read_text(encoding="utf-8"))
@@ -112,8 +112,8 @@ def test_a_check_that_cannot_finish_keeps_every_later_frame_off_disk(tmp_path: P
     assert watch.checks == 4
     assert result.stopped == "error"
     assert result.code.startswith("check.")
-    assert _frames(watch.folder) == ["01.png", "02.png"]
-    assert [path.name for path in result.kept] == ["01.png", "02.png"]
+    assert _frames(watch.folder) == ["01.webp", "02.webp"]
+    assert [path.name for path in result.kept] == ["01.webp", "02.webp"]
     for index in (2, 3):
         assert ("kept", index) not in watch.events
         assert ("blocked", index) in watch.events
@@ -135,7 +135,7 @@ def test_a_refused_frame_is_never_written_or_marked_kept(tmp_path: Path) -> None
     result = _series(tmp_path, watch)
     assert refused == [3]
     assert watch.checks == 4
-    assert "04.png" not in _frames(watch.folder)
+    assert "04.webp" not in _frames(watch.folder)
     assert ("kept", 3) not in watch.events
     assert len(result.kept) == 3
 

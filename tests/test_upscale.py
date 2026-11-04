@@ -18,7 +18,7 @@ from canvas.safety.classifiers import Face
 from canvas.safety.gate import GenerationBlocked
 from canvas.safety.image import RawImage, ScreenedInput
 from canvas.safety.inputs import ImageRole, PendingInput
-from tests.fakes import World, avif_file, rgb
+from tests.fakes import World, rgb
 
 
 class _Gen:
@@ -94,9 +94,9 @@ def test_fourk_chain_unloads_on_16gb_and_screens_the_upscale(tmp_path, monkeypat
         "generate-start", "generate-end", "unload", "upscale-start", "upscale-end",
     ]
     assert read_lock(lock_path()) is None
-    path = tmp_path / "out.avif"
+    path = tmp_path / "out.webp"
     pipeline.export("a red boat", Mode.TEXT, (), path, aspect="1:1", output="4k")
-    assert avif_file(path.read_bytes())
+    assert path.read_bytes()[8:12] == b"WEBP"
 
 
 def test_fourk_cli_releases_the_lock_and_starts_from_a_clean_environment(tmp_path, monkeypatch):

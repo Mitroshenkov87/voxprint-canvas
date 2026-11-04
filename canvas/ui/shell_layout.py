@@ -299,14 +299,14 @@ def _settings() -> Settings:
     settings.add(
         _enum(
             "canvas.format",
-            "avif",
+            "webp",
             (("avif", "canvas.format.avif"), ("jxl", "canvas.format.jxl"), ("webp", "canvas.format.webp")),
         )
     )
     settings.add(
         _enum(
             "canvas.export",
-            "png",
+            "webp",
             (
                 ("png", "canvas.export.png"),
                 ("jpg", "canvas.export.jpg"),

@@ -201,7 +201,7 @@ def _json(stdout: str) -> dict[str, object]:
 
 
 # The app writes AVIF by default and refuses PNG.
-OUTPUT_SUFFIX = ".avif"
+OUTPUT_SUFFIX = ".webp"
 
 
 def run_image(python: str, cap: float | None, index: int, prompt: str, dest: Path) -> dict[str, object]:

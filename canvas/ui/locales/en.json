@@ -96,7 +96,7 @@
   "canvas.export.jpg": "JPEG",
   "canvas.export.webp": "WebP",
   "canvas.export.avif": "AVIF",
-  "canvas.export.help": "The file type handed to Forge. PNG is the default.",
+  "canvas.export.help": "The file type handed to Forge. WebP is the default.",
   "canvas.style": "Look",
   "canvas.style.help": "The look added to the prompt.",
   "canvas.output_size": "Exact size",

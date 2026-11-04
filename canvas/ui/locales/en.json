@@ -164,6 +164,8 @@
   "lora.preview": "This LoRA package cannot be imported.",
   "lora.base_missing": "The base model for this LoRA could not be requested from VOXPrint MDL.",
   "canvas.lora.base_queued": "VOXPrint MDL is downloading the base model for this LoRA.",
+  "canvas.lora.base_title": "Different base model",
+  "canvas.lora.base_note": "This LoRA was trained on {base}, which Canvas does not have. The picture runs on the default base and may look different.",
   "canvas.lora.import": "Import LoRA",
   "canvas.lora.import_filter": "Model Forge LoRA (*.voxlora *.safetensors)",
   "canvas.lora.imported": "{name} is in the LoRA library.",

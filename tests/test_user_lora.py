@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import ast
 import os
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -19,7 +20,6 @@ from canvas.models.modes import Mode, Tier
 from canvas.models.registry import load_catalog
 from canvas.models.runtime import _place_and_bind, _release_lora
 from canvas.models.user_lora import (
-    REASON_BASE,
     REASON_FILE,
     REASON_INCOMPLETE,
     REASON_PERSON,
@@ -133,13 +133,17 @@ def test_discovery_lists_matching_kinds_and_skips_bad_records(tmp_path: Path) ->
     write_lora(tmp_path, "plain-77777777", kind="object", notice=False)
     write_lora(tmp_path, "view-88888888", preview=b"preview", preview_hash="0" * 64)
     index = discover(tmp_path)
-    assert [item.id for item in index.available] == ["boat-aaaaaaaa", "late-dddddddd", "ada-cccccccc", "ink-bbbbbbbb"]
+    # A LoRA trained on another base is listed; the window shows a note for it.
+    assert [item.id for item in index.available] == [
+        "base-eeeeeeee", "boat-aaaaaaaa", "late-dddddddd", "ada-cccccccc", "ink-bbbbbbbb",
+    ]
+    assert index.available[0].base == "moss-image-base"
+    index = replace(index, available=index.available[1:])
     assert index.available[0].adult_content is False
     assert index.available[2].adult_content is True
     assert index.available[2].trigger == "adatrigger"
     assert index.available[3].adult_content is True
     reasons = {item.name: item.reason_key for item in index.skipped}
-    assert reasons["base-eeeeeeee"] == REASON_BASE
     assert reasons["hash-ffffffff"] == REASON_FILE
     assert reasons["size-11111111"] == REASON_FILE
     assert reasons["schema-22222222"] == REASON_SCHEMA

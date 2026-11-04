@@ -5,9 +5,10 @@ import os
 import sys
 import time
 from collections.abc import Callable
+from importlib import import_module
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
-from PIL import Image
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
@@ -18,7 +19,6 @@ from canvas.app.identity import splash_line
 from canvas.app.i18n import text
 from canvas.app.info import APP_NAME, APP_VERSION, ENLARGE_NAME
 from canvas.app.platform import GpuCheck, check_gpu, current_os_check
-from canvas.app.selftest import selftest_report
 from canvas.app.updates import check_for_update
 from canvas.core.formats import parse_export_format, parse_format
 from canvas.safety.image import RawImage
@@ -31,29 +31,16 @@ from canvas.infra.manifest import ManifestError
 from canvas.infra.models_users import register, unregister
 from canvas.infra.paths import OutputFolderError, models_dir, prepare_output_folder, shared_dir
 from canvas.infra.vram import peak_allocated_bytes, set_vram_cap_gb
-from canvas.models.loader import ModelNotReady, ZImageGenerator, load_catalog_stack
 from canvas.models.views import remove_views
 from canvas.models.provision import DownloadDeclined, ensure_plan, install_defaults, install_supporting, repair
-from canvas.models.runtime import InferenceUnavailable
 from canvas.models.user_lora import LoraRejected, UserLora, cli_scale, prepare_cli_lora
 from canvas.models.modes import Mode, Tier
 from canvas.models.plan import BaseNotSelected, ModeUnavailable, build_plan
 from canvas.models.registry import load_catalog
 from canvas.models.snapshots import SnapshotError
-from canvas.app.photoshoot_bench import live_generate, live_rewrite, run_bench
-from canvas.app.batch_cli import ManifestInvalid, default_out, load_manifest, run_batch_command, write_failed
-from canvas.app.photoshoot_cli import model_generate, model_rewrite, reject_frames, run_command
-from canvas.pipeline.photoshoot import DEFAULT_FRAMES, MAX_FRAMES, TEST_SERIES_CHARACTER
+from canvas.pipeline.series_text import DEFAULT_FRAMES, MAX_FRAMES, TEST_SERIES_CHARACTER
 from canvas.ui.styles import LOOKS
-from canvas.pipeline.bf16_schedule import VramRefused, is_out_of_memory
-from canvas.pipeline.device_guard import DeviceRefused
-from canvas.pipeline.gpu_release import release_gate_weights
 from canvas.infra.stage_timer import StageTimes
-from canvas.pipeline.series import SerialGate
-from canvas.pipeline.enhance import EnhanceResult, fallback_message, open_rewriter, resolve_prompt, rewrite_text
-from canvas.pipeline.schedule import last_image_seconds, reset_image_seconds
-from canvas.pipeline.pipeline import CoolingDown, EnlargeMissing, JobError, Pipeline
-from canvas.safety.gate import AgeGate, SafetyError
 from canvas.ipc.client import WorkerClient, default_host
 from canvas.ui.shell_layout import canvas_state_dir, open_worker_layout
 from canvas.ui.shell_screen import ShellWindow
@@ -62,6 +49,57 @@ from voxprint_common.ui.simple_image import Phase
 from voxprint_common.worker.qt import install_crash_bar
 from canvas.ui.splash import Splash, show_splash
 
+if TYPE_CHECKING:
+    from canvas.app.batch_cli import ManifestInvalid, default_out, load_manifest, run_batch_command, write_failed
+    from canvas.app.photoshoot_bench import live_generate, live_rewrite, run_bench
+    from canvas.app.photoshoot_cli import model_generate, model_rewrite, reject_frames, run_command
+    from canvas.app.selftest import selftest_report
+    from canvas.models.loader import ModelNotReady, ZImageGenerator, load_catalog_stack
+    from canvas.models.runtime import InferenceUnavailable
+    from canvas.pipeline.bf16_schedule import VramRefused, is_out_of_memory
+    from canvas.pipeline.device_guard import DeviceRefused
+    from canvas.pipeline.enhance import EnhanceResult, fallback_message, open_rewriter, resolve_prompt, rewrite_text
+    from canvas.pipeline.gpu_release import release_gate_weights
+    from canvas.pipeline.pipeline import CoolingDown, EnlargeMissing, JobError, Pipeline
+    from canvas.pipeline.schedule import last_image_seconds, reset_image_seconds
+    from canvas.pipeline.series import SerialGate
+    from canvas.safety.gate import AgeGate, SafetyError
+
+# Command-line names bound on first use: the window process loads no model code.
+_COMMAND_NAMES: dict[str, tuple[str, ...]] = {
+    "canvas.app.batch_cli": ("ManifestInvalid", "default_out", "load_manifest", "run_batch_command", "write_failed"),
+    "canvas.app.photoshoot_bench": ("live_generate", "live_rewrite", "run_bench"),
+    "canvas.app.photoshoot_cli": ("model_generate", "model_rewrite", "reject_frames", "run_command"),
+    "canvas.app.selftest": ("selftest_report",),
+    "canvas.models.loader": ("ModelNotReady", "ZImageGenerator", "load_catalog_stack"),
+    "canvas.models.runtime": ("InferenceUnavailable",),
+    "canvas.pipeline.bf16_schedule": ("VramRefused", "is_out_of_memory"),
+    "canvas.pipeline.device_guard": ("DeviceRefused",),
+    "canvas.pipeline.enhance": ("EnhanceResult", "fallback_message", "open_rewriter", "resolve_prompt", "rewrite_text"),
+    "canvas.pipeline.gpu_release": ("release_gate_weights",),
+    "canvas.pipeline.pipeline": ("CoolingDown", "EnlargeMissing", "JobError", "Pipeline"),
+    "canvas.pipeline.schedule": ("last_image_seconds", "reset_image_seconds"),
+    "canvas.pipeline.series": ("SerialGate",),
+    "canvas.safety.gate": ("AgeGate", "SafetyError"),
+}
+_COMMAND_MODULE = {name: module for module, names in _COMMAND_NAMES.items() for name in names}
+
+
+def __getattr__(name: str) -> Any:
+    """Bind one command-line name on first access."""
+    module = _COMMAND_MODULE.get(name)
+    if module is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module(module), name)
+    globals()[name] = value
+    return value
+
+
+def _command_imports() -> None:
+    """Bind every command-line name not bound yet. A name already set (a test double) is kept."""
+    for name in _COMMAND_MODULE:
+        if name not in globals():
+            __getattr__(name)
 
 _EXIT_CODES = (
     "exit codes:\n"
@@ -127,7 +165,7 @@ def _parser() -> argparse.ArgumentParser:
         help="plan as if the GPU had this many GB (CANVAS_VRAM_CAP_GB)",
     )
     generate.add_argument("--lora", default="", help="LoRA .safetensors file, .voxlora package, add-on folder, or imported LoRA name")
-    generate.add_argument("--lora-scale", type=float, default=0.7, help="LoRA strength, from 0 to 2")
+    generate.add_argument("--lora-scale", type=float, default=None, help="LoRA strength, from 0 to 2; the LoRA default when omitted")
     _gpu_argument(generate, argparse.SUPPRESS)
     generate.add_argument("--json", action="store_true")
     bench = commands.add_parser(
@@ -188,7 +226,7 @@ def _parser() -> argparse.ArgumentParser:
         help="plan as if the GPU had this many GB (CANVAS_VRAM_CAP_GB)",
     )
     photoshoot.add_argument("--lora", default="", help="LoRA .safetensors file, .voxlora package, add-on folder, or imported LoRA name")
-    photoshoot.add_argument("--lora-scale", type=float, default=0.7, help="LoRA strength, from 0 to 2")
+    photoshoot.add_argument("--lora-scale", type=float, default=None, help="LoRA strength, from 0 to 2; the LoRA default when omitted")
     photoshoot.add_argument(
         "--vram-trace",
         action="store_true",
@@ -240,7 +278,7 @@ def _parser() -> argparse.ArgumentParser:
         help="plan as if the GPU had this many GB (CANVAS_VRAM_CAP_GB)",
     )
     batch.add_argument("--lora", default="", help="LoRA .safetensors file, .voxlora package, add-on folder, or imported LoRA name")
-    batch.add_argument("--lora-scale", type=float, default=0.7, help="LoRA strength, from 0 to 2")
+    batch.add_argument("--lora-scale", type=float, default=None, help="LoRA strength, from 0 to 2; the LoRA default when omitted")
     batch.add_argument(
         "--vram-trace",
         action="store_true",
@@ -305,6 +343,8 @@ def _launch(tier: Tier, splash: Splash | None = None, app: QApplication | None =
     if isinstance(app, QApplication):
         app.aboutToQuit.connect(worker.shutdown)
     window.show()
+    # Warm the worker right after the window shows, so its hello overlaps first paint.
+    worker.start()
     if lock_note == "busy":
         window.shell.layout.unavailable(text("startup.lock"))
         window.view.refresh()
@@ -335,6 +375,8 @@ def _emit(payload: dict[str, object], as_json: bool, code: int) -> int:
 
 def _load_rgb(path: Path) -> RawImage:
     """Read one RGB image from disk. PNG, JPEG, WebP, and AVIF are accepted as inputs."""
+    from PIL import Image
+
     with Image.open(path) as image:
         rgb = image.convert("RGB")
         return RawImage(rgb.width, rgb.height, rgb.tobytes())
@@ -357,6 +399,7 @@ def _inputs(args: argparse.Namespace, mode: Mode) -> tuple[PendingInput, ...]:
 
 def _generate(args: argparse.Namespace) -> int:
     """Download what is missing, generate one image, and write it."""
+    _command_imports()
     as_json = bool(args.json)
     if str(args.edit_instruction or ""):
         return _instruction_removed(as_json)
@@ -454,6 +497,7 @@ def _generate(args: argparse.Namespace) -> int:
 
 def _photoshoot_bench(args: argparse.Namespace) -> int:
     """Time a 6-frame series on this machine. A missing GPU writes no duration."""
+    _command_imports()
     as_json = bool(args.json)
     os_result = current_os_check()
     if not os_result.ok:
@@ -493,6 +537,7 @@ def _photoshoot_bench(args: argparse.Namespace) -> int:
 
 def _photoshoot(args: argparse.Namespace) -> int:
     """Write a series into --out. A stopped frame is reported, not a crash."""
+    _command_imports()
     if getattr(args, "vram_trace", False):
         os.environ["VOXPRINT_VRAM_TRACE"] = "1"
     as_json = bool(args.json)
@@ -559,6 +604,7 @@ def _photoshoot(args: argparse.Namespace) -> int:
 
 def _batch(args: argparse.Namespace) -> int:
     """Run a manifest into --out. The manifest and the folder are checked before any model loads."""
+    _command_imports()
     if getattr(args, "vram_trace", False):
         os.environ["VOXPRINT_VRAM_TRACE"] = "1"
     as_json = bool(args.json)
@@ -731,6 +777,7 @@ def main(argv: list[str] | None = None) -> int:
     if command is not None:
         return _leave_if_cuda_lost(command(args))
     if args.selftest:
+        _command_imports()
         report = selftest_report(deep=bool(args.deep))
         if args.json:
             print(json.dumps(report, indent=2))
@@ -771,12 +818,17 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _chosen_lora(args: argparse.Namespace) -> tuple[UserLora, float] | None:
-    """The LoRA named by ``--lora``, checked before any model is opened."""
+    """The LoRA named by ``--lora``, checked before any model is opened.
+
+    Without ``--lora-scale`` the LoRA's own recorded default strength is used.
+    """
     raw = str(getattr(args, "lora", "") or "").strip()
     if not raw:
         return None
-    scale = cli_scale(getattr(args, "lora_scale", 0.7))
-    return prepare_cli_lora(Path(raw)), scale
+    lora = prepare_cli_lora(Path(raw))
+    wanted = getattr(args, "lora_scale", None)
+    scale = lora.default_strength if wanted is None else cli_scale(wanted)
+    return lora, scale
 
 
 def _emit_lora(code: str, as_json: bool) -> int:

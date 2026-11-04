@@ -18,6 +18,7 @@ from canvas.models.registry import load_catalog
 SCHEMA = "voxprint-model/1"
 ZIMAGE_TURBO_MDL_ID = "z-image-turbo"
 FORGE_BASE_ID = "z-image"
+# Strength for a LoRA whose record names none.
 CLI_DEFAULT_STRENGTH = 0.7
 CLI_STRENGTH_RANGE = (0.0, 2.0)
 CODE_BASE_MISMATCH = "lora.base_mismatch"
@@ -72,6 +73,8 @@ class UserLora:
     adult_content: bool
     name: str = ""
     previews: tuple[Path, ...] = ()
+    base: str = ""
+    sha256: str = ""
 
 
 @dataclass(frozen=True)
@@ -109,11 +112,10 @@ def discover(root: Path | None = None) -> LoraIndex:
         return LoraIndex((), ())
     available: list[UserLora] = []
     skipped: list[SkippedLora] = []
-    expected = running_base_id()
     for folder in sorted((path for path in base.iterdir() if path.is_dir()), key=lambda path: path.name):
         if folder.name.startswith("."):
             continue
-        found, reason = inspect_folder(folder, expected_base=expected)
+        found, reason = inspect_folder(folder)
         if found is None:
             skipped.append(SkippedLora(folder.name, reason or REASON_RECORD))
         else:
@@ -122,15 +124,15 @@ def discover(root: Path | None = None) -> LoraIndex:
     return LoraIndex(tuple(available), tuple(skipped))
 
 
-def inspect_folder(folder: Path, *, expected_base: str | None = None) -> tuple[UserLora | None, str | None]:
+def inspect_folder(folder: Path) -> tuple[UserLora | None, str | None]:
     """Return a listed LoRA, or a catalog reason key when the folder is skipped.
+
+    A LoRA trained on another base model is listed too; its trained base id is
+    recorded on the entry (see :func:`base_choice`).
 
     Args:
         folder: One ``<id>`` directory.
-        expected_base: ``base.mdl_id`` this app accepts. The running base is used when omitted.
     """
-    if expected_base is None:
-        expected_base = running_base_id()
     document = _document(folder / "voxprint-model.json")
     if document is None:
         return None, REASON_RECORD
@@ -151,7 +153,7 @@ def inspect_folder(folder: Path, *, expected_base: str | None = None) -> tuple[U
         return None, REASON_INCOMPLETE
     base = document.get("base")
     mdl_id = str(base.get("mdl_id") or "") if isinstance(base, dict) else ""
-    if not isinstance(base, dict) or not base_matches(mdl_id, expected_base):
+    if not mdl_id:
         return None, REASON_BASE
     file_reason = _file_reason(document, weights)
     if file_reason is not None:
@@ -172,9 +174,6 @@ def inspect_folder(folder: Path, *, expected_base: str | None = None) -> tuple[U
     header_kind = header.get(_HEADER_KIND)
     if header_kind is not None and header_kind != kind:
         return None, REASON_RECORD
-    header_base = header.get(_HEADER_BASE)
-    if header_base is not None and not base_matches(header_base, expected_base):
-        return None, REASON_BASE
     if kind == "person" and not _person_flags(header):
         return None, REASON_PERSON
     licence = document.get("licence")
@@ -189,6 +188,8 @@ def inspect_folder(folder: Path, *, expected_base: str | None = None) -> tuple[U
         default_strength,
         (low, high),
         adult,
+        base=mdl_id,
+        sha256=str(document.get("sha256") or ""),
     ), None
 
 
@@ -281,22 +282,19 @@ def _cli_lora(path: str | Path) -> UserLora:
 
     imported = resolve_library(str(path))
     if imported is not None:
-        return replace(imported, default_strength=CLI_DEFAULT_STRENGTH, strength_range=CLI_STRENGTH_RANGE)
+        return replace(imported, strength_range=CLI_STRENGTH_RANGE)
     candidate = Path(path)
     if candidate.is_file() and candidate.suffix == PACKAGE_SUFFIX:
         opened = open_package_weights(candidate)
-        return replace(opened, default_strength=CLI_DEFAULT_STRENGTH, strength_range=CLI_STRENGTH_RANGE)
+        return replace(opened, strength_range=CLI_STRENGTH_RANGE)
     if candidate.is_dir():
-        found, reason = inspect_folder(candidate)
+        found, _reason = inspect_folder(candidate)
         if found is None:
-            if reason == REASON_BASE:
-                raise LoraRejected(CODE_BASE_MISMATCH)
             raise LoraRejected(CODE_INVALID)
         weights = _loader_weights(found.weights)
         return replace(
             found,
             weights=weights,
-            default_strength=CLI_DEFAULT_STRENGTH,
             strength_range=CLI_STRENGTH_RANGE,
         )
     if not candidate.is_file():
@@ -307,7 +305,6 @@ def _cli_lora(path: str | Path) -> UserLora:
         opened = open_weights(candidate)
     return replace(
         opened,
-        default_strength=CLI_DEFAULT_STRENGTH,
         strength_range=CLI_STRENGTH_RANGE,
     )
 
@@ -327,18 +324,19 @@ def _forge_file(path: Path) -> bool:
 def open_weights(path: Path) -> UserLora:
     """Read one Forge ``.safetensors`` file and the sidecar beside it, when present.
 
+    A LoRA trained on another base model opens all the same; its trained base
+    is recorded on the entry.
+
     Args:
         path: The weight file. The default Forge path is ``project/export/<id>.safetensors``.
 
     Raises:
-        LoraRejected: The file is unreadable or its base does not match.
+        LoraRejected: The file is unreadable.
     """
     meta, weights = _opened_weights(path)
     base = meta.get(_HEADER_BASE, "")
     if not base:
         raise LoraRejected(CODE_INVALID)
-    if not base_matches(base):
-        raise LoraRejected(CODE_BASE_MISMATCH)
     sidecar = _matching_sidecar(path)
     kind = _HEADER_KIND_ALIAS.get(meta.get(_HEADER_KIND, ""), meta.get(_HEADER_KIND, ""))
     lora_id = path.stem
@@ -369,6 +367,8 @@ def open_weights(path: Path) -> UserLora:
         default_strength,
         (low, high),
         adult,
+        base=base,
+        sha256=_sha256(path),
     )
 
 
@@ -380,6 +380,52 @@ def running_base_id() -> str:
     return ZIMAGE_TURBO_MDL_ID
 
 
+def strength_or_default(lora: UserLora, requested: object) -> float:
+    """The strength to use for ``lora``: the requested number, else the LoRA's recorded default.
+
+    Args:
+        lora: The selected LoRA.
+        requested: The strength a screen or command carries; None when nothing was chosen.
+    """
+    if isinstance(requested, bool) or not isinstance(requested, (int, float)):
+        return lora.default_strength
+    return float(requested)
+
+
+@dataclass(frozen=True)
+class BaseChoice:
+    """Which base a LoRA runs on, and the trained base to mention when they differ.
+
+    Attributes:
+        run_on: The text base the job uses.
+        note_base: The trained base id when it is not available here, else empty.
+    """
+
+    run_on: str
+    note_base: str = ""
+
+
+def base_choice(lora: UserLora, text_bases: tuple[str, ...] | None = None, default: str | None = None) -> BaseChoice:
+    """Pick the base for ``lora``: its trained base when this app has it, else the default with a note.
+
+    Args:
+        lora: The selected LoRA.
+        text_bases: Text bases the catalog lists. The catalog is read when omitted.
+        default: The default text base. The catalog default is used when omitted.
+    """
+    if text_bases is None or default is None:
+        catalog = load_catalog()
+        text_bases = catalog.text_bases if text_bases is None else text_bases
+        default = (catalog.default_text_base or "") if default is None else default
+    trained = str(lora.base or "").strip()
+    if not trained:
+        return BaseChoice(default)
+    for candidate in text_bases:
+        if base_matches(trained, candidate):
+            return BaseChoice(candidate)
+    return BaseChoice(default, trained)
+
+
 def clamp_strength(lora: UserLora, requested: float) -> float:
     """Keep a requested strength inside the LoRA's recorded range.
 
@@ -387,8 +433,7 @@ def clamp_strength(lora: UserLora, requested: float) -> float:
         lora: The selected LoRA.
         requested: The expert LoRA strength field.
     """
-    if isinstance(requested, bool) or not isinstance(requested, (int, float)):
-        requested = lora.default_strength
+    requested = strength_or_default(lora, requested)
     low, high = lora.strength_range
     return min(max(float(requested), low), high)
 
@@ -696,13 +741,14 @@ def fits_base(path: Path) -> None:
 def open_third_party(path: Path) -> UserLora:
     """A ``.safetensors`` LoRA made outside Model Forge, for one command.
 
+    A LoRA trained on another base model opens all the same; its trained base
+    is recorded on the entry when the file names one.
+
     Raises:
         LoraRejected: The file is damaged, or its adapters do not fit the base.
     """
     meta, weights = _opened_weights(path)
     base = meta.get(_HEADER_BASE, "")
-    if base and not base_matches(base):
-        raise LoraRejected(CODE_BASE_MISMATCH)
     fits_base(path)
     return UserLora(
         path.stem,
@@ -714,6 +760,8 @@ def open_third_party(path: Path) -> UserLora:
         CLI_STRENGTH_RANGE,
         False,
         name=path.stem,
+        base=base,
+        sha256=_sha256(path),
     )
 
 
@@ -735,8 +783,6 @@ def _matching_sidecar(path: Path) -> dict[str, object] | None:
     mdl_id = str(base.get("mdl_id") or "") if isinstance(base, dict) else ""
     if not isinstance(base, dict) or not mdl_id:
         raise LoraRejected(CODE_INVALID)
-    if not base_matches(mdl_id):
-        raise LoraRejected(CODE_BASE_MISMATCH)
     return document
 
 

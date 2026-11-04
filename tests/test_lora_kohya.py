@@ -111,7 +111,7 @@ def test_the_cli_takes_a_third_party_peft_lora_that_fits_the_base(home: Path):
     assert caught.value.code == "lora.invalid"
 
 
-def test_the_cli_refuses_a_third_party_lora_naming_another_base(home: Path):
+def test_the_cli_refuses_a_kohya_file_that_claims_a_forge_base_header(home: Path):
     path = _kohya(home / "k" / "b.safetensors")
     header, blob = _safetensors(path)
     header["__metadata__"] = {"voxprint.lora.base": "sdxl"}
@@ -119,7 +119,8 @@ def test_the_cli_refuses_a_third_party_lora_naming_another_base(home: Path):
     path.write_bytes(len(payload).to_bytes(8, "little") + payload + blob)
     with pytest.raises(LoraRejected) as caught:
         prepare_cli_lora(path)
-    assert caught.value.code == "lora.base_mismatch"
+    # The base header marks a Forge export, and this file has no Forge kind.
+    assert caught.value.code == "lora.invalid"
 
 
 def test_gui_import_takes_a_kohya_lora(home: Path):

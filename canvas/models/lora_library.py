@@ -24,7 +24,6 @@ from pathlib import Path
 
 from canvas.infra.paths import lora_library_dir
 from canvas.models.user_lora import (
-    CODE_BASE_MISMATCH,
     CODE_INVALID,
     FORGE_BASE_ID,
     SCHEMA,
@@ -32,7 +31,6 @@ from canvas.models.user_lora import (
     LoraRejected,
     UserLora,
     _opened_weights,
-    base_matches,
 )
 
 PACKAGE_SUFFIX = ".voxlora"
@@ -106,6 +104,8 @@ class LibraryEntry:
             False,
             name=self.manifest.name,
             previews=self.previews,
+            base=self.manifest.base,
+            sha256=self.manifest.weights_sha256 or "",
         )
 
 
@@ -185,6 +185,8 @@ def open_package_weights(source: Path) -> UserLora:
         (low, high),
         False,
         name=manifest.name,
+        base=manifest.base,
+        sha256=manifest.weights_sha256 or "",
     )
 
 
@@ -320,8 +322,6 @@ def _stage(source: Path, *, with_previews: bool = True) -> _Staged:
         raise LoraRejected(CODE_INVALID)
     meta = _weights_meta(weights)
     _agree(manifest, meta)
-    if not base_matches(manifest.base, ZIMAGE_TURBO_MDL_ID):
-        raise LoraRejected(CODE_BASE_MISMATCH)
     if not _kind_allowed(manifest.kind, raw_manifest):
         raise LoraRejected(CODE_KIND)
     if raw_manifest.get("source") == THIRD_PARTY_SOURCE:
@@ -634,13 +634,11 @@ def _third_party_manifest(source: Path, weights: bytes) -> bytes:
     """A record for a LoRA without a Forge json: name from the file, no trigger, kind unknown."""
     meta = _weights_meta(weights)
     base = meta.get(_HEADER_BASE, "")
-    if base and not base_matches(base, ZIMAGE_TURBO_MDL_ID):
-        raise LoraRejected(CODE_BASE_MISMATCH)
     name = " ".join(source.stem.replace("_", " ").split())[:64] or "LoRA"
     record = {
         "schema": SCHEMA,
         "name": name,
-        "base": FORGE_BASE_ID,
+        "base": base or FORGE_BASE_ID,
         "trigger": "",
         "kind": THIRD_PARTY_KIND,
         "scale_default": 0.8,

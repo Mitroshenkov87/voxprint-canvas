@@ -41,7 +41,7 @@ from canvas.models.lora_library import (
     remove_entry,
     set_trigger,
 )
-from canvas.models.user_lora import LoraRejected, UserLora, discover
+from canvas.models.user_lora import LoraRejected, UserLora, discover, strength_or_default
 from canvas.ui.theme import BUTTON_RADIUS
 from canvas.ui.picture_file import load_pixmap
 
@@ -569,7 +569,7 @@ class LoraPicker(QWidget):
         low, high = lora.strength_range
         low, high = max(0.0, low), min(2.0, high)
         self.slider.setRange(round(low * SLIDER_STEPS), round(high * SLIDER_STEPS))
-        value = lora.default_strength if strength is None else strength
+        value = strength_or_default(lora, strength)
         self.slider.setValue(round(min(max(float(value), low), high) * SLIDER_STEPS))
         self.value.setText(f"{self.strength():.2f}")
 

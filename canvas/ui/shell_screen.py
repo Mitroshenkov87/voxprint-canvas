@@ -10,8 +10,7 @@ from pathlib import Path
 from collections.abc import Callable
 from typing import assert_never
 
-from PIL import Image
-from PySide6.QtCore import QUrl
+from PySide6.QtCore import QTimer, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QMessageBox,
@@ -29,6 +28,7 @@ from voxprint_common.mdl.names import CLI_NAME
 from voxprint_common.ui.expert import ExpertMode
 from voxprint_common.ui.safety import ReviewedOutput
 from voxprint_common.ui.simple_image import Phase, SimpleImageWidget as SimpleWidget
+from voxprint_common.worker.qt import InfoBar
 from canvas.app.i18n import text
 from canvas.app.info import APP_VERSION, ENLARGE_NAME
 from canvas.app.updates import check_for_update
@@ -38,7 +38,7 @@ from canvas.ipc.schema import Reply, decode_event
 from canvas.models.mdl_layout import on_disk_manifest
 from canvas.models.mdl_registry import selectable
 from canvas.models.lora_library import LibraryEntry
-from canvas.models.user_lora import LoraIndex, discover, resolve_selected
+from canvas.models.user_lora import LoraIndex, base_choice, discover, resolve_selected
 from canvas.ui.lora_panel import ImportedDialog, LibraryDialog, dark, import_with_dialog, library_loras
 from canvas.models.modes import Mode, Tier
 from canvas.models.sizes import closest_aspect
@@ -68,6 +68,9 @@ from canvas.ui.photoshoot_run import adult_content, load_series_folders, run_pho
 from canvas.ui.shell_layout import CanvasShell, PictureJob, job_from
 from canvas.ui.wizards import AddonsWizard, DiagnosticsWizard, MaskWizard, PictureWizard, SetupWizard
 from canvas.ui.worker_checks import WorkerChecks
+
+LORA_NOTE_MS = 12_000
+"""How long the LoRA base InfoBar stays up."""
 
 
 class _NeedImage(Exception):
@@ -249,7 +252,7 @@ class ShellWindow(QMainWindow):
         """The add-ons screen. It reads and writes the shared expert values."""
         layout = self.shell.layout
         strength = layout.get("shell.lora_weight")
-        number = float(strength) if isinstance(strength, int | float) and not isinstance(strength, bool) else 0.7
+        number = float(strength) if isinstance(strength, int | float) and not isinstance(strength, bool) else None
         found = discover()
         index = LoraIndex(tuple(library_loras()) + found.available, found.skipped)
         return AddonsWizard(
@@ -314,6 +317,30 @@ class ShellWindow(QMainWindow):
             # Only a new pick changes the trigger chip; a strength step does not redraw.
             self.shell.layout.set_value("shell.addons", key)
             self.view.refresh()
+            self._show_lora_base_note(key)
+
+    def _show_lora_base_note(self, key: str) -> None:
+        """Show an InfoBar when the pick was trained on a base model this app does not have.
+
+        The job still runs on the default base. The bar hides on the next
+        matching pick, or after ``LORA_NOTE_MS``.
+        """
+        old = getattr(self, "_lora_bar", None)
+        if old is not None:
+            old.widget.hide()
+            old.widget.deleteLater()
+            self._lora_bar = None
+        try:
+            selected = resolve_selected(key) if key else None
+            trained = base_choice(selected).note_base if selected is not None else ""
+        except Exception:  # noqa: BLE001 - the note is advisory; a lookup failure shows nothing
+            trained = ""
+        if not trained:
+            return
+        bar = InfoBar(self, text("canvas.lora.base_title"), text("canvas.lora.base_note", base=trained))
+        bar.present()
+        self._lora_bar = bar
+        QTimer.singleShot(LORA_NOTE_MS, bar.widget.hide)
 
     def lora_trigger(self) -> str:
         """The trigger word of the selected LoRA, or empty when nothing is selected."""
@@ -384,6 +411,7 @@ class ShellWindow(QMainWindow):
         self.shell.layout.set_value("shell.lora_weight", strength)
         self.view.refresh()
         self.refresh_loras()
+        self._show_lora_base_note(path)
 
     def _run_check(self, deep: bool) -> str:
         """Queue the self-test in the worker. The wizard shows the report when it arrives."""
@@ -465,6 +493,8 @@ class ShellWindow(QMainWindow):
 
     def _write_mask(self, image: RawImage) -> Path | None:
         """Save the mask beside the state and store it in the Yitro mask slot."""
+        from PIL import Image
+
         path = self.shell.state_dir / "mask.png"
         try:
             Image.frombytes("RGB", (image.width, image.height), image.to_bytes()).save(path)
@@ -675,6 +705,8 @@ class ShellWindow(QMainWindow):
         if mode is Mode.INPAINT or mode is Mode.OUTPAINT:
             if self._mask is None:
                 raise _NeedImage(text("error.job"))
+            from PIL import Image
+
             mask = self.worker.session_dir / f"mask-{uuid.uuid4().hex}.png"
             try:
                 Image.frombytes("RGB", (self._mask.width, self._mask.height), self._mask.to_bytes()).save(mask)

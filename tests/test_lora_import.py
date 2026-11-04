@@ -111,9 +111,10 @@ def test_a_header_that_disagrees_with_the_json_is_invalid(home: Path):
     assert _code(write_voxlora(home / "c", header=header)) == "lora.invalid"
 
 
-def test_a_different_base_is_a_base_mismatch(home: Path):
+def test_a_different_base_is_imported_with_its_trained_base(home: Path):
     package = write_voxlora(home / "in", record=manifest(base="flux-dev"))
-    assert _code(package) == "lora.base_mismatch"
+    _import(package)
+    assert [entry.manifest.base for entry in list_library()] == ["flux-dev"]
 
 
 def test_a_missing_base_is_requested_from_mdl(home: Path):

@@ -317,7 +317,7 @@ class AddonsWizard(QDialog):
         parent: QWidget | None,
         index: LoraIndex,
         selected: str,
-        strength: float,
+        strength: float | None,
         on_save: Callable[[str, float], None],
         on_import: Callable[[Callable[[UserLora], None]], None] | None = None,
     ) -> None:
@@ -327,7 +327,7 @@ class AddonsWizard(QDialog):
             parent: The shell window.
             index: Listed LoRAs and the folders that were skipped.
             selected: The current expert folder, or empty.
-            strength: The current expert strength.
+            strength: The current expert strength; None starts from the LoRA's own default.
             on_save: Writes the folder and the strength into the shared state.
             on_import: Runs «Import LoRA». It calls the given function with the imported LoRA.
         """
@@ -389,7 +389,7 @@ class AddonsWizard(QDialog):
         self._strength.setDecimals(2)
         self._strength.setSingleStep(0.05)
         self._apply_strength(chosen, strength if chosen is not None else None)
-        if chosen is None:
+        if chosen is None and strength is not None:
             self._strength.setValue(float(strength))
         self._loading = False
         save = QPushButton(text("canvas.addons.save"))

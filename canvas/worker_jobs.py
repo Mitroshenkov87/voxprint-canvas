@@ -20,10 +20,14 @@ import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from voxprint_common.worker import JobCancelled, JobContext
 
 from canvas.ipc.schema import PROTO, encode_event, refused, reply
+
+if TYPE_CHECKING:
+    from canvas.ui.shell_layout import PictureJob
 
 __all__ = ["Session", "check", "install_session", "run", "session"]
 
@@ -284,7 +288,7 @@ def _generate(ctx: JobContext, current: Session, payload: Mapping[str, object]) 
         return refused("generate", "output", reason or _unavailable_text(None), unavailable=reason is None)
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{item_id}{extension(job.fmt)}"
-    save_image(safe, path, job.fmt)
+    save_image(safe, path, job.fmt, metadata=_picture_metadata(job))
     return reply("generate", item_id=item_id, path=str(path), width=int(safe.width), height=int(safe.height))
 
 
@@ -584,6 +588,45 @@ def _series_seed(mode: str, base: int, series_seed: int) -> int:
     if mode == "random":
         return random.SystemRandom().randrange(1, 2**31)
     raise ValueError(mode)
+
+
+def _picture_metadata(job: PictureJob) -> dict[str, str]:
+    """PNG text fields recorded on one saved picture. Empty when the job turned metadata off.
+
+    Every field is best-effort: a LoRA that cannot be re-read never stops the
+    picture; its raw strength field is recorded instead.
+    """
+    if not job.save_metadata:
+        return {}
+    from canvas.models.user_lora import clamp_strength, resolve_selected, running_base_id
+
+    fields = {
+        "seed": str(job.seed),
+        "steps": str(job.steps),
+        "prompt": job.prompt,
+    }
+    base = running_base_id()
+    if base:
+        fields["base_model"] = base
+    if not job.lora_path:
+        return fields
+    strength: float = job.lora_weight
+    name = ""
+    digest = ""
+    try:
+        selected = resolve_selected(job.lora_path)
+    except Exception:  # noqa: BLE001 - metadata never blocks a job
+        selected = None
+    if selected is not None:
+        strength = clamp_strength(selected, job.lora_weight)
+        name = selected.name or selected.id
+        digest = selected.sha256
+    fields["lora_strength"] = str(strength)
+    if name:
+        fields["lora_name"] = name
+    if digest:
+        fields["lora_sha256"] = digest
+    return fields
 
 
 # --- helpers ------------------------------------------------------------------------------------------------------

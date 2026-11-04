@@ -31,9 +31,10 @@ from voxprint_common.i18n import tr
 from voxprint_common.ui.simple_image import Phase
 from voxprint_common.ui.theme import CARD_PLAIN, TEXT
 
-from canvas.pipeline.photoshoot import DEFAULT_FRAMES, MAX_FRAMES, Shot, assemble_line
+from canvas.pipeline.series_text import DEFAULT_FRAMES, MAX_FRAMES
 
 if TYPE_CHECKING:
+    from canvas.pipeline.photoshoot import Shot
     from canvas.ui.shell_screen import ShellWindow
 
 
@@ -106,6 +107,8 @@ class PhotoshootBar:
             shots: Accepted shots.
             seed: Series seed. Each row keeps one item from a choice list.
         """
+        from canvas.pipeline.photoshoot import assemble_line
+
         self.subject = subject
         self._clear_rows()
         for index, shot in enumerate(shots):

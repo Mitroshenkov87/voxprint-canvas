@@ -505,6 +505,12 @@
     "canvas.lora.base_queued": {
       "en": "VOXPrint MDL is downloading the base model for this LoRA."
     },
+    "canvas.lora.base_title": {
+      "en": "Different base model"
+    },
+    "canvas.lora.base_note": {
+      "en": "This LoRA was trained on {base}, which Canvas does not have. The picture runs on the default base and may look different."
+    },
     "canvas.lora.import": {
       "en": "Import LoRA"
     },

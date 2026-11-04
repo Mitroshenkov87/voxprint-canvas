@@ -24,7 +24,6 @@ from canvas.models.modes import Mode, Tier
 from canvas.models.plan import PIPELINE_TEXT, CallPlan
 from canvas.models.user_lora import (
     CLI_STRENGTH_RANGE,
-    CODE_BASE_MISMATCH,
     CODE_INVALID,
     CODE_SCALE,
     LoraRejected,
@@ -133,7 +132,8 @@ def test_a_forge_export_keeps_its_keys_name_and_trigger(tmp_path: Path) -> None:
     assert lora.id == _LORA_ID
     assert lora.trigger == "kettleword"
     assert lora.weights == path
-    assert lora.default_strength == 0.7
+    # The record's own default strength is kept (the sidecar names 0.8).
+    assert lora.default_strength == 0.8
     assert lora.strength_range == CLI_STRENGTH_RANGE
     assert cli_scale(0) == 0
     assert cli_scale(2) == 2
@@ -160,10 +160,9 @@ def test_a_down_up_file_is_renamed_to_lora_a_and_lora_b(tmp_path: Path) -> None:
 
 
 def test_the_wrong_base_and_a_bad_file_use_stable_codes(tmp_path: Path) -> None:
+    # A LoRA trained on another base opens; its trained base is recorded.
     moss = _export(tmp_path / "moss", base="moss-image-base")
-    with pytest.raises(LoraRejected) as mismatch:
-        prepare_cli_lora(moss)
-    assert mismatch.value.code == CODE_BASE_MISMATCH
+    assert prepare_cli_lora(moss).base == "moss-image-base"
     bad = tmp_path / "notes.safetensors"
     bad.write_bytes(b"not safetensors")
     with pytest.raises(LoraRejected) as invalid:
@@ -213,14 +212,6 @@ def test_commands_report_the_lora_and_reject_it_before_the_gpu(monkeypatch, caps
     assert calls == []
     assert body["error"] == CODE_INVALID
     assert body["message"] == text("lora.invalid", "en")
-    moss = _export(tmp_path / "moss", base="moss-image-base")
-    mismatch = main([
-        "photoshoot", "--prompt", IDEA, "--out", str(tmp_path / "series"),
-        "--lora", str(moss), "--json",
-    ])
-    assert mismatch == 2
-    assert json.loads(capsys.readouterr().out)["error"] == CODE_BASE_MISMATCH
-    assert calls == []
     scaled = main([
         "generate", "--prompt", "a red boat", "--out", str(tmp_path / "out.avif"),
         "--lora", str(path), "--lora-scale", "2.5", "--json",
@@ -286,7 +277,8 @@ def test_photoshoot_json_names_the_lora_and_every_frame_keeps_it(monkeypatch, ca
     assert body["lora_trigger"] == "kettleword"
     parsed = _parser().parse_args(["generate", "--prompt", "a red boat", "--out", "picture.avif"])
     assert parsed.lora == ""
-    assert parsed.lora_scale == 0.7
+    # No --lora-scale means the LoRA's own default strength.
+    assert parsed.lora_scale is None
 
 
 def test_the_runner_passes_the_bound_lora_to_the_generator(monkeypatch, tmp_path: Path) -> None:

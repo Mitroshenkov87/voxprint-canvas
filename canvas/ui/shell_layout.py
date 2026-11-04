@@ -50,6 +50,8 @@ class PictureJob(NamedTuple):
     adult_content: bool = False
     lora_path: str = ""
     lora_weight: float = 0.7
+    # Seed, steps, prompt and LoRA go into PNG text fields when True.
+    save_metadata: bool = True
 
 
 @dataclass

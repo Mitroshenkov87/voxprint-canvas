@@ -4,16 +4,16 @@ Pillow 11.3 and newer writes AVIF, PNG and WebP. Pillow itself is HPND. Its
 wheels include libavif (BSD-2-Clause) for AVIF. JPEG XL goes through imagecodecs
 (BSD-3-Clause). pillow-jxl-plugin is not used. Forge opens PNG, JPEG and WebP.
 AVIF stays available as an export option.
+
+A PNG can carry text fields with how the picture was made (seed, steps, the
+LoRA, the prompt). Other containers are written without them.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from enum import Enum
 from pathlib import Path
 from typing import assert_never
-
-import numpy as np
-from PIL import Image
-from imagecodecs import jpegxl_encode
 
 from canvas.safety.image import SafeImage
 
@@ -111,19 +111,39 @@ def extension(fmt: OutputFormat) -> str:
     assert_never(fmt)
 
 
-def save_image(image: SafeImage, path: Path, fmt: OutputFormat = DEFAULT_FORMAT) -> None:
+def _png_text(metadata: Mapping[str, str] | None):  # -> PngInfo | None
+    """PNG text chunks for one picture. None when nothing is recorded.
+
+    Values are written as UTF-8 bytes so a prompt in any language round-trips.
+    """
+    if not metadata:
+        return None
+    from PIL.PngImagePlugin import PngInfo
+
+    info = PngInfo()
+    for key, value in metadata.items():
+        info.add_text(str(key), str(value).encode("utf-8"))
+    return info
+
+
+def save_image(image: SafeImage, path: Path, fmt: OutputFormat = DEFAULT_FORMAT, *,
+               metadata: Mapping[str, str] | None = None) -> None:
     """Write one released image. Any other object is refused.
 
-    PNG is lossless. The picture default is still AVIF, and a path whose
+    PNG is lossless and carries ``metadata`` as text chunks; other containers
+    are written without it. The picture default is still AVIF, and a path whose
     extension does not match the format is refused.
     """
     if type(image) is not SafeImage:
         raise TypeError("only a released image can be saved")
+    # Imported here so parsing a format name stays free of the image stack.
+    from PIL import Image
+
     if fmt is OutputFormat.PNG:
         if path.suffix.lower() != extension(fmt):
             raise UnsupportedFormat("the file extension does not match the format")
         picture = Image.frombytes("RGB", (image.width, image.height), image.data)
-        picture.save(path, format="PNG")
+        picture.save(path, format="PNG", pnginfo=_png_text(metadata))
         return
     if path.suffix.lower() != extension(fmt):
         raise UnsupportedFormat("the file extension does not match the format")
@@ -144,6 +164,9 @@ def save_image(image: SafeImage, path: Path, fmt: OutputFormat = DEFAULT_FORMAT)
         picture.save(path, format="JPEG", quality=_JPEG_QUALITY)
         return
     if fmt is OutputFormat.JXL:
+        import numpy as np
+        from imagecodecs import jpegxl_encode
+
         pixels = np.frombuffer(image.data, dtype=np.uint8).reshape(image.height, image.width, 3)
         path.write_bytes(jpegxl_encode(pixels, distance=_JXL_DISTANCE))
         return

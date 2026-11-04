@@ -16,6 +16,7 @@ from typing import Literal, assert_never
 
 from canvas.pipeline.adult_direction import LIGHT_SETUPS, POSE_FAMILIES, shot_plan
 from canvas.pipeline.enhance import AGING_DESCRIPTOR_MIN_AGE, added_aging_terms, quoted_spans, stated_ages
+from canvas.pipeline.series_text import DEFAULT_FRAMES as DEFAULT_FRAMES, MAX_FRAMES, TEST_SERIES_CHARACTER
 from canvas.pipeline.frame_prompt import (
     _undangle,
     _without_partial,
@@ -26,8 +27,6 @@ from canvas.pipeline.frame_prompt import (
 )
 
 PlaceMode = Literal["same", "different"]
-MAX_FRAMES = 99
-DEFAULT_FRAMES = 6
 SCENARIO_CHUNK = 10
 SCENARIO_TOKENS = 8192
 
@@ -111,7 +110,6 @@ _PERSON_RE = re.compile(
     r"(?<![\w])(?:" + "|".join(re.escape(word) for word in sorted(_PERSON_WORDS, key=len, reverse=True)) + r")(?![\w])",
     re.IGNORECASE,
 )
-TEST_SERIES_CHARACTER = "an Asian woman, about 30, blonde, athletic with defined muscles"
 
 
 def describes_person(idea: str) -> bool:

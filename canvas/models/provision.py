@@ -28,7 +28,6 @@ from canvas.infra.runtime import (
     restore_tensorrt,
 )
 from canvas.models.features import withheld_from_setup
-from canvas.models.loader import plan_specs
 from canvas.models.plan import CallPlan
 from canvas.models.registry import Catalog, ModelSpec, RegistryError
 from canvas.models.views import is_view
@@ -172,6 +171,8 @@ def ensure_plan(
     confirm: Callable[[str], bool] | None,
 ) -> None:
     """Record packs that are already on disk. VOXPrint MDL fetches anything missing."""
+    from canvas.models.loader import plan_specs
+
     try:
         for spec in plan_specs(catalog, plan):
             install_spec(spec, progress, confirm)

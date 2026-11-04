@@ -25,7 +25,6 @@ from canvas.app.info import ENLARGE_NAME
 from canvas.ipc.schema import Reply, decode_event, inside, series_fields
 from canvas.ui.shell_chrome import refresh_pictures
 from canvas.models.mdl_registry import selectable
-from canvas.pipeline.photoshoot import Shot
 from canvas.ui.worker_checks import WorkerChecks
 
 if TYPE_CHECKING:
@@ -118,6 +117,8 @@ def run_photoshoot(window: ShellWindow) -> bool:
             return
         kind, data = decoded
         if kind == "scenario":
+            from canvas.pipeline.photoshoot import Shot
+
             listed = data.get("shots")
             shots = tuple(Shot(**shot) for shot in (listed if isinstance(listed, list) else []) if isinstance(shot, dict))
             bar.show_scenario(str(data.get("subject", "")), shots, seed=base_seed)

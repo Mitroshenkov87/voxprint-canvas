@@ -21,6 +21,9 @@ $Py = Join-Path $Venv "Scripts\python.exe"
 $SuiteHome = Join-Path $env:LOCALAPPDATA "VOXPrint AI Suite"
 $LegacyHome = Join-Path $env:LOCALAPPDATA "Voxprint"
 $Shared = Join-Path $SuiteHome "shared"
+# Shipped runtime stays Python 3.14.8 until onnxruntime-gpu and imagecodecs
+# publish regular cp315 wheels. The planned next runtime is
+# cpython-3.15.2+20261026 from python-build-standalone.
 $RuntimeRel = "runtime/py314-torch2.11-cu130"
 $Runtime = Join-Path $Shared ($RuntimeRel -replace '/', '\')
 $RuntimePy = Join-Path $Runtime "Scripts\python.exe"
@@ -727,13 +730,13 @@ function Invoke-Machine {
             Install-SuiteGpuPackages $Py ""
             if (-not (Test-SuiteGpuPackages $Py)) { throw "Setup stopped." }
         }
-        $CommonUrl = "https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.6.3/voxprint_common-0.6.3-py3-none-any.whl"
-        $CommonSha = "a18e5760863e34042c6eb16dd25d37d28055b9eb90a460c62407cdc2a09b43e4"
-        $CommonWheel = Join-Path $Fetch "voxprint_common-0.6.3-py3-none-any.whl"
+        $CommonUrl = "https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.6.4/voxprint_common-0.6.4-py3-none-any.whl"
+        $CommonSha = "1b7abcc99530d6f155b4be41fba26f3f27b8b54789d49282b936430c53a4314b"
+        $CommonWheel = Join-Path $Fetch "voxprint_common-0.6.4-py3-none-any.whl"
         Assert-NoReparse $CommonWheel
         Invoke-WebRequest -UseBasicParsing -Uri $CommonUrl -OutFile $CommonWheel
         $got = (Get-FileHash -Algorithm SHA256 -Path $CommonWheel).Hash.ToLowerInvariant()
-        if ($got -ne $CommonSha) { throw "voxprint-common 0.6.3 failed the SHA-256 check." }
+        if ($got -ne $CommonSha) { throw "voxprint-common 0.6.4 failed the SHA-256 check." }
         Assert-AdminPath $script:Uv
         Assert-AdminPath $Py
         & $script:Uv pip install --no-config --python $Py $CommonWheel

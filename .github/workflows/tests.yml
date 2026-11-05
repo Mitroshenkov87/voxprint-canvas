@@ -50,9 +50,9 @@ jobs:
         run: |
           python -m pip install -q uv
           mkdir -p wheels
-          curl -fsSL -o wheels/voxprint_common-0.6.3-py3-none-any.whl \
-            https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.6.3/voxprint_common-0.6.3-py3-none-any.whl
-          python -c "import hashlib, pathlib; p=pathlib.Path('wheels/voxprint_common-0.6.3-py3-none-any.whl'); d=hashlib.sha256(p.read_bytes()).hexdigest(); e='a18e5760863e34042c6eb16dd25d37d28055b9eb90a460c62407cdc2a09b43e4'; raise SystemExit(None if d==e else 'voxprint-common 0.6.3 failed the SHA-256 check: '+d)"
+          curl -fsSL -o wheels/voxprint_common-0.6.4-py3-none-any.whl \
+            https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.6.4/voxprint_common-0.6.4-py3-none-any.whl
+          python -c "import hashlib, pathlib; p=pathlib.Path('wheels/voxprint_common-0.6.4-py3-none-any.whl'); d=hashlib.sha256(p.read_bytes()).hexdigest(); e='1b7abcc99530d6f155b4be41fba26f3f27b8b54789d49282b936430c53a4314b'; raise SystemExit(None if d==e else 'voxprint-common 0.6.4 failed the SHA-256 check: '+d)"
           uv venv .venv
           if [ "${{ runner.os }}" = "Windows" ]; then
             uv pip install --python .venv/Scripts/python.exe --find-links wheels -e ".[dev]"
@@ -69,6 +69,55 @@ jobs:
           else
             .venv/bin/python -m pytest
           fi
+  test-py315:
+    # Experimental probe. Allowed to fail until onnxruntime-gpu and imagecodecs
+    # publish regular cp315 wheels (not the freethreaded cp315t build).
+    name: "test-py315 (experimental)"
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.15"
+      - name: Qt libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 \
+            libgl1 \
+            libdbus-1-3 \
+            libfontconfig1 \
+            libglib2.0-0 \
+            libxkbcommon0 \
+            libxkbcommon-x11-0 \
+            libxcb-cursor0 \
+            libxcb-icccm4 \
+            libxcb-image0 \
+            libxcb-keysyms1 \
+            libxcb-randr0 \
+            libxcb-render-util0 \
+            libxcb-render0 \
+            libxcb-shape0 \
+            libxcb-shm0 \
+            libxcb-sync1 \
+            libxcb-util1 \
+            libxcb-xfixes0 \
+            libxcb-xkb1
+      - name: Install on Python 3.15
+        run: |
+          python -m pip install -q uv
+          mkdir -p wheels
+          curl -fsSL -o wheels/voxprint_common-0.6.4-py3-none-any.whl \
+            https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.6.4/voxprint_common-0.6.4-py3-none-any.whl
+          python -c "import hashlib, pathlib; p=pathlib.Path('wheels/voxprint_common-0.6.4-py3-none-any.whl'); d=hashlib.sha256(p.read_bytes()).hexdigest(); e='1b7abcc99530d6f155b4be41fba26f3f27b8b54789d49282b936430c53a4314b'; raise SystemExit(None if d==e else 'voxprint-common 0.6.4 failed the SHA-256 check: '+d)"
+          uv venv .venv
+          uv pip install --python .venv/bin/python --find-links wheels -e ".[dev]"
+      - name: Test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: .venv/bin/python -m pytest
   gui-smoke:
     # The shared headless GUI walk (voxprint_common.testing.gui_smoke) on the Canvas window,
     # wired to a real spawned worker. Offscreen Qt, so no display server is needed.
@@ -113,9 +162,9 @@ jobs:
         run: |
           python -m pip install -q uv
           mkdir -p wheels
-          curl -fsSL -o wheels/voxprint_common-0.6.3-py3-none-any.whl \
-            https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.6.3/voxprint_common-0.6.3-py3-none-any.whl
-          python -c "import hashlib, pathlib; p=pathlib.Path('wheels/voxprint_common-0.6.3-py3-none-any.whl'); d=hashlib.sha256(p.read_bytes()).hexdigest(); e='a18e5760863e34042c6eb16dd25d37d28055b9eb90a460c62407cdc2a09b43e4'; raise SystemExit(None if d==e else 'voxprint-common 0.6.3 failed the SHA-256 check: '+d)"
+          curl -fsSL -o wheels/voxprint_common-0.6.4-py3-none-any.whl \
+            https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.6.4/voxprint_common-0.6.4-py3-none-any.whl
+          python -c "import hashlib, pathlib; p=pathlib.Path('wheels/voxprint_common-0.6.4-py3-none-any.whl'); d=hashlib.sha256(p.read_bytes()).hexdigest(); e='1b7abcc99530d6f155b4be41fba26f3f27b8b54789d49282b936430c53a4314b'; raise SystemExit(None if d==e else 'voxprint-common 0.6.4 failed the SHA-256 check: '+d)"
           uv venv .venv
           if [ "${{ runner.os }}" = "Windows" ]; then
             uv pip install --python .venv/Scripts/python.exe --find-links wheels -e ".[dev]"
@@ -144,10 +193,10 @@ jobs:
       - name: Install the pinned voxprint-common
         # The release wheel the installers vendor, checked by sha256; it carries the Model Forge key.
         run: |
-          curl -fsSL -o voxprint_common-0.6.3-py3-none-any.whl \
-            https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.6.3/voxprint_common-0.6.3-py3-none-any.whl
-          echo "a18e5760863e34042c6eb16dd25d37d28055b9eb90a460c62407cdc2a09b43e4  voxprint_common-0.6.3-py3-none-any.whl" | sha256sum -c -
-          python -m pip install -q -c constraints.txt voxprint_common-0.6.3-py3-none-any.whl
+          curl -fsSL -o voxprint_common-0.6.4-py3-none-any.whl \
+            https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.6.4/voxprint_common-0.6.4-py3-none-any.whl
+          echo "1b7abcc99530d6f155b4be41fba26f3f27b8b54789d49282b936430c53a4314b  voxprint_common-0.6.4-py3-none-any.whl" | sha256sum -c -
+          python -m pip install -q -c constraints.txt voxprint_common-0.6.4-py3-none-any.whl
       - name: Compare mdl.json with the signed model index
         run: python tools/check_model_index.py
   enlarge-release:
@@ -186,9 +235,9 @@ jobs:
         run: |
           python -m pip install -q uv
           mkdir -p wheels
-          curl -fsSL -o wheels/voxprint_common-0.6.3-py3-none-any.whl \
-            https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.6.3/voxprint_common-0.6.3-py3-none-any.whl
-          python -c "import hashlib, pathlib; p=pathlib.Path('wheels/voxprint_common-0.6.3-py3-none-any.whl'); d=hashlib.sha256(p.read_bytes()).hexdigest(); e='a18e5760863e34042c6eb16dd25d37d28055b9eb90a460c62407cdc2a09b43e4'; raise SystemExit(None if d==e else 'voxprint-common 0.6.3 failed the SHA-256 check: '+d)"
+          curl -fsSL -o wheels/voxprint_common-0.6.4-py3-none-any.whl \
+            https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.6.4/voxprint_common-0.6.4-py3-none-any.whl
+          python -c "import hashlib, pathlib; p=pathlib.Path('wheels/voxprint_common-0.6.4-py3-none-any.whl'); d=hashlib.sha256(p.read_bytes()).hexdigest(); e='1b7abcc99530d6f155b4be41fba26f3f27b8b54789d49282b936430c53a4314b'; raise SystemExit(None if d==e else 'voxprint-common 0.6.4 failed the SHA-256 check: '+d)"
           uv venv .venv
           uv pip install --python .venv/bin/python --find-links wheels -e ".[dev]"
       - name: Check the pinned Enlarge release
@@ -207,9 +256,9 @@ jobs:
         run: |
           python -m pip install -q uv
           mkdir -p wheels
-          curl -fsSL -o wheels/voxprint_common-0.6.3-py3-none-any.whl \
-            https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.6.3/voxprint_common-0.6.3-py3-none-any.whl
-          python -c "import hashlib, pathlib; p=pathlib.Path('wheels/voxprint_common-0.6.3-py3-none-any.whl'); d=hashlib.sha256(p.read_bytes()).hexdigest(); e='a18e5760863e34042c6eb16dd25d37d28055b9eb90a460c62407cdc2a09b43e4'; raise SystemExit(None if d==e else 'voxprint-common 0.6.3 failed the SHA-256 check: '+d)"
+          curl -fsSL -o wheels/voxprint_common-0.6.4-py3-none-any.whl \
+            https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.6.4/voxprint_common-0.6.4-py3-none-any.whl
+          python -c "import hashlib, pathlib; p=pathlib.Path('wheels/voxprint_common-0.6.4-py3-none-any.whl'); d=hashlib.sha256(p.read_bytes()).hexdigest(); e='1b7abcc99530d6f155b4be41fba26f3f27b8b54789d49282b936430c53a4314b'; raise SystemExit(None if d==e else 'voxprint-common 0.6.4 failed the SHA-256 check: '+d)"
           uv venv .venv
           uv pip install --python .venv/bin/python \
             --index-url https://download.pytorch.org/whl/cpu \
@@ -239,9 +288,9 @@ jobs:
         run: |
           python -m pip install -q uv
           mkdir -p wheels
-          curl -fsSL -o wheels/voxprint_common-0.6.3-py3-none-any.whl \
-            https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.6.3/voxprint_common-0.6.3-py3-none-any.whl
-          python -c "import hashlib, pathlib; p=pathlib.Path('wheels/voxprint_common-0.6.3-py3-none-any.whl'); d=hashlib.sha256(p.read_bytes()).hexdigest(); e='a18e5760863e34042c6eb16dd25d37d28055b9eb90a460c62407cdc2a09b43e4'; raise SystemExit(None if d==e else 'voxprint-common 0.6.3 failed the SHA-256 check: '+d)"
+          curl -fsSL -o wheels/voxprint_common-0.6.4-py3-none-any.whl \
+            https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.6.4/voxprint_common-0.6.4-py3-none-any.whl
+          python -c "import hashlib, pathlib; p=pathlib.Path('wheels/voxprint_common-0.6.4-py3-none-any.whl'); d=hashlib.sha256(p.read_bytes()).hexdigest(); e='1b7abcc99530d6f155b4be41fba26f3f27b8b54789d49282b936430c53a4314b'; raise SystemExit(None if d==e else 'voxprint-common 0.6.4 failed the SHA-256 check: '+d)"
           uv venv .venv
           uv pip install --python .venv/bin/python \
             --index-url https://download.pytorch.org/whl/cpu \
@@ -277,9 +326,9 @@ jobs:
         run: |
           python -m pip install -q uv
           mkdir -p wheels
-          curl -fsSL -o wheels/voxprint_common-0.6.3-py3-none-any.whl \
-            https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.6.3/voxprint_common-0.6.3-py3-none-any.whl
-          python -c "import hashlib, pathlib; p=pathlib.Path('wheels/voxprint_common-0.6.3-py3-none-any.whl'); d=hashlib.sha256(p.read_bytes()).hexdigest(); e='a18e5760863e34042c6eb16dd25d37d28055b9eb90a460c62407cdc2a09b43e4'; raise SystemExit(None if d==e else 'voxprint-common 0.6.3 failed the SHA-256 check: '+d)"
+          curl -fsSL -o wheels/voxprint_common-0.6.4-py3-none-any.whl \
+            https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.6.4/voxprint_common-0.6.4-py3-none-any.whl
+          python -c "import hashlib, pathlib; p=pathlib.Path('wheels/voxprint_common-0.6.4-py3-none-any.whl'); d=hashlib.sha256(p.read_bytes()).hexdigest(); e='1b7abcc99530d6f155b4be41fba26f3f27b8b54789d49282b936430c53a4314b'; raise SystemExit(None if d==e else 'voxprint-common 0.6.4 failed the SHA-256 check: '+d)"
           uv venv .venv
           uv pip install --python .venv/bin/python \
             --index-url https://download.pytorch.org/whl/cpu \

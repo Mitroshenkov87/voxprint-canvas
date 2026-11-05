@@ -24,7 +24,7 @@ Pictures, models, and the shared manifest stay in `%LOCALAPPDATA%\VOXPrint AI Su
 
 - **OS:** Windows 11 24H2 or newer, or a Linux distribution released in 2025 or later.
 - **GPU:** NVIDIA GeForce RTX 40 series or newer, with 16 GB of memory (24 GB unlocks the larger plans). PCs without a supported NVIDIA GPU are not supported.
-- **Python:** 3.14 or newer, when running from source.
+- **Python:** 3.14 or newer, when running from source. The shipped runtime and required CI stay on 3.14. A non-blocking CI job probes 3.15.
 
 ## Responsibility
 
@@ -62,7 +62,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File $smoke -Out .\smoke-results       
 
 Without PowerShell 7, run the same lines with `powershell` instead of `pwsh`. A silent Setup uses PowerShell 7 when it is installed and Windows PowerShell 5.1 otherwise; an interactive Setup offers to install PowerShell 7 from Microsoft first.
 
-The script uses the Python the Setup installed (`-Python <python.exe>` picks another one). It verifies the voxprint-common 0.6.3 wheel, downloads the models through VOXPrint MDL, generates five neutral 1024x1024 pictures through the content gate, and times the gate by stage. The results are `smoke-results\result-16gb.json` and `smoke-results\result-24gb.json`. Exit codes: 0 pass, 1 a picture failed, 2 setup (no Python, wheel hash, wrong tier), 3 no GPU, 4 gate unavailable, 5 an MDL download or hash check failed.
+The script uses the Python the Setup installed (`-Python <python.exe>` picks another one). It verifies the voxprint-common 0.6.4 wheel, downloads the models through VOXPrint MDL, generates five neutral 1024x1024 pictures through the content gate, and times the gate by stage. The results are `smoke-results\result-16gb.json` and `smoke-results\result-24gb.json`. Exit codes: 0 pass, 1 a picture failed, 2 setup (no Python, wheel hash, wrong tier), 3 no GPU, 4 gate unavailable, 5 an MDL download or hash check failed.
 
 ## License
 

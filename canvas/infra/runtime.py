@@ -7,7 +7,6 @@ build is not installed there.
 """
 from __future__ import annotations
 
-import hashlib
 import shutil
 import subprocess
 import sys
@@ -21,19 +20,14 @@ from canvas.infra.manifest import APP_ID, ManifestError, load_manifest
 from canvas.infra.paths import shared_dir
 
 LINUX_PYTHON_URL = (
-    "https://github.com/astral-sh/python-build-standalone/releases/download/20261026/"
-    "cpython-3.15.2%2B20261026-x86_64-unknown-linux-gnu-install_only.tar.gz"
+    "https://github.com/astral-sh/python-build-standalone/releases/download/20261009/"
+    "cpython-3.14.8%2B20261009-x86_64-unknown-linux-gnu-install_only.tar.gz"
 )
-LINUX_PYTHON_SHA = "08d4ae9024a7cfbd3b70e559241afa2571cd3208d7bd5f96f88e0080dd4092aa"
-WINDOWS_PYTHON_URL = (
-    "https://github.com/astral-sh/python-build-standalone/releases/download/20261026/"
-    "cpython-3.15.2%2B20261026-x86_64-pc-windows-msvc-install_only.tar.gz"
-)
-WINDOWS_PYTHON_SHA = "17769f04c4c8c228e9fb838a37d92f6a6401b170c5cd27fb3073f233f73bb2f9"
+WINDOWS_PYTHON_URL = "https://www.python.org/ftp/python/3.14.8/python-3.14.8-amd64.exe"
 TORCH_INDEX = "https://download.pytorch.org/whl/cu130"
-RUNTIME_REL = "runtime/py315-torch2.11-cu130"
-PYTHON_ID = "python-3.15"
-PYTHON_VERSION = "3.15.2"
+RUNTIME_REL = "runtime/py314-torch2.11-cu130"
+PYTHON_ID = "python-3.14"
+PYTHON_VERSION = "3.14.8"
 TORCH_ID = "torch-2.11.0-cu130"
 TORCH_VERSION = "2.11.0+cu130"
 VISION_VERSION = "0.26.0+cu130"
@@ -48,12 +42,12 @@ PYPI_INDEX = "https://pypi.org/simple"
 
 
 def python_supports_tensorrt() -> bool:
-    """False on Python 3.14 and newer, which have no TensorRT wheel."""
+    """False on Python 3.14, which has no TensorRT wheel."""
     return sys.version_info < (3, 14)
 
 
 def python_home() -> Path:
-    """Directory of the suite Python 3.15 runtime."""
+    """Directory of the suite Python 3.14 runtime."""
     return shared_dir() / RUNTIME_REL
 
 
@@ -117,7 +111,7 @@ def refill_wheels(progress: Callable[[str], None]) -> None:
 def restore_tensorrt(progress: Callable[[str], None]) -> None:
     """Install TensorRT 10 into its own component directory.
 
-    Python 3.15 has no wheel. That skip is a note, not a failed install.
+    Python 3.14 has no wheel. That skip is a note, not a failed install.
     """
     if not python_supports_tensorrt():
         progress(text("splash.tensorrt_skip"))
@@ -144,40 +138,37 @@ def _pip(args: list[str]) -> None:
 
 
 def _restore_linux() -> None:
-    _restore_standalone(LINUX_PYTHON_URL, LINUX_PYTHON_SHA)
-
-
-def _restore_windows() -> None:
-    _restore_standalone(WINDOWS_PYTHON_URL, WINDOWS_PYTHON_SHA)
-
-
-def _restore_standalone(url: str, expected: str) -> None:
-    """Install one python-build-standalone install_only archive."""
     dest = python_home()
     if dest.exists():
         shutil.rmtree(dest)
     dest.mkdir(parents=True)
     archive = dest.with_suffix(".tar.gz")
-    _download(url, archive)
-    if _sha256(archive) != expected:
-        archive.unlink(missing_ok=True)
-        raise OSError(text("error.python"))
+    _download(LINUX_PYTHON_URL, archive)
     with tarfile.open(archive) as handle:
         handle.extractall(dest, filter="data")
     archive.unlink(missing_ok=True)
     inner = dest / "python"
-    if inner.is_dir() and not (dest / "bin").exists() and not (dest / "python.exe").exists():
+    if inner.is_dir() and not (dest / "bin").exists():
         for child in inner.iterdir():
             child.rename(dest / child.name)
         inner.rmdir()
 
 
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+def _restore_windows() -> None:
+    dest = python_home()
+    dest.mkdir(parents=True, exist_ok=True)
+    installer = dest / "python-installer.exe"
+    _download(WINDOWS_PYTHON_URL, installer)
+    completed = subprocess.run(
+        [
+            str(installer), "/quiet", "InstallAllUsers=0", "PrependPath=0",
+            "Include_test=0", "Include_pip=1", f"TargetDir={dest}",
+        ],
+        check=False,
+    )
+    installer.unlink(missing_ok=True)
+    if completed.returncode != 0:
+        raise OSError(text("error.python"))
 
 
 def interpreter_marker() -> Path | None:

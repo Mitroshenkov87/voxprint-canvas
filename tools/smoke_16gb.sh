@@ -12,12 +12,12 @@ ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
 OUT=${1:-smoke-results}
 PASS=${PASS:-16gb}
-PY=${PYTHON:-python3.15}
+PY=${PYTHON:-python3.14}
 TORCH_INDEX="https://download.pytorch.org/whl/cu130"
 COMMON_URL="https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.6.4/voxprint_common-0.6.4-py3-none-any.whl"
 COMMON_SHA="1b7abcc99530d6f155b4be41fba26f3f27b8b54789d49282b936430c53a4314b"
 if ! command -v "$PY" >/dev/null 2>&1; then
-  echo "$PY is not installed. Set PYTHON to a Python 3.15 interpreter." >&2
+  echo "$PY is not installed. Set PYTHON to a Python 3.14 interpreter." >&2
   exit 2
 fi
 VENV="$ROOT/.smoke-venv"

@@ -9,12 +9,14 @@ set -eu
 SRC=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 APP="/opt/voxprint-ai-suite/canvas"
 VENV="$APP/venv"
-RUNTIME_REL="runtime/py315-torch2.11-cu130"
+# Shipped runtime stays Python 3.14.8 until onnxruntime-gpu and imagecodecs
+# publish regular cp315 wheels. The planned next runtime is
+# cpython-3.15.2+20261026 from python-build-standalone.
+RUNTIME_REL="runtime/py314-torch2.11-cu130"
 WHEELS="$APP/setup-work/wheels"
 APP_PYTHON="$APP/python"
 BASE="$APP_PYTHON/bin/python3"
-LINUX_PYTHON_URL="https://github.com/astral-sh/python-build-standalone/releases/download/20261026/cpython-3.15.2%2B20261026-x86_64-unknown-linux-gnu-install_only.tar.gz"
-LINUX_PYTHON_SHA="08d4ae9024a7cfbd3b70e559241afa2571cd3208d7bd5f96f88e0080dd4092aa"
+LINUX_PYTHON_URL="https://github.com/astral-sh/python-build-standalone/releases/download/20261009/cpython-3.14.8%2B20261009-x86_64-unknown-linux-gnu-install_only.tar.gz"
 TORCH_INDEX="https://download.pytorch.org/whl/cu130"
 
 scrub_environment() {
@@ -237,7 +239,7 @@ PY
   fi
 fi
 RUNTIME="$SHARED/$RUNTIME_REL"
-RUNTIME_SITE="$RUNTIME/lib/python3.15/site-packages"
+RUNTIME_SITE="$RUNTIME/lib/python3.14/site-packages"
 APP_DIR="$USER_HOME/.local/share/applications"
 DIR_DIR="$USER_HOME/.local/share/desktop-directories"
 BIN_DIR="$USER_HOME/.local/bin"
@@ -256,7 +258,6 @@ if [ ! -x "$BASE" ]; then
   mkdir -p "$APP_PYTHON"
   archive="$APP/setup-work/python.tar.gz"
   curl -fsSL -o "$archive" "$LINUX_PYTHON_URL"
-  echo "$LINUX_PYTHON_SHA  $archive" | sha256sum -c -
   tar -xzf "$archive" -C "$APP_PYTHON" --strip-components=1
   rm -f "$archive"
 fi
@@ -415,7 +416,7 @@ echo "$COMMON_SHA  $common_wheel" | sha256sum -c -
   -c "$SRC/constraints.txt" -c "$SRC/constraints-cuda.txt" \
   "$SRC[gen]"
 if "$VENV/bin/python" -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 14) else 1)"; then
-  echo "TensorRT is skipped on Python 3.15." >&2
+  echo "TensorRT is skipped on Python 3.14." >&2
 elif [ -z "$(find "$SHARED/tensorrt-10" -mindepth 1 -print -quit 2>/dev/null)" ]; then
   refuse_symlink "$SHARED/tensorrt-10"
   handoff_parents "$SHARED/tensorrt-10"

@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Local text-to-image generation for the VOXPrint AI Suite."
 readme = "README.md"
 license = "Apache-2.0"
-requires-python = ">=3.15"
+requires-python = ">=3.14"
 authors = [{ name = "Aleksandr Mitroshenkov" }]
 dependencies = [
     # Shared shell and worker host (v0.6.4). Installers and CI resolve this from the sha256-checked release wheel.

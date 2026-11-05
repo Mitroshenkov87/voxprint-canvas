@@ -257,7 +257,7 @@
       "en": "Installing PyTorch"
     },
     "splash.tensorrt_skip": {
-      "en": "TensorRT is skipped on Python 3.15."
+      "en": "TensorRT is skipped on Python 3.14."
     },
     "splash.install_tensorrt": {
       "en": "Installing TensorRT"

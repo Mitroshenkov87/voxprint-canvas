@@ -73,7 +73,7 @@ def test_selftest_deep_is_still_read_only(monkeypatch, tmp_path, capsys):
     assert main(["--selftest", "--deep", "--json"]) == 2
     report = json.loads(capsys.readouterr().out)
     assert report["deep"] is True
-    assert report["notes"] == ["TensorRT is skipped on Python 3.14."]
+    assert report["notes"] == ["TensorRT is skipped on Python 3.15."]
     assert "Collecting" not in capsys.readouterr().out
 
 

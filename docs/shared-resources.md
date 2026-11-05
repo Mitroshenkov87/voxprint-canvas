@@ -9,7 +9,7 @@ Suite apps share one folder and one manifest.
 
 On Linux, `XDG_DATA_HOME/voxprint-ai-suite/shared` is used when `XDG_DATA_HOME` is set. `VOXPRINT_HOME` replaces the data home on either platform. A previous `Voxprint` or `voxprint` folder is moved to the new name once (voxprint-common 0.2.5). The program itself is installed under `C:\Program Files\VOXPrint AI Suite\Canvas\` or `/opt/voxprint-ai-suite/canvas/`, not in this data folder.
 
-The suite runtime is Python 3.14 at `shared/runtime/py314-torch2.11-cu130`. Every pinned dependency publishes a wheel that installs on Python 3.14, so Canvas uses that runtime. The runtime contains PyTorch 2.11.0 for CUDA 13.0, the matching torchvision 0.26.0, and the GPU ONNX Runtime 1.31.0. Setup resolves numpy, torchao, and the other packages from PyPI, and takes torch and torchvision from the CUDA 13.0 index. torchao is pinned with `==` and is not taken from that index. The CPU ONNX Runtime build is not installed into it, because that build would shadow the GPU build. TensorRT 10.16.1.11 is an optional component, `tensorrt-10`. Python 3.14 has no TensorRT wheel, so setup skips it. The self-test records that note and does not fail.
+The suite runtime is Python 3.15.2 at `shared/runtime/py315-torch2.11-cu130`. Every pinned dependency publishes a wheel that installs on Python 3.15, so Canvas uses that runtime. The runtime contains PyTorch 2.11.0 for CUDA 13.0, the matching torchvision 0.26.0, and the GPU ONNX Runtime 1.31.0. Setup resolves numpy, torchao, and the other packages from PyPI, and takes torch and torchvision from the CUDA 13.0 index. torchao is pinned with `==` and is not taken from that index. The CPU ONNX Runtime build is not installed into it, because that build would shadow the GPU build. TensorRT 10.16.1.11 is an optional component, `tensorrt-10`. Python 3.15 has no TensorRT wheel, so setup skips it. The self-test records that note and does not fail.
 
 The setup installs anything that is missing before the first picture: the suite runtime when it is not already there, the CUDA 13.0 wheels, the default Z-Image-Turbo pack, and the models that ship with that pack. Progress is printed while those files are fetched. Wheels are cached in `shared/wheels` so another suite app can reuse them. A component that another app already refs is left in place. A different version is installed beside it, under a new path.
 
@@ -28,7 +28,7 @@ Optional packs stay out of the setup. ControlNet lite and Creative Z-Image downl
     "torch-2.11.0-cu130": {
       "kind": "wheels",
       "version": "2.11.0+cu130",
-      "path": "runtime/py314-torch2.11-cu130",
+      "path": "runtime/py315-torch2.11-cu130",
       "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
       "installed_at": "2026-10-11T12:00:00+00:00",
       "refs": ["enlarge", "canvas"]
@@ -38,7 +38,7 @@ Optional packs stay out of the setup. ControlNet lite and Creative Z-Image downl
 ```
 
 - The top-level keys Canvas writes are `schema` (the integer 1) and `components`. Any other top-level key is kept when Canvas writes the file.
-- A component id is lowercase and matches `[a-z0-9][a-z0-9._-]*`. Examples: `python-3.14`, `torch-2.11.0-cu130`, `onnxruntime-gpu-1.31`, `tensorrt-10`, and `model-` plus a SHA-256 prefix.
+- A component id is lowercase and matches `[a-z0-9][a-z0-9._-]*`. Examples: `python-3.15`, `torch-2.11.0-cu130`, `onnxruntime-gpu-1.31`, `tensorrt-10`, and `model-` plus a SHA-256 prefix.
 - `kind` is `runtime`, `wheels`, `model`, or `tool`.
 - `version` is the component version, such as `2.11.0+cu130`.
 - `path` is relative to the shared directory. It must not be absolute and must not contain `..`.

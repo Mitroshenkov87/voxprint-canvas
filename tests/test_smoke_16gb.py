@@ -75,7 +75,7 @@ def test_summary_counts_gate_results_and_peaks():
     assert body["size"] == [1024, 1024]
 
 
-COMMON_SHA = "a18e5760863e34042c6eb16dd25d37d28055b9eb90a460c62407cdc2a09b43e4"
+COMMON_SHA = "1b7abcc99530d6f155b4be41fba26f3f27b8b54789d49282b936430c53a4314b"
 
 
 def test_wrappers_pin_common_025_fetch_through_mdl_and_run_the_tool():
@@ -83,11 +83,11 @@ def test_wrappers_pin_common_025_fetch_through_mdl_and_run_the_tool():
     shell = (root / "smoke_16gb.sh").read_text(encoding="utf-8")
     windows = (root / "smoke_16gb.ps1").read_text(encoding="utf-8")
     installer = Path("installer/linux/install.sh").read_text(encoding="utf-8")
-    assert COMMON_SHA in installer and "v0.6.3/voxprint_common-0.6.3-py3-none-any.whl" in installer
+    assert COMMON_SHA in installer and "v0.6.4/voxprint_common-0.6.4-py3-none-any.whl" in installer
     for text in (shell, windows):
         assert "canvas.models.install_fetch" in text and "mdl.json" in text
         assert "smoke_16gb" in text
-        assert COMMON_SHA in text and "v0.6.3/voxprint_common-0.6.3-py3-none-any.whl" in text
+        assert COMMON_SHA in text and "v0.6.4/voxprint_common-0.6.4-py3-none-any.whl" in text
         assert "0.2.4" not in text and "3051bc64" not in text
         assert "exit 2" in text and "exit 5" in text
     assert "constraints-cuda.txt" in shell and "set -eu" in shell

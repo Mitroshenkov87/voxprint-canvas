@@ -28,7 +28,16 @@ from canvas.infra.manifest import (
     unregister_app,
 )
 from canvas.infra.paths import shared_dir
-from canvas.infra.runtime import LINUX_PYTHON_URL, TORCH_INDEX, TORCHAO_VERSION, WINDOWS_PYTHON_URL, refill_wheels, restore_tensorrt
+from canvas.infra.runtime import (
+    LINUX_PYTHON_SHA,
+    LINUX_PYTHON_URL,
+    TORCH_INDEX,
+    TORCHAO_VERSION,
+    WINDOWS_PYTHON_SHA,
+    WINDOWS_PYTHON_URL,
+    refill_wheels,
+    restore_tensorrt,
+)
 from canvas.models.provision import default_specs, is_optional, pack_notice, repair
 from canvas.models.registry import load_catalog
 
@@ -406,13 +415,16 @@ def test_installers_use_the_suite_runtime():
     windows = Path("installer/windows/install.ps1").read_text(encoding="utf-8")
     assert LINUX_PYTHON_URL in linux
     assert WINDOWS_PYTHON_URL in windows
-    assert "cpython-3.14" in LINUX_PYTHON_URL
-    assert "python-3.14" in WINDOWS_PYTHON_URL
+    assert LINUX_PYTHON_SHA in linux
+    assert WINDOWS_PYTHON_SHA in windows
+    assert "cpython-3.15.2" in LINUX_PYTHON_URL
+    assert "cpython-3.15.2%2B20261026-x86_64-pc-windows-msvc-install_only" in WINDOWS_PYTHON_URL
+    assert "freethreaded" not in WINDOWS_PYTHON_URL
     assert TORCH_INDEX == "https://download.pytorch.org/whl/cu130"
     assert TORCH_INDEX in linux
     assert TORCH_INDEX in windows
-    assert "runtime/py314-torch2.11-cu130" in linux
-    assert "runtime/py314-torch2.11-cu130" in windows
+    assert "runtime/py315-torch2.11-cu130" in linux
+    assert "runtime/py315-torch2.11-cu130" in windows
     assert "tensorrt-10" in linux
     assert "tensorrt-10" in windows
     assert "onnxruntime-gpu" in linux
@@ -449,7 +461,7 @@ def test_installers_resolve_numpy_from_pypi_and_pin_cuda_torch():
         assert "[gen]" in script
         assert "Repairing the suite runtime..." in script
         assert "PyTorch is already installed." in script
-        assert "TensorRT is skipped on Python 3.14." in script
+        assert "TensorRT is skipped on Python 3.15." in script
     assert "PyTorch wheels are already downloaded." in linux
     assert 'WHEELS="$APP/setup-work/wheels"' in linux
     assert '--find-links "$WHEELS"' in linux
@@ -510,7 +522,9 @@ def test_installers_resolve_numpy_from_pypi_and_pin_cuda_torch():
     assert "USERPROFILE" in windows
     assert "an elevated install must live under Program Files" in windows
     assert 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion' in windows
-    assert "python install 3.14 --reinstall" in windows
+    assert "cpython-3.15.2%2B20261026-x86_64-pc-windows-msvc-install_only" in windows
+    assert "tar.exe -xzf $archive -C $PythonDir --strip-components=1" in windows
+    assert "Python 3.15.2 failed the SHA-256 check." in windows
     assert "Get-Command py" not in windows
     assert "voxprint-gpu-probe-" in windows
     assert "-c $code" not in windows
@@ -619,14 +633,14 @@ def test_wheel_repair_pins_torch_to_cuda_and_torchao_to_pypi(monkeypatch, tmp_pa
     assert "torchao==0.18.0" in Path("pyproject.toml").read_text(encoding="utf-8")
 
 
-def test_tensorrt_on_python_314_is_skipped(monkeypatch):
+def test_tensorrt_on_python_315_is_skipped(monkeypatch):
     monkeypatch.setattr("canvas.infra.runtime.python_supports_tensorrt", lambda: False)
     called: list[list[str]] = []
     monkeypatch.setattr("canvas.infra.runtime._pip", lambda args: called.append(args))
     notes: list[str] = []
     restore_tensorrt(notes.append)
     assert called == []
-    assert notes == ["TensorRT is skipped on Python 3.14."]
+    assert notes == ["TensorRT is skipped on Python 3.15."]
 
 
 def _source_install_functions(env, script, cwd):
@@ -716,7 +730,7 @@ data_root
 @pytest.mark.skipif(sys.platform == "win32", reason="The Linux installer script runs on Linux.")
 def test_linux_setup_moves_a_standalone_runtime_aside(tmp_path):
     home = tmp_path / "alice"
-    runtime = home / ".local" / "share" / "voxprint" / "shared" / "runtime" / "py314-torch2.11-cu130"
+    runtime = home / ".local" / "share" / "voxprint" / "shared" / "runtime" / "py315-torch2.11-cu130"
     binary = runtime / "bin" / "python3"
     binary.parent.mkdir(parents=True)
     binary.write_text("#!/bin/sh\n", encoding="utf-8")
@@ -772,7 +786,7 @@ def test_windows_follows_a_python_junction_only_inside_the_install(tmp_path, hos
     real.mkdir(parents=True)
     real_exe = real / "python.exe"
     real_exe.write_bytes(b"")
-    alias = py_root / "cpython-3.14-windows-x86_64-none"
+    alias = py_root / "cpython-3.15-windows-x86_64-none"
     _windows_junction(alias, real)
     outside = tmp_path / "outside"
     outside.mkdir()
@@ -825,6 +839,6 @@ try {
     lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
     resolved = next(line for line in lines if line.startswith("RESOLVED=")).split("=", 1)[1]
     assert resolved.lower() == str(real_exe).lower()
-    assert "cpython-3.14-windows-x86_64-none" not in resolved.lower()
+    assert "cpython-3.15-windows-x86_64-none" not in resolved.lower()
     assert "ESCAPE_REJECTED" in lines
     assert "ROOT_REJECTED" in lines

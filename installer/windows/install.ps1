@@ -21,7 +21,7 @@ $Py = Join-Path $Venv "Scripts\python.exe"
 $SuiteHome = Join-Path $env:LOCALAPPDATA "VOXPrint AI Suite"
 $LegacyHome = Join-Path $env:LOCALAPPDATA "Voxprint"
 $Shared = Join-Path $SuiteHome "shared"
-$RuntimeRel = "runtime/py314-torch2.11-cu130"
+$RuntimeRel = "runtime/py315-torch2.11-cu130"
 $Runtime = Join-Path $Shared ($RuntimeRel -replace '/', '\')
 $RuntimePy = Join-Path $Runtime "Scripts\python.exe"
 $RuntimeCfg = Join-Path $Runtime "pyvenv.cfg"
@@ -41,7 +41,8 @@ foreach ($envName in @("LOCALAPPDATA", "APPDATA", "TEMP", "TMP")) {
     }
 }
 $Trt = Join-Path $Shared "tensorrt-10"
-$WindowsPythonUrl = "https://www.python.org/ftp/python/3.14.8/python-3.14.8-amd64.exe"
+$WindowsPythonUrl = "https://github.com/astral-sh/python-build-standalone/releases/download/20261026/cpython-3.15.2%2B20261026-x86_64-pc-windows-msvc-install_only.tar.gz"
+$WindowsPythonSha = "17769f04c4c8c228e9fb838a37d92f6a6401b170c5cd27fb3073f233f73bb2f9"
 $TorchIndex = "https://download.pytorch.org/whl/cu130"
 $Constraints = Join-Path $App "constraints.txt"
 $CudaConstraints = Join-Path $App "constraints-cuda.txt"
@@ -622,7 +623,7 @@ function Resolve-BasePython {
     $found = Get-ChildItem -LiteralPath $PythonDir -Filter python.exe -Recurse -File -ErrorAction SilentlyContinue |
         Select-Object -First 1
     if (-not $found) {
-        throw "uv installed Python 3.14 but the interpreter could not be found. Install Python 3.14 from $WindowsPythonUrl and run this setup again."
+        throw "Python 3.15.2 was installed but the interpreter could not be found. Install Python 3.15.2 from $WindowsPythonUrl and run this setup again."
     }
     $resolved = Resolve-ContainedPath $found.FullName $PythonDir
     Assert-AdminPath $resolved
@@ -673,22 +674,30 @@ function Invoke-Machine {
         Write-SetupHost
         Write-Host "Checking Python..."
         if (-not (Test-Path -LiteralPath $script:Uv)) {
-            throw "uv.exe is not bundled next to install.ps1. Install Python 3.14 from $WindowsPythonUrl and run this setup again."
+            throw "uv.exe is not bundled next to install.ps1. Install Python 3.15.2 from $WindowsPythonUrl and run this setup again."
         }
         Assert-ConstraintFiles
         Assert-AdminPath $script:Uv
-        Write-Host "Installing Python with uv..."
-        & $script:Uv python install 3.14 --reinstall --no-registry --no-config --install-dir $PythonDir
+        Write-Host "Installing Python 3.15.2..."
+        $archive = Join-Path $Work "cpython-3.15.2-windows.tar.gz"
+        Assert-NoReparse $archive
+        Invoke-WebRequest -UseBasicParsing -Uri $WindowsPythonUrl -OutFile $archive
+        $gotPy = (Get-FileHash -Algorithm SHA256 -Path $archive).Hash.ToLowerInvariant()
+        if ($gotPy -ne $WindowsPythonSha) { throw "Python 3.15.2 failed the SHA-256 check." }
+        Get-ChildItem -Force -LiteralPath $PythonDir | Remove-Item -Recurse -Force
+        & tar.exe -xzf $archive -C $PythonDir --strip-components=1
         if ($LASTEXITCODE -ne 0) {
-            throw "uv could not install Python 3.14. Install Python 3.14 from $WindowsPythonUrl and run this setup again."
+            throw "Setup could not install Python 3.15.2. Install Python 3.15.2 from $WindowsPythonUrl and run this setup again."
         }
-        $found = (& $script:Uv python find 3.14 --managed-python --no-config | Out-String).Trim()
-        if ($LASTEXITCODE -ne 0 -or -not $found) {
-            throw "uv installed Python 3.14 but the interpreter could not be found. Install Python 3.14 from $WindowsPythonUrl and run this setup again."
-        }
-        $script:Base = (($found -split '\r?\n') | Where-Object { $_.Trim() } | Select-Object -Last 1).Trim()
+        Remove-Item -LiteralPath $archive -Force
+        $script:Base = Join-Path $PythonDir "python.exe"
         if (-not (Test-Path -LiteralPath $script:Base)) {
-            throw "uv reported Python at '$script:Base', but that file does not exist. Install Python 3.14 from $WindowsPythonUrl and run this setup again."
+            $found = Get-ChildItem -LiteralPath $PythonDir -Filter python.exe -Recurse -File -ErrorAction SilentlyContinue |
+                Select-Object -First 1
+            if (-not $found) {
+                throw "Setup could not install Python 3.15.2. Install Python 3.15.2 from $WindowsPythonUrl and run this setup again."
+            }
+            $script:Base = $found.FullName
         }
         $script:Base = Resolve-ContainedPath $script:Base $PythonDir
         Assert-AdminPath $script:Base
@@ -727,13 +736,13 @@ function Invoke-Machine {
             Install-SuiteGpuPackages $Py ""
             if (-not (Test-SuiteGpuPackages $Py)) { throw "Setup stopped." }
         }
-        $CommonUrl = "https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.6.3/voxprint_common-0.6.3-py3-none-any.whl"
-        $CommonSha = "a18e5760863e34042c6eb16dd25d37d28055b9eb90a460c62407cdc2a09b43e4"
-        $CommonWheel = Join-Path $Fetch "voxprint_common-0.6.3-py3-none-any.whl"
+        $CommonUrl = "https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.6.4/voxprint_common-0.6.4-py3-none-any.whl"
+        $CommonSha = "1b7abcc99530d6f155b4be41fba26f3f27b8b54789d49282b936430c53a4314b"
+        $CommonWheel = Join-Path $Fetch "voxprint_common-0.6.4-py3-none-any.whl"
         Assert-NoReparse $CommonWheel
         Invoke-WebRequest -UseBasicParsing -Uri $CommonUrl -OutFile $CommonWheel
         $got = (Get-FileHash -Algorithm SHA256 -Path $CommonWheel).Hash.ToLowerInvariant()
-        if ($got -ne $CommonSha) { throw "voxprint-common 0.6.3 failed the SHA-256 check." }
+        if ($got -ne $CommonSha) { throw "voxprint-common 0.6.4 failed the SHA-256 check." }
         Assert-AdminPath $script:Uv
         Assert-AdminPath $Py
         & $script:Uv pip install --no-config --python $Py $CommonWheel
@@ -838,7 +847,7 @@ function Invoke-User {
         & $Py -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 14) else 1)"
         Assert-NoReparse $Trt
         if ($LASTEXITCODE -eq 0) {
-            Write-Host "TensorRT is skipped on Python 3.14."
+            Write-Host "TensorRT is skipped on Python 3.15."
         } elseif (-not (Get-ChildItem -Force -LiteralPath $Trt -ErrorAction SilentlyContinue | Select-Object -First 1)) {
             New-Item -ItemType Directory -Force $Trt | Out-Null
             Invoke-Py @("-m", "pip", "--isolated", "install", "-c", $Constraints, "--target", $Trt, "--upgrade-strategy", "only-if-needed", "tensorrt-cu13==10.16.1.11")

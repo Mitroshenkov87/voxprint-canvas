@@ -51,7 +51,7 @@ def test_the_frame_count_starts_at_six(app, home: Path) -> None:
     assert frames.value() == 6
     assert frames.minimum() == 1
     assert frames.maximum() == 99
-    assert frames.buttonSymbols() == QAbstractSpinBox.ButtonSymbols.NoButtons
+    assert frames.buttonSymbols() == QAbstractSpinBox.ButtonSymbols.UpDownArrows
     assert label.text() == "Frames"
     assert window.photoshoot.count == 6
     window.findChild(QCheckBox, "photoshootMode").click()
@@ -266,3 +266,54 @@ def test_cancel_keeps_the_frames_already_finished(app, home: Path, monkeypatch) 
     assert not (folder / "02.png").exists()
     cancel = window.findChild(QPushButton, "photoshootCancel")
     assert cancel is not None and cancel.text() == "Cancel"
+
+
+def test_the_frame_stepper_stays_next_to_photoshoot_across_modes(app, home: Path) -> None:
+    """The count stepper appears beside Photoshoot in simple, a preset, and Expert."""
+    window = _window(home, lambda job, inputs: rgb())
+    window.setFixedSize(1920, 1080)
+    window.show()
+    mode = window.findChild(QCheckBox, "photoshootMode")
+    frames = window.findChild(QSpinBox, "photoshootFrames")
+    label = window.findChild(QLabel, "photoshootFramesLabel")
+    assert mode is not None and frames is not None
+    assert not frames.isVisible()
+    mode.click()
+    for _ in range(4):
+        app.processEvents()
+    assert frames.isVisible() and label.isVisible()
+    assert frames.buttonSymbols() == QAbstractSpinBox.ButtonSymbols.UpDownArrows
+    start = frames.value()
+    frames.stepUp()
+    assert frames.value() == start + 1
+    frames.stepDown()
+    assert frames.value() == start
+
+    def geometry():
+        for _ in range(4):
+            app.processEvents()
+        mode_box = mode.mapTo(window, mode.rect().topLeft())
+        frames_box = frames.mapTo(window, frames.rect().topLeft())
+        return (frames.isVisible(), label.isVisible(),
+                mode_box.x(), mode_box.y(), frames_box.x(), frames_box.y(),
+                frames.width(), frames.height(), frames.value())
+
+    simple = geometry()
+    assert simple[0] and simple[1]
+    assert simple[4] > simple[2]  # stepper to the right of the checkbox
+    assert abs(simple[5] - simple[3]) <= 4
+    for button in window.findChildren(QPushButton):
+        if button.text() == "Best" and button.isVisible():
+            button.click()
+            break
+    preset = geometry()
+    window.set_expert(True)
+    expert = geometry()
+    window.set_expert(False)
+    back = geometry()
+    assert simple[0:2] == preset[0:2] == expert[0:2] == back[0:2] == (True, True)
+    # Same row relationship in every mode (x/y of the pair may shift slightly
+    # if the left column wraps, but the stepper stays immediately right).
+    for row in (simple, preset, expert, back):
+        assert row[4] > row[2]
+        assert abs(row[5] - row[3]) <= 4

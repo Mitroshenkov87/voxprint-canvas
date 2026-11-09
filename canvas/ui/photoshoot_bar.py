@@ -39,17 +39,19 @@ if TYPE_CHECKING:
 
 
 FRAMES_PAD = 12
+# Room for the up/down stepper on the right, so the digits are not clipped.
+FRAMES_STEPPER = 18
 
 
 def fit_frames(spin: QSpinBox) -> None:
-    """Give the frame count room for its widest value, the border and some air.
+    """Give the frame count room for its widest value, the stepper, and some air.
 
     Args:
         spin: The Frames spin box.
     """
     spin.ensurePolished()
     widest = max(spin.fontMetrics().horizontalAdvance(str(value)) for value in (spin.minimum(), spin.maximum()))
-    spin.setMinimumWidth(widest + 2 * FRAMES_PAD)
+    spin.setMinimumWidth(widest + 2 * FRAMES_PAD + FRAMES_STEPPER)
 
 
 @dataclass
@@ -167,15 +169,14 @@ class PhotoshootBar:
         self.frames.setObjectName("photoshootFrames")
         self.frames.setRange(1, MAX_FRAMES)
         self.frames.setValue(DEFAULT_FRAMES)
-        self.frames.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+        self.frames.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.UpDownArrows)
         self.frames.setCorrectionMode(QAbstractSpinBox.CorrectionMode.CorrectToNearestValue)
         self.frames.setAccelerated(True)
-        # Under a stylesheet, NoButtons with right-hand step buttons collapses the
-        # edit field to 1 px (Qt 6.12), so the digits never showed. Empty buttons
-        # on the left give the field the whole box.
+        # Keep a real right-hand stepper. A zero-width button, or NoButtons
+        # with a stylesheet, collapsed the edit field to 1 px on Qt 6.12.
         self.frames.setStyleSheet(
             "QSpinBox#photoshootFrames::up-button, QSpinBox#photoshootFrames::down-button"
-            " { subcontrol-position: top left; width: 0; border: none; image: none; }"
+            f" {{ width: {FRAMES_STEPPER}px; }}"
         )
         self.frames.setAlignment(Qt.AlignmentFlag.AlignCenter)
         fit_frames(self.frames)

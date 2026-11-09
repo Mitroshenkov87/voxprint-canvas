@@ -83,7 +83,7 @@ def test_install_sources_do_not_use_git_or_an_unsafe_index_strategy():
         assert "git+" not in text, path
     pyproject = (root / "pyproject.toml").read_text(encoding="utf-8")
     assert 'voxprint-common[ui]==0.7.0' in pyproject
-    sha = "fb66c7967a318b222351a2442fa8c2f1ac7cafdf5ca0a2609e63554d25f6893c"
+    sha = "39e56588c14fafb4f060d79da3afcfc444c1da7a34f4028a8d0e60488a45e232"
     for name in ("tests.yml", "audit.yml", "docs.yml"):
         workflow = (root / ".github" / "workflows" / name).read_text(encoding="utf-8")
         assert sha in workflow

@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 from voxprint_common.i18n import tr
-from voxprint_common.ui.theme import CONTROL_BG, CONTROL_BORDER, TEXT
+from voxprint_common.ui.theme import CONTROL_BG, CONTROL_BORDER, TEXT, mark_compact
 
 from canvas.app.i18n import text
 from canvas.ui.theme import BUTTON_RADIUS
@@ -27,10 +27,6 @@ GENERATE_HEIGHT = 52
 GENERATE_FONT = 20
 GENERATE_MIN = 300
 GENERATE_PAD = 32
-# The shared QPushButton rule adds min-height plus 4 px padding top and bottom, which
-# is taller than HEIGHT and pushes the bottom border out. This widget-level rule
-# wins over it: no minimum, no vertical padding, so the text centres in the fixed height.
-ROW_FIT = "min-height: 0; padding-top: 0; padding-bottom: 0;"
 
 
 def build(window, parts) -> QWidget:
@@ -108,7 +104,7 @@ def _picture_actions(window) -> QWidget:
 
     The picture button stays immediately left of Improve prompt. The mask button
     is hidden with no reserved gap until a picture is in use, so the two stay
-    adjacent. Height, ROW_FIT, and horizontal padding match Improve prompt;
+    adjacent. Height, compact style, and horizontal padding match Improve prompt;
     width comes from the label's font metrics.
     """
     box = QWidget()
@@ -122,9 +118,8 @@ def _picture_actions(window) -> QWidget:
     ):
         if button is None:
             continue
-        # Same rule as Improve prompt, plus a fixed-height host so the button
-        # cannot shrink to the 20 px text hint when min-height is 0.
-        button.setStyleSheet(f"QPushButton#{name} {{ {ROW_FIT} }}")
+        # Same compact style and fixed height as Improve prompt.
+        mark_compact(button)
         button.setFixedHeight(HEIGHT)
         metrics = button.fontMetrics()
         button.setMinimumWidth(metrics.horizontalAdvance(button.text()) + 24)
@@ -154,8 +149,8 @@ def _improve_split(window, improve, revert) -> QWidget:
         " border-top-right-radius: 0; border-bottom-right-radius: 0; padding: 0; min-height: 0; font-size: 16px; }"
     )
     improve.setProperty("chip", False)
+    mark_compact(improve)
     improve.setFixedHeight(HEIGHT)
-    improve.setStyleSheet(f"QPushButton#improvePrompt {{ {ROW_FIT} }}")
     revert.hide()
     revert.setMaximumWidth(0)
     line.addWidget(back)
@@ -169,11 +164,13 @@ def _improve_split(window, improve, revert) -> QWidget:
             (
                 f"QPushButton#improvePrompt {{ background: {CONTROL_BG}; color: {TEXT};"
                 f" border: 1px solid {CONTROL_BORDER}; border-radius: {BUTTON_RADIUS}px;"
-                f" border-top-left-radius: 0; border-bottom-left-radius: 0; border-left-width: 0; {ROW_FIT} }}"
+                " border-top-left-radius: 0; border-bottom-left-radius: 0; border-left-width: 0; }"
             )
             if on
-            else f"QPushButton#improvePrompt {{ {ROW_FIT} }}"
+            else ""
         )
+        mark_compact(improve)
+        improve.setFixedHeight(HEIGHT)
 
     def after_improve() -> None:
         if revert.isEnabled():
@@ -207,10 +204,10 @@ def _menu_button(name: str) -> QPushButton:
     button = QPushButton()
     button.setObjectName(name)
     button.setAutoDefault(False)
+    mark_compact(button)
     button.setFixedHeight(HEIGHT)
     button.setStyleSheet(
-        f"QPushButton#{name} {{ {ROW_FIT} }}"
-        f" QPushButton#{name}::menu-indicator {{ image: none; width: 0; }}"
+        f"QPushButton#{name}::menu-indicator {{ image: none; width: 0; }}"
     )
     return button
 

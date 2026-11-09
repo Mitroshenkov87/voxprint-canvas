@@ -28,7 +28,7 @@ from voxprint_common.i18n import add_catalogs, set_language, tr
 from voxprint_common.mdl.names import CLI_NAME
 from voxprint_common.ui.expert import ExpertMode
 from voxprint_common.ui.safety import ReviewedOutput
-from voxprint_common.ui.simple_image import Phase, SimpleImageWidget as SimpleWidget
+from voxprint_common.ui.simple_image import Phase, SimpleImageWidget as SimpleWidget, HISTORY_CELL_SIZE, HISTORY_CELL_GAP
 from voxprint_common.worker.qt import InfoBar
 from canvas.app.i18n import text
 from canvas.app.info import APP_VERSION, ENLARGE_NAME
@@ -162,6 +162,8 @@ class ShellWindow(QMainWindow):
             on_history=self._on_history,
             on_refresh=self._on_refresh,
             surface=shell.surface,
+            cell_size=HISTORY_CELL_SIZE,
+            cell_gap=HISTORY_CELL_GAP,
         )
         self._expert = ExpertMode()
         self._expert.subscribe(self.view.set_expert)

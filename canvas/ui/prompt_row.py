@@ -232,49 +232,9 @@ def _left_panel(window, outer, row, parts) -> None:
     body.addWidget(scroll, 0)
     body.addLayout(right, 1)
     outer.insertLayout(index, body, 1)
-    window._history_snap_watch = _HistorySnap(window, split, history)
-    split.installEventFilter(window._history_snap_watch)
-    window._snap_history = window._history_snap_watch.snap
+    # History cells snap through SimpleImageWidget (HISTORY_CELL_SIZE / GAP).
 
 
-
-
-_CELL = 88
-_GAP = 8
-
-
-class _HistorySnap(QObject):
-    """With Expert on, size the history strip to whole thumbnails so none is sliced.
-
-    The strip never leaves the picture column; this only trims it to the last whole
-    cell. Extra cells stay reachable with the strip's own horizontal scroll. With
-    Expert off the strip fills the column and lines up with the picture frame.
-    """
-
-    def __init__(self, window, split, history) -> None:
-        super().__init__(split)
-        self._window = window
-        self._split = split
-        self._history = history
-
-    def eventFilter(self, watched, event):  # noqa: N802
-        if watched is self._split and event.type() == QEvent.Type.Resize:
-            self.snap()
-        return False
-
-    def snap(self) -> None:
-        history = self._history
-        full = self._split.width()
-        if not self._window.view._expert_panel.isVisible() or full <= 0:
-            history.setMaximumWidth(16777215)
-            history.setMinimumWidth(0)
-            return
-        cells = max(1, (full + _GAP) // (_CELL + _GAP))
-        fit = cells * (_CELL + _GAP) - _GAP
-        width = min(full, fit)
-        # Leave the scroll step on whole cells.
-        history.horizontalScrollBar().setSingleStep(_CELL + _GAP)
-        history.setFixedWidth(width)
 
 
 class _Resized(QObject):

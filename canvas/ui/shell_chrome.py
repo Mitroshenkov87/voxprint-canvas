@@ -151,9 +151,6 @@ QLabel[dialogTitle="true"] {{ font-size: 18px; }}
 QDialog QPushButton:checked {{
     background: {PRIMARY}; color: {TEXT_ON_PRIMARY}; border-color: {PRIMARY_BORDER}; font-weight: 600;
 }}
-QPushButton#actionPicture, QPushButton#actionMask {{
-    padding: 2px 12px; min-height: 28px;
-}}
 QPushButton[primary="true"] {{
     background: {PRIMARY}; color: {TEXT_ON_PRIMARY}; border: 1px solid {PRIMARY_BORDER}; font-weight: 600;
 }}
@@ -343,17 +340,25 @@ def _sync_lora_picker(window):
 
 
 def _toolbar(window, row):
+    """Create Use a picture and Edit the mask; the action row places them.
+
+    ``row`` is the top bar (More / Expert). These buttons used to sit there and
+    looked unattached; they now live on the Improve prompt line.
+    """
+    del row
     picture = QPushButton(text("canvas.action.picture"))
     picture.setObjectName("actionPicture")
+    picture.setAutoDefault(False)
+    picture.setProperty("chip", False)
     picture.clicked.connect(window._open_picture)
     mask = QPushButton(text("canvas.action.mask"))
     mask.setObjectName("actionMask")
+    mask.setAutoDefault(False)
+    mask.setProperty("chip", False)
     mask.clicked.connect(window._open_mask)
     mask.hide()
     window._picture_button = picture
     window._mask_button = mask
-    row.insertWidget(0, mask)
-    row.insertWidget(0, picture)
 
 
 def _menu(window, menu):

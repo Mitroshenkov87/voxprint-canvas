@@ -51,6 +51,7 @@ def build(window, parts) -> QWidget:
     policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
     policy.setHeightForWidth(True)
     options.setSizePolicy(policy)
+    flow.addWidget(_picture_actions(window))
     flow.addWidget(_improve_split(window, parts["improve"], parts["revert"]))
     flow.addWidget(_proportions(window))
     flow.addWidget(_image_size(window))
@@ -99,6 +100,37 @@ def _photoshoot_line(mode, label, frames) -> QWidget:
     row.addWidget(mode)
     row.addWidget(side, 1)
     return line
+
+
+
+def _picture_actions(window) -> QWidget:
+    """Use a picture (and Edit the mask once a picture is chosen) on the Improve line.
+
+    The picture button stays immediately left of Improve prompt. The mask button
+    is hidden with no reserved gap until a picture is in use, so the two stay
+    adjacent. Height, ROW_FIT, and horizontal padding match Improve prompt;
+    width comes from the label's font metrics.
+    """
+    box = QWidget()
+    box.setObjectName("pictureActions")
+    line = QHBoxLayout(box)
+    line.setContentsMargins(0, 0, 0, 0)
+    line.setSpacing(8)
+    for button, name in (
+        (getattr(window, "_picture_button", None), "actionPicture"),
+        (getattr(window, "_mask_button", None), "actionMask"),
+    ):
+        if button is None:
+            continue
+        # Same rule as Improve prompt, plus a fixed-height host so the button
+        # cannot shrink to the 20 px text hint when min-height is 0.
+        button.setStyleSheet(f"QPushButton#{name} {{ {ROW_FIT} }}")
+        button.setFixedHeight(HEIGHT)
+        metrics = button.fontMetrics()
+        button.setMinimumWidth(metrics.horizontalAdvance(button.text()) + 24)
+        line.addWidget(button)
+    box.setFixedHeight(HEIGHT)
+    return box
 
 
 def _improve_split(window, improve, revert) -> QWidget:

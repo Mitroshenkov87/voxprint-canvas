@@ -41,7 +41,7 @@ def test_same_prompts_and_seeds_and_kept_images_stay_in_temp(tmp_path: Path):
     by_base: dict[str, list[tuple[str, int]]] = {}
     for row in rows:
         by_base.setdefault(row.base, []).append((row.prompt, row.seed))
-    bases = ["moss-image-sft", "z-image-turbo"]
+    bases = ["z-image-turbo", "moss-image-sft"]
     assert list(by_base) == bases
     assert all(by_base[base] == pairs for base in bases)
     assert seen == [(base, prompt, seed) for base in bases for prompt, seed in pairs]

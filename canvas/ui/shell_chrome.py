@@ -255,6 +255,7 @@ def fit_panel(window, enabled):
     if not enabled:
         split.setSizes([max(1, window.width()), 0])
         _flow_heights(window, False)
+        _lock_chip_widths(window)
         return
     _reap(window)
     _paint_panel(window)
@@ -265,6 +266,7 @@ def fit_panel(window, enabled):
     split.setSizes([width, PANEL_WIDTH])
     _flow_heights(window, True)
     _settle_form(window)
+    _lock_chip_widths(window)
 
 
 def polish(window):
@@ -291,6 +293,7 @@ def polish(window):
     _hide_row_resets(window)
     _labels(window)
     _fit_controls(window)
+    _lock_chip_widths(window)
     _wrap_rows(window)
     _sync_lora_picker(window)
     _sync_lora_chip(window)
@@ -762,17 +765,28 @@ def _even_rows(window):
             field = field_item.widget() if field_item is not None else None
             if field is None:
                 continue
-            if isinstance(field, QPlainTextEdit):
-                one_line = field.objectName() in _ONE_LINE_TEXT
-                field.setFixedHeight(FIELD_HEIGHT if one_line else 2 * FIELD_HEIGHT)
-                if one_line:
-                    field.setStyleSheet("QPlainTextEdit { padding: 0 2px; }")
-                    field.document().setDocumentMargin(5)
-                    field.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-            elif isinstance(field, QAbstractSpinBox | QComboBox | QLineEdit):
-                field.setFixedHeight(FIELD_HEIGHT)
-            if isinstance(field, QAbstractSpinBox):
-                inset_spin(field)
+            # Geometry-only tweaks must not emit as value edits: common would
+            # _sync_presets and shrink the quality chips a few pixels.
+            document = field.document() if isinstance(field, QPlainTextEdit) else None
+            field.blockSignals(True)
+            if document is not None:
+                document.blockSignals(True)
+            try:
+                if isinstance(field, QPlainTextEdit):
+                    one_line = field.objectName() in _ONE_LINE_TEXT
+                    field.setFixedHeight(FIELD_HEIGHT if one_line else 2 * FIELD_HEIGHT)
+                    if one_line:
+                        field.setStyleSheet("QPlainTextEdit { padding: 0 2px; }")
+                        field.document().setDocumentMargin(5)
+                        field.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+                elif isinstance(field, QAbstractSpinBox | QComboBox | QLineEdit):
+                    field.setFixedHeight(FIELD_HEIGHT)
+                if isinstance(field, QAbstractSpinBox):
+                    inset_spin(field)
+            finally:
+                field.blockSignals(False)
+                if document is not None:
+                    document.blockSignals(False)
             label = label_item.widget() if label_item is not None else None
             if isinstance(label, QLabel):
                 label.setMinimumHeight(FIELD_HEIGHT)
@@ -1140,6 +1154,27 @@ def _flow_size(item):
     return max(width, 1), max(height, 1)
 
 
+def _lock_chip_widths(window):
+    """Keep chip columns from shrinking after a later common refit.
+
+    Common remeasures chips when Expert opens. A first polish already reserved
+    the face width; later passes may only grow it (a Custom ' + changes' label).
+    """
+    for button in window.findChildren(QPushButton):
+        name = button.objectName()
+        # Quality chips only. Style chips may still tighten so that row
+        # stays on one line when the Expert panel narrows the column.
+        if not name.startswith("chip-quality-"):
+            continue
+        text = button.text()
+        reserved = button.property("reservedWidth")
+        if reserved is None or button.property("reservedText") != text:
+            reserved = max(button.minimumWidth(), button.width(), 1)
+            button.setProperty("reservedWidth", reserved)
+            button.setProperty("reservedText", text)
+        button.setMinimumWidth(max(button.minimumWidth(), int(reserved)))
+
+
 def _fit_text(button):
     words = button.text()
     font = QFont(button.font())
@@ -1162,9 +1197,12 @@ def _fit_text(button):
         # give up padding (down to 6px a side) when the row is tight.
         button.setProperty("tightWidth", advance + 12)
         button.setProperty("naturalWidth", advance + pad * 2)
-        button.setMinimumWidth(advance + 12)
+        need = advance + 12
     else:
-        button.setMinimumWidth(advance + pad * 2)
+        need = advance + pad * 2
+    # A later polish (opening Expert, toggling 18+) was shrinking chips by a
+    # few pixels as the font finished loading. Never shrink the reserved width.
+    button.setMinimumWidth(max(button.minimumWidth(), need))
     policy = button.sizePolicy()
     policy.setHorizontalPolicy(QSizePolicy.Policy.Minimum)
     button.setSizePolicy(policy)

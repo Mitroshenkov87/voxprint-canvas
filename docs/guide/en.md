@@ -650,7 +650,7 @@ Open both logs; the last lines name the step that failed.
 | Message | What to do |
 |---|---|
 | *uv could not install Python 3.14. Install Python 3.14 from … and run this setup again.* | Install Python 3.14 from the address in the message, then run Setup again |
-| *voxprint-common 0.6.4 failed the SHA-256 check.* | The download was damaged. Check the connection and run Setup again |
+| *voxprint-common 0.7.0 failed the SHA-256 check.* | The download was damaged. Check the connection and run Setup again |
 | *CUDA 13.0 PyTorch is still missing.* | The graphics libraries did not install. Check the connection and the free space, then run Setup again |
 | *Setup stopped because this path contains a link: …* | A folder Setup writes to is a link or junction. Replace it with a normal folder and run Setup again |
 | *VOXPrint AI Canvas could not start its setup script.* | PowerShell could not be started. Install PowerShell 7 and run Setup again |

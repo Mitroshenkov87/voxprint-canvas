@@ -50,6 +50,8 @@ def test_catalog_loads_with_moss_as_the_default_text_base():
     assert compact.pin_note.startswith("PENDING:")
     assert compact_row["notes"] == "(fp8/int8/nf4, chosen by moss-prequant)"
     assert "(fp8/int8/nf4, chosen by moss-prequant)" in compact.pin_note
+    assert "moss-image-compressed" in compact.pin_note
+    assert "TODO-pending-calibration" in compact.pin_note
     for model_id, offload, hint, minimum in (
         ("moss-image-sft-bf16-16gb", "release-after-encode", 11, 16),
         ("moss-image-sft-bf16", "none", 27, 24),
@@ -78,6 +80,36 @@ def test_catalog_loads_with_moss_as_the_default_text_base():
         assert catalog.by_id(model_id).optional is True
         assert model_id not in required
     assert Generator is ZImageGenerator
+
+
+
+def test_the_common_compressed_placeholder_is_not_a_canvas_pin():
+    """voxprint-common 0.7.0 lists moss-image-compressed as the default download.
+
+    The sha256 and size are TODO-pending-calibration (no artifact). Canvas must
+    not copy that placeholder digest into the catalog or treat the row as pinned.
+    Z-Image stays an optional separate download.
+    """
+    from voxprint_common.mdl.index import load_index
+
+    index = load_index(remote=False)
+    compressed = index.get("moss-image-compressed")
+    assert compressed is not None
+    assert compressed.default is True
+    assert compressed.optional is False
+    assert compressed.revision == "TODO-pending-calibration"
+    assert "TODO-pending-calibration" in compressed.note
+    z_image = index.get("z-image")
+    assert z_image is not None
+    assert z_image.optional is True
+    catalog = load_catalog()
+    compact = catalog.by_id("voxprint-moss-image-sft-compact")
+    assert compact.pinned() is False
+    raw = json.loads(Path("canvas/models/catalog.json").read_text(encoding="utf-8"))
+    compact_row = next(row for row in raw["models"] if row["id"] == compact.id)
+    assert compact_row.get("revision") in ("", None)
+    assert compressed.sha256 not in json.dumps(compact_row)
+
 
 
 def test_text_plans_pick_moss_unless_the_caller_asks_for_z_image():

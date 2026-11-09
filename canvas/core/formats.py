@@ -44,8 +44,10 @@ FORGE_EXPORTS = frozenset({
     OutputFormat.PNG, OutputFormat.JPEG, OutputFormat.WEBP, OutputFormat.AVIF,
 })
 
-# Canvas keeps its historical AVIF and JPEG qualities. WebP quality comes from
-# the shared writer: lossless for masters, its lossy default for pictures.
+# Canvas keeps its historical AVIF and JPEG qualities. WebP quality is left
+# unset (the 0.7.0 QUALITY_LOSSLESS vs None distinction): the shared writer
+# then applies default_quality(purpose) — QUALITY_LOSSLESS for masters, 90
+# for pictures.
 _AVIF_QUALITY = 80
 _JPEG_QUALITY = 95
 _JXL_DISTANCE = 1.0
@@ -129,9 +131,11 @@ def extension(fmt: OutputFormat) -> str:
 def _setting(fmt: OutputFormat) -> dict[str, Any]:
     """The shared save format for one Canvas container.
 
-    WebP and PNG leave the quality unset so the save purpose decides (lossless
-    for masters, the shared lossy default for pictures); AVIF and JPEG keep the
-    historical Canvas qualities.
+    WebP and PNG omit ``quality`` so the shared writer treats it as unset
+    (None) and fills ``default_quality(purpose)``: ``QUALITY_LOSSLESS`` for
+    masters, the lossy default for pictures. Do not pass ``quality="lossless"``
+    unless a picture should stay lossless. AVIF and JPEG keep the historical
+    Canvas qualities.
     """
     setting: dict[str, Any] = {"format": _COMMON_FORMATS[fmt]}
     if fmt is OutputFormat.AVIF:

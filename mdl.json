@@ -1323,7 +1323,7 @@
     },
     {
       "id": "voxprint-moss-image-sft-compact",
-      "note": "PENDING: compressed once by VOXPrint on the test VM; repo, revision and sha256 TBD; MDL will not download until pinned. Quant (fp8/int8/nf4, chosen by moss-prequant)."
+      "note": "PENDING: compressed once by VOXPrint on the test VM; repo, revision and sha256 TBD; MDL will not download until pinned. The voxprint-common 0.7.0 index lists moss-image-compressed as the default download with sha256 and size marked TODO-pending-calibration (no artifact; do not copy that placeholder hash or download it until calibration). Quant (fp8/int8/nf4, chosen by moss-prequant)."
     }
   ]
 }

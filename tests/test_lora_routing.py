@@ -135,7 +135,7 @@ def test_detect_base_reads_the_header_then_metadata_then_the_filename(tmp_path: 
     assert detect_base(_file(tmp_path / "zname", "cup.z-image.safetensors", {})) == FAMILY_ZIMAGE
     assert detect_base(_file(tmp_path / "case", "cup.MOSS.safetensors", {})) == MOSS_LORA_BASE
     untagged = _file(tmp_path / "old", "cup.safetensors", {})
-    assert detect_base(untagged) == ZIMAGE_TURBO_MDL_ID
+    assert detect_base(untagged) == FAMILY_ZIMAGE
     recorded = _entry(_file(tmp_path / "side", "cup.moss.safetensors", {}), "sdxl")
     assert detect_base(recorded) == "sdxl"
 
@@ -155,8 +155,8 @@ def test_route_lora_loads_a_listed_base_and_asks_for_a_retrain_otherwise(tmp_pat
     assert route_lora(zimage, bases, ZIMAGE_TURBO_MDL_ID) == LoraRoute(ZIMAGE_TURBO_MDL_ID)
     assert route_lora(zimage, bases, MOSS_IMAGE_SFT) == LoraRoute("", FAMILY_ZIMAGE)
     untagged = _entry(_file(tmp_path / "old", "cup.safetensors", {}))
-    assert route_lora(untagged, bases, ZIMAGE_TURBO_MDL_ID) == LoraRoute(ZIMAGE_TURBO_MDL_ID, "")
-    assert route_lora(untagged, bases, MOSS_IMAGE_SFT) == LoraRoute("", FAMILY_TURBO)
+    assert route_lora(untagged, bases, ZIMAGE_TURBO_MDL_ID) == LoraRoute(ZIMAGE_TURBO_MDL_ID)
+    assert route_lora(untagged, bases, MOSS_IMAGE_SFT) == LoraRoute("", FAMILY_ZIMAGE)
     other = _entry(_file(tmp_path / "sdxl", "cup.safetensors", {"voxprint.lora.base": "sdxl"}))
     assert route_lora(other, bases, MOSS_IMAGE_SFT) == LoraRoute("", "sdxl")
     choice = base_choice(other, bases, MOSS_IMAGE_SFT)

@@ -151,6 +151,15 @@ def _text_model(catalog: Catalog, tier: Tier, base: str | None = None) -> tuple[
         if moss is None:
             raise OptionalModelUnavailable()
         return moss, PIPELINE_MOSS
+    if family == "z-image":
+        # Optional full Z-Image. There is no Canvas pin yet; stay absent-safe.
+        wanted = "16gb" if tier is Tier.GB16 else "24gb" if tier is Tier.GB24 else None
+        if wanted is None:
+            assert_never(tier)
+        full = next((spec for spec in catalog.models if spec.text_base == "z-image" and spec.tier == wanted), None)
+        if full is None:
+            raise OptionalModelUnavailable()
+        return full, PIPELINE_TEXT
     if family not in catalog.text_bases:
         raise BaseNotSelected()
     raise BaseNotSelected()

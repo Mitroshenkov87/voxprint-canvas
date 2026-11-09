@@ -692,7 +692,7 @@ def _trained_tag(meta: dict[str, str], path: Path | None, recorded: str = "") ->
     named = _filename_base(path)
     if named:
         return named
-    return FAMILY_TURBO
+    return FAMILY_ZIMAGE
 
 
 def detect_base(path_or_lora: Path | UserLora | str) -> str:
@@ -712,7 +712,7 @@ def detect_base(path_or_lora: Path | UserLora | str) -> str:
     ``<name>.moss.safetensors``, ``<name>.moss5b.safetensors``,
     ``<name>.z-image.safetensors``, or ``<name>.zimg6b.safetensors`` is used
     when those strings are absent. An untagged file, including an older LoRA,
-    is ``z-image-turbo``.
+    is the Z-Image family (``z-image``) and still loads on Turbo.
 
     Args:
         path_or_lora: A weight file, or a LoRA whose ``weights`` file is read.

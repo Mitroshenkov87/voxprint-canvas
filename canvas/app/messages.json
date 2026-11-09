@@ -153,7 +153,7 @@
       "en": "The text model has not been selected yet."
     },
     "error.optional_model": {
-      "en": "The optional MOSS-Image model is not available."
+      "en": "The optional model is not available."
     },
     "error.vram": {
       "en": "This picture does not fit on the GPU."

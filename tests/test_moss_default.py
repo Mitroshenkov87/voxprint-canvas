@@ -98,12 +98,15 @@ def test_the_common_compressed_placeholder_is_not_a_canvas_pin():
 
     index = load_index(remote=False)
     assert index.get("moss-image-compressed") is None
+    turbo = index.get("z-image-turbo")
+    assert turbo is not None
+    assert turbo.default is True
+    assert turbo.optional is False
     z_image = index.get("z-image")
     assert z_image is not None
-    assert z_image.default is True
-    assert z_image.optional is False
-    assert default_model() == "z-image"
-    assert model_default() == "z-image"
+    assert z_image.default is False
+    assert default_model() == "z-image-turbo"
+    assert model_default() == "z-image-turbo"
     catalog = load_catalog()
     compact = catalog.by_id("voxprint-moss-image-sft-compact")
     assert compact.pinned() is False
@@ -318,7 +321,7 @@ def test_a_stored_moss_choice_selects_the_optional_moss_plan(tmp_path, monkeypat
     from canvas.models.default_base import selected_text_base
 
     monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
-    assert model_default() == "z-image"
+    assert model_default() == "z-image-turbo"
     assert selected_text_base() == "z-image-turbo"
     set_model_default("moss")
     assert model_default() == "moss"
@@ -355,3 +358,38 @@ def test_a_catalog_without_the_compact_moss_row_still_starts_and_plans(tmp_path)
     assert implicit.model_id == "z-image-turbo-bf16-16gb"
     with pytest.raises(OptionalModelUnavailable):
         build_plan(catalog, _screened(), Tier.GB16, base="moss-image-sft")
+
+
+
+def test_full_z_image_is_an_optional_download(tmp_path, monkeypatch):
+    """model.default=z-image is the optional full model, not an alias of Turbo."""
+    from voxprint_common.suite_settings import model_default, set_model_default
+
+    from canvas.models.default_base import selected_text_base
+    from canvas.models.plan import OptionalModelUnavailable
+    from canvas.models.registry import RegistryError
+
+    monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
+    set_model_default("z-image")
+    assert model_default() == "z-image"
+    assert selected_text_base() == "z-image"
+    catalog = load_catalog()
+    assert "z-image" not in catalog.text_bases
+    # The catalog has no full z-image text row yet: planning must not raise RegistryError.
+    try:
+        build_plan(catalog, _screened(), Tier.GB16, base="z-image")
+    except OptionalModelUnavailable:
+        pass
+    except RegistryError as exc:
+        raise AssertionError(f"full z-image raised RegistryError: {exc}") from exc
+    else:
+        raise AssertionError("expected OptionalModelUnavailable when the full z-image row is absent")
+    # Default (omitted base) still follows the stored z-image pick, which is optional/unavailable.
+    try:
+        build_plan(catalog, _screened(), Tier.GB16)
+    except OptionalModelUnavailable:
+        pass
+    except RegistryError as exc:
+        raise AssertionError(f"implicit full z-image raised RegistryError: {exc}") from exc
+    else:
+        raise AssertionError("expected OptionalModelUnavailable for a stored full z-image pick")

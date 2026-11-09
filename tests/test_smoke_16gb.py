@@ -78,7 +78,7 @@ def test_summary_counts_gate_results_and_peaks():
     assert body["size"] == [1024, 1024]
 
 
-COMMON_SHA = "43f7604a95c9297fa577b00d9653d0d03b9acf4f1448c7b1855f04d880d6bf1b"
+COMMON_SHA = "1badeee091ead72379a72e948384f2fdc25c4701bb826527758527e486900382"
 
 
 def test_wrappers_pin_common_025_fetch_through_mdl_and_run_the_tool():

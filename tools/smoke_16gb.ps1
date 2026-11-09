@@ -31,7 +31,7 @@ if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction Sile
 $Root = Split-Path -Parent $PSScriptRoot
 $CommonVersion = "0.7.0"
 $CommonUrl = "https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.7.0/voxprint_common-0.7.0-py3-none-any.whl"
-$CommonSha = "43f7604a95c9297fa577b00d9653d0d03b9acf4f1448c7b1855f04d880d6bf1b"
+$CommonSha = "1badeee091ead72379a72e948384f2fdc25c4701bb826527758527e486900382"
 $Installed = Join-Path $env:ProgramFiles "VOXPrint AI Suite\Canvas\venv\Scripts\python.exe"
 
 if ($Python -eq "") { $Python = $Installed }

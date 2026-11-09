@@ -58,7 +58,7 @@ jobs:
           mkdir -p wheels
           curl -fsSL -o wheels/voxprint_common-0.7.0-py3-none-any.whl \
             https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.7.0/voxprint_common-0.7.0-py3-none-any.whl
-          python -c "import hashlib, pathlib; p=pathlib.Path('wheels/voxprint_common-0.7.0-py3-none-any.whl'); d=hashlib.sha256(p.read_bytes()).hexdigest(); e='43f7604a95c9297fa577b00d9653d0d03b9acf4f1448c7b1855f04d880d6bf1b'; raise SystemExit(None if d==e else 'voxprint-common 0.7.0 failed the SHA-256 check: '+d)"
+          python -c "import hashlib, pathlib; p=pathlib.Path('wheels/voxprint_common-0.7.0-py3-none-any.whl'); d=hashlib.sha256(p.read_bytes()).hexdigest(); e='1badeee091ead72379a72e948384f2fdc25c4701bb826527758527e486900382'; raise SystemExit(None if d==e else 'voxprint-common 0.7.0 failed the SHA-256 check: '+d)"
           uv venv .app
           uv venv .tools
           uv pip install --python .app/bin/python --find-links wheels -e ".[dev]"

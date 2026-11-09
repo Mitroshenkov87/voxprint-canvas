@@ -404,7 +404,7 @@ if [ "$app_ready" -eq 0 ]; then
   fi
 fi
 COMMON_URL="https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.7.0/voxprint_common-0.7.0-py3-none-any.whl"
-COMMON_SHA="43f7604a95c9297fa577b00d9653d0d03b9acf4f1448c7b1855f04d880d6bf1b"
+COMMON_SHA="1badeee091ead72379a72e948384f2fdc25c4701bb826527758527e486900382"
 common_wheel="$WHEELS/voxprint_common-0.7.0-py3-none-any.whl"
 curl -fsSL -o "$common_wheel" "$COMMON_URL"
 echo "$COMMON_SHA  $common_wheel" | sha256sum -c -

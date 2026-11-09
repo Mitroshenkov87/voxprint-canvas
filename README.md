@@ -8,9 +8,9 @@ Local text-to-image and image-to-image generation for the VOXPrint AI Suite. Eve
 
 > Status: 0.1.0 release candidate.
 
-Text to image uses Z-Image-Turbo in BF16 on every tier. Image to image covers restyle, inpaint, outpaint, pose, depth, and edge. On a 24 GB GPU, Creative is available as well.
+Text to image uses MOSS-Image-SFT on every tier. Image to image covers restyle, inpaint, outpaint, pose, depth, and edge. On a 24 GB GPU, Creative is available as well. Z-Image and Z-Image-Turbo stay available as an optional download. The 16 GB compact build of MOSS-Image-SFT is not published yet — its repository, revision and checksum are still pending, so the model downloader does not fetch the default pack until they are pinned.
 
-Third-party add-ons are off until you turn them on. Third-party weights are provided by their authors, who are responsible for the licence and training data. Voxprint does not host or redistribute them. Output defaults to AVIF, with JPEG XL and WebP beside it.
+Third-party add-ons are off until you turn them on. Third-party weights are provided by their authors, who are responsible for the licence and training data. Voxprint does not host or redistribute them. Output defaults to WebP — quality 90 for regular pictures, lossless for series and Forge hand-offs — with AVIF, JPEG XL, PNG and JPEG beside it. Saved pictures carry no prompt metadata unless you opt in: the **Save prompt in file** setting, `VOXPRINT_CANVAS_SAVE_METADATA=1`, or `--save-metadata`.
 
 ## Install
 
@@ -38,7 +38,7 @@ python -m pytest
 python tools/audit.py --python python
 ```
 
-Tests do not download weights and do not need a GPU. AVIF, JPEG XL, WebP and JPEG are written by the installed libraries. HEIC still needs a system codec. The Windows setup and the Linux archive install Python when it is missing, the GPU libraries, and the default Z-Image-Turbo pack. Optional packs download when you choose them, after the window shows the size and the estimated time.
+Tests do not download weights and do not need a GPU. AVIF, JPEG XL, WebP and JPEG are written by the installed libraries. HEIC still needs a system codec. The Windows setup and the Linux archive install Python when it is missing, the GPU libraries, and the default MOSS-Image-SFT pack. Optional packs download when you choose them, after the window shows the size and the estimated time.
 
 ### GPU smoke test on Windows
 
@@ -66,7 +66,7 @@ The script uses the Python the Setup installed (`-Python <python.exe>` picks ano
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE). Models downloaded by the app keep their own licences.
+Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE). Models downloaded by the app keep their own licences; the default model, MOSS-Image-SFT, is published under Apache-2.0.
 
 ## Roadmap
 

@@ -5,22 +5,23 @@ wheels include libavif (BSD-2-Clause) for AVIF. JPEG XL goes through imagecodecs
 (BSD-3-Clause). pillow-jxl-plugin is not used. Forge opens PNG, JPEG and WebP.
 AVIF stays available as an export option, and PNG stays an option too.
 
-Every picture can carry text fields describing how it was made (seed, steps,
-the LoRA, the prompt). PNG stores them as text chunks. WebP, AVIF and JPEG
-store the same fields in an XMP packet and in EXIF: ImageDescription holds the
-prompt, Software names the app and UserComment holds the whole record as JSON.
-JPEG XL goes through imagecodecs, which takes no metadata, so JXL pictures are
-written without it; HEIF pictures carry none either.
+PNG, WebP, AVIF and JPEG are written by the shared ``voxprint_common.image``
+writer: it encodes in memory, publishes the bytes atomically, and records
+metadata as XMP (an iTXt chunk keyed ``XML:com.adobe.xmp`` on PNG; an XMP
+packet plus a small EXIF copy on WebP, AVIF and JPEG). Metadata is off unless
+the caller passes a non-empty mapping. JPEG XL goes through imagecodecs, which
+takes no metadata, so JXL pictures are written without it; HEIF pictures carry
+none either.
 """
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
 from enum import Enum
 from pathlib import Path
-from typing import assert_never
-from xml.etree import ElementTree
-from xml.sax.saxutils import escape
+from typing import Any, assert_never
+
+from voxprint_common.image import read_metadata as _common_read_metadata
+from voxprint_common.image import save_image as _common_save_image
 
 from canvas.safety.image import SafeImage
 
@@ -43,16 +44,9 @@ FORGE_EXPORTS = frozenset({
     OutputFormat.PNG, OutputFormat.JPEG, OutputFormat.WEBP, OutputFormat.AVIF,
 })
 
-# Metadata: one rdf:Description with namespaced attributes per field.
-_METADATA_NS = "https://voxprint.app/ns/picture/1.0/"
-_RDF_DESCRIPTION = "{http://www.w3.org/1999/02/22-rdf-syntax-ns#}Description"
-_XML_EXTRA = {'"': "&quot;"}
-
-# Visually lossless defaults. AVIF stays 4:4:4. JPEG XL distance 1.0 matches that size.
+# Canvas keeps its historical AVIF and JPEG qualities. WebP quality comes from
+# the shared writer: lossless for masters, its lossy default for pictures.
 _AVIF_QUALITY = 80
-_AVIF_SPEED = 6
-_AVIF_SUBSAMPLING = "4:4:4"
-_WEBP_QUALITY = 90
 _JPEG_QUALITY = 95
 _JXL_DISTANCE = 1.0
 
@@ -71,6 +65,15 @@ _EXPORT_NAMES = {
     "webp": OutputFormat.WEBP,
     "avif": OutputFormat.AVIF,
 }
+
+# Containers the shared writer saves, and the suffixes it reads metadata back.
+_COMMON_FORMATS = {
+    OutputFormat.PNG: "png",
+    OutputFormat.WEBP: "webp",
+    OutputFormat.AVIF: "avif",
+    OutputFormat.JPEG: "jpeg",
+}
+_COMMON_SUFFIXES = frozenset({".png", ".webp", ".avif", ".jpg", ".jpeg"})
 
 
 class UnsupportedFormat(ValueError):
@@ -123,83 +126,134 @@ def extension(fmt: OutputFormat) -> str:
     assert_never(fmt)
 
 
-def _png_text(metadata: Mapping[str, str] | None):  # -> PngInfo | None
-    """PNG text chunks for one picture. None when nothing is recorded.
+def _setting(fmt: OutputFormat) -> dict[str, Any]:
+    """The shared save format for one Canvas container.
 
-    Values are iTXt (UTF-8) chunks so a prompt in any language round-trips.
+    WebP and PNG leave the quality unset so the save purpose decides (lossless
+    for masters, the shared lossy default for pictures); AVIF and JPEG keep the
+    historical Canvas qualities.
+    """
+    setting: dict[str, Any] = {"format": _COMMON_FORMATS[fmt]}
+    if fmt is OutputFormat.AVIF:
+        setting["quality"] = _AVIF_QUALITY
+    elif fmt is OutputFormat.JPEG:
+        setting["quality"] = _JPEG_QUALITY
+    return setting
+
+
+def _decimal_int(value: Any) -> Any:
+    """``value`` as an int when it is a decimal string, otherwise unchanged."""
+    if isinstance(value, str):
+        text = value.strip()
+        digits = text[1:] if text[:1] in ("+", "-") else text
+        if digits and digits.isdecimal():
+            return int(text)
+    return value
+
+
+def _common_metadata(metadata: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    """Map Canvas picture metadata onto the shared schema. None when empty.
+
+    The historical flat mapping records every field as a string and names one
+    LoRA ``lora_name``/``lora_sha256``/``lora_strength``; the shared schema
+    types ``seed`` and ``steps`` as integers and lists every LoRA as
+    ``{"name", "strength", "sha256", "base"}``. Both shapes are accepted so
+    existing callers keep working; LoRA fields that were not provided are not
+    invented. Fields the shared schema does not know are dropped.
     """
     if not metadata:
         return None
-    from PIL.PngImagePlugin import PngInfo
+    document: dict[str, Any] = {}
+    prompt = metadata.get("prompt")
+    if prompt is not None:
+        document["prompt"] = str(prompt)
+    seed = _decimal_int(metadata.get("seed"))
+    if seed is not None:
+        document["seed"] = seed
+    steps = _decimal_int(metadata.get("steps"))
+    if steps is not None:
+        document["steps"] = steps
+    base = metadata.get("base", metadata.get("base_model"))
+    if base is not None:
+        document["base"] = str(base)
+    strength = metadata.get("lora_strength")
+    if strength is not None:
+        document["lora_strength"] = strength
+    loras = metadata.get("loras")
+    if loras:
+        document["loras"] = loras
+        return document
+    name = metadata.get("lora_name")
+    digest = metadata.get("lora_sha256")
+    lora: dict[str, Any] = {}
+    if name is not None:
+        lora["name"] = str(name)
+    if strength is not None:
+        lora["strength"] = strength
+    if digest is not None:
+        lora["sha256"] = str(digest)
+    if lora:
+        document["loras"] = [lora]
+    return document
 
-    info = PngInfo()
-    for key, value in metadata.items():
-        info.add_itxt(str(key), str(value))
-    return info
 
+def _canvas_metadata(metadata: Mapping[str, Any]) -> dict[str, Any]:
+    """Normalize shared metadata back to Canvas's flat string mapping.
 
-def _xmp_packet(metadata: Mapping[str, str]) -> bytes:
-    """One XMP packet recording every field as a voxprint attribute.
-
-    Values are XML-escaped and the packet is UTF-8, so any prompt round-trips.
+    A picture saved without metadata (every shared field empty) reads back as
+    an empty mapping. One LoRA reads back under the historical ``lora_name``,
+    ``lora_strength`` and ``lora_sha256`` keys; several read back as the shared
+    ``loras`` list.
     """
-    attributes = "".join(
-        f' voxprint:{key}="{escape(str(value), _XML_EXTRA)}"'
-        for key, value in metadata.items()
-    )
-    body = (
-        '<?xpacket begin="\ufeff" id="W5M0MpCehiHzreSzNTczkc9d"?>\n'
-        '<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="VOXPrint Canvas">\n'
-        ' <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">\n'
-        f'  <rdf:Description rdf:about="" xmlns:voxprint="{_METADATA_NS}"{attributes}/>\n'
-        ' </rdf:RDF>\n'
-        '</x:xmpmeta>\n'
-        '<?xpacket end="w"?>'
-    )
-    return body.encode("utf-8")
-
-
-def _exif_block(metadata: Mapping[str, str]):  # -> Image.Exif | None
-    """EXIF block for one picture. None when nothing is recorded.
-
-    ImageDescription (0x010E) holds the prompt and Software (0x0131) names
-    the app. UserComment (0x9286) holds the whole record as JSON, encoded
-    with the EXIF ``UNICODE`` prefix.
-    """
-    if not metadata:
-        return None
-    from PIL import Image
-
-    record = dict(metadata)
-    block = Image.Exif()
-    block[0x010E] = str(record.get("prompt", ""))
-    block[0x0131] = "VOXPrint Canvas"
-    block[0x9286] = b"UNICODE\0" + json.dumps(record, ensure_ascii=False, sort_keys=True).encode("utf-16")
-    return block
-
-
-def _xmp_exif(metadata: Mapping[str, str] | None):  # -> dict[str, object]
-    """Save kwargs carrying metadata. Empty when nothing is recorded.
-
-    The single metadata writer for non-PNG containers. XMP is the primary
-    record (read_metadata reads it); EXIF is a convenience copy. Swap this
-    for the shared voxprint-common helper when it ships.
-    """
-    if not metadata:
-        return {}
-    return {"xmp": _xmp_packet(metadata), "exif": _exif_block(metadata)}
+    fields: dict[str, Any] = {}
+    if metadata.get("prompt") is not None:
+        fields["prompt"] = str(metadata["prompt"])
+    if metadata.get("seed") is not None:
+        fields["seed"] = str(metadata["seed"])
+    if metadata.get("steps") is not None:
+        fields["steps"] = str(metadata["steps"])
+    base = metadata.get("base_model")
+    if base is None:
+        base = metadata.get("base")
+    if base is not None:
+        fields["base_model"] = str(base)
+    if metadata.get("lora_strength") is not None:
+        fields["lora_strength"] = str(metadata["lora_strength"])
+    loras = metadata.get("loras") or []
+    if len(loras) == 1 and isinstance(loras[0], Mapping):
+        lora = loras[0]
+        if lora.get("name") is not None:
+            fields["lora_name"] = str(lora["name"])
+        if lora.get("strength") is not None:
+            fields["lora_strength"] = str(lora["strength"])
+        if lora.get("sha256") is not None:
+            fields["lora_sha256"] = str(lora["sha256"])
+        if lora.get("base") is not None:
+            fields["lora_base"] = str(lora["base"])
+    elif loras:
+        fields["loras"] = [
+            {key: (None if value is None else str(value)) for key, value in lora.items()}
+            for lora in loras
+            if isinstance(lora, Mapping)
+        ]
+    return fields
 
 
 def save_image(image: SafeImage, path: Path, fmt: OutputFormat = DEFAULT_FORMAT, *,
-               metadata: Mapping[str, str] | None = None, lossless: bool = False) -> None:
+               metadata: Mapping[str, Any] | None = None, lossless: bool = False,
+               purpose: str | None = None) -> None:
     """Write one released image. Any other object is refused.
 
-    PNG is lossless and carries ``metadata`` as text chunks. WebP, AVIF and
-    JPEG carry the same fields in an XMP packet plus an EXIF block. JPEG XL
-    goes through imagecodecs, which takes no metadata, so JXL pictures are
-    written without it; HEIF pictures carry none either. A path whose
-    extension does not match the format is refused either way. ``lossless``
-    applies to WebP only; series and Forge hand-offs set it.
+    PNG, WebP, AVIF and JPEG go through the shared voxprint-common writer.
+    ``metadata`` is written only when it is a non-empty mapping, in the
+    historical flat string mapping or the shared schema (see
+    :func:`_common_metadata`). ``purpose`` picks the WebP default: ``"master"``
+    — also the legacy ``lossless=True`` used by series and Forge hand-offs —
+    is lossless WebP; ``"picture"`` (the default) is lossy at the shared
+    default quality. An explicit ``purpose`` wins over ``lossless``. JPEG XL
+    goes through imagecodecs and HEIF through a system codec; both carry no
+    metadata. A path whose extension does not match the format is refused
+    either way.
     """
     if type(image) is not SafeImage:
         raise TypeError("only a released image can be saved")
@@ -209,29 +263,6 @@ def save_image(image: SafeImage, path: Path, fmt: OutputFormat = DEFAULT_FORMAT,
     if path.suffix.lower() != extension(fmt):
         raise UnsupportedFormat("the file extension does not match the format")
     picture = Image.frombytes("RGB", (image.width, image.height), image.data)
-    if fmt is OutputFormat.PNG:
-        picture.save(path, format="PNG", pnginfo=_png_text(metadata))
-        return
-    extra = _xmp_exif(metadata)
-    if fmt is OutputFormat.AVIF:
-        picture.save(
-            path,
-            format="AVIF",
-            quality=_AVIF_QUALITY,
-            subsampling=_AVIF_SUBSAMPLING,
-            speed=_AVIF_SPEED,
-            **extra,
-        )
-        return
-    if fmt is OutputFormat.WEBP:
-        if lossless:
-            picture.save(path, format="WEBP", lossless=True, quality=100, method=4, **extra)
-        else:
-            picture.save(path, format="WEBP", quality=_WEBP_QUALITY, **extra)
-        return
-    if fmt is OutputFormat.JPEG:
-        picture.save(path, format="JPEG", quality=_JPEG_QUALITY, **extra)
-        return
     if fmt is OutputFormat.JXL:
         import numpy as np
         from imagecodecs import jpegxl_encode
@@ -245,34 +276,36 @@ def save_image(image: SafeImage, path: Path, fmt: OutputFormat = DEFAULT_FORMAT,
         except (KeyError, OSError) as exc:
             raise UnsupportedFormat("HEIC needs a system codec") from exc
         return
-    assert_never(fmt)
+    if purpose is None:
+        purpose = "master" if lossless else "picture"
+    elif purpose not in ("master", "picture"):
+        raise ValueError("purpose must be 'master' or 'picture'")
+    try:
+        _common_save_image(
+            picture,
+            path,
+            _setting(fmt),
+            metadata=_common_metadata(metadata),
+            write_metadata=bool(metadata),
+            purpose=purpose,
+        )
+    except RuntimeError as exc:
+        # The shared writer raises RuntimeError when the Pillow build lacks the
+        # codec; report it like a failed encode so encoder probes (selftest)
+        # mark the format missing instead of crashing.
+        raise OSError(str(exc)) from exc
 
 
-def read_metadata(path: Path) -> dict[str, str]:
+def read_metadata(path: Path) -> dict[str, Any]:
     """Read the fields ``save_image`` recorded for one picture.
 
-    PNG text chunks are read back as written. WebP, AVIF and JPEG carry an
-    XMP packet instead, which is parsed here. Containers written without
-    metadata (and pictures saved without any) read back as an empty mapping.
+    WebP, AVIF, JPEG and PNG go through the shared reader and are normalized
+    back to Canvas's flat string mapping: a picture saved without metadata
+    reads back as an empty mapping, and one LoRA reads back as
+    ``lora_name``/``lora_strength``/``lora_sha256`` (see
+    :func:`_canvas_metadata`). JPEG XL and HEIF carry no metadata and read
+    back empty.
     """
-    from PIL import Image
-
-    with Image.open(path) as image:
-        image.load()
-        packet = image.info.get("xmp")
-        if packet is None:
-            text = getattr(image, "text", None)
-            if not text:
-                return {}
-            return {str(key): str(value) for key, value in text.items()}
-    if isinstance(packet, str):
-        packet = packet.encode("utf-8")
-    prefix = f"{{{_METADATA_NS}}}"
-    fields: dict[str, str] = {}
-    for element in ElementTree.fromstring(packet).iter():
-        if element.tag != _RDF_DESCRIPTION:
-            continue
-        for attr, value in element.attrib.items():
-            if attr.startswith(prefix):
-                fields[attr[len(prefix):]] = value
-    return fields
+    if path.suffix.lower() not in _COMMON_SUFFIXES:
+        return {}
+    return _canvas_metadata(_common_read_metadata(path))

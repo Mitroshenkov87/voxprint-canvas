@@ -25,7 +25,7 @@ from typing import Literal, Protocol, cast
 from canvas.app.i18n import text
 from canvas.app.shell_run import RunStopped
 from canvas.core.exchange import handoff_image
-from canvas.core.formats import EXPORT_FORMAT, OutputFormat, extension
+from canvas.core.formats import EXPORT_FORMAT, OutputFormat, extension, save_image
 from canvas.infra.errors import note_crash, note_debug, note_error, note_timing
 from canvas.infra.phase_vram import Phase, ResidualVram, phase, require_released, start_phase
 from canvas.infra.stage_timer import StageTimes, log_detail, note_peak_mib, set_current, timed
@@ -69,6 +69,7 @@ from canvas.safety.gate import (
     SafetyUnavailable,
     StylisedBlocked,
     YouthContextBlocked,
+    issue,
 )
 from canvas.safety.image import RawImage, SafeImage
 
@@ -1247,15 +1248,21 @@ def _read_frame(path: Path) -> tuple[int, int, bytes]:
 
 
 def _write_overview(path: Path, width: int, height: int, rgb: bytes) -> None:
-    """The contact sheet, in the same container as the frames."""
+    """The contact sheet, in the same container as the frames.
+
+    The sheet is assembled from frames that already passed the check, so it is
+    issued as a released image and saved with the series master purpose.
+    """
     if path.suffix.lower() == ".png":
         _write_png(path, width, height, rgb)
         return
-    from PIL import Image
-
-    fmt = {".jpg": "JPEG", ".jpeg": "JPEG", ".webp": "WEBP", ".avif": "AVIF"}[path.suffix.lower()]
-    options = {"lossless": True} if fmt == "WEBP" else {"quality": 90}
-    Image.frombytes("RGB", (width, height), rgb).save(path, format=fmt, **options)
+    fmt = {
+        ".jpg": OutputFormat.JPEG,
+        ".jpeg": OutputFormat.JPEG,
+        ".webp": OutputFormat.WEBP,
+        ".avif": OutputFormat.AVIF,
+    }[path.suffix.lower()]
+    save_image(issue(RawImage(width, height, rgb)), path, fmt, purpose="master")
 
 
 def _write_png(path: Path, width: int, height: int, rgb: bytes) -> None:

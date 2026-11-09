@@ -78,7 +78,7 @@ def test_metadata_unicode_and_escaping_round_trip(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fmt: OutputFormat
 ) -> None:
     _require_container(fmt)
-    metadata = {"prompt": "кот на окне", "note": '<bikes> & "boats"'}
+    metadata = {"prompt": 'кот на окне <bikes> & "boats"'}
     path = _save(tmp_path, monkeypatch, fmt, metadata)
     assert read_metadata(path) == metadata
 
@@ -149,11 +149,14 @@ def test_job_with_metadata_on_writes_the_recipe_into_the_picture(
     job = _job(save_metadata=True)
     fields = _picture_metadata(job)
     assert fields["prompt"] == job.prompt
-    assert fields["seed"] == "42"
-    assert fields["steps"] == "8"
+    assert fields["seed"] == 42
+    assert fields["steps"] == 8
     path = tmp_path / "picture.png"
     save_image(_released_image(monkeypatch), path, job.fmt, metadata=fields)
-    assert read_metadata(path) == fields
+    written = read_metadata(path)
+    assert written["prompt"] == job.prompt
+    assert written["seed"] == "42"
+    assert written["steps"] == "8"
 
 
 def test_metadata_enabled_env_wins_over_the_setting(monkeypatch: pytest.MonkeyPatch) -> None:

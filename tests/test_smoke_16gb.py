@@ -34,7 +34,8 @@ def test_gate_is_unavailable_when_a_classifier_is_missing():
 
 def test_manifest_failures_cover_empty_missing_and_hash(tmp_path):
     good = {
-        "models": [{"id": "z-image-turbo-bf16-16gb", "ok": True, "detail": ""},
+        "models": [{"id": "voxprint-moss-image-sft-compact", "ok": True, "detail": ""},
+                   {"id": "z-image-turbo-bf16-16gb", "ok": True, "detail": "not_downloaded"},
                    {"id": "z-image-creative-bf16", "ok": True, "detail": "not_downloaded"}],
         "classifiers": [{"id": "nsfw-image-detection", "ok": True, "detail": ""}],
     }

@@ -27,6 +27,10 @@ GENERATE_HEIGHT = 52
 GENERATE_FONT = 20
 GENERATE_MIN = 300
 GENERATE_PAD = 32
+# The shared QPushButton rule adds min-height plus 4 px padding top and bottom, which
+# is taller than HEIGHT and pushes the bottom border out. This widget-level rule
+# wins over it: no minimum, no vertical padding, so the text centres in the fixed height.
+ROW_FIT = "min-height: 0; padding-top: 0; padding-bottom: 0;"
 
 
 def build(window, parts) -> QWidget:
@@ -115,10 +119,11 @@ def _improve_split(window, improve, revert) -> QWidget:
     back.setStyleSheet(
         f"QPushButton#revertSegment {{ background: {CONTROL_BG}; color: {TEXT};"
         f" border: 1px solid {CONTROL_BORDER}; border-radius: {BUTTON_RADIUS}px;"
-        " border-top-right-radius: 0; border-bottom-right-radius: 0; padding: 0; font-size: 16px; }"
+        " border-top-right-radius: 0; border-bottom-right-radius: 0; padding: 0; min-height: 0; font-size: 16px; }"
     )
     improve.setProperty("chip", False)
     improve.setFixedHeight(HEIGHT)
+    improve.setStyleSheet(f"QPushButton#improvePrompt {{ {ROW_FIT} }}")
     revert.hide()
     revert.setMaximumWidth(0)
     line.addWidget(back)
@@ -132,10 +137,10 @@ def _improve_split(window, improve, revert) -> QWidget:
             (
                 f"QPushButton#improvePrompt {{ background: {CONTROL_BG}; color: {TEXT};"
                 f" border: 1px solid {CONTROL_BORDER}; border-radius: {BUTTON_RADIUS}px;"
-                " border-top-left-radius: 0; border-bottom-left-radius: 0; border-left-width: 0; }"
+                f" border-top-left-radius: 0; border-bottom-left-radius: 0; border-left-width: 0; {ROW_FIT} }}"
             )
             if on
-            else ""
+            else f"QPushButton#improvePrompt {{ {ROW_FIT} }}"
         )
 
     def after_improve() -> None:
@@ -171,7 +176,10 @@ def _menu_button(name: str) -> QPushButton:
     button.setObjectName(name)
     button.setAutoDefault(False)
     button.setFixedHeight(HEIGHT)
-    button.setStyleSheet("QPushButton::menu-indicator { image: none; width: 0; }")
+    button.setStyleSheet(
+        f"QPushButton#{name} {{ {ROW_FIT} }}"
+        f" QPushButton#{name}::menu-indicator {{ image: none; width: 0; }}"
+    )
     return button
 
 

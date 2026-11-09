@@ -252,6 +252,9 @@ def fit_panel(window, enabled):
     split = getattr(window, "_split", None)
     if split is None:
         return
+    snap = getattr(window, "_snap_history", None)
+    if snap is not None:
+        QTimer.singleShot(0, snap)
     if not enabled:
         split.setSizes([max(1, window.width()), 0])
         _flow_heights(window, False)

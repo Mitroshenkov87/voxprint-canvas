@@ -42,6 +42,9 @@ from canvas.models.verified import VerifiedCache, flush_process_cache, process_c
 _RATE = 8 * 1024 * 1024
 _SAFETY_ROLES = ("prompt-guard", "zero-shot", "face-detector", "age", "nsfw", "age-fine")
 OPTIONAL_IDS = (
+    "voxprint-moss-image-sft-compact",
+    "moss-image-sft-bf16-16gb",
+    "moss-image-sft-bf16",
     "z-image-turbo-fun-controlnet-union-bf16-lite",
     "z-image-turbo-fun-controlnet-union-bf16",
     "z-image-creative-bf16",

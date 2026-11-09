@@ -731,7 +731,7 @@ function Invoke-Machine {
             if (-not (Test-SuiteGpuPackages $Py)) { throw "Setup stopped." }
         }
         $CommonUrl = "https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.7.0/voxprint_common-0.7.0-py3-none-any.whl"
-        $CommonSha = "39e56588c14fafb4f060d79da3afcfc444c1da7a34f4028a8d0e60488a45e232"
+        $CommonSha = "43f7604a95c9297fa577b00d9653d0d03b9acf4f1448c7b1855f04d880d6bf1b"
         $CommonWheel = Join-Path $Fetch "voxprint_common-0.7.0-py3-none-any.whl"
         Assert-NoReparse $CommonWheel
         Invoke-WebRequest -UseBasicParsing -Uri $CommonUrl -OutFile $CommonWheel

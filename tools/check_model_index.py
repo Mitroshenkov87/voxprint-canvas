@@ -8,11 +8,12 @@ and every file in mdl.json must match its descriptor by path, size and SHA-256.
 mdl.json keeps those explicit hashes. In the FP32 ``-upstream`` fallback rows, the
 transformer files are matched against the descriptor's ``prebuilt`` fallback.
 
-The 0.7.0 bundled index may list ``moss-image-compressed`` as the default
-download with ``revision``, sha256 and size marked TODO-pending-calibration
-(no artifact, not signed). That row is not in ``CANVAS_IDS`` and must not be
-fetched or pinned until calibration replaces the placeholder. ``z-image`` is
-an optional separate download and is also not required here.
+The 0.7.0 bundled index no longer lists ``moss-image-compressed``. Canvas
+must not look that id up as a required pin, must not invent a hash for it,
+and must stay absent-safe if a residual reference remains. Canvas treats
+Z-Image-Turbo as the default generator; MOSS is an optional download. This
+checker still only verifies the ids in ``CANVAS_IDS`` and does not fetch
+Z-Image or MOSS weights.
 
     python tools/check_model_index.py          # network: huggingface.co
 """

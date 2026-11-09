@@ -73,7 +73,7 @@ from canvas.ui.worker_checks import WorkerChecks
 
 LORA_NOTE_MS = 12_000
 """How long the queued retrain note stays up."""
-_RETRAIN_TARGET = "MOSS-Image"
+_RETRAIN_TARGET = "Z-Image-Turbo"
 
 
 class _NeedImage(Exception):
@@ -332,8 +332,8 @@ class ShellWindow(QMainWindow):
         old.widget.deleteLater()
         self._lora_bar = None
 
-    def _selected_retrain(self, key: str | None = None) -> tuple[UserLora, str] | None:
-        """The selected LoRA and its trained base, when Canvas cannot run that base."""
+    def _selected_retrain(self, key: str | None = None) -> tuple[UserLora, str, str] | None:
+        """The selected LoRA, trained base, and notice code when it cannot run as-is."""
         if key is None:
             key = str(self.shell.layout.get("shell.addons") or "")
         if not key:
@@ -343,9 +343,15 @@ class ShellWindow(QMainWindow):
             route = route_lora(selected) if selected is not None else None
         except Exception:  # noqa: BLE001 - a lookup failure shows nothing and does not start a job
             return None
-        if selected is None or route is None or route.base:
+        if selected is None or route is None:
             return None
-        return selected, route.retrain_from
+        if not route.base:
+            return selected, route.retrain_from, "lora.retrain"
+        from canvas.models.user_lora import CODE_NEEDS_OPTIONAL_MOSS, moss_weights_ready
+
+        if route.base == "moss-image-sft" and not moss_weights_ready():
+            return selected, route.base, CODE_NEEDS_OPTIONAL_MOSS
+        return None
 
     def _show_lora_base_note(self, key: str) -> None:
         """Offer a Forge retrain when the pick was trained on a base Canvas cannot run.
@@ -356,17 +362,24 @@ class ShellWindow(QMainWindow):
         if found is None:
             self._hide_lora_bar()
             return
-        self._present_retrain(found[0], found[1])
+        lora, trained, code = found
+        self._present_retrain(lora, trained, code)
 
-    def _present_retrain(self, lora: UserLora, trained: str) -> None:
+    def _present_retrain(self, lora: UserLora, trained: str, code: str = "lora.retrain") -> None:
         """Show the retrain title, note, and Forge button for ``lora``."""
         self._hide_lora_bar()
         self._retrain_lora = lora
         self._retrain_from = trained
+        if code == "lora.needs_optional_moss":
+            title = text("canvas.lora.needs_optional_moss_title")
+            note = text("canvas.lora.needs_optional_moss_note", target=_RETRAIN_TARGET)
+        else:
+            title = text("canvas.lora.retrain_title")
+            note = text("canvas.lora.retrain_note", base=trained, target=_RETRAIN_TARGET)
         bar = InfoBar(
             self,
-            text("canvas.lora.retrain_title"),
-            text("canvas.lora.retrain_note", base=trained, target=_RETRAIN_TARGET),
+            title,
+            note,
         )
         button = QPushButton(text("canvas.lora.retrain_action"), bar.widget)
         button.setObjectName("loraRetrain")
@@ -600,9 +613,9 @@ class ShellWindow(QMainWindow):
         """Start one Generate press in the worker. True while the worker has the job."""
         blocked = self._selected_retrain()
         if blocked is not None:
-            lora, trained = blocked
-            self._present_retrain(lora, trained)
-            self.shell.layout.block(text("lora.retrain", base=trained))
+            lora, trained, code = blocked
+            self._present_retrain(lora, trained, code)
+            self.shell.layout.block(text(code, base=trained))
             self.view.refresh()
             return False
         if self.photoshoot.enabled:

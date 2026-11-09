@@ -106,15 +106,16 @@ def test_stub_generator_becomes_unavailable_after_the_plan():
     waiting = ZImageGenerator(replace(catalog, default_text_base=None), Tier.GB16)
     try:
         waiting.generate(screened)
-    except BaseNotSelected as exc:
-        assert str(exc) == "The text model has not been selected yet."
+    except ModelNotReady as exc:
+        assert exc.plan.pipeline_class == "ZImagePipeline"
+        assert exc.plan.diffusers == "0.41.0"
     else:
-        raise AssertionError("expected an unset text model")
+        raise AssertionError("expected the stub to refuse")
     generator = ZImageGenerator(catalog, Tier.GB16)
     try:
         generator.generate(screened)
     except ModelNotReady as exc:
-        assert exc.plan.pipeline_class == "MOSSImagePipeline"
+        assert exc.plan.pipeline_class == "ZImagePipeline"
         assert exc.plan.diffusers == "0.41.0"
     else:
         raise AssertionError("expected the stub to refuse")

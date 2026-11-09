@@ -1,6 +1,6 @@
 """Model Forge LoRAs under the shared models folder.
 
-A folder is listed when its record matches the Z-Image-Turbo base this app
+A folder is listed when its record matches a text base this app
 runs. One adapter is loaded on the transformer at a time.
 """
 from __future__ import annotations
@@ -14,6 +14,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from canvas.infra.paths import models_dir
+from canvas.models.default_base import selected_text_base
 from canvas.models.registry import load_catalog
 
 SCHEMA = "voxprint-model/1"
@@ -33,6 +34,17 @@ _MOSS_TAGS = frozenset({
     "moss-image-sft",
     "moss5b",
 })
+# Forge family strings. Full Z-Image is ``z-image``; Turbo is ``z-image-turbo``.
+# Forge never trains on Turbo. The legacy short tags are ``zimg6b`` and ``moss5b``.
+FAMILY_ZIMAGE = "z-image"
+FAMILY_TURBO = "z-image-turbo"
+ZIMAGE_SHORT_TAG = "zimg6b"
+# Default strength for a Z-Image family LoRA on Turbo. No auto-scaling.
+ZIMAGE_LORA_DEFAULT_STRENGTH = 1.0
+_ZIMAGE_FULL_TAGS = frozenset({FAMILY_ZIMAGE, ZIMAGE_SHORT_TAG})
+_TURBO_TAGS = frozenset({FAMILY_TURBO})
+_HEADER_TRAINED_BASE = "voxprint.lora.trained_base"
+_HEADER_COMPATIBLE_BASES = "voxprint.lora.compatible_bases"
 # Strength for a LoRA whose record names none.
 CLI_DEFAULT_STRENGTH = 0.7
 CLI_STRENGTH_RANGE = (0.0, 2.0)
@@ -40,6 +52,7 @@ CODE_BASE_MISMATCH = "lora.base_mismatch"
 CODE_INVALID = "lora.invalid"
 CODE_SCALE = "lora.scale"
 CODE_RETRAIN = "lora.retrain"
+CODE_NEEDS_OPTIONAL_MOSS = "lora.needs_optional_moss"
 _KINDS = frozenset({"person", "object", "style"})
 _ADAPTER = "canvas-lora"
 _A_WEIGHT = ".lora_A.weight"
@@ -63,6 +76,8 @@ _HEADER_KEYS = (
     _HEADER_TRIGGER,
     _HEADER_KIND,
     _HEADER_BASE,
+    _HEADER_TRAINED_BASE,
+    _HEADER_COMPATIBLE_BASES,
     _HEADER_BASE_VARIANT,
     _HEADER_BASE_SHA256,
     _HEADER_BASE_SHA256_ALT,
@@ -259,6 +274,127 @@ def resolve_selected(path: str | Path, root: Path | None = None) -> UserLora | N
     return found
 
 
+def _strip_revision(token: str) -> str:
+    """Drop a ``@revision`` suffix from a Forge ``trained_base`` value."""
+    text = token.strip()
+    if "@" in text:
+        text = text.split("@", 1)[0].strip()
+    return text
+
+
+def family_of(token: str) -> str:
+    """Return the Forge family id for a catalog base, LoRA tag, or trained_base.
+
+    ``z-image@04cc4abb`` and the short tag ``zimg6b`` are ``z-image``.
+    MOSS aliases are the catalog family ``moss-image-sft``. Unknown tokens
+    are returned case-folded, so ``sdxl`` stays ``sdxl``.
+    """
+    raw = _strip_revision(token)
+    if not raw:
+        return ""
+    folded = raw.casefold()
+    if folded in _MOSS_TAGS:
+        return MOSS_IMAGE_SFT
+    if folded in _ZIMAGE_FULL_TAGS:
+        return FAMILY_ZIMAGE
+    if folded in _TURBO_TAGS:
+        return FAMILY_TURBO
+    return folded
+
+
+def parse_compatible_bases(raw: object) -> tuple[str, ...] | None:
+    """Parse ``voxprint.lora.compatible_bases``. Malformed values are absent."""
+    if raw is None or raw == "":
+        return None
+    if isinstance(raw, str):
+        try:
+            value = json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+    elif isinstance(raw, list):
+        value = raw
+    else:
+        return None
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        return None
+    return tuple(value)
+
+
+def _legacy_compatible_families(trained: str) -> frozenset[str]:
+    """Families a LoRA may load on when ``compatible_bases`` is absent.
+
+    Legacy ``voxprint.lora.base="z-image"`` or the short tag ``zimg6b``
+    (and an untagged or Turbo-tagged Z-Image file) is compatible with both
+    ``z-image`` and ``z-image-turbo``. Legacy ``moss-image-base`` / ``moss5b``
+    is compatible only with MOSS.
+    """
+    family = family_of(trained)
+    if family in {FAMILY_ZIMAGE, FAMILY_TURBO}:
+        return frozenset({FAMILY_ZIMAGE, FAMILY_TURBO})
+    if family == MOSS_IMAGE_SFT:
+        return frozenset({MOSS_IMAGE_SFT})
+    return frozenset()
+
+
+def _lora_fields(path: Path | None, recorded: str = "") -> dict[str, object]:
+    """Safetensors header fields, filled from a sidecar when a key is missing."""
+    fields: dict[str, object] = dict(_string_metadata(path) if path is not None else {})
+    if path is not None:
+        sidecar = path.parent / _SIDECAR
+        document = _document(sidecar) if sidecar.is_file() else None
+        if isinstance(document, dict):
+            for key in (
+                _HEADER_TRAINED_BASE,
+                _HEADER_COMPATIBLE_BASES,
+                _HEADER_BASE,
+                "trained_base",
+                "compatible_bases",
+            ):
+                if not fields.get(key) and key in document:
+                    fields[key] = document[key]
+            base = document.get("base")
+            if not fields.get(_HEADER_BASE) and isinstance(base, dict):
+                mdl_id = base.get("mdl_id")
+                if isinstance(mdl_id, str) and mdl_id.strip():
+                    fields[_HEADER_BASE] = mdl_id
+    if recorded and not fields.get(_HEADER_BASE) and not fields.get(_HEADER_TRAINED_BASE):
+        fields[_HEADER_BASE] = recorded
+    return fields
+
+
+def lora_accepts_family(lora: UserLora | Path | str, loaded: str) -> bool:
+    """True when ``lora`` may load on the running Forge family ``loaded``.
+
+    When ``voxprint.lora.compatible_bases`` is present and well-formed, the
+    loaded family must be in that list. Otherwise the legacy single-tag
+    check applies.
+    """
+    if isinstance(lora, UserLora):
+        path, recorded = lora.weights, str(lora.base or "")
+    else:
+        path, recorded = Path(lora), ""
+    fields = _lora_fields(path, recorded)
+    compatible = parse_compatible_bases(
+        fields.get(_HEADER_COMPATIBLE_BASES) or fields.get("compatible_bases")
+    )
+    if compatible is not None:
+        return loaded in compatible
+    return loaded in _legacy_compatible_families(detect_base(lora))
+
+
+def _catalog_base_for_family(loaded: str, text_bases: tuple[str, ...]) -> str | None:
+    """The catalog text base that runs family ``loaded``, if the catalog lists one."""
+    for candidate in text_bases:
+        if family_of(candidate) == loaded:
+            return candidate
+    return None
+
+
+def _is_zimage_family(token: str) -> bool:
+    """True when ``token`` names full Z-Image or Z-Image-Turbo."""
+    return family_of(token) in {FAMILY_ZIMAGE, FAMILY_TURBO}
+
+
 def _is_moss_tag(value: str) -> bool:
     """True when ``value`` is a MOSS LoRA tag or a user-facing alias of one."""
     token = value.strip()
@@ -267,11 +403,8 @@ def _is_moss_tag(value: str) -> bool:
 
 
 def _is_zimage_tag(value: str) -> bool:
-    """True when ``value`` is the Z-Image LoRA tag. The tag itself is unchanged."""
-    token = value.strip()
-    folded = token.casefold()
-    names = {ZIMAGE_TURBO_MDL_ID, FORGE_BASE_ID}
-    return token in names or folded in names
+    """True when ``value`` is a Z-Image family tag (full, Turbo, or ``zimg6b``)."""
+    return _is_zimage_family(value)
 
 
 def base_matches(mdl_id: str, expected: str | None = None) -> bool:
@@ -368,7 +501,7 @@ def _forge_file(path: Path) -> bool:
     header = _header(path)
     if header is None:
         raise LoraRejected(CODE_INVALID)
-    if header.get(_HEADER_BASE):
+    if header.get(_HEADER_BASE) or header.get(_HEADER_TRAINED_BASE) or parse_compatible_bases(header.get(_HEADER_COMPATIBLE_BASES)):
         return True
     sidecar = path.parent / _SIDECAR
     document = _document(sidecar) if sidecar.is_file() else None
@@ -389,12 +522,17 @@ def open_weights(path: Path) -> UserLora:
     """
     meta, weights = _opened_weights(path)
     base = meta.get(_HEADER_BASE, "")
-    if not base:
+    trained = str(meta.get(_HEADER_TRAINED_BASE) or "").strip()
+    compatible = parse_compatible_bases(meta.get(_HEADER_COMPATIBLE_BASES))
+    if not base and not trained and compatible is None:
         raise LoraRejected(CODE_INVALID)
+    stored_base = base or (_canonical_base(trained) if trained else "")
     sidecar = _matching_sidecar(path)
     kind = _HEADER_KIND_ALIAS.get(meta.get(_HEADER_KIND, ""), meta.get(_HEADER_KIND, ""))
     lora_id = path.stem
-    default_strength = CLI_DEFAULT_STRENGTH
+    default_strength = (
+        ZIMAGE_LORA_DEFAULT_STRENGTH if _is_zimage_family(stored_base or trained or FAMILY_ZIMAGE) else CLI_DEFAULT_STRENGTH
+    )
     low, high = CLI_STRENGTH_RANGE
     adult = meta.get(_ADULT_LABEL) == "true"
     if sidecar is not None:
@@ -412,7 +550,7 @@ def open_weights(path: Path) -> UserLora:
         adult = labelled
     if kind not in _KINDS or _bad_id(lora_id):
         raise LoraRejected(CODE_INVALID)
-    variant, base_sha, warnings = _provenance(meta, path, base)
+    variant, base_sha, warnings = _provenance(meta, path, stored_base)
     return UserLora(
         lora_id,
         kind,
@@ -422,7 +560,7 @@ def open_weights(path: Path) -> UserLora:
         default_strength,
         (low, high),
         adult,
-        base=base,
+        base=stored_base,
         sha256=_sha256(path),
         base_variant=variant,
         base_sha256=base_sha,
@@ -431,12 +569,12 @@ def open_weights(path: Path) -> UserLora:
 
 
 def running_base_id() -> str:
-    """The catalog's default text base, or empty when the registry sets none.
+    """The shared ``model.default`` mapped to a Canvas text base.
 
     An untagged LoRA is a Z-Image LoRA. :func:`detect_base` applies that.
     This function does not.
     """
-    return load_catalog().default_text_base or ""
+    return selected_text_base()
 
 
 def strength_or_default(lora: UserLora, requested: object) -> float:
@@ -454,24 +592,27 @@ def strength_or_default(lora: UserLora, requested: object) -> float:
 _META_ARCHITECTURE = "modelspec.architecture"
 _META_BASE_VERSION = "ss_base_model_version"
 _FILENAME_BASES = (
+    (".moss5b.safetensors", MOSS_LORA_BASE),
     (".moss.safetensors", MOSS_LORA_BASE),
-    (".z-image.safetensors", ZIMAGE_TURBO_MDL_ID),
+    (".zimg6b.safetensors", FAMILY_ZIMAGE),
+    (".z-image.safetensors", FAMILY_ZIMAGE),
 )
 
 
 def _canonical_base(raw: str) -> str:
-    """``moss5b`` or ``z-image-turbo`` when ``raw`` is one of those families.
+    """``moss5b``, ``z-image``, or ``z-image-turbo`` when ``raw`` is one of those families.
 
     ``moss`` and ``moss-image`` are the user-facing MOSS values. Older headers
     ``moss-image-sft`` and ``moss-image-base`` normalise to ``moss5b`` too.
-    The Z-Image tag is unchanged. Any other id is kept, so ``sdxl`` stays ``sdxl``.
+    ``z-image@04cc4abb`` and the short tag ``zimg6b`` become ``z-image``.
+    Any other id is kept, so ``sdxl`` stays ``sdxl``.
     """
-    token = raw.strip()
-    folded = token.casefold()
-    if base_matches(token, MOSS_LORA_BASE) or base_matches(folded, MOSS_LORA_BASE):
+    token = _strip_revision(raw)
+    family = family_of(token)
+    if family == MOSS_IMAGE_SFT:
         return MOSS_LORA_BASE
-    if base_matches(token, ZIMAGE_TURBO_MDL_ID) or base_matches(folded, ZIMAGE_TURBO_MDL_ID):
-        return ZIMAGE_TURBO_MDL_ID
+    if family in {FAMILY_ZIMAGE, FAMILY_TURBO}:
+        return family
     return token
 
 
@@ -510,7 +651,8 @@ def _family_token(value: str) -> str:
     """A MOSS or Z-Image family id found inside one metadata string.
 
     A string that names MOSS, including the user-facing values ``moss`` and
-    ``moss-image``, is the ``moss5b`` tag. Z-Image stays ``z-image-turbo``.
+    ``moss-image``, is the ``moss5b`` tag. ``zimg6b`` and a bare ``z-image``
+    are the full Z-Image family. A Turbo name stays ``z-image-turbo``.
     """
     folded = value.casefold()
     if not folded:
@@ -518,8 +660,12 @@ def _family_token(value: str) -> str:
     if "moss" in folded:
         return MOSS_LORA_BASE
     compact = folded.replace("-", "").replace("_", "").replace(" ", "")
+    if "zimg6b" in compact:
+        return FAMILY_ZIMAGE
+    if "zimageturbo" in compact or "z-image-turbo" in folded:
+        return FAMILY_TURBO
     if "z-image" in folded or "zimage" in compact:
-        return ZIMAGE_TURBO_MDL_ID
+        return FAMILY_ZIMAGE
     return ""
 
 
@@ -534,7 +680,10 @@ def _metadata_family(meta: dict[str, str]) -> str:
 
 def _trained_tag(meta: dict[str, str], path: Path | None, recorded: str = "") -> str:
     """The normalised base tag for one header, filename, or recorded id."""
-    header = meta.get(_HEADER_BASE, "").strip() or recorded.strip()
+    trained = str(meta.get(_HEADER_TRAINED_BASE) or meta.get("trained_base") or "").strip()
+    if trained:
+        return _canonical_base(trained)
+    header = str(meta.get(_HEADER_BASE) or "").strip() or recorded.strip()
     if header:
         return _canonical_base(header)
     found = _metadata_family(meta)
@@ -543,29 +692,35 @@ def _trained_tag(meta: dict[str, str], path: Path | None, recorded: str = "") ->
     named = _filename_base(path)
     if named:
         return named
-    return ZIMAGE_TURBO_MDL_ID
+    return FAMILY_TURBO
 
 
 def detect_base(path_or_lora: Path | UserLora | str) -> str:
     """The base a LoRA was trained on.
 
-    ``voxprint.lora.base`` wins, including over a filename tag, and is
-    normalised to ``moss5b`` or ``z-image-turbo``. ``moss`` and ``moss-image``
-    both become ``moss5b``. Any other header value is kept, so ``sdxl`` stays
-    ``sdxl``. A recorded base on a :class:`UserLora` is that header when the
-    file does not carry one.
+    ``voxprint.lora.trained_base`` wins when present (``z-image@04cc4abb``
+    becomes ``z-image``). Otherwise ``voxprint.lora.base`` wins, including
+    over a filename tag, and is normalised to ``moss5b``, ``z-image``, or
+    ``z-image-turbo``. ``moss`` and ``moss-image`` both become ``moss5b``.
+    ``zimg6b`` becomes ``z-image``. Any other header value is kept, so
+    ``sdxl`` stays ``sdxl``. A recorded base on a :class:`UserLora` is that
+    header when the file does not carry one.
 
     Otherwise ``modelspec.architecture`` and ``ss_base_model_version`` are
-    read: ``moss`` is ``moss5b``, and ``z-image`` or ``zimage`` is
-    ``z-image-turbo``. A filename ``<name>.moss.safetensors`` or
-    ``<name>.z-image.safetensors`` is used when those strings are absent.
-    An untagged file, including an older LoRA, is ``z-image-turbo``.
+    read: ``moss`` is ``moss5b``, a Turbo name is ``z-image-turbo``, and
+    ``z-image`` or ``zimg6b`` is ``z-image``. A filename
+    ``<name>.moss.safetensors``, ``<name>.moss5b.safetensors``,
+    ``<name>.z-image.safetensors``, or ``<name>.zimg6b.safetensors`` is used
+    when those strings are absent. An untagged file, including an older LoRA,
+    is ``z-image-turbo``.
 
     Args:
         path_or_lora: A weight file, or a LoRA whose ``weights`` file is read.
     """
     path, recorded = _detect_target(path_or_lora)
-    return _trained_tag(_string_metadata(path), path, recorded)
+    fields = _lora_fields(path, recorded)
+    meta = {key: value for key, value in fields.items() if isinstance(key, str) and isinstance(value, str)}
+    return _trained_tag(meta, path, recorded)
 
 
 def _variant_warnings(tag: str, variant: str) -> tuple[str, ...]:
@@ -606,45 +761,76 @@ class LoraRoute:
 
 
 def route_lora(lora: UserLora, text_bases: tuple[str, ...] | None = None, default: str | None = None) -> LoraRoute:
-    """Route ``lora`` onto one listed text base. A different base is not loaded.
+    """Route ``lora`` onto the loaded family when that family is compatible.
 
-    A LoRA tagged ``moss5b`` (including user-facing ``moss`` and ``moss-image``)
-    runs on the catalog base ``moss-image-sft``. The Z-Image tag still runs on
-    ``z-image-turbo``.
+    When ``voxprint.lora.compatible_bases`` is present, the LoRA loads only if
+    the running family is in that list. Otherwise the legacy tag check
+    applies: ``z-image`` / ``zimg6b`` load on full Z-Image and on Turbo;
+    ``moss5b`` / ``moss-image-base`` load only on MOSS. Any other combination
+    is a retrain.
 
     Args:
         lora: The selected LoRA.
         text_bases: Text bases the catalog lists. The catalog is read when omitted.
-        default: The catalog default. Accepted so :func:`base_choice` can pass
-            it through. A mismatch does not run on it.
+        default: The loaded (running) text base. The shared ``model.default``
+            is used when omitted.
 
     Returns:
-        ``LoraRoute(base)`` when the trained base is one of ``text_bases``.
+        ``LoraRoute(base)`` when the LoRA may load on the running family.
         ``LoraRoute("", retrain_from=trained)`` otherwise. ``retrain_from`` is
         the normalised tag, so a MOSS file reports ``moss5b``.
     """
     if text_bases is None:
         catalog = load_catalog()
         text_bases = catalog.text_bases
-        if default is None:
-            default = catalog.default_text_base or ""
-    # ``default`` is not a substitute base. Cross-base loads are refused.
-    del default
+    if default is None:
+        default = selected_text_base()
     trained = detect_base(lora)
-    for candidate in text_bases:
-        if trained == candidate or base_matches(trained, candidate):
-            return LoraRoute(candidate)
-    return LoraRoute("", trained)
+    loaded = family_of(default)
+    if not loaded or not lora_accepts_family(lora, loaded):
+        return LoraRoute("", trained)
+    target = _catalog_base_for_family(loaded, text_bases)
+    if target is None:
+        return LoraRoute("", trained)
+    return LoraRoute(target)
+
+
+def moss_weights_ready(root: Path | None = None) -> bool:
+    """True when a MOSS-Image generator snapshot is already on disk.
+
+    This does not download or queue a fetch. Missing or unreadable weights
+    count as not ready, so an optional MOSS LoRA can show a download prompt.
+    """
+    try:
+        from canvas.models.snapshots import snapshot_ready
+        from canvas.models.verified import flush_process_cache, process_cache
+
+        catalog = load_catalog()
+        models = root if root is not None else models_dir()
+        cache = process_cache()
+        try:
+            for spec in catalog.models:
+                if spec.role != "generator" or spec.text_base != MOSS_IMAGE_SFT:
+                    continue
+                if snapshot_ready(spec, models, cache) is not None:
+                    return True
+        finally:
+            flush_process_cache()
+    except Exception:  # noqa: BLE001 - an unreadable install counts as missing
+        return False
+    return False
 
 
 def retrain_rejection(
     lora: UserLora, text_bases: tuple[str, ...] | None = None, default: str | None = None,
 ) -> LoraRejected | None:
-    """``lora.retrain`` when ``lora`` cannot run here. None when it can."""
+    """A refusal when ``lora`` cannot run on an installed base. None when it can."""
     route = route_lora(lora, text_bases, default)
-    if route.base:
-        return None
-    return LoraRejected(CODE_RETRAIN, base=route.retrain_from)
+    if not route.base:
+        return LoraRejected(CODE_RETRAIN, base=route.retrain_from)
+    if route.base == MOSS_IMAGE_SFT and not moss_weights_ready():
+        return LoraRejected(CODE_NEEDS_OPTIONAL_MOSS, base=route.base)
+    return None
 
 
 @dataclass(frozen=True)
@@ -972,7 +1158,7 @@ def fits_base(path: Path) -> None:
     opened = _safetensors(path)
     if opened is None:
         raise LoraRejected(CODE_INVALID)
-    if detect_base(path) != ZIMAGE_TURBO_MDL_ID:
+    if not _is_zimage_family(detect_base(path)):
         return
     modules = _modules()
     for key in opened[0]:
@@ -999,16 +1185,17 @@ def open_third_party(path: Path) -> UserLora:
         LoraRejected: The file is damaged, or its adapters do not fit the base.
     """
     meta, weights = _opened_weights(path)
-    base = meta.get(_HEADER_BASE, "")
+    base = meta.get(_HEADER_BASE, "") or _canonical_base(str(meta.get(_HEADER_TRAINED_BASE) or ""))
     fits_base(path)
     variant, base_sha, warnings = _provenance(meta, path, base)
+    default_strength = ZIMAGE_LORA_DEFAULT_STRENGTH if _is_zimage_family(base or detect_base(path)) else CLI_DEFAULT_STRENGTH
     return UserLora(
         path.stem,
         THIRD_PARTY_KIND,
         path.parent,
         weights,
         "",
-        CLI_DEFAULT_STRENGTH,
+        default_strength,
         CLI_STRENGTH_RANGE,
         False,
         name=path.stem,

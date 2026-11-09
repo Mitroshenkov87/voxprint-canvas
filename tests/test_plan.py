@@ -14,7 +14,7 @@ from canvas.models.pins import (
     REPO_CONTROL,
     REPO_TURBO,
 )
-from canvas.models.plan import BaseNotSelected, ModeUnavailable, build_plan
+from canvas.models.plan import BaseNotSelected, ModeUnavailable, OptionalModelUnavailable, build_plan
 from canvas.models.registry import RegistryError, load_catalog
 from canvas.safety.inputs import ImageRole, PendingInput
 from tests.fakes import World, rgb
@@ -29,8 +29,8 @@ def _screened(mode: Mode, *roles: ImageRole):
 def test_pin_and_visibility():
     catalog = load_catalog()
     assert catalog.diffusers == "0.41.0"
-    assert catalog.default_text_base == "moss-image-sft"
-    assert catalog.text_bases == ("moss-image-sft", "z-image-turbo")
+    assert catalog.default_text_base == "z-image-turbo"
+    assert catalog.text_bases == ("z-image-turbo", "moss-image-sft")
     assert DIFFUSERS_PIN == "0.41.0"
     assert Mode.RESTYLE in visible_modes(Tier.GB16)
     assert Mode.TEXT_CREATIVE not in visible_modes(Tier.GB16)
@@ -48,14 +48,17 @@ def test_pin_and_visibility():
     assert "diffusers==0.41.0" in open("pyproject.toml", encoding="utf-8").read()
 
 
-def test_text_plan_waits_until_a_base_is_chosen():
+def test_text_plan_follows_the_shared_model_default():
+    """A missing catalog default still follows common's model.default (z-image)."""
     catalog = replace(load_catalog(), default_text_base=None)
-    with pytest.raises(BaseNotSelected):
-        build_plan(catalog, _screened(Mode.TEXT), Tier.GB16)
+    plan = build_plan(catalog, _screened(Mode.TEXT), Tier.GB16)
+    assert plan.model_id == "z-image-turbo-bf16-16gb"
 
 
 def test_text_and_restyle_plans():
     catalog = load_catalog()
+    implicit = build_plan(catalog, _screened(Mode.TEXT), Tier.GB16)
+    assert implicit.model_id == "z-image-turbo-bf16-16gb"
     text = build_plan(catalog, _screened(Mode.TEXT), Tier.GB16, base="z-image-turbo")
     assert text.diffusers == "0.41.0"
     assert text.pipeline_class == PIPELINE_TEXT
@@ -74,10 +77,13 @@ def test_text_and_restyle_plans():
         default_text_base="qwen-image-2512",
         text_bases=("z-image-turbo", "qwen-image-2512"),
     )
-    with pytest.raises(RegistryError, match="has no plan"):
-        build_plan(qwen, _screened(Mode.TEXT), Tier.GB16)
-    with pytest.raises(RegistryError, match="has no plan"):
-        build_plan(qwen, _screened(Mode.TEXT), Tier.GB24)
+    # Implicit text plans follow common's model.default, not a leftover catalog default.
+    implicit_on_qwen = build_plan(qwen, _screened(Mode.TEXT), Tier.GB16)
+    assert implicit_on_qwen.model_id == "z-image-turbo-bf16-16gb"
+    with pytest.raises(BaseNotSelected):
+        build_plan(qwen, _screened(Mode.TEXT), Tier.GB16, base="qwen-image-2512")
+    with pytest.raises(BaseNotSelected):
+        build_plan(qwen, _screened(Mode.TEXT), Tier.GB24, base="qwen-image-2512")
     restyle_on_qwen = build_plan(qwen, _screened(Mode.RESTYLE, ImageRole.INIT), Tier.GB16)
     assert restyle_on_qwen.repos == (REPO_TURBO,) and restyle_on_qwen.pipeline_class == PIPELINE_IMG2IMG
 

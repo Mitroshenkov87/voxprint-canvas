@@ -66,7 +66,7 @@ The script uses the Python the Setup installed (`-Python <python.exe>` picks ano
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE). Models downloaded by the app keep their own licences; the default model, MOSS-Image-SFT, is published under Apache-2.0.
+Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE). Models downloaded by the app keep their own licences; the default model, Z-Image-Turbo, is published under Apache-2.0. MOSS-Image is an optional download, also under Apache-2.0.
 
 ## Roadmap
 

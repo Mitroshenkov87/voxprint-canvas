@@ -34,8 +34,9 @@ from canvas.infra.vram import peak_allocated_bytes, set_vram_cap_gb
 from canvas.models.views import remove_views
 from canvas.models.provision import DownloadDeclined, ensure_plan, install_defaults, install_supporting, repair
 from canvas.models.user_lora import (
+    CODE_NEEDS_OPTIONAL_MOSS,
     CODE_RETRAIN,
-    MOSS_IMAGE_SFT,
+    FORGE_BASE_ID,
     LoraRejected,
     UserLora,
     cli_scale,
@@ -43,7 +44,7 @@ from canvas.models.user_lora import (
     retrain_rejection,
 )
 from canvas.models.modes import Mode, Tier
-from canvas.models.plan import BaseNotSelected, ModeUnavailable, build_plan
+from canvas.models.plan import BaseNotSelected, ModeUnavailable, OptionalModelUnavailable, build_plan
 from canvas.models.registry import load_catalog
 from canvas.models.snapshots import SnapshotError
 from canvas.pipeline.series_text import DEFAULT_FRAMES, MAX_FRAMES, TEST_SERIES_CHARACTER
@@ -494,7 +495,7 @@ def _generate(args: argparse.Namespace) -> int:
         return _emit({"ok": False, "error": str(exc), "code": "gpu_busy"}, as_json, 1)
     except (
         SafetyError, SnapshotError, DownloadDeclined, InferenceUnavailable, ModelNotReady,
-        ModeUnavailable, BaseNotSelected, JobError, CoolingDown, EnlargeMissing, EnlargeError, VramRefused, DeviceRefused,
+        ModeUnavailable, BaseNotSelected, OptionalModelUnavailable, JobError, CoolingDown, EnlargeMissing, EnlargeError, VramRefused, DeviceRefused,
         OSError,
     ) as exc:
         return _emit({"ok": False, "error": str(exc)}, as_json, 1)
@@ -540,7 +541,7 @@ def _photoshoot_bench(args: argparse.Namespace) -> int:
         return _emit({"ok": False, "error": str(exc), "code": "gpu_busy"}, as_json, 1)
     except (
         SafetyError, SnapshotError, DownloadDeclined, InferenceUnavailable, ModelNotReady,
-        ModeUnavailable, BaseNotSelected, JobError, CoolingDown, EnlargeMissing, EnlargeError, VramRefused, DeviceRefused,
+        ModeUnavailable, BaseNotSelected, OptionalModelUnavailable, JobError, CoolingDown, EnlargeMissing, EnlargeError, VramRefused, DeviceRefused,
         OSError,
     ) as exc:
         return _emit({"ok": False, "error": str(exc)}, as_json, 1)
@@ -606,7 +607,7 @@ def _photoshoot(args: argparse.Namespace) -> int:
         )
     except (
         SafetyError, SnapshotError, DownloadDeclined, InferenceUnavailable, ModelNotReady,
-        ModeUnavailable, BaseNotSelected, JobError, CoolingDown, EnlargeMissing, EnlargeError, VramRefused, DeviceRefused,
+        ModeUnavailable, BaseNotSelected, OptionalModelUnavailable, JobError, CoolingDown, EnlargeMissing, EnlargeError, VramRefused, DeviceRefused,
         OSError,
     ) as exc:
         return _emit({"ok": False, "error": str(exc)}, as_json, 1)
@@ -669,7 +670,7 @@ def _batch(args: argparse.Namespace) -> int:
         )
     except (
         SafetyError, SnapshotError, DownloadDeclined, InferenceUnavailable, ModelNotReady,
-        ModeUnavailable, BaseNotSelected, JobError, CoolingDown, EnlargeMissing, EnlargeError, VramRefused, DeviceRefused,
+        ModeUnavailable, BaseNotSelected, OptionalModelUnavailable, JobError, CoolingDown, EnlargeMissing, EnlargeError, VramRefused, DeviceRefused,
         OSError,
     ) as exc:
         code_name = "vram" if isinstance(exc, VramRefused) else "error"
@@ -862,13 +863,13 @@ def _take_lora(args: argparse.Namespace, as_json: bool) -> tuple[tuple[UserLora,
 def _emit_lora(code: str, as_json: bool, **values: object) -> int:
     """Exit 2. ``--json`` prints the stable code and the English sentence.
 
-    ``lora.retrain`` also names the trained base and the MOSS target.
+    ``lora.retrain`` and ``lora.needs_optional_moss`` also name the trained base and the Z-Image retrain target.
     """
     message = text(code, "en", **values) if values else text(code, "en")
     if as_json:
         body: dict[str, object] = {"ok": False, "error": code, "message": message}
-        if code == CODE_RETRAIN:
-            body["retrain"] = {"from": str(values.get("base") or ""), "to": MOSS_IMAGE_SFT}
+        if code in {CODE_RETRAIN, CODE_NEEDS_OPTIONAL_MOSS}:
+            body["retrain"] = {"from": str(values.get("base") or ""), "to": FORGE_BASE_ID}
         print(json.dumps(body))
     else:
         print(message, file=sys.stderr)

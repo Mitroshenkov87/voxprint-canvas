@@ -31,7 +31,7 @@ if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction Sile
 $Root = Split-Path -Parent $PSScriptRoot
 $CommonVersion = "0.7.0"
 $CommonUrl = "https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.7.0/voxprint_common-0.7.0-py3-none-any.whl"
-$CommonSha = "39e56588c14fafb4f060d79da3afcfc444c1da7a34f4028a8d0e60488a45e232"
+$CommonSha = "43f7604a95c9297fa577b00d9653d0d03b9acf4f1448c7b1855f04d880d6bf1b"
 $Installed = Join-Path $env:ProgramFiles "VOXPrint AI Suite\Canvas\venv\Scripts\python.exe"
 
 if ($Python -eq "") { $Python = $Installed }
@@ -92,10 +92,10 @@ try {
     $probe = $LASTEXITCODE
     $ErrorActionPreference = "Stop"
     if ($probe -ne 0) { Write-Host "Canvas is not installed in this Python."; exit 2 }
-    # The 16 GB generator is the required MOSS-Image-SFT compact row (moss-image-sft).
-    # The 24 GB Z-Image-Turbo generator is optional and is requested by id.
+    # The 16 GB generator is the default Z-Image-Turbo 16 GB pack.
+    # The 24 GB pack is requested by id. MOSS-Image is optional and is not fetched here.
     $mdlArgs = @("-m", "canvas.models.install_fetch", "--app", "canvas", "--manifest", $Manifest)
-    if ($Pass -eq "16gb") { $mdlArgs += @("--model", "voxprint-moss-image-sft-compact") }
+    if ($Pass -eq "16gb") { $mdlArgs += @("--model", "z-image-turbo-bf16-16gb") }
     if ($Pass -eq "24gb") { $mdlArgs += @("--model", "z-image-turbo-bf16") }
     Write-Host "Models: python $($mdlArgs -join ' ')"
     & $Python @mdlArgs

@@ -14,10 +14,10 @@ from canvas.infra.errors import note_crash
 from canvas.infra.gpu_lock import GpuLockTimeout, lock_path, release, try_acquire
 from canvas.infra.paths import models_dir
 from canvas.models.loader import ModelNotReady, ZImageGenerator, plan_specs
-from canvas.models.user_lora import CODE_RETRAIN, LoraRejected, UserLora, route_lora
+from canvas.models.user_lora import LoraRejected, UserLora, retrain_rejection, route_lora
 from canvas.models.mdl_registry import selectable
 from canvas.models.modes import Tier
-from canvas.models.plan import BaseNotSelected, ModeUnavailable, build_plan
+from canvas.models.plan import BaseNotSelected, ModeUnavailable, OptionalModelUnavailable, build_plan
 from canvas.models.provision import DownloadDeclined
 from canvas.models.registry import load_catalog
 from canvas.models.runtime import InferenceUnavailable, LoraLoadError, prepare_series_embeds
@@ -159,6 +159,8 @@ class ShellRunner:
                 _halt(str(exc), exc, "cooling", unavailable=False)
             except BaseNotSelected as exc:
                 _halt(str(exc), exc, "base", unavailable=False)
+            except OptionalModelUnavailable as exc:
+                _halt(str(exc), exc, "optional_model", unavailable=False)
             except EnlargeError as exc:
                 _halt(str(exc), exc, "enlarge_unavailable", unavailable=True)
             except LoraLoadError as exc:
@@ -311,10 +313,10 @@ def _lora_base_of(runner: ShellRunner) -> str | None:
     """
     if runner.bound_lora is None:
         return None
-    route = route_lora(runner.bound_lora)
-    if not route.base:
-        raise LoraRejected(CODE_RETRAIN, base=route.retrain_from)
-    return route.base
+    rejected = retrain_rejection(runner.bound_lora)
+    if rejected is not None:
+        raise rejected
+    return route_lora(runner.bound_lora).base
 
 
 def _offer(generator: object, name: str, value: object) -> None:

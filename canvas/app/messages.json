@@ -152,6 +152,9 @@
     "error.base": {
       "en": "The text model has not been selected yet."
     },
+    "error.optional_model": {
+      "en": "The optional MOSS-Image model is not available."
+    },
     "error.vram": {
       "en": "This picture does not fit on the GPU."
     },
@@ -492,7 +495,10 @@
       "en": "This LoRA is for a different base model."
     },
     "lora.retrain": {
-      "en": "This LoRA was trained on {base}, which Canvas cannot run. Retrain it for MOSS-Image in Model Forge (voxprint-forge prepare --base moss)."
+      "en": "This LoRA was trained on {base}, which Canvas cannot run. Retrain it for Z-Image-Turbo in Model Forge (voxprint-forge prepare --base z-image)."
+    },
+    "lora.needs_optional_moss": {
+      "en": "This LoRA needs the optional MOSS-Image model. Download it in Manage models, or retrain it for Z-Image-Turbo in Model Forge."
     },
     "lora.invalid": {
       "en": "This LoRA file cannot be read."
@@ -517,6 +523,12 @@
     },
     "canvas.lora.base_note": {
       "en": "This LoRA was trained on {base}, which Canvas does not have. The picture runs on the default base and may look different."
+    },
+    "canvas.lora.needs_optional_moss_title": {
+      "en": "Optional MOSS-Image model"
+    },
+    "canvas.lora.needs_optional_moss_note": {
+      "en": "This LoRA needs the optional MOSS-Image model, which is not installed. Download it in Manage models, or retrain it for {target}."
     },
     "canvas.lora.retrain_title": {
       "en": "Retrain this LoRA"

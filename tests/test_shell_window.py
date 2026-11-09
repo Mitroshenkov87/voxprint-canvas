@@ -713,7 +713,26 @@ def test_expert_values_start_at_the_turbo_defaults(app, home: Path) -> None:
     del app
     window = _window(home)
     assert window.shell.layout.get("shell.steps") == 8
-    assert window.shell.layout.get("shell.guidance") == 1.0
+    assert window.shell.layout.get("shell.guidance") == 0.0
+    window.close()
+
+
+def test_expert_accepts_zero_guidance(app, home: Path) -> None:
+    del app
+    from PySide6.QtWidgets import QDoubleSpinBox
+
+    window = _window(home)
+    window.set_expert(True)
+    window.resize(1280, 800)
+    window.show()
+    settle(window)
+    window.shell.layout.set_value("shell.guidance", 0.0)
+    assert window.shell.layout.get("shell.guidance") == 0.0
+    box = window.findChild(QDoubleSpinBox, "shell.guidance")
+    assert box is not None
+    assert float(box.minimum()) == 0.0
+    box.setValue(0.0)
+    assert window.shell.layout.get("shell.guidance") == 0.0
     window.close()
 
 

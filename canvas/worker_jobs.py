@@ -231,7 +231,7 @@ def _retrain_refusal(op: str, lora_path: str, runner: object) -> dict[str, objec
     The diffusion model is not opened.
     """
     from canvas.app.i18n import text
-    from canvas.models.user_lora import MOSS_IMAGE_SFT, UserLora, retrain_rejection, resolve_selected
+    from canvas.models.user_lora import FORGE_BASE_ID, UserLora, retrain_rejection, resolve_selected
 
     lora = getattr(runner, "bound_lora", None)
     if not isinstance(lora, UserLora) and lora_path:
@@ -245,7 +245,7 @@ def _retrain_refusal(op: str, lora_path: str, runner: object) -> dict[str, objec
     if rejected is None:
         return None
     body = refused(op, rejected.code, text(rejected.code, **rejected.details), unavailable=True)
-    body["retrain"] = {"from": str(rejected.details.get("base") or ""), "to": MOSS_IMAGE_SFT}
+    body["retrain"] = {"from": str(rejected.details.get("base") or ""), "to": FORGE_BASE_ID}
     return body
 
 

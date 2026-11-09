@@ -16,7 +16,7 @@ from typing import NamedTuple
 
 from voxprint_common.paths import state_dir
 from voxprint_common.ui.presets import PresetFile, PresetGroup, PresetOption
-from voxprint_common.ui.settings import Choice, SettingSpec, SettingType, Settings
+from voxprint_common.ui.settings import Choice, SettingSpec, SettingType, Settings, reference_settings
 from voxprint_common.ui.simple_image import SimpleImageLayout as SimpleLayout
 from voxprint_common.ui.variants import AppSurface, settings_for, state_names, surface_for, variant_presets
 
@@ -24,7 +24,6 @@ from typing import TYPE_CHECKING
 
 from canvas.core.formats import OutputFormat
 from canvas.models.modes import Mode
-from canvas.models.pins import TURBO_GUIDANCE, TURBO_STEPS
 from canvas.pipeline import adult_boundary
 from canvas.ui.styles import LOOKS, look_for, style_label
 from canvas.ui.worker_checks import WorkerChecks
@@ -212,8 +211,16 @@ def _open(state_dir_path: Path, check: ContentCheck | WorkerChecks, enlarge_inst
 _OLD_DEFAULTS = {"shell.steps": 20, "shell.guidance": 7.0}
 
 
+def _shared_image_defaults() -> tuple[int, float]:
+    """Steps and guidance from common's shared image settings, not a Canvas copy."""
+    settings = reference_settings()
+    steps = settings.get("shell.steps")
+    guidance = settings.get("shell.guidance")
+    return int(steps.default), float(guidance.default)
+
+
 def migrate_old_defaults(path: Path) -> bool:
-    """Move saved steps and guidance that still equal the old defaults to the Turbo defaults.
+    """Move saved steps and guidance that still equal the old defaults to the shared Turbo values.
 
     Values the user changed are kept. Returns True when the file was rewritten.
     """
@@ -228,8 +235,9 @@ def migrate_old_defaults(path: Path) -> bool:
         found = values.get(key)
         if isinstance(found, bool) or not isinstance(found, (int, float)) or float(found) != float(old):
             return False
-    values["shell.steps"] = int(TURBO_STEPS)
-    values["shell.guidance"] = max(1.0, float(TURBO_GUIDANCE))
+    steps, guidance = _shared_image_defaults()
+    values["shell.steps"] = steps
+    values["shell.guidance"] = guidance
     overrides = payload.get("overrides")
     if isinstance(overrides, dict):
         for group, keys in overrides.items():
@@ -391,7 +399,6 @@ def output_name(layout: SimpleLayout) -> str:
 
 def _settings() -> Settings:
     settings = settings_for(surface_for("canvas"))
-    _turbo_defaults(settings)
     settings.add(_enum("canvas.style", "photo", tuple((look.style_id, style_label(look.style_id)) for look in LOOKS)))
     settings.add(_enum("canvas.source", "words", (("words", "canvas.source.words"), ("picture", "canvas.source.picture"))))
     settings.add(
@@ -452,16 +459,6 @@ def _settings() -> Settings:
     return settings
 
 
-def _turbo_defaults(settings: Settings) -> None:
-    """Start Expert mode on the Turbo steps and guidance. The field minimum bounds the guidance."""
-    for setting_id, wanted in (("shell.steps", TURBO_STEPS), ("shell.guidance", TURBO_GUIDANCE)):
-        spec = settings.get(setting_id)
-        if spec is None:
-            continue
-        value = max(float(wanted), spec.minimum or 0.0)
-        settings._specs[setting_id] = replace(spec, default=int(value) if spec.type is SettingType.INT else value)
-
-
 def _enum(
     setting_id: str,
     default: str,
@@ -499,22 +496,8 @@ def _presets(settings: Settings, *, enlarge_installed: bool) -> PresetFile:
     for group in document.groups:
         if group.group_id == "style":
             group = _style_group()
-        elif group.group_id == "quality":
-            group = _turbo_quality(group)
         groups.append(group)
     return PresetFile(tuple(groups))
-
-
-def _turbo_quality(group: PresetGroup) -> PresetGroup:
-    """The default quality chip writes the Turbo steps and guidance."""
-    turbo = {"shell.steps": TURBO_STEPS, "shell.guidance": max(1.0, TURBO_GUIDANCE)}
-    options = tuple(
-        replace(option, values=tuple((key, turbo.get(key, value)) for key, value in option.values))
-        if option.option_id == group.default
-        else option
-        for option in group.options
-    )
-    return replace(group, options=options)
 
 
 def _style_group() -> PresetGroup:

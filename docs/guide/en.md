@@ -111,7 +111,7 @@ Canvas works the same either way. PowerShell 7 is recommended; you can install i
 
 ## Model download
 
-The default model pack (MOSS-Image-SFT and the supporting models) is meant to download during Setup through VOXPrint MDL, the shared model downloader of the suite. The 16 GB row, `voxprint-moss-image-sft-compact`, is not published yet: its repository, revision and SHA-256 are still pending, so MDL does not download it until they are pinned. Each file is checked against its pinned checksum before it is used. A file that is already complete, with a matching size and a verification marker, is not downloaded again. A stopped download is kept as a partial file. The next run continues that file from where it stopped when the source accepts a range request. If the source ignores the range, that file starts again.
+The default model pack (Z-Image-Turbo and the supporting models) is meant to download during Setup through VOXPrint MDL, the shared model downloader of the suite. MOSS-Image is an optional later download: it is marked optional in Manage models, offered when it is not installed, and is never fetched automatically. Its 16 GB compact row, `voxprint-moss-image-sft-compact`, is not published yet: its repository, revision and SHA-256 are still pending, so MDL does not download it until they are pinned. Each file is checked against its pinned checksum before it is used. A file that is already complete, with a matching size and a verification marker, is not downloaded again. A stopped download is kept as a partial file. The next run continues that file from where it stopped when the source accepts a range request. If the source ignores the range, that file starts again.
 
 ## First launch
 

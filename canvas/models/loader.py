@@ -12,10 +12,11 @@ from canvas.app.preflight import PreflightFailed, Reason, preflight
 from canvas.infra.paths import models_dir
 from canvas.models.modes import Mode, Tier
 from canvas.models.pin import PinError, require_pin, verify_file
+from canvas.models.default_base import selected_text_base
 from canvas.models.plan import PIPELINE_MOSS, CallPlan, build_plan
 from canvas.models.registry import Catalog, ModelSpec, RegistryError, load_catalog
 from canvas.models.runtime import WeightsLoadError, render, sample_latent
-from canvas.models.user_lora import CODE_RETRAIN, LoraRejected, UserLora, resolve_selected, route_lora
+from canvas.models.user_lora import LoraRejected, UserLora, resolve_selected, retrain_rejection, route_lora
 from canvas.models.snapshots import SnapshotError, fallback_ready, request_download, snapshot_ready
 from canvas.models.verified import VerifiedCache, flush_process_cache, process_cache
 from canvas.pipeline.bf16_schedule import (
@@ -217,7 +218,9 @@ class ZImageGenerator:
         try:
             folder = snapshot_ready(spec, root, cache)
             if folder is None:
-                request_download(spec.id)
+                # Optional MOSS is never auto-downloaded; the UI offers Manage models.
+                if not (spec.optional and spec.text_base == "moss-image-sft"):
+                    request_download(spec.id)
                 raise ModelNotReady(plan, missing=True)
             if width is None or height is None:
                 raise ModelNotReady(plan)
@@ -273,9 +276,10 @@ class ZImageGenerator:
         lora = self._bound_or_selected()
         if lora is None:
             return
-        route = route_lora(lora, self.catalog.text_bases, self.catalog.default_text_base or "")
-        if not route.base:
-            raise LoraRejected(CODE_RETRAIN, base=route.retrain_from)
+        rejected = retrain_rejection(lora, self.catalog.text_bases, selected_text_base())
+        if rejected is not None:
+            raise rejected
+        route = route_lora(lora, self.catalog.text_bases, selected_text_base())
         self.base = route.base
 
     def _schedule(self, plan: CallPlan, mode: Mode, width: int, height: int, prompt: str) -> None:

@@ -106,4 +106,4 @@ def test_mdl_accepts_the_manifest_and_plans_the_default_pack():
     ids = {item.model_id for item in planned}
     catalog = load_catalog()
     assert {spec.id for spec in default_specs(catalog) if not spec.optional} <= ids
-    assert "z-image-turbo-bf16-16gb" not in ids
+    assert "z-image-turbo-bf16-16gb" in ids

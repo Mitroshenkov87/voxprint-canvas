@@ -35,7 +35,7 @@ INDEX_REVISION = "main"
 
 # index id -> mdl.json ids that must match it
 CANVAS_IDS: dict[str, tuple[str, ...]] = {
-    "mirror-z-image-turbo": ("z-image-turbo-bf16-16gb", "z-image-turbo-bf16"),
+    "z-image-turbo": ("z-image-turbo-bf16-16gb", "z-image-turbo-bf16"),
     "mirror-z-image-turbo-controlnet-union-2.1": (
         "z-image-turbo-fun-controlnet-union-bf16-lite",
         "z-image-turbo-fun-controlnet-union-bf16",

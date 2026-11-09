@@ -15,7 +15,7 @@ PASS=${PASS:-16gb}
 PY=${PYTHON:-python3.14}
 TORCH_INDEX="https://download.pytorch.org/whl/cu130"
 COMMON_URL="https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.7.0/voxprint_common-0.7.0-py3-none-any.whl"
-COMMON_SHA="1badeee091ead72379a72e948384f2fdc25c4701bb826527758527e486900382"
+COMMON_SHA="e0100f6ea42e62ce0d310695ab34bfdcd9227e15c71cdac4fb9e5b1e35b1f6ee"
 if ! command -v "$PY" >/dev/null 2>&1; then
   echo "$PY is not installed. Set PYTHON to a Python 3.14 interpreter." >&2
   exit 2

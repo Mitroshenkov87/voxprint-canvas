@@ -92,8 +92,10 @@ try {
     $probe = $LASTEXITCODE
     $ErrorActionPreference = "Stop"
     if ($probe -ne 0) { Write-Host "Canvas is not installed in this Python."; exit 2 }
-    # The 16 GB generator is a required entry. The 24 GB generator is optional and is requested by id.
+    # The 16 GB generator is the required MOSS-Image-SFT compact row (moss-image-sft).
+    # The 24 GB Z-Image-Turbo generator is optional and is requested by id.
     $mdlArgs = @("-m", "canvas.models.install_fetch", "--app", "canvas", "--manifest", $Manifest)
+    if ($Pass -eq "16gb") { $mdlArgs += @("--model", "voxprint-moss-image-sft-compact") }
     if ($Pass -eq "24gb") { $mdlArgs += @("--model", "z-image-turbo-bf16") }
     Write-Host "Models: python $($mdlArgs -join ' ')"
     & $Python @mdlArgs

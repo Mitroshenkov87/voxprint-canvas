@@ -47,8 +47,8 @@ BLOCKED = "This request cannot be completed."
 UNAVAILABLE = "Image generation is unavailable."
 EXIT_GATE_UNAVAILABLE = 4
 EXIT_MANIFEST = 5
-PASSES = {"16gb": ("z-image-turbo-bf16-16gb", "Z-Image-Turbo BF16 (16 GB group offload)"),
-          "24gb": ("z-image-turbo-bf16", "Z-Image-Turbo BF16 (24 GB)")}
+PASSES = {"16gb": ("voxprint-moss-image-sft-compact", "MOSS-Image-SFT compact (16 GB)"),
+          "24gb": ("z-image-turbo-bf16", "Z-Image-Turbo BF16 (24 GB, optional)")}
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -157,7 +157,7 @@ def manifest_ids(path: Path | None = None) -> set[str]:
 
 
 def manifest_failures(report: dict[str, object], wanted: set[str],
-                      generator: str = "z-image-turbo-bf16-16gb") -> list[str]:
+                      generator: str = "voxprint-moss-image-sft-compact") -> list[str]:
     """Problems from a deep self-test: an empty manifest, a missing file or a hash failure.
 
     Every row must pass its hash. Every required manifest id, and the generator

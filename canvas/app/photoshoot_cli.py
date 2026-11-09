@@ -6,11 +6,10 @@ from collections.abc import Callable
 from pathlib import Path
 
 from voxprint_common.i18n import add_catalogs, tr_lang
-from voxprint_common.ui.safety import adult_prompt_policy
 
 from canvas.app.i18n import text
 from canvas.app.info import ENLARGE_NAME
-from canvas.app.shell_run import ShellRunner
+from canvas.app.shell_run import RunStopped, ShellRunner
 from canvas.core.formats import EXPORT_FORMAT, OutputFormat, extension
 from canvas.infra.enlarge import EnlargeClient
 from canvas.infra.paths import models_dir
@@ -18,6 +17,7 @@ from canvas.models.loader import ModelNotReady
 from canvas.models.modes import Mode, Tier
 from canvas.models.registry import load_catalog
 from canvas.models.runtime import InferenceUnavailable
+from canvas.pipeline import adult_boundary
 from canvas.pipeline.adult_direction import scenario_system
 from canvas.pipeline.enhance import QwenRewriter, WriterSession, open_rewriter
 from canvas.pipeline.photoshoot import (
@@ -109,7 +109,7 @@ def model_generate(
     runner.lora_strength = lora_scale
     runner.cook = True
     look = look_for(style)
-    policy = adult_prompt_policy(allowed=adult)
+    policy = adult_boundary.policy(adult)
 
     def _prompt(line: str) -> str:
         return " ".join(part for part in (policy.template, line.strip(), look.suffix) if part)
@@ -126,6 +126,9 @@ def model_generate(
     def job_for(
         line: str, seed: int, hero: SeriesFrame | None, strength: float | None,
     ) -> tuple[PictureJob, tuple[PendingInput, ...]]:
+        refusal = adult_boundary.refusal(line, allowed=adult)
+        if refusal is not None:
+            raise RunStopped(refusal, code="adult_off")
         prompt = _prompt(line)
         negative_text = frame_negative(", ".join(
             part for part in (negative.strip(), look.negative, policy.negatives) if part

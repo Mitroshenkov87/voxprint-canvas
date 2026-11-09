@@ -29,6 +29,7 @@ from canvas.ui.worker_checks import WorkerChecks
 
 if TYPE_CHECKING:
     from canvas.ui.shell_screen import ShellWindow
+from canvas.pipeline import adult_boundary
 from canvas.ui.shell_layout import SimpleLayout, job_from
 from canvas.ui.styles import look_for
 
@@ -367,7 +368,4 @@ def _export_format(layout: SimpleLayout) -> OutputFormat:
 
 def adult_content(layout: SimpleLayout) -> bool:
     """True when the Expert «Для взрослых (18+)» prompt policy is on."""
-    try:
-        return layout.get("image.adult_content") is True
-    except KeyError:
-        return False
+    return adult_boundary.enabled(layout)

@@ -117,6 +117,10 @@
     "status.done": {
       "en": "Done"
     },
+    "adult_off.refused": {
+      "en": "Adult content (18+) is off. Changing an outfit is fine, but removing all clothing or making nude pictures needs it turned on in Expert.",
+      "ru": "Режим «Для взрослых (18+)» выключен. Сменить одежду можно, а полностью раздеть или создать обнажённую картинку можно только при включённом режиме в Эксперте."
+    },
     "gate.blocked": {
       "en": "This request cannot be completed.",
       "ru": "Этот запрос нельзя выполнить."

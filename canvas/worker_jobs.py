@@ -428,6 +428,12 @@ def _series(ctx: JobContext, current: Session, payload: Mapping[str, object]) ->
     reason = _review_prompts(current, [idea])
     if reason is not None:
         return refused("series", "prompt", reason, unavailable=False)
+    # Adult content off: the same boundary on the idea. The gate review above ran first and is unchanged.
+    from canvas.pipeline import adult_boundary
+
+    off = adult_boundary.refusal(idea, allowed=adult)
+    if off is not None:
+        return refused("series", "adult_off", off, unavailable=False)
 
     def compose(line: str) -> str:
         return " ".join(part for part in (template, line.strip(), suffix) if part)
@@ -447,6 +453,12 @@ def _series(ctx: JobContext, current: Session, payload: Mapping[str, object]) ->
     scenario_box: dict[str, object] = {}
 
     def job_for(line: str, seed: int, hero: SeriesFrame | None, frame_strength: float | None):
+        # Adult content off: every per-image line follows the same boundary. The gate calls stay as they are.
+        from canvas.pipeline import adult_boundary
+
+        off = adult_boundary.refusal(line, allowed=adult)
+        if off is not None:
+            raise RunStopped(off, code="adult_off")
         used = seeds.setdefault(seed, _series_seed(seed_mode, base_seed, seed))
         picture = base._replace(
             prompt=compose(line),

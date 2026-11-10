@@ -338,9 +338,9 @@ def _save_smoke(app: QApplication, window: ShellWindow, path: Path) -> bool:
     cancel = _button(window, "photoshootCancel")
     if not cancel.isVisible() or cancel.text() != tr("simple.cancel"):
         raise SystemExit(f"{path.name} is missing Cancel")
-    lines = [item for item in window.findChildren(QLabel, "photoshootLine") if item.isVisible() and item.text().strip()]
-    if not lines:
-        raise SystemExit(f"{path.name} is missing the shot list")
+    rows = [row for row in window.findChildren(QWidget, "photoshootScriptRow") if row.isVisible()]
+    if not rows:
+        raise SystemExit(f"{path.name} is missing the shot script")
     generate = _button(window, "generate")
     if not generate.isVisible():
         raise SystemExit(f"{path.name} hides the shell Create button")

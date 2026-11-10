@@ -108,6 +108,21 @@ def job_fields(job: PictureJob) -> dict[str, object]:
     return fields
 
 
+def watch_history_select(view: SimpleWidget, listener: Callable[[str], None]) -> None:
+    """Call ``listener`` after the shared screen selects a history item.
+
+    The shared widget keeps history selection to itself; the Photoshoot
+    script links its rows to the selected picture through this hook.
+    """
+    select = view._select
+
+    def watched(item_id: str) -> None:
+        select(item_id)
+        listener(item_id)
+
+    view._select = watched  # type: ignore[method-assign]
+
+
 class ShellWindow(QMainWindow):
     """Simple mode by default. Expert opens the side panel. The old window stays unused."""
 
@@ -179,6 +194,7 @@ class ShellWindow(QMainWindow):
         self._split = mount(self)
         self.setCentralWidget(self._split)
         self.photoshoot = PhotoshootBar(self)
+        watch_history_select(self.view, self.photoshoot.script.select_image)
         show_real_pictures(self)
         self._chrome_ready = True
         polish(self)

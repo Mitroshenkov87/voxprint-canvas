@@ -1,39 +1,35 @@
 """Photoshoot option on the shared simple screen.
 
 The option sits centred under the Create button, which stays the
-primary action and runs the series while the option is on. The shot list is
-read-only. Cancel stops after the frame that already finished.
+primary action and runs the series while the option is on. The shot script
+lives in a separate non-modal window (see :mod:`canvas.ui.photoshoot_script`),
+never in the image stage; a ``Script (N)`` button beside the option reopens it.
+Cancel stops after the frame that already finished.
 """
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
-    QBoxLayout,
     QCheckBox,
-    QFrame,
-    QHBoxLayout,
     QLabel,
     QPushButton,
-    QScrollArea,
     QSpinBox,
-    QVBoxLayout,
     QWidget,
 )
 
 from voxprint_common.i18n import tr
 from voxprint_common.ui.simple_image import Phase
-from voxprint_common.ui.theme import CARD_PLAIN, TEXT
 
 from canvas.pipeline.series_text import DEFAULT_FRAMES, MAX_FRAMES
+from canvas.ui.photoshoot_script import PhotoshootScriptModel, PhotoshootScriptWindow, series_loras
 
 if TYPE_CHECKING:
+    from canvas.models.user_lora import UserLora
     from canvas.pipeline.photoshoot import Shot
     from canvas.ui.shell_screen import ShellWindow
 
@@ -54,21 +50,11 @@ def fit_frames(spin: QSpinBox) -> None:
     spin.setMinimumWidth(widest + 2 * FRAMES_PAD + FRAMES_STEPPER)
 
 
-@dataclass
-class ShotRow:
-    """One read-only shot line."""
-
-    plain: str
-    full: str
-    status: str
-    label: QLabel
-
-
 class PhotoshootBar:
-    """The mode option, the read-only shot list, and Cancel."""
+    """The mode option, the Script (N) reopen button, the progress line, and Cancel."""
 
     def __init__(self, window: ShellWindow) -> None:
-        """Add the option and the list to an open shell window.
+        """Add the option and its controls to an open shell window.
 
         Args:
             window: A :class:`canvas.ui.shell_screen.ShellWindow`.
@@ -80,12 +66,17 @@ class PhotoshootBar:
         self.seed_mode = "random"
         self.strength = "medium"
         self._stop = False
-        self.rows: list[ShotRow] = []
         self.subject = ""
         self.folder: Path | None = None
         self._showing = False
+        self._lora: UserLora | None = None
+        self._lora_strength: float | None = None
+        self.script = PhotoshootScriptModel(window)
+        self.script_window = PhotoshootScriptWindow(window, self.script)
         self._mount_mode()
-        self.board = self._mount_board()
+        self.script.item_selected.connect(self._on_script_item_selected)
+        self.script.count_changed.connect(self._on_script_count)
+        self.script.window_closed.connect(self.sync)
         self.sync()
 
     @property
@@ -99,10 +90,25 @@ class PhotoshootBar:
         Args:
             index: Row index in the current list.
         """
-        return self.rows[index].full
+        item = self.script.item(index)
+        return "" if item is None else item.prompt
+
+    def begin_series(self, lora: UserLora | None, strength: float | None) -> None:
+        """Remember the LoRA and strength this series draws with, for the script rows.
+
+        Args:
+            lora: The bound window LoRA, or None for a plain series.
+            strength: The strength the series applies (already clamped).
+        """
+        self._lora = lora
+        self._lora_strength = strength
 
     def show_scenario(self, subject: str, shots: tuple[Shot, ...], *, seed: int = 0) -> None:
-        """Fill the read-only list before the first photograph.
+        """Fill the script with the accepted shots before the first photograph.
+
+        One row is appended per shot as its line is assembled, and the pop-up
+        opens with the first content. The LoRA/trigger details come from the
+        same bound LoRA and strength the series itself uses.
 
         Args:
             subject: Verbatim subject block.
@@ -112,41 +118,54 @@ class PhotoshootBar:
         from canvas.pipeline.photoshoot import assemble_line
 
         self.subject = subject
-        self._clear_rows()
+        self.script.begin()
+        loras = series_loras(self._lora, self._lora_strength)
         for index, shot in enumerate(shots):
-            self._add_row(
-                assemble_line(subject, shot, include_camera=False, index=index, seed=seed),
-                assemble_line(subject, shot, include_camera=True, index=index, seed=seed),
-            )
+            line = assemble_line(subject, shot, include_camera=True, index=index, seed=seed, lora=self._lora)
+            self.script.append_shot(line, loras)
         self.frame.setText("")
         self._showing = True
+        self.script_window.open_window()
         self.sync()
 
     def mark(self, index: int, status: str) -> None:
-        """Update one row and the progress line.
+        """Update one row's status and the progress line.
 
         Args:
             index: Row index.
             status: ``drawing``, ``kept``, or ``blocked``.
         """
-        if index < 0 or index >= len(self.rows):
+        if self.script.item(index) is None:
             return
-        row = self.rows[index]
-        row.status = status
-        note = _note(status)
-        row.label.setText(row.plain if not note else tr("photoshoot.row.status", line=row.plain, note=note))
-        self.frame.setText(tr("photoshoot.progress.frame", current=index + 1, total=len(self.rows)))
+        self.script.update_shot(index, status=status)
+        self.frame.setText(tr("photoshoot.progress.frame", current=index + 1, total=self.script.count))
         self.sync()
 
+    def record_kept(self, item_id: str, kept: tuple[Path, ...]) -> None:
+        """Link every kept frame to its script row, in kept order.
+
+        Args:
+            item_id: The grouped series history entry.
+            kept: Kept frame paths, in draw order — the order the rows were
+                marked ``kept`` in.
+        """
+        rows = [
+            item.index for item in self.script.items() if item.status == "kept"
+        ]
+        for index, path in zip(rows, kept, strict=False):
+            self.script.record_image(index, item_id, path)
+        if self.window.shell.layout.selected == item_id:
+            self.script.select_image(item_id)
+
     def sync(self) -> None:
-        """Show the shot list only after a scenario has been accepted."""
+        """Show the shot-area controls only after a scenario has been accepted."""
         busy = self.window.shell.layout.phase is Phase.BUSY
         self.mode.setEnabled(not busy)
         self.frames_label.setVisible(self.enabled)
         self.frames.setVisible(self.enabled)
         self.frames.setEnabled(self.enabled and not busy)
-        self.board.setVisible(self._showing)
         self.cancel.setVisible(busy and self._showing)
+        self.script_button.setVisible(self.script.count > 0 and not self.script_window.isVisible())
 
     def cancel_series(self) -> None:
         """Stop after the frame that already finished. Finished frames stay."""
@@ -181,6 +200,17 @@ class PhotoshootBar:
         self.frames.setAlignment(Qt.AlignmentFlag.AlignCenter)
         fit_frames(self.frames)
         self.frames_label.setBuddy(self.frames)
+        self.script_button = QPushButton(tr("photoshoot.script.button", count=0))
+        self.script_button.setObjectName("photoshootScriptButton")
+        self.script_button.setAutoDefault(False)
+        self.script_button.setToolTip(tr("photoshoot.script.tooltip"))
+        self.script_button.clicked.connect(self._open_script)
+        self.frame = QLabel("")
+        self.frame.setObjectName("photoshootFrame")
+        self.cancel = QPushButton(tr("simple.cancel"))
+        self.cancel.setObjectName("photoshootCancel")
+        self.cancel.setAutoDefault(False)
+        self.cancel.clicked.connect(self.cancel_series)
         if improve is not None:
             layout = _layout_containing(improve)
             if layout is not None:
@@ -188,6 +218,9 @@ class PhotoshootBar:
                 layout.insertWidget(index, self.mode)
                 layout.insertWidget(index + 1, self.frames_label)
                 layout.insertWidget(index + 2, self.frames)
+                layout.insertWidget(index + 3, self.script_button)
+                layout.insertWidget(index + 4, self.frame)
+                layout.insertWidget(index + 5, self.cancel)
 
     def _toggle(self) -> None:
         self.enabled = self.mode.isChecked()
@@ -195,88 +228,24 @@ class PhotoshootBar:
             self._showing = False
         self.sync()
 
-    def _mount_board(self) -> QWidget:
-        board = QWidget()
-        board.setObjectName("photoshootBoard")
-        board.setMinimumHeight(188)
-        board.setStyleSheet(
-            f"QWidget#photoshootBoard {{ background: {CARD_PLAIN}; }}"
-            f"QLabel {{ color: {TEXT}; background: transparent; }}"
-            f"QScrollArea, QWidget#photoshootLines {{ background: {CARD_PLAIN}; border: none; }}"
-        )
-        outer = QVBoxLayout(board)
-        outer.setContentsMargins(8, 8, 8, 8)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setMinimumHeight(96)
-        scroll.setObjectName("photoshootList")
-        _fill(scroll.viewport(), CARD_PLAIN)
-        self._list_host = QWidget()
-        self._list_host.setObjectName("photoshootLines")
-        _fill(self._list_host, CARD_PLAIN)
-        column = QVBoxLayout(self._list_host)
-        column.setContentsMargins(0, 0, 0, 0)
-        column.setSpacing(6)
-        column.addStretch(1)
-        scroll.setWidget(self._list_host)
-        outer.addWidget(scroll, 1)
-        footer = QHBoxLayout()
-        self.frame = QLabel("")
-        self.frame.setObjectName("photoshootFrame")
-        self.cancel = QPushButton(tr("simple.cancel"))
-        self.cancel.setObjectName("photoshootCancel")
-        self.cancel.setAutoDefault(False)
-        self.cancel.clicked.connect(self.cancel_series)
-        footer.addWidget(self.frame, 1)
-        footer.addWidget(self.cancel)
-        outer.addLayout(footer)
-        _column(self.window.view._stage).insertWidget(0, board)
-        board.hide()
-        return board
+    def _open_script(self) -> None:
+        self.script_window.open_window()
+        self.sync()
 
-    def _add_row(self, plain: str, full: str) -> None:
-        label = QLabel(plain)
-        label.setObjectName("photoshootLine")
-        label.setWordWrap(True)
-        label.setStyleSheet(f"color: {TEXT}; background: transparent;")
-        label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        layout = _column(self._list_host)
-        layout.insertWidget(max(0, layout.count() - 1), label)
-        self.rows.append(ShotRow(plain, full, "waiting", label))
+    def _on_script_count(self, count: int) -> None:
+        self.script_button.setText(tr("photoshoot.script.button", count=count))
+        self.sync()
 
-    def _clear_rows(self) -> None:
-        for row in self.rows:
-            row.label.setParent(None)
-            row.label.deleteLater()
-        self.rows.clear()
-
-
-def _fill(widget: QWidget, colour: str) -> None:
-    widget.setAutoFillBackground(True)
-    palette = widget.palette()
-    painted = QColor(colour)
-    palette.setColor(QPalette.ColorRole.Window, painted)
-    palette.setColor(QPalette.ColorRole.Base, painted)
-    widget.setPalette(palette)
-    widget.setStyleSheet(f"background: {colour};")
-
-
-def _column(widget: QWidget) -> QBoxLayout:
-    layout = widget.layout()
-    if not isinstance(layout, QBoxLayout):
-        raise RuntimeError("the photoshoot row has no column")
-    return layout
-
-
-def _note(status: str) -> str:
-    if status == "drawing":
-        return tr("canvas.stage.draw")
-    if status == "blocked":
-        return tr("photoshoot.frame.blocked")
-    if status == "kept" or status == "waiting":
-        return ""
-    return ""
+    def _on_script_item_selected(self, index: int) -> None:
+        """A script row was clicked: select its frame in the main window when it has one."""
+        item = self.script.item(index) if index >= 0 else None
+        if item is None or not item.image_id:
+            return
+        layout = self.window.shell.layout
+        if layout.selected == item.image_id:
+            return
+        layout.select(item.image_id)
+        self.window.view.refresh()
 
 
 def _layout_containing(widget: QWidget):

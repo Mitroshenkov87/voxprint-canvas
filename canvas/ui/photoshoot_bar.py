@@ -164,8 +164,12 @@ class PhotoshootBar:
         self.frames_label.setVisible(self.enabled)
         self.frames.setVisible(self.enabled)
         self.frames.setEnabled(self.enabled and not busy)
-        self.cancel.setVisible(busy and self._showing)
-        self.frame.setVisible(busy and self._showing and bool(self.frame.text()))
+        running = busy and self._showing
+        self.cancel.setVisible(running)
+        self.frame.setVisible(running and bool(self.frame.text()))
+        run_line = self.window.findChild(QWidget, "photoshootRun")
+        if run_line is not None:
+            run_line.setVisible(running)
         self.script_button.setVisible(self.script.count > 0 and not self.script_window.isVisible())
 
     def cancel_series(self) -> None:

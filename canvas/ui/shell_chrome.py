@@ -150,6 +150,11 @@ QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{
     image: url("{down}"); width: 8px; height: 5px;
 }}
 QLabel[dialogTitle="true"] {{ font-size: 18px; }}
+QDialog#enlargeProgress QProgressBar {{
+    background: {CONTROL_BG}; border: 1px solid {CONTROL_BORDER}; border-radius: 4px;
+    max-height: 8px; text-align: center;
+}}
+QDialog#enlargeProgress QProgressBar::chunk {{ background: {PRIMARY}; border-radius: 3px; }}
 QDialog QPushButton:checked {{
     background: {PRIMARY}; color: {TEXT_ON_PRIMARY}; border-color: {PRIMARY_BORDER}; font-weight: 600;
 }}

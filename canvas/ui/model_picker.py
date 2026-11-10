@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from voxprint_common.ui.theme import CONTROL_BG, CONTROL_BORDER
+from voxprint_common.ui.theme import CONTROL_BG, CONTROL_BORDER, TEXT_FAINT, TEXT_MUTED
 
 from canvas.app.i18n import text
 from canvas.models.generate_picker import FULL_TIER, GenerateChoice, split
@@ -31,6 +31,17 @@ from canvas.ui.theme import BUTTON_RADIUS
 
 ROW_HEIGHT = 36
 SECTION_IDS = ("compact", "full")
+BADGE_WIDTH = 64
+# Quiet section titles, size badges and disclosure; the row buttons keep the shared look.
+STYLE = f"""
+QWidget#modelPicker QLabel[presetLabel="true"] {{ color: {TEXT_MUTED}; font-size: 12px; font-weight: 600; padding-top: 4px; }}
+QWidget#modelPicker QLabel#modelBadge {{
+    background: {CONTROL_BG}; border: 1px solid {CONTROL_BORDER}; border-radius: {BUTTON_RADIUS}px;
+    color: {TEXT_MUTED}; font-size: 12px; padding: 0 8px;
+}}
+QWidget#modelPicker QToolButton#modelPickerOthers {{ color: {TEXT_FAINT}; font-size: 12px; padding: 6px 2px; border: none; }}
+QWidget#modelPicker QToolButton#modelPickerOthers:hover {{ color: {TEXT_MUTED}; }}
+"""
 
 
 class ModelPicker(QWidget):
@@ -40,6 +51,7 @@ class ModelPicker(QWidget):
         super().__init__()
         self.setObjectName("modelPicker")
         self.setToolTip(text("canvas.model.pick_tip"))
+        self.setStyleSheet(STYLE)
         self._on_change = on_change
         self._loading = False
         self._choices: tuple[GenerateChoice, ...] = ()
@@ -48,7 +60,7 @@ class ModelPicker(QWidget):
         self._group.setExclusive(True)
         self._column = QVBoxLayout(self)
         self._column.setContentsMargins(0, 0, 0, 0)
-        self._column.setSpacing(4)
+        self._column.setSpacing(6)
         self._headers: dict[str, QLabel] = {}
         self._bodies: dict[str, QWidget] = {}
         for section in SECTION_IDS:
@@ -68,6 +80,7 @@ class ModelPicker(QWidget):
         self._others.setObjectName("modelPickerOthers")
         self._others.setCheckable(True)
         self._others.setAutoRaise(True)
+        self._others.setCursor(Qt.CursorShape.PointingHandCursor)
         self._others.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self._others.setArrowType(Qt.ArrowType.RightArrow)
         self._others.setText(text("canvas.model.show_others"))
@@ -152,11 +165,7 @@ class ModelPicker(QWidget):
         badge.setObjectName("modelBadge")
         badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         badge.setToolTip(choice.tip)
-        badge.setFixedHeight(ROW_HEIGHT)
-        badge.setStyleSheet(
-            f"QLabel#modelBadge {{ background: {CONTROL_BG}; border: 1px solid {CONTROL_BORDER};"
-            f" border-radius: {BUTTON_RADIUS}px; padding: 0 8px; }}"
-        )
+        badge.setFixedSize(BADGE_WIDTH, ROW_HEIGHT)
         self._group.addButton(button)
         line.addWidget(button, 1)
         line.addWidget(badge)

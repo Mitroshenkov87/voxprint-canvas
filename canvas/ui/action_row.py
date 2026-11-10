@@ -3,7 +3,7 @@
 Improve with its back segment, Proportions and Image size share a centred
 line that wraps when the panel is narrow. The large Generate button sits
 centred under them, and the Photoshoot option is centred under Generate with
-Frames, the Script button, progress and Cancel beside it."""
+Frames and the Script button beside it, and progress with Cancel on a line below."""
 from __future__ import annotations
 
 from PySide6.QtCore import QSize, Qt
@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 from voxprint_common.i18n import tr
-from voxprint_common.ui.theme import CONTROL_BG, CONTROL_BORDER, TEXT, mark_compact
+from voxprint_common.ui.theme import CONTROL_BG, CONTROL_BORDER, TEXT, TEXT_MUTED, mark_compact
 
 from canvas.app.i18n import text
 from canvas.ui.theme import BUTTON_RADIUS
@@ -27,6 +27,7 @@ GENERATE_HEIGHT = 52
 GENERATE_FONT = 20
 GENERATE_MIN = 300
 GENERATE_PAD = 32
+RUN_HEIGHT = 30
 
 
 def build(window, parts) -> QWidget:
@@ -73,10 +74,19 @@ def build(window, parts) -> QWidget:
 
 
 def _photoshoot_line(mode, label, frames, script=None, progress=None, cancel=None) -> QWidget:
-    """The Photoshoot checkbox centred on Generate, with Frames and script controls on its right."""
+    """The Photoshoot cluster: the option centred on Generate, then the run line under it.
+
+    The first line holds the checkbox with Frames and the Script (N) button on its
+    right. Progress and Cancel sit centred on a second line that only shows while a
+    series is running, so a run never crowds Frames.
+    """
     line = QWidget()
     line.setObjectName("photoshootOption")
-    row = QHBoxLayout(line)
+    stack = QVBoxLayout(line)
+    stack.setContentsMargins(0, 0, 0, 0)
+    stack.setSpacing(6)
+    first = QWidget()
+    row = QHBoxLayout(first)
     row.setContentsMargins(0, 0, 0, 0)
     row.setSpacing(8)
     mode.setProperty("chip", False)
@@ -86,12 +96,9 @@ def _photoshoot_line(mode, label, frames, script=None, progress=None, cancel=Non
     beside = QHBoxLayout(side)
     beside.setContentsMargins(0, 0, 0, 0)
     beside.setSpacing(8)
-    for widget in (label, frames, script, progress, cancel):
+    for widget in (label, frames, script):
         if widget is not None:
-            if widget is progress:
-                widget.setFixedHeight(widget.sizeHint().height())
-            else:
-                widget.setFixedHeight(HEIGHT)
+            widget.setFixedHeight(HEIGHT)
             beside.addWidget(widget)
     beside.addStretch(1)
     # Two equal sides keep the checkbox on the centre line whether Frames shows or not.
@@ -101,8 +108,25 @@ def _photoshoot_line(mode, label, frames, script=None, progress=None, cancel=Non
     row.addWidget(balance, 1)
     row.addWidget(mode)
     row.addWidget(side, 1)
+    stack.addWidget(first)
+    run = QWidget()
+    run.setObjectName("photoshootRun")
+    running = QHBoxLayout(run)
+    running.setContentsMargins(0, 0, 0, 0)
+    running.setSpacing(12)
+    running.addStretch(1)
+    if progress is not None:
+        progress.setFixedHeight(progress.sizeHint().height())
+        progress.setStyleSheet(f"QLabel#photoshootFrame {{ color: {TEXT_MUTED}; }}")
+        running.addWidget(progress)
+    if cancel is not None:
+        cancel.setFixedHeight(RUN_HEIGHT)
+        mark_compact(cancel)
+        running.addWidget(cancel)
+    running.addStretch(1)
+    run.hide()
+    stack.addWidget(run)
     return line
-
 
 
 def _picture_actions(window) -> QWidget:

@@ -9,6 +9,7 @@ import hashlib
 import json
 import logging
 import re
+import sys
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -1126,16 +1127,32 @@ def apply_lora(transformer: object, lora: UserLora, strength: float) -> float:
         unload_lora(transformer)
         raise LoraRejected(CODE_INVALID)
     _fuse_adapter(transformer)
-    _LOG.info(
-        "LoRA applied id=%s alias=%s strength=%s base=%s modules=%s",
-        lora.id,
-        lora.alias or "-",
-        applied,
-        lora.base or "-",
-        patched,
-    )
+    _log_lora_applied(lora, applied, patched)
     apply_lora.last_modules_patched = patched
     return applied
+
+
+
+def _log_lora_applied(lora: UserLora, strength: float, modules: int) -> None:
+    """Write one apply line to the suite log, stderr, and the module logger."""
+    line = (
+        f"LoRA applied id={lora.id} alias={lora.alias or '-'} "
+        f"strength={strength} base={lora.base or '-'} modules={modules}"
+    )
+    _LOG.info("%s", line)
+    try:
+        from voxprint_common.paths import logs_dir
+
+        folder = logs_dir()
+        folder.mkdir(parents=True, exist_ok=True)
+        with (folder / "voxprint.log").open("a", encoding="utf-8") as handle:
+            handle.write(line + "\n")
+    except OSError:
+        pass
+    try:
+        print(line, file=sys.stderr)
+    except OSError:
+        return
 
 
 def _fuse_adapter(transformer: object) -> None:

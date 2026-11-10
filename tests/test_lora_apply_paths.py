@@ -93,12 +93,20 @@ def _lora(tmp_path: Path, alias: str = "vox_lamp") -> UserLora:
     )
 
 
-def test_apply_bound_lora_sets_the_holder_loads_and_logs(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+def test_apply_bound_lora_sets_the_holder_loads_and_logs(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture,
+) -> None:
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    monkeypatch.setattr("voxprint_common.paths.logs_dir", lambda: logs)
     transformer = _Transformer(fuse=True)
     holder = SimpleNamespace()
     lora = _lora(tmp_path)
     caplog.set_level(logging.INFO, logger="canvas.models.user_lora")
     result = apply_bound_lora(lora, 1.0, holder=holder, transformer=transformer)
+    recorded = (logs / "voxprint.log").read_text(encoding="utf-8")
+    assert "LoRA applied id=lamp-1 alias=vox_lamp strength=1.0 base=z-image-turbo modules=1" in recorded
+    assert "LoRA applied id=lamp-1" in capsys.readouterr().err
     assert isinstance(result, LoraApplyResult)
     assert result.lora_id == "lamp-1"
     assert result.alias == "vox_lamp"

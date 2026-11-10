@@ -57,7 +57,7 @@ from canvas.models.pins import (
     PIPELINE_TEXT,
 )
 from canvas.models.plan import CallPlan
-from canvas.models.user_lora import LoraRejected, UserLora, apply_lora, unload_lora
+from canvas.models.user_lora import LoraRejected, UserLora, apply_bound_lora, unload_lora
 from canvas.pipeline.bf16_schedule import VramRefused, is_out_of_memory
 from canvas.pipeline.device_guard import DeviceRefused, pretrained_attempts, require_cuda
 from canvas.pipeline.generation_weights import dtype_label
@@ -86,10 +86,10 @@ class LoraLoadError(InferenceUnavailable):
     """The selected LoRA did not load. ``detail`` names the real cause."""
 
 
-def _apply_lora_reported(transformer: Any, lora: UserLora, requested: float) -> None:
-    """``apply_lora`` with its failure reported as ``LoraLoadError``. An out-of-memory error passes through."""
+def _apply_lora_reported(transformer: Any, lora: UserLora, requested: float, holder: Any | None = None) -> None:
+    """``apply_bound_lora`` with its failure reported as ``LoraLoadError``. An out-of-memory error passes through."""
     try:
-        apply_lora(transformer, lora, requested)
+        apply_bound_lora(lora, requested, holder=holder, transformer=transformer)
     except LoraRejected as exc:
         rejected = LoraRejected(exc.code)
         raise rejected from None
@@ -970,7 +970,7 @@ def _bind_lora(pipe: Any, lora: UserLora | None, lora_strength: float | None) ->
     if transformer is None:
         raise InferenceUnavailable("the generator has no transformer")
     requested = lora.default_strength if lora_strength is None else lora_strength
-    _apply_lora_reported(transformer, lora, requested)
+    _apply_lora_reported(transformer, lora, requested, holder=pipe)
 
 
 def _open_pipeline(
@@ -2741,7 +2741,7 @@ def _place_and_bind(pipe: Any, tier: Tier, lora: UserLora | None, lora_strength:
     if transformer is None:
         raise InferenceUnavailable("the generator has no transformer")
     requested = lora.default_strength if lora_strength is None else lora_strength
-    _apply_lora_reported(transformer, lora, requested)
+    _apply_lora_reported(transformer, lora, requested, holder=pipe)
 
 
 def _release_lora(pipe: Any) -> None:

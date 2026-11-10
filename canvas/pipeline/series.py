@@ -452,6 +452,8 @@ def review_plans(
         check_code, check_reason, ending = _review_frames(
             plan.drawn, gate, plan.folder, container, clock, plan.blocked, plan.kept,
             plan.saved_lines, plan.seeds, plan.on_status, verdicts=mine, halted=halted is not None,
+            lora=getattr(plan.draw_frame, "lora", None),
+            lora_scale=getattr(plan.draw_frame, "lora_scale", None),
         )
         _write_meta(
             plan.folder, plan.idea, plan.scenario, plan.style, plan.mode,
@@ -736,6 +738,8 @@ def _review_frames(
     *,
     verdicts: list[tuple[_Drawn, _Released | None, Exception | None]] | None = None,
     halted: bool = False,
+    lora: object | None = None,
+    lora_scale: float | None = None,
 ) -> tuple[str, str, str | None]:
     """Check every held frame in one batch, then write the ones that passed before a series stop.
 
@@ -779,7 +783,10 @@ def _review_frames(
             _status(on_status, item.index, "blocked")
             continue
         with clock.measure("save"):
-            path = _store_frame(folder, item.index, replace(released, seed=item.seed), container)
+            path = _store_frame(
+                folder, item.index, replace(released, seed=item.seed), container,
+                metadata=_frame_metadata(item, lora, lora_scale),
+            )
         kept.append(path)
         saved_lines.append(item.line)
         seeds.append(item.seed)
@@ -1071,7 +1078,30 @@ def _used_seed(draw_frame: object, seed: int) -> int:
     return int(used(seed)) if callable(used) else int(seed)
 
 
-def _store_frame(folder: Path, index: int, released: _Released, container: OutputFormat | None) -> Path:
+def _frame_metadata(item: _Drawn, lora: object | None, lora_scale: float | None) -> dict:
+    """Seed, and the full record when ``--save-metadata`` or the setting is on."""
+    from canvas.core.picture_meta import picture_fields
+    from canvas.models.user_lora import UserLora
+    from canvas.ui.shell_layout import metadata_enabled
+
+    selected = lora if isinstance(lora, UserLora) else None
+    strength = 0.7 if selected is None else selected.default_strength
+    if lora_scale is not None:
+        strength = float(lora_scale)
+    return picture_fields(
+        prompt=item.line,
+        seed=item.seed,
+        save_metadata=metadata_enabled(),
+        lora=selected,
+        lora_path="" if selected is None else str(selected.weights),
+        lora_weight=strength,
+    )
+
+
+def _store_frame(
+    folder: Path, index: int, released: _Released, container: OutputFormat | None,
+    metadata: dict | None = None,
+) -> Path:
     """Write one frame in the export format. WebP is the Forge default.
 
     PNG, AVIF, JPEG and WebP go through the Forge hand-off; the contact sheet
@@ -1085,7 +1115,7 @@ def _store_frame(folder: Path, index: int, released: _Released, container: Outpu
             return path
         # The seed is the one field every saved frame carries, even with full metadata off.
         path = folder / f"{index + 1:02}{extension(fmt)}"
-        handoff_image(released.safe, path, fmt, seed=released.seed)
+        handoff_image(released.safe, path, fmt, seed=released.seed, metadata=metadata)
         return path
 
 
@@ -1251,37 +1281,18 @@ def _write_sheet(path: Path, frames: list[Path]) -> None:
 
 
 def _read_frame(path: Path) -> tuple[int, int, bytes]:
-    """8-bit RGB of one saved frame in any container the series writes."""
-    raw = path.read_bytes()
-    if raw[:8] != b"\x89PNG\r\n\x1a\n":
-        from PIL import Image
+    """8-bit RGB of one saved frame in any container the series writes.
 
-        with Image.open(path) as image:
-            rgb = image.convert("RGB")
-            return rgb.width, rgb.height, rgb.tobytes()
-    pos = 8
-    width = height = 0
-    compressed = b""
-    while pos + 8 <= len(raw):
-        length = struct.unpack(">I", raw[pos:pos + 4])[0]
-        tag = raw[pos + 4:pos + 8]
-        data = raw[pos + 8:pos + 8 + length]
-        pos += 12 + length
-        if tag == b"IHDR":
-            width, height = struct.unpack(">II", data[:8])
-        elif tag == b"IDAT":
-            compressed += data
-        elif tag == b"IEND":
-            break
-    inflated = zlib.decompress(compressed)
-    rows = []
-    stride = width * 3
-    cursor = 0
-    for _ in range(height):
-        cursor += 1
-        rows.append(inflated[cursor:cursor + stride])
-        cursor += stride
-    return width, height, b"".join(rows)
+    PNG frames are encoded with scanline filters (Sub, Up, Paeth). The pixels
+    must be unfiltered and converted to 8-bit RGB, or the contact sheet is
+    colour noise. PIL handles that for every container the series writes.
+    """
+    from PIL import Image
+
+    with Image.open(path) as image:
+        rgb = image.convert("RGB")
+        return rgb.width, rgb.height, rgb.tobytes()
+
 
 
 def _write_overview(path: Path, width: int, height: int, rgb: bytes) -> None:

@@ -277,10 +277,18 @@ def _file_digest(path: Path) -> str:
 
 
 def resolve_library(value: str, root: Path | None = None) -> UserLora | None:
-    """The imported LoRA named by an id or a library folder path, or None."""
+    """The imported LoRA named by an id, a library folder path, or its alias, or None."""
     text = str(value).strip()
     if not text:
         return None
+    found = _resolve_library_id_or_path(text, root)
+    if found is not None:
+        return found
+    return _resolve_library_alias(text, root)
+
+
+def _resolve_library_id_or_path(text: str, root: Path | None) -> UserLora | None:
+    """The imported LoRA named by an id or a library folder path, or None."""
     base = library_root(root)
     candidate = Path(text)
     if candidate.is_absolute():
@@ -304,6 +312,30 @@ def resolve_library(value: str, root: Path | None = None) -> UserLora | None:
         return entry.as_lora()
     except LoraRejected:
         return None
+
+
+def _resolve_library_alias(text: str, root: Path | None) -> UserLora | None:
+    """The unique library entry whose ``voxprint-model.json`` alias matches ``text``."""
+    alias = parse_alias(text)
+    if not alias:
+        return None
+    matches: list[UserLora] = []
+    fallback: list[UserLora] = []
+    for entry in list_library(root):
+        try:
+            opened = entry.as_lora()
+        except LoraRejected:
+            continue
+        if opened.alias == alias:
+            matches.append(opened)
+        elif entry.manifest.alias == alias:
+            fallback.append(opened)
+    if len(matches) == 1:
+        return matches[0]
+    if not matches and len(fallback) == 1:
+        return fallback[0]
+    return None
+
 
 
 def remove_entry(entry_id: str, root: Path | None = None) -> bool:

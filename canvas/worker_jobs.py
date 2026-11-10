@@ -675,54 +675,11 @@ def _series_seed(mode: str, base: int, series_seed: int) -> int:
 
 
 def _picture_metadata(job: PictureJob) -> dict[str, Any]:
-    """Metadata recorded on one saved picture, in the shared schema.
+    """Metadata recorded on one saved picture, in the shared schema."""
+    from canvas.core.picture_meta import fields_for_job
 
-    With full metadata off the picture still carries its ``seed`` and nothing
-    else: no prompt, model, steps or LoRA. With it on, ``seed`` sits in the
-    full block.
+    return fields_for_job(job)
 
-    ``seed`` and ``steps`` are integers, the LoRA strength is a float, and a
-    resolved LoRA is listed under ``loras`` with only the fields that are
-    known. Every field is best-effort: a LoRA that cannot be re-read never
-    stops the picture; its raw strength field is recorded instead.
-    """
-    if not job.save_metadata:
-        return {"seed": int(job.seed)}
-    from canvas.models.user_lora import clamp_strength, resolve_selected, running_base_id
-
-    fields: dict[str, Any] = {
-        "prompt": job.prompt,
-        "seed": int(job.seed),
-        "steps": int(job.steps),
-    }
-    base = running_base_id()
-    if base:
-        fields["base"] = base
-    if not job.lora_path:
-        return fields
-    strength: float = job.lora_weight
-    name = ""
-    digest = ""
-    lora_base = ""
-    try:
-        selected = resolve_selected(job.lora_path)
-    except Exception:  # noqa: BLE001 - metadata never blocks a job
-        selected = None
-    if selected is not None:
-        strength = clamp_strength(selected, job.lora_weight)
-        name = selected.name or selected.id
-        digest = selected.sha256
-        lora_base = selected.base
-    fields["lora_strength"] = strength
-    if not name:
-        return fields
-    lora: dict[str, Any] = {"name": name, "strength": strength}
-    if digest:
-        lora["sha256"] = digest
-    if lora_base:
-        lora["base"] = lora_base
-    fields["loras"] = [lora]
-    return fields
 
 
 # --- helpers ------------------------------------------------------------------------------------------------------

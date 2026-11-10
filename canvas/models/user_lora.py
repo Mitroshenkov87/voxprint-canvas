@@ -1022,6 +1022,68 @@ def clamp_strength(lora: UserLora, requested: float) -> float:
     return min(max(float(requested), low), high)
 
 
+@dataclass(frozen=True)
+class LoraApplyResult:
+    """What ``apply_bound_lora`` loaded onto the transformer."""
+
+    lora_id: str
+    alias: str
+    strength: float
+    base: str
+    modules_patched: int
+
+
+def apply_bound_lora(
+    lora: UserLora,
+    strength: float,
+    *,
+    holder: object | None = None,
+    transformer: object | None = None,
+) -> LoraApplyResult:
+    """Set the bound LoRA and strength, then load and fuse or apply the adapter.
+
+    GUI and CLI both go through this function. ``holder`` is the generator,
+    runner, or pipeline that should remember the selection. When a transformer
+    is available (passed in, or on ``holder``), the adapter is loaded, the
+    strength is set, and it is fused when the module supports that. The
+    function raises ``LoraRejected`` if the adapter reaches no layer.
+    """
+    applied = clamp_strength(lora, strength)
+    _bind_holder(holder, lora, applied)
+    target = transformer if transformer is not None else _holder_transformer(holder)
+    if target is None:
+        return LoraApplyResult(lora.id, lora.alias, applied, lora.base, 0)
+    applied = apply_lora(target, lora, applied)
+    patched = int(getattr(apply_lora, "last_modules_patched", 0) or 0)
+    return LoraApplyResult(lora.id, lora.alias, applied, lora.base, patched)
+
+
+def _bind_holder(holder: object | None, lora: UserLora, strength: float) -> None:
+    """Record the selected LoRA on a generator, runner, or job-like object."""
+    if holder is None:
+        return
+    for name, value in (
+        ("bound_lora", lora),
+        ("lora_strength", strength),
+        ("lora_weight", strength),
+        ("lora_path", str(lora.weights)),
+    ):
+        try:
+            setattr(holder, name, value)
+        except (AttributeError, TypeError):
+            continue
+
+
+def _holder_transformer(holder: object | None) -> object | None:
+    if holder is None:
+        return None
+    transformer = getattr(holder, "transformer", None)
+    if transformer is not None:
+        return transformer
+    pipe = getattr(holder, "pipe", None)
+    return None if pipe is None else getattr(pipe, "transformer", None)
+
+
 def apply_lora(transformer: object, lora: UserLora, strength: float) -> float:
     """Load one adapter on the transformer. Any loaded adapter is removed first.
 
@@ -1059,7 +1121,53 @@ def apply_lora(transformer: object, lora: UserLora, strength: float) -> float:
         setter([_ADAPTER], weights=[applied])
     except TypeError:
         setter([_ADAPTER], adapter_weights=[applied])
+    patched = _modules_patched(transformer)
+    if patched == 0 and callable(getattr(transformer, "named_modules", None)):
+        unload_lora(transformer)
+        raise LoraRejected(CODE_INVALID)
+    _fuse_adapter(transformer)
+    _LOG.info(
+        "LoRA applied id=%s alias=%s strength=%s base=%s modules=%s",
+        lora.id,
+        lora.alias or "-",
+        applied,
+        lora.base or "-",
+        patched,
+    )
+    apply_lora.last_modules_patched = patched
     return applied
+
+
+def _fuse_adapter(transformer: object) -> None:
+    """Bake the adapter into the weights when the module exposes a fuse hook."""
+    fuse = getattr(transformer, "fuse_lora", None)
+    if not callable(fuse):
+        fuse = getattr(transformer, "fuse_lora_weights", None)
+    if not callable(fuse):
+        return
+    try:
+        fuse()
+    except TypeError:
+        try:
+            fuse(adapter_names=[_ADAPTER])
+        except TypeError:
+            return
+
+
+def _modules_patched(transformer: object) -> int:
+    """How many modules received the bound adapter. ``peft_config`` is the fallback."""
+    modules = getattr(transformer, "named_modules", None)
+    if callable(modules):
+        count = 0
+        for _name, module in modules():
+            layers = getattr(module, "lora_A", None)
+            if isinstance(layers, dict) and _ADAPTER in layers:
+                count += 1
+        return count
+    config = getattr(transformer, "peft_config", None)
+    if isinstance(config, dict) and _ADAPTER in config:
+        return 1
+    return 0
 
 
 def _load_adapter(loader: Callable[..., object], weights: str) -> None:

@@ -272,7 +272,7 @@ def _simple_window(home: Path):
 
 def test_simple_mode_has_its_own_18_box(monkeypatch, tmp_path: Path) -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    from PySide6.QtWidgets import QApplication, QCheckBox, QWidget
+    from PySide6.QtWidgets import QApplication, QCheckBox, QToolButton, QWidget
 
     app = QApplication.instance() or QApplication([])
     monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
@@ -283,7 +283,12 @@ def test_simple_mode_has_its_own_18_box(monkeypatch, tmp_path: Path) -> None:
     window.show()
     app.processEvents()
     box = window.findChild(QCheckBox, "adultBox")
-    assert box is not None and box.isVisible() and not box.isChecked()
+    more = window.findChild(QToolButton, "simpleMore")
+    assert more is not None and more.isVisible() and not more.isChecked()
+    assert box is not None and not box.isVisible() and not box.isChecked()
+    more.click()
+    app.processEvents()
+    assert more.isChecked() and box.isVisible() and not box.isChecked()
 
     box.setChecked(True)
     app.processEvents()
@@ -305,14 +310,21 @@ def test_simple_mode_has_its_own_18_box(monkeypatch, tmp_path: Path) -> None:
     assert box.isChecked()
     window.set_expert(False)
     app.processEvents()
-    assert layout.get(KEY) is True and box.isVisible() and box.isChecked()
+    assert layout.get(KEY) is True and box.isChecked()
     window.close()
 
     # A reopen from the same state dir keeps the value, with Expert still off.
+    # More starts collapsed again, so the box is not shown until it is opened.
     again = _simple_window(tmp_path)
     again.show()
     app.processEvents()
     assert ExpertMode().enabled() is False
-    assert again.findChild(QCheckBox, "adultBox").isChecked()
+    again_box = again.findChild(QCheckBox, "adultBox")
+    again_more = again.findChild(QToolButton, "simpleMore")
+    assert again_more is not None and not again_more.isChecked()
+    assert again_box is not None and again_box.isChecked() and not again_box.isVisible()
+    again_more.click()
+    app.processEvents()
+    assert again_box.isVisible() and again_box.isChecked()
     assert job_from(again.shell.layout).adult_content is True
     again.close()

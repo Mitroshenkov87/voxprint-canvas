@@ -39,7 +39,7 @@ Status is `done`, `TODO`, `NEEDS OWNER DECISION`, `pending Yitro`, or `removed (
 | History | (not on the old window) | Simple history strip. A finished picture shows More like this, Save, Open folder, Use prompt again, Use as input, and Delete. Each history item's menu still has Open folder and Delete | done |
 | Steps, guidance, seed, sampler, negative prompt | (not on the old window) | Expert panel | done |
 | VRAM cap | `--vram-cap-gb` | Expert VRAM limit, and the command | done |
-| Adult content | (not on the old window) | 18+ box in Simple, mirrored in the Expert panel. It changes only the prompt policy | done |
+| Adult content | (not on the old window) | 18+ box in the Simple More section (collapsed by default, not shown in the main panel), mirrored in the Expert panel. It changes only the prompt policy | done |
 | Exact size, including 2K | `--output-size 2k` | Expert Exact size, and the command | done |
 | Source picture | Use a picture; `generate --input` | Image surface source-picture slot, opt-in | done |
 | Mask | Edit the mask; `generate --mask` | Image surface mask slot, opt-in | done |
@@ -47,7 +47,7 @@ Status is `done`, `TODO`, `NEEDS OWNER DECISION`, `pending Yitro`, or `removed (
 | Expert steps | Expert panel | `shell.steps` in the live settings passed to the generator | done |
 | Expert CFG | Expert panel | `shell.guidance` in the live settings passed to the generator | done |
 | Expert sampler | Expert panel | `shell.sampler` in the live settings passed to the generator | done |
-| Random seed (Simple) and Lock seed (Expert) | Top bar box, Expert panel | `canvas.seed_lock` (off by default = a new random seed per picture, copy and shot). `shell.seed` shows the last seed used; locked repeats it. The used seed is on the result line, in the job result, and in every saved picture | done |
+| Random seed (Simple) and Lock seed (Expert) | Bottom of the Simple panel, Expert panel | `canvas.seed_lock` (off by default = a new random seed per picture, copy and shot). `shell.seed` shows the last seed used; locked repeats it. The used seed is on the result line, in the job result, and in every saved picture | done |
 | `generate --prompt` | Command | Simple prompt, and the command | done |
 | `generate --input` | Command | Use a picture, and the command | done |
 | `generate --mask` | Command | Edit the mask, and the command | done |

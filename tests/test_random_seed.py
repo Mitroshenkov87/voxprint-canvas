@@ -247,9 +247,12 @@ def test_simple_random_seed_toggle_is_on_by_default(app, home: Path, monkeypatch
     window.show()
     app.processEvents()
     box = window.findChild(QCheckBox, "seedDice")
-    assert box is not None and box.isChecked()
+    assert box is not None and box.isVisible() and box.isChecked()
     assert box.text() == tr("canvas.seed.box")
     assert window.shell.layout.seed_locked() is False
+    # Bottom of the Simple panel, not the top bar (More / Expert).
+    assert box.parent().objectName() == "shellColumn"
+    assert window.view.root.findChild(QCheckBox, "seedDice") is None
 
 
 def test_two_unlocked_runs_use_different_seeds_and_show_them(app, home: Path, monkeypatch) -> None:

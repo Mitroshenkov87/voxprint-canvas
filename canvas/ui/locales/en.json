@@ -11,6 +11,7 @@
   "canvas.seed.shown": "Seed {seed}",
   "canvas.adult.box": "Adult content (18+)",
   "canvas.adult.tip": "Allows adult prompts. Changes only the prompt policy. Works the same in Simple and Expert.",
+  "canvas.more.section": "More",
   "canvas.action.mask": "Edit the mask",
   "canvas.action.addons": "Add-ons",
   "canvas.action.check": "Check this PC",

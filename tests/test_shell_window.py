@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -341,12 +342,22 @@ def test_expert_combos_fill_the_field_column(app, home: Path) -> None:
     app.processEvents()
     window.set_expert(True)
     # The form settles on a queued call once the refilled fields are shown.
-    app.processEvents()
-    app.processEvents()
     form = window.findChild(QWidget, "expertForm")
-    steps = form.findChild(QSpinBox, "shell.steps")
-    combos = [combo for combo in form.findChildren(QComboBox) if combo.isVisible()]
-    assert steps is not None and steps.isVisible() and len(combos) >= 3
+    steps = form.findChild(QSpinBox, "shell.steps") if form is not None else None
+    combos: list[QComboBox] = []
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline:
+        app.processEvents()
+        if form is None or steps is None:
+            form = window.findChild(QWidget, "expertForm")
+            steps = form.findChild(QSpinBox, "shell.steps") if form is not None else None
+            continue
+        combos = [combo for combo in form.findChildren(QComboBox) if combo.isVisible()]
+        if steps.isVisible() and len(combos) >= 3 and all(
+            combo.width() == steps.width() and combo.x() == steps.x() for combo in combos
+        ):
+            break
+    assert form is not None and steps is not None and steps.isVisible() and len(combos) >= 3
     for combo in combos:
         assert combo.width() == steps.width(), combo.objectName()
         assert combo.x() == steps.x(), combo.objectName()

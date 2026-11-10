@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import gc
 import inspect
+import logging
 import threading
 import time
 import zlib
@@ -154,6 +155,52 @@ _slot: _Held | None = None
 # Phase 2 of a series keeps the denoiser on the card. Phase 3 decodes the latents it left here.
 _resident_cook = False
 _pending_latents: dict[tuple[object, ...], Any] = {}
+
+
+class _CallOptions:
+    """Per-call extras for a headless tool. Both stay None in the app."""
+
+    inpaint_strength: float | None = None
+    step_callback: Any = None
+
+
+_call_options = _CallOptions()
+
+
+@contextmanager
+def call_options(*, inpaint_strength: float | None = None, step_callback: Any = None) -> Iterator[None]:
+    """Pass an inpaint denoise and a per-step callback to the pipeline calls made inside this block.
+
+    ``inpaint_strength`` goes to the inpaint pipelines as ``strength`` when they
+    take one. It is not the restyle strength, so ``applied_strength`` is not
+    involved. ``step_callback`` runs after each denoising step, with the
+    ``callback_on_step_end`` arguments, and its return value is ignored. Outside
+    the block the calls are unchanged.
+    """
+    with _lock:
+        before = (_call_options.inpaint_strength, _call_options.step_callback)
+        _call_options.inpaint_strength = inpaint_strength
+        _call_options.step_callback = step_callback
+    try:
+        yield
+    finally:
+        with _lock:
+            _call_options.inpaint_strength, _call_options.step_callback = before
+
+
+def _inpaint_extras(pipe: Any) -> dict[str, Any]:
+    """``strength`` for an inpaint call, only when a tool set one and the pipeline takes it."""
+    value = _call_options.inpaint_strength
+    if value is None:
+        return {}
+    try:
+        names = set(inspect.signature(pipe.__call__).parameters)
+    except (AttributeError, TypeError, ValueError):
+        return {}
+    if "strength" not in names:
+        logging.getLogger(__name__).warning("this inpaint pipeline takes no strength; the requested denoise is ignored")
+        return {}
+    return {"strength": float(value)}
 
 
 def system_ram_bytes() -> int:
@@ -1400,7 +1447,8 @@ def _render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, h
                     )
                 elif pipeline_name == PIPELINE_INPAINT:
                     result = _timed(
-                        pipe, torch, image=_pil(_frame(screened, "init")), mask_image=_pil(_frame(screened, "mask")), **call,
+                        pipe, torch, image=_pil(_frame(screened, "init")), mask_image=_pil(_frame(screened, "mask")),
+                        **_inpaint_extras(pipe), **call,
                     )
                 elif pipeline_name == PIPELINE_CONTROL:
                     role = _control_role(screened)
@@ -1415,6 +1463,7 @@ def _render(plan: CallPlan, folder: Path, screened: ScreenedInput, width: int, h
                         mask_image=_pil(_frame(screened, "mask")),
                         control_image=_pil(_frame(screened, _control_role(screened))),
                         controlnet_conditioning_scale=0.75,
+                        **_inpaint_extras(pipe),
                         **call,
                     )
                 else:
@@ -1545,9 +1594,12 @@ def _with_step_beat(pipe: Any, kwargs: dict[str, Any], progress: Any) -> dict[st
         names = set(inspect.signature(pipe.__call__).parameters)
     except (AttributeError, TypeError, ValueError):
         return kwargs
+    extra = _call_options.step_callback
 
     def beat(_pipe: Any, _step: int, _timestep: Any, tensors: dict[str, Any]) -> dict[str, Any]:
         progress.kick()
+        if extra is not None:
+            extra(_pipe, _step, _timestep, tensors)
         return tensors
 
     if "callback_on_step_end" not in names:

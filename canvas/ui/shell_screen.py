@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 
 from voxprint_common.i18n import add_catalogs, set_language, tr
 from voxprint_common.mdl.names import CLI_NAME
+from voxprint_common.suite_settings import model_default, set_model_default
 from voxprint_common.ui.expert import ExpertMode
 from voxprint_common.ui.safety import ReviewedOutput
 from voxprint_common.ui.simple_image import Phase, SimpleImageWidget as SimpleWidget, HISTORY_CELL_SIZE, HISTORY_CELL_GAP
@@ -40,6 +41,7 @@ from canvas.ipc.schema import Reply, decode_event
 from canvas.models.mdl_layout import on_disk_manifest
 from canvas.models.mdl_registry import selectable
 from canvas.models.forge_retrain import request_retrain
+from canvas.models.generate_picker import implied_family
 from canvas.models.lora_library import LibraryEntry
 from canvas.models.user_lora import LoraIndex, UserLora, chip_word, discover, installed_loras, resolve_selected, route_lora
 from canvas.ui.lora_panel import ImportedDialog, LibraryDialog, dark, import_with_dialog
@@ -318,6 +320,24 @@ class ShellWindow(QMainWindow):
                     return  # the add-ons screen was closed while the worker checked the file
 
         self.import_lora(on_done=finished)
+
+    def _pick_model(self, model_id: str) -> None:
+        """Store the generate-model pick. The shared family follows when the pick implies one."""
+        layout = self.shell.layout
+        if str(layout.get("canvas.generate_model") or "") != model_id:
+            layout.set_value("canvas.generate_model", model_id)
+        family = implied_family(model_id)
+        if family and model_default() != family:
+            set_model_default(family)
+
+    def refresh_models(self) -> None:
+        """Re-read the installed manifest into the generate-model pick."""
+        picker = getattr(self, "_model_picker", None)
+        if picker is None:
+            return
+        from canvas.ui.shell_chrome import _reload_model_picker
+
+        _reload_model_picker(self)
 
     def _pick_lora(self, key: str, strength: float) -> None:
         changed = str(self.shell.layout.get("shell.addons") or "") != key

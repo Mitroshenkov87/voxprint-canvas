@@ -151,14 +151,18 @@ class ZImageGenerator:
     """Diffusers generator. ``generate`` accepts only a ``ScreenedInput``.
 
     ``base`` selects the text-to-image family. ``None`` uses the catalog default.
+    ``model_id`` is a specific installed generate row (the Canvas model pick);
+    words-to-image plans use it when the catalog lists the row.
     """
 
     base: str | None = None
+    model_id: str | None = None
 
     def __init__(self, catalog: Catalog, tier: Tier, ledger: GpuLedger | None = None) -> None:
         self.catalog = catalog
         self.tier = tier
         self.base = None
+        self.model_id = None
         self.last_plan: CallPlan | None = None
         self.last_size: tuple[int, int] | None = None
         self.unloaded = False
@@ -194,7 +198,7 @@ class ZImageGenerator:
         if type(screened) is not ScreenedInput:
             raise TypeError("the generator only accepts a ScreenedInput")
         self._apply_lora_route()
-        plan = build_plan(self.catalog, screened, self.tier, base=self.base)
+        plan = build_plan(self.catalog, screened, self.tier, base=self.base, model_id=self.model_id)
         if plan.pipeline_class == PIPELINE_MOSS:
             return
         self._draw(sample_latent, screened, width, height)
@@ -207,7 +211,7 @@ class ZImageGenerator:
         self._apply_lora_route()
         if width is not None and height is not None:
             self.last_size = (width, height)
-        plan = build_plan(self.catalog, screened, self.tier, base=self.base)
+        plan = build_plan(self.catalog, screened, self.tier, base=self.base, model_id=self.model_id)
         self.last_plan = plan
         mode = Mode(plan.mode)
         self._schedule(plan, mode, 1024 if width is None else width, 1024 if height is None else height, screened.prompt)

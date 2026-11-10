@@ -82,10 +82,21 @@ def _lookup(catalog: Catalog, model_id: str) -> ModelSpec | None:
         return None
 
 
-def build_plan(catalog: Catalog, screened: ScreenedInput, tier: Tier, *, base: str | None = None) -> CallPlan:
+def build_plan(
+    catalog: Catalog,
+    screened: ScreenedInput,
+    tier: Tier,
+    *,
+    base: str | None = None,
+    model_id: str | None = None,
+) -> CallPlan:
     """Return the diffusers call for one screened request. Hidden modes raise.
 
     ``base`` selects the text-to-image family. Other modes ignore it and stay on Z-Image.
+    ``model_id`` is a specific installed generate row (the Canvas model pick). It
+    wins for words-to-image when the catalog lists the row; an explicit ``base``
+    (a bound LoRA's trained family) still wins over a pick of another family, and
+    an uncatalogued pick leaves the family mapping in charge.
     """
     if type(screened) is not ScreenedInput:
         raise TypeError("a generation plan requires a screened request")
@@ -107,7 +118,7 @@ def build_plan(catalog: Catalog, screened: ScreenedInput, tier: Tier, *, base: s
         if tier is not Tier.GB24:
             raise ModeUnavailable()
     if mode is Mode.TEXT:
-        spec, pipeline = _text_model(catalog, tier, base)
+        spec, pipeline = _text_model(catalog, tier, base, model_id)
         return _plan(mode, tier, pipeline, (spec,), spec.steps, spec.guidance_scale, spec.text_encoder_offload)
     if mode is Mode.TEXT_CREATIVE:
         creative = _one(catalog, "z-image-creative-bf16")
@@ -128,11 +139,28 @@ def build_plan(catalog: Catalog, screened: ScreenedInput, tier: Tier, *, base: s
     assert_never(mode)
 
 
-def _text_model(catalog: Catalog, tier: Tier, base: str | None = None) -> tuple[ModelSpec, str]:
-    """The text-to-image row for ``base``, or the shared ``model.default`` when ``base`` is omitted."""
+def _text_model(
+    catalog: Catalog,
+    tier: Tier,
+    base: str | None = None,
+    model_id: str | None = None,
+) -> tuple[ModelSpec, str]:
+    """The text-to-image row for ``base``, or the shared ``model.default`` when ``base`` is omitted.
+
+    A specific ``model_id`` (the Canvas model pick) wins when the catalog lists
+    the row as a generator. An explicit ``base`` — a bound LoRA's trained
+    family — still wins over a pick of a different family, and a pick the
+    catalog does not know (for example a compact 4-bit build pinned nowhere
+    yet) leaves the family mapping in charge, so catalogued models keep
+    planning.
+    """
     family = base or selected_text_base()
     if not family:
         raise BaseNotSelected()
+    if model_id:
+        picked = _picked_text_row(catalog, model_id, explicit_base=base)
+        if picked is not None:
+            return picked
     if family == "z-image-turbo":
         if tier is Tier.GB16:
             return _one(catalog, "z-image-turbo-bf16-16gb"), PIPELINE_TEXT
@@ -163,6 +191,27 @@ def _text_model(catalog: Catalog, tier: Tier, base: str | None = None) -> tuple[
     if family not in catalog.text_bases:
         raise BaseNotSelected()
     raise BaseNotSelected()
+
+
+def _picked_text_row(catalog: Catalog, model_id: str, *, explicit_base: str | None) -> tuple[ModelSpec, str] | None:
+    """The picked generate row and its pipeline, or None when the pick cannot run.
+
+    The catalog must list the id with the ``generator`` role. An explicit
+    ``base`` (a bound LoRA's trained family) keeps a pick of another family
+    from loading that LoRA onto the wrong weights; a row without a text base
+    (creative) runs under any family. Uncatalogued picks return None so the
+    family mapping plans instead.
+    """
+    try:
+        spec = catalog.by_id(model_id)
+    except RegistryError:
+        return None
+    if spec.role != "generator":
+        return None
+    if explicit_base and spec.text_base and spec.text_base != explicit_base:
+        return None
+    pipeline = PIPELINE_MOSS if PIPELINE_MOSS in spec.pipeline_classes else PIPELINE_TEXT
+    return spec, pipeline
 
 
 def _plan(mode: Mode, tier: Tier, pipeline: str, specs: tuple[ModelSpec, ...], steps: int | None,

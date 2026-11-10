@@ -24,7 +24,9 @@ from typing import TYPE_CHECKING
 
 from canvas.core.formats import OutputFormat
 from canvas.core.seeds import field_value, fresh_seed, offset_seed
+from canvas.models.generate_picker import SETTING_KEY, picked_spec
 from canvas.models.modes import Mode
+from canvas.models.registry import load_catalog
 from canvas.pipeline import adult_boundary
 from canvas.ui.styles import LOOKS, look_for, style_label
 from canvas.ui.worker_checks import WorkerChecks
@@ -56,6 +58,8 @@ class PictureJob(NamedTuple):
     lora_weight: float = 0.7
     # XMP/PNG text is written only when this is on.
     save_metadata: bool = False
+    # The Canvas generate-model pick; empty lets the plan follow the family.
+    model_id: str = ""
 
 
 class CanvasLayout(SimpleLayout):
@@ -386,11 +390,14 @@ def job_from(layout: SimpleLayout, live: Mapping[str, object] | None = None) -> 
         lora_path=str(pick("shell.addons") or ""),
         lora_weight=_decimal(pick("shell.lora_weight")),
         save_metadata=metadata_enabled(layout.get("canvas.save_metadata")),
+        model_id=str(pick(SETTING_KEY) or ""),
     )
 
 
 def picture_mode(layout: SimpleLayout) -> Mode:
-    """The mode the chips describe. Words use variation. A picture uses Change.
+    """The mode the chips describe. Words use variation. A picked generate model
+    answers "varied" on its own, so it becomes a plain text job that the plan
+    steers onto the pick. A picture uses Change.
 
     Args:
         layout: A screen opened by :func:`open_layout`.
@@ -401,6 +408,8 @@ def picture_mode(layout: SimpleLayout) -> Mode:
     source = layout.get("canvas.source")
     if source == "words":
         if layout.get("canvas.variation") == "varied":
+            if picked_spec(load_catalog(), str(layout.get(SETTING_KEY) or "")) is not None:
+                return Mode.TEXT
             return Mode.TEXT_CREATIVE
         if layout.get("canvas.variation") == "quick":
             return Mode.TEXT
@@ -497,6 +506,7 @@ def _settings() -> Settings:
         )
     )
     settings.add(_bool("canvas.save_metadata", False))
+    settings.add(_text(SETTING_KEY))
     settings.add(_bool(adult_boundary.KEY, False))
     settings.add(_bool(SEED_LOCK_KEY, False, expert=True))
     settings.add(
@@ -555,6 +565,17 @@ def _bool(setting_id: str, default: bool, *, expert: bool = False) -> SettingSpe
         default,
         expert=expert,
         group="image" if expert else "",
+    )
+
+
+def _text(setting_id: str) -> SettingSpec:
+    """A stored text value the screens do not render (the model pick)."""
+    return SettingSpec(
+        setting_id,
+        setting_id,
+        f"{setting_id}.help",
+        SettingType.TEXT,
+        "",
     )
 
 

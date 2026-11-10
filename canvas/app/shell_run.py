@@ -234,6 +234,7 @@ class ShellRunner:
         catalog = load_catalog()
         generator = ZImageGenerator(catalog, self.tier)
         generator.seed = job.seed
+        generator.model_id = job.model_id or None
         generator.lora_path = job.lora_path
         generator.lora_strength = job.lora_weight
         generator.bound_lora = self.bound_lora

@@ -298,6 +298,7 @@ def polish(window):
     _fit_controls(window)
     _lock_chip_widths(window)
     _wrap_rows(window)
+    _sync_model_picker(window)
     _sync_lora_picker(window)
     _sync_lora_chip(window)
     sync_actions(window)
@@ -323,6 +324,42 @@ def _sync_lora_chip(window):
         picker.show_chip(button, word)
     else:
         button.setVisible(False)
+
+
+def _sync_model_picker(window):
+    """Put the generate-model pick under the presets, above the LoRA pick, once."""
+    picker = getattr(window, "_model_picker", None)
+    if picker is None:
+        panel = window.view.root.findChild(QWidget, "promptPanel")
+        column = None if panel is None else panel.layout()
+        if column is None:
+            return
+        from canvas.ui.model_picker import ModelPicker
+
+        picker = ModelPicker(window._pick_model)
+        window._model_picker = picker
+        lora = getattr(window, "_lora_picker", None)
+        if lora is not None and column.indexOf(lora) >= 0:
+            at = column.indexOf(lora)
+        else:
+            at = column.count()
+            for index in range(column.count()):
+                if column.itemAt(index).spacerItem() is not None:
+                    at = index
+        column.insertWidget(at, picker)
+    _reload_model_picker(window)
+
+
+def _reload_model_picker(window) -> None:
+    """Fill the pick from the installed manifest and the window's tier."""
+    from canvas.models.generate_picker import choices, preselect
+
+    picker = getattr(window, "_model_picker", None)
+    if picker is None:
+        return
+    found = choices()
+    stored = str(window.shell.layout.get("canvas.generate_model") or "")
+    picker.reload(found, preselect(found, window.tier, stored), window.tier)
 
 
 def _sync_lora_picker(window):

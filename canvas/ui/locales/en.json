@@ -228,5 +228,14 @@
   "canvas.file.type": "Files of type:",
   "canvas.file.open": "Open",
   "canvas.file.cancel": "Cancel",
-  "canvas.file.folder": "Folder"
+  "canvas.file.folder": "Folder",
+  "canvas.model.section.compact": "For 16 GB cards (compact)",
+  "canvas.model.section.full": "Full size (24 GB+)",
+  "canvas.model.badge.compact": "16 GB",
+  "canvas.model.badge.full": "24 GB+",
+  "canvas.model.show_others": "Show models for other cards",
+  "canvas.model.hide_others": "Hide models for other cards",
+  "canvas.model.pick_tip": "The installed model that draws a picture made from text.",
+  "canvas.generate_model": "Generate model",
+  "canvas.generate_model.help": "The installed model that draws pictures made from text."
 }

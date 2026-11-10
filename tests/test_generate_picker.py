@@ -64,7 +64,10 @@ KNOWN_GROUPS = frozenset({
     "translate", "writer", "safety", "internal",
 })
 
-# The exact picker metadata every shipped placeholder row must carry.
+# Exact picker metadata for every row in the canvas/mdl.json placeholder
+# (13 rows, including the two uncatalogued SVDQuant builds). The shipped
+# installer catalog is root mdl.json (14 rows, including mivolo-v2-age and
+# the two FP32 -upstream fallbacks); that file is covered in test_mdl_manifest.
 EXPECTED = {
     "z-image-turbo-bf16": ("generate", "24gb", "Z-Image Turbo (recommended)", "Fast, high-quality pictures from text; the default."),
     "z-image-turbo-bf16-16gb": ("generate", "16gb", "Z-Image Turbo for 16 GB cards", "The default model, sized to fit 16 GB graphics cards."),

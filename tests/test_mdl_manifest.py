@@ -145,3 +145,112 @@ def test_turbo_plans_compose_the_bf16_transformer_and_shared_text_stack():
             else:
                 assert "voxprint-mirror-z-image-turbo" in item.urls[0]
 
+
+# The shipped installer catalog (root mdl.json) has 14 rows: the 12 pinned
+# catalog models plus the two FP32 ``-upstream`` fallbacks. It does not
+# include the unpinned MOSS generators or the uncatalogued SVDQuant ids
+# that appear only in the canvas/mdl.json placeholder (13 rows).
+# Task groups recognised by voxprint-common 0.7.1 (docs/mdl-fields.md).
+_KNOWN_GROUPS = frozenset({
+    "generate", "edit", "upscale", "restore", "voice", "transcribe",
+    "translate", "writer", "safety", "internal",
+})
+
+SHIPPED_EXPECTED = {
+    "z-image-turbo-bf16-16gb": (
+        "generate",
+        "Z-Image Turbo for 16 GB cards",
+        "The default model, sized to fit 16 GB graphics cards.",
+    ),
+    "z-image-turbo-bf16-16gb-upstream": (
+        "generate",
+        "Z-Image Turbo for 16 GB cards (full precision)",
+        "The full-precision fallback when the BF16 weights cannot be opened.",
+    ),
+    "z-image-turbo-bf16": (
+        "generate",
+        "Z-Image Turbo (recommended)",
+        "Fast, high-quality pictures from text; the default.",
+    ),
+    "z-image-turbo-bf16-upstream": (
+        "generate",
+        "Z-Image Turbo (full precision)",
+        "The full-precision fallback when the BF16 weights cannot be opened.",
+    ),
+    "z-image-creative-bf16": (
+        "generate",
+        "Z-Image Creative",
+        "Slower, more varied and artistic results.",
+    ),
+    "z-image-turbo-fun-controlnet-union-bf16-lite": (
+        "edit",
+        "Pose & edge guidance, lite",
+        "The same guidance, sized for 16 GB cards.",
+    ),
+    "z-image-turbo-fun-controlnet-union-bf16": (
+        "edit",
+        "Pose & edge guidance",
+        "Follows a pose, edges or depth from a reference picture.",
+    ),
+    "qwen3guard-gen-0.6b": (
+        "safety",
+        "Prompt safety check",
+        "Checks prompts before generating.",
+    ),
+    "siglip2-so400m-patch14-384": (
+        "safety",
+        "Image safety check",
+        "Checks input and output pictures.",
+    ),
+    "yunet-face": (
+        "safety",
+        "Face finder",
+        "Finds faces for the safety and likeness checks.",
+    ),
+    "fairface-age": (
+        "safety",
+        "Age check",
+        "Part of the adults-only check.",
+    ),
+    "mivolo-v2-age": (
+        "safety",
+        "Fine age check",
+        "A closer age estimate used with the adults-only check.",
+    ),
+    "nsfw-image-detection": (
+        "safety",
+        "Content check",
+        "Classifies picture content for the 18+ setting.",
+    ),
+    "qwen3-4b-writer": (
+        "writer",
+        "Photoshoot writer (Qwen3 4B)",
+        "Writes the shot list for Photoshoot series.",
+    ),
+}
+
+
+def test_every_shipped_mdl_row_has_label_purpose_and_a_known_group():
+    doc = _doc()
+    rows = {row["id"]: row for row in doc["models"]}
+    assert len(rows) == 14
+    assert set(rows) == set(SHIPPED_EXPECTED)
+    for model_id, (group, label, purpose) in SHIPPED_EXPECTED.items():
+        row = rows[model_id]
+        assert row["label"] == label, model_id
+        assert row["purpose"] == purpose, model_id
+        assert row["group"] == group, model_id
+        assert group in _KNOWN_GROUPS, model_id
+
+
+def test_common_loader_accepts_the_shipped_display_fields():
+    catalog_mod = pytest.importorskip("voxprint_common.mdl.catalog")
+    manifest = catalog_mod.load_manifest(MANIFEST.resolve())
+    assert len(manifest.models) == 14
+    by_id = {model.id: model for model in manifest.models}
+    for model_id, (group, label, purpose) in SHIPPED_EXPECTED.items():
+        model = by_id[model_id]
+        assert model.label == label, model_id
+        assert model.purpose == purpose, model_id
+        assert model.group == group, model_id
+

@@ -396,3 +396,113 @@ def test_a_missing_or_unreadable_recommended_strength_is_one_even_with_a_sidecar
     assert present is not None and present.default_strength == 0.5
     # A non-Z-Image third-party file without the key also falls back to 1.0.
     assert _bare(tmp_path, **{"voxprint.lora.base": "sdxl"}).default_strength == 1.0
+
+
+# --- GUI series carries the window LoRA -----------------------------------------------------
+
+
+def test_gui_series_binds_the_window_lora_and_strength(tmp_path: Path, monkeypatch) -> None:
+    """A Photoshoot from the window uses the same LoRA and strength as Generate.
+
+    The worker series path used to leave the runner unbound, so cook/precompute
+    drew with the base model even when the job named a LoRA.
+    """
+    from canvas.app.shell_run import RunStopped
+    from canvas.core.formats import OutputFormat
+    from canvas.models.modes import Mode
+    from canvas.pipeline.series import SeriesResult
+    from canvas.ui.shell_layout import PictureJob
+    from canvas.worker_jobs import Session, _series
+
+    lora = _folder_lora(tmp_path, **{"voxprint.subject.alias": ALIAS})
+    monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
+    seen: dict[str, object] = {}
+
+    class Check:
+        def review_prompt(self, text: str):
+            return None
+
+    class Runner:
+        bound_lora = None
+        lora_strength = 0.25
+        cook = False
+
+        def __call__(self, job, inputs):
+            seen["job_path"] = job.lora_path
+            seen["job_weight"] = job.lora_weight
+            seen["job_prompt"] = job.prompt
+            seen["bound"] = self.bound_lora
+            seen["strength"] = self.lora_strength
+            raise RunStopped("stop after bind")
+
+    runner = Runner()
+
+    def fake_run_series(**kwargs):
+        draw = kwargs["draw_frame"]
+        seen["draw_lora"] = getattr(draw, "lora", None)
+        seen["during_bound"] = runner.bound_lora
+        seen["during_strength"] = runner.lora_strength
+        try:
+            draw("a red boat at dusk", 1, None, None)
+        except RunStopped:
+            pass
+        return SeriesResult(stopped="", reason="", kept=(), folder=None, code="", source="")
+
+    reviewed: list[str] = []
+
+    def record_review(_current, prompts):
+        reviewed.extend(prompts)
+        return None
+
+    class Writer:
+        def __call__(self, prompt: str) -> str:
+            return prompt
+
+        def release(self) -> None:
+            return None
+
+    monkeypatch.setattr("canvas.pipeline.series.run_series", fake_run_series)
+    monkeypatch.setattr("canvas.worker_jobs._review_prompts", record_review)
+    monkeypatch.setattr("canvas.worker_jobs._selected_lora", lambda _path, _runner: lora)
+    monkeypatch.setattr("canvas.worker_jobs._writer_session", lambda *_a, **_k: Writer())
+
+    job = PictureJob(
+        "a red boat", "", Mode.TEXT, "1:1", "native", OutputFormat.PNG, 1, 8, 0.0, "euler", 1,
+        lora_path=str(lora.weights), lora_weight=1.0,
+    )
+    fields = job._asdict()
+    fields["mode"] = job.mode.value
+    fields["fmt"] = job.fmt.value
+    ctx = types.SimpleNamespace(progress=lambda **_kw: None, cancelled=lambda: False)
+    current = Session(gate=None, check=Check(), tier=None, runner=runner, improver=lambda **_kw: "")
+    payload = {
+        "job": fields,
+        "idea": f"{ALIAS} on a bench",
+        "count": 2,
+        "style": "photo",
+        "place": "same",
+        "seed": 1,
+        "adult": False,
+        "container": "png",
+        "series_id": "abcd",
+        "out_dir": str(tmp_path / "session"),
+        "template": "",
+        "suffix": "",
+        "seed_mode": "locked",
+    }
+    reply = _series(ctx, current, payload)
+    assert reply.get("status") == "ok"
+    assert seen["during_bound"] is lora
+    assert seen["during_strength"] == pytest.approx(1.0)
+    assert seen["draw_lora"] is lora
+    assert seen["job_path"] == str(lora.weights)
+    assert seen["job_weight"] == pytest.approx(1.0)
+    assert seen["bound"] is lora
+    assert seen["strength"] == pytest.approx(1.0)
+    assert str(seen["job_prompt"]).startswith(f"{TRIGGER}, ")
+    # Alias is rewritten before the gate reviews the idea.
+    assert reviewed and all(ALIAS not in item for item in reviewed)
+    assert any(TRIGGER in item for item in reviewed)
+    # The bind is restored so a later picture does not keep the series LoRA.
+    assert runner.bound_lora is None
+    assert runner.lora_strength == pytest.approx(0.25)

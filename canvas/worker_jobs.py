@@ -563,6 +563,14 @@ def _series(ctx: JobContext, current: Session, payload: Mapping[str, object]) ->
             lora=lora,
         )
 
+    # Same LoRA and strength as a single picture from this window. The cook
+    # pass and precompute read bound_lora / lora_strength off the runner.
+    previous_lora = getattr(runner, "bound_lora", None)
+    previous_strength = getattr(runner, "lora_strength", None)
+    if hasattr(runner, "bound_lora"):
+        runner.bound_lora = lora
+    if hasattr(runner, "lora_strength"):
+        runner.lora_strength = base.lora_weight
     if hasattr(runner, "cook"):
         runner.cook = True
     try:
@@ -591,6 +599,10 @@ def _series(ctx: JobContext, current: Session, payload: Mapping[str, object]) ->
         writer.release()
         if hasattr(runner, "cook"):
             runner.cook = False
+        if hasattr(runner, "bound_lora"):
+            runner.bound_lora = previous_lora
+        if hasattr(runner, "lora_strength"):
+            runner.lora_strength = previous_strength
         release(lock_path())
     hero_released = False
     hero_reason = ""

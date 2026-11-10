@@ -45,7 +45,7 @@ from canvas.pipeline.gpu_release import release_cuda_cache, release_gate_weights
 from canvas.pipeline.adult_direction import ages_allowed, with_adult_anchor, youth_cues
 from canvas.pipeline.frame_prompt import log_frame_prompt, strip_series_words, with_choices
 from canvas.pipeline.photoshoot import (
-    FORMAT_REMINDER,
+    retry_prompt,
     SCENARIO_CHUNK,
     PlaceMode,
     Scenario,
@@ -61,6 +61,7 @@ from canvas.pipeline.photoshoot import (
     scenario_request,
     shot_identity,
 )
+from canvas.models.user_lora import UserLora, apply_trigger, rewrite_alias
 from canvas.safety.denylist import scan
 from canvas.safety.gate import (
     AgeGate,
@@ -226,6 +227,8 @@ def _run_series(
     hot.begin_job()
     hot.note_tier()
     gate = SerialGate.wrap(age_gate)
+    # A LoRA alias in the idea is the trigger from here on: the gate, the writer and the lines all see it.
+    idea = rewrite_alias(idea, getattr(draw_frame, "lora", None))
     mode = place_mode_of(place_mode)
     if mode is None:
         return _stop("scenario", "", "scenario.format")
@@ -235,7 +238,7 @@ def _run_series(
     # The prompt check is the part of prep that has to finish before the writer.
     # Picture-check weights are read SSD to RAM on a side thread during the
     # writer and the sampler. They stay off the GPU until the output check.
-    refused = screen_idea(gate, idea, negative, adult, clock)
+    refused = screen_idea(gate, apply_trigger(idea, getattr(draw_frame, "lora", None)), negative, adult, clock)
     if refused is not None:
         return refused
     try:
@@ -360,11 +363,17 @@ def plan_series(
     on_scenario: Callable[[Scenario], None] | None, on_status: Callable[[int, str], None] | None,
     cancelled: Callable[[], bool], folder: Path, draw_frame: DrawFrame,
 ) -> _Plan | SeriesResult:
-    """Check every shot line of one scenario. A SeriesResult is a stop with nothing drawn."""
+    """Check every shot line of one scenario. A SeriesResult is a stop with nothing drawn.
+
+    With a LoRA on ``draw_frame`` (its ``lora`` attribute), every line leads with the
+    trigger before the gate sees it, so the gate reviews the line that is encoded.
+    """
+    lora = getattr(draw_frame, "lora", None)
+    idea = rewrite_alias(idea, lora)
     lines = [
-        single_frame(strip_series_words(assemble_line(
-            scenario.subject_block, shot, include_camera=True, index=index, seed=seed,
-        )))
+        _final_line(assemble_line(
+            scenario.subject_block, shot, include_camera=True, index=index, seed=seed, lora=lora,
+        ), lora)
         for index, shot in enumerate(scenario.shots)
     ]
     try:
@@ -389,7 +398,7 @@ def plan_series(
     blocked: list[int] = []
     accepted, prep_stop, cancelled_prep = _accepted_shots(
         scenario, lines, verdicts, seed, idea, adult, include_camera, line_for, gate, clock, blocked,
-        on_status, cancelled,
+        on_status, cancelled, lora,
     )
     if cancelled_prep:
         release_gate_weights(gate)
@@ -507,6 +516,7 @@ def _accepted_shots(
     blocked: list[int],
     on_status: Callable[[int, str], None] | None,
     cancelled: Callable[[], bool],
+    lora: UserLora | None = None,
 ) -> tuple[list[_CookShot], Exception | None, bool]:
     """Every shot line and its prompt verdict, before the picture model loads.
 
@@ -519,15 +529,15 @@ def _accepted_shots(
             return accepted, None, True
         line = (
             assemble_line(
-                scenario.subject_block, shot, include_camera=include_camera(), index=index, seed=seed,
+                scenario.subject_block, shot, include_camera=include_camera(), index=index, seed=seed, lora=lora,
             )
             if line_for is None
-            else single_frame(strip_series_words(with_choices(line_for(index), index, seed)))
+            else with_choices(line_for(index), index, seed)
         )
-        line = single_frame(strip_series_words(line))
+        line = _final_line(line, lora)
         # The stored subject can still name the series and list every outfit.
         # The photograph only has to keep the appearance once those words are gone.
-        identity = shot_identity(scenario.subject_block)
+        identity = rewrite_alias(shot_identity(scenario.subject_block), lora)
         if (identity and identity not in line) or (adult and youth_cues(line)):
             blocked.append(index)
             _status(on_status, index, "blocked")
@@ -820,6 +830,17 @@ def _stop(stopped: StopCode, reason: str, code: str, source: Source = "") -> Ser
     return SeriesResult(stopped, reason, (), None, code, source)
 
 
+def _final_line(line: str, lora: UserLora | None) -> str:
+    """One photograph, series words removed. A LoRA trigger stays first, ahead of the lead."""
+    trigger = "" if lora is None else lora.trigger.strip()
+    if not trigger:
+        return single_frame(strip_series_words(line))
+    body = line.strip()
+    if body.casefold().startswith(f"{trigger.casefold()},"):
+        body = body[len(trigger) + 1:].strip()
+    return f"{trigger}, {single_frame(strip_series_words(body))}"
+
+
 def _with_idea(idea: str, line: str) -> str:
     return f"{idea}\n{line}"
 
@@ -1095,7 +1116,9 @@ def _scenario(
         request = scenario_request(idea, ask, style, mode, adult=adult, previous=previous)
         if request is None:
             return None, "scenario.format", ""
-        fresh, place, chunk_replies = _read_chunk(idea, subject, ask, mode, place, tuple(collected), request, rewrite)
+        fresh, place, chunk_replies = _read_chunk(
+            idea, subject, ask, mode, place, tuple(collected), request, rewrite, adult,
+        )
         replies.extend(chunk_replies)
         collected.extend(fresh)
         if not fresh:
@@ -1119,11 +1142,18 @@ def _read_chunk(
     taken: tuple[Shot, ...],
     request: str,
     rewrite: Callable[[str], str],
+    adult: bool = False,
 ) -> tuple[list[Shot], str, tuple[str, ...]]:
-    """Accepted shots for one chunk, the series place, and the raw replies."""
+    """Accepted shots for one chunk, the series place, and the raw replies.
+
+    A refusal, or a reply with no shot lines at all, is asked once more (with the
+    adult-fiction note when 18+ is on). A reply whose lines were all left out by
+    the series checks is not asked again. The caller fills what is still missing
+    from the planned shots, so a writer that keeps declining does not end the series.
+    """
     replies: list[str] = []
     fresh: list[Shot] = []
-    for prompt in (request, f"{request}\n{FORMAT_REMINDER}"):
+    for prompt in (request, retry_prompt(request, adult)):
         raw = rewrite(prompt)
         replies.append(raw)
         fresh, place = _accept_reply(idea, subject, ask, mode, place, taken, raw)

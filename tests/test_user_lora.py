@@ -174,7 +174,8 @@ def test_strength_is_clamped_to_the_recorded_range(tmp_path: Path) -> None:
     assert clamp_strength(lora, 2.0) == 1.5
     assert clamp_strength(lora, -1) == 0.0
     assert clamp_strength(lora, 0.7) == 0.7
-    assert clamp_strength(lora, True) == 0.8  # type: ignore[arg-type]
+    # No recommended_strength key in the header: the default is 1.0, not the record's 0.8.
+    assert clamp_strength(lora, True) == 1.0  # type: ignore[arg-type]
 
 
 def test_one_adapter_is_loaded_and_a_deselection_unloads_it(tmp_path: Path) -> None:
@@ -351,7 +352,7 @@ def test_the_addons_view_lists_reasons_and_the_trigger_is_a_chip(app, home: Path
     assert adult is not None and text("canvas.addons.adult_label") in adult.text()
     wizard.findChild(QRadioButton, "loraOption-boat-aaaaaaaa").click()
     spin = wizard.findChild(QDoubleSpinBox, "addonsStrength")
-    assert spin.value() == pytest.approx(0.8)
+    assert spin.value() == pytest.approx(1.0)
     assert spin.maximum() == pytest.approx(1.5)
     spin.setValue(1.0)
     wizard.findChild(QPushButton, "addonsSave").click()

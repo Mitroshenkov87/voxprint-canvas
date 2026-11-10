@@ -33,6 +33,8 @@ from canvas.models.user_lora import (
     _canonical_base,
     _opened_weights,
     _provenance,
+    parse_alias,
+    recommended_or_default,
     _string_metadata,
 )
 
@@ -59,6 +61,8 @@ CODE_BASE_MISSING = "lora.base_missing"
 _HEADER_KIND = "voxprint.lora.kind"
 _HEADER_BASE = "voxprint.lora.base"
 _HEADER_TRIGGER = "voxprint.subject.trigger"
+_HEADER_ALIAS = "voxprint.subject.alias"
+_HEADER_STRENGTH = "voxprint.lora.recommended_strength"
 _HEADER_KIND_MAP = {"person": "subject", "thing": "object"}
 _PREVIEW_ENTRY = re.compile(r"^previews/(\d{2})\.webp$")
 _ALLOWED_ENTRY = re.compile(r"^(model\.safetensors|voxprint-model\.json|preview\.webp|previews/\d{2}\.webp|previews/)$")
@@ -80,6 +84,7 @@ class Manifest:
     created: str
     weights_sha256: str | None
     attest: dict[str, object] = field(default_factory=dict)
+    alias: str = ""
 
 
 @dataclass(frozen=True)
@@ -96,16 +101,15 @@ class LibraryEntry:
         """The entry as a selectable LoRA. The weight keys are normalised for the loader."""
         loader_weights = _loader_path(self.weights)
         low, high = _clamped_range(self.manifest)
-        variant, base_sha, warnings = _provenance(
-            _string_metadata(self.weights), self.weights, self.manifest.base,
-        )
+        meta = _string_metadata(self.weights)
+        variant, base_sha, warnings = _provenance(meta, self.weights, self.manifest.base)
         return UserLora(
             self.id,
             self.manifest.kind,
             self.folder,
             loader_weights,
             self.manifest.trigger,
-            min(max(self.manifest.scale_default, low), high),
+            min(max(_recommended(meta), low), high),
             (low, high),
             False,
             name=self.manifest.name,
@@ -115,6 +119,7 @@ class LibraryEntry:
             base_variant=variant,
             base_sha256=base_sha,
             warnings=warnings,
+            alias=_alias_of(self.manifest, meta),
         )
 
 
@@ -191,7 +196,7 @@ def open_package_weights(source: Path) -> UserLora:
         folder,
         loader_weights,
         manifest.trigger,
-        min(max(manifest.scale_default, low), high),
+        min(max(_recommended(meta), low), high),
         (low, high),
         False,
         name=manifest.name,
@@ -200,6 +205,7 @@ def open_package_weights(source: Path) -> UserLora:
         base_variant=variant,
         base_sha256=base_sha,
         warnings=warnings,
+        alias=_alias_of(manifest, meta),
     )
 
 
@@ -392,6 +398,7 @@ def _rc3_manifest(source: Path) -> bytes:
         "name": opened.id,
         "base": meta.get(_HEADER_BASE, ""),
         "trigger": opened.trigger,
+        "alias": opened.alias,
         "kind": kind,
         "scale_default": opened.default_strength,
         "scale_min": low,
@@ -452,6 +459,7 @@ def _manifest(raw: dict[str, object]) -> Manifest:
         texts["created"],
         None if digest is None else str(digest).casefold(),
         dict(attest) if isinstance(attest, dict) else {},
+        parse_alias(raw.get("alias")),
     )
 
 
@@ -480,6 +488,21 @@ def _agree(manifest: Manifest, meta: dict[str, str]) -> None:
     trigger = meta.get(_HEADER_TRIGGER)
     if trigger is not None and trigger.strip() != manifest.trigger:
         raise LoraRejected(CODE_INVALID)
+    alias = parse_alias(meta.get(_HEADER_ALIAS))
+    if alias and manifest.alias and alias != manifest.alias:
+        raise LoraRejected(CODE_INVALID)
+
+
+def _alias_of(manifest: Manifest, meta: dict[str, str]) -> str:
+    """The alias from the json, else the weight header. Empty without a trigger: it would have nothing to stand for."""
+    if not manifest.trigger:
+        return ""
+    return manifest.alias or parse_alias(meta.get(_HEADER_ALIAS))
+
+
+def _recommended(meta: dict[str, str]) -> float:
+    """The weight header's recommended strength, else 1.0."""
+    return recommended_or_default(meta.get(_HEADER_STRENGTH))
 
 
 def _base_family(base: str) -> str:

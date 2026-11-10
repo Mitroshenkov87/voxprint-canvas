@@ -17,7 +17,7 @@ import json
 import sys
 from pathlib import Path
 
-from canvas.models.provision import OPTIONAL_IDS, default_specs
+from canvas.models.provision import OPTIONAL_IDS, REQUIRED_EXTRA_IDS, default_specs
 from canvas.models.registry import Catalog, ModelSpec, load_catalog
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -87,8 +87,8 @@ def _primary_urls(spec: ModelSpec, name: str) -> list[str]:
 
 
 def _entry(model_id: str, version: str, tier: str, files: list[dict[str, object]], *,
-           optional: bool, licence: str, source: str) -> dict[str, object]:
-    return {
+           optional: bool, licence: str, source: str, display_name: str = "") -> dict[str, object]:
+    row: dict[str, object] = {
         "id": model_id,
         "version": version,
         "vram_tier": tier,
@@ -97,6 +97,9 @@ def _entry(model_id: str, version: str, tier: str, files: list[dict[str, object]
         "source": source,
         "files": files,
     }
+    if display_name:
+        row["display_name"] = display_name
+    return row
 
 
 def _tier(spec: ModelSpec) -> str:
@@ -106,7 +109,7 @@ def _tier(spec: ModelSpec) -> str:
 def build(catalog: Catalog | None = None) -> dict[str, object]:
     """The ``mdl.json`` document for this catalog."""
     catalog = load_catalog() if catalog is None else catalog
-    defaults = {spec.id for spec in default_specs(catalog)}
+    defaults = {spec.id for spec in default_specs(catalog)} | set(REQUIRED_EXTRA_IDS)
     raw = json.loads((ROOT / "canvas" / "models" / "catalog.json").read_text(encoding="utf-8"))
     rows = {row["id"]: row for row in raw["models"]}
     models: list[dict[str, object]] = []
@@ -124,7 +127,8 @@ def build(catalog: Catalog | None = None) -> dict[str, object]:
             files.append({"path": name, "size": int(meta["size"]), "sha256": meta["sha256"], "mirrors": urls})
         optional = spec.optional or spec.id in OPTIONAL_IDS or spec.id not in defaults
         models.append(_entry(spec.id, spec.revision, _tier(spec), files,
-                             optional=optional, licence=spec.licence, source="primary"))
+                             optional=optional, licence=spec.licence, source="primary",
+                             display_name=spec.display_name))
         fallback = row.get("fallback")
         if fallback:
             revision = str(fallback["revision"])

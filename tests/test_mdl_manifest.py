@@ -79,10 +79,16 @@ def test_pins_licences_and_sources():
             assert len(item["mirrors"]) == 2
     writer = rows["qwen3-4b-writer"]
     assert writer["version"] == "c9bd464550d4078c72af0dd22aa18d0437868ce3"
-    mirror = "https://huggingface.co/Mitroshenkov87/voxprint-mirror-huihui-qwen3-4b-instruct-2507-abliterated/resolve/2c219b659d064d24236fd748c19cc2e579cbe3be/"
-    upstream = "https://huggingface.co/huihui-ai/Huihui-Qwen3-4B-Instruct-2507-abliterated/resolve/c9bd464550d4078c72af0dd22aa18d0437868ce3/"
+    mirror = "https://huggingface.co/Mitroshenkov87/voxprint-huihui-qwen3-4b-instruct-2507-abliterated/resolve/6e368340799452e5cba7a1e423120c7b0bc0473d/"
+    assert writer["display_name"] == "Huihui Qwen3 4B Instruct 2507 (scenario writer)"
+    assert writer["licence"] == "Apache-2.0"
+    # Required, like the signed index row (optional:false), but not the default generator.
+    assert writer["optional"] is False
+    assert rows["z-image-turbo-bf16-16gb"]["optional"] is False
+    assert "qwen3-4b-writer" not in {spec.id for spec in default_specs(load_catalog())}
     for item in writer["files"]:
-        assert item["mirrors"] == [mirror + item["path"], upstream + item["path"]]
+        # Mirror only; the upstream commit above is the pin, not a download address.
+        assert item["mirrors"] == [mirror + item["path"]]
         assert len(item["sha256"]) == 64
     control = "voxprint-mirror-z-image-turbo-controlnet-union-2.1/resolve/34c99d2bcaa323341a4c0df5f867d049f420333a/"
     for model_id in ("z-image-turbo-fun-controlnet-union-bf16", "z-image-turbo-fun-controlnet-union-bf16-lite"):

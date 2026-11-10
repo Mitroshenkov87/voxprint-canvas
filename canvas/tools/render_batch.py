@@ -34,8 +34,8 @@ from canvas.models.plan import OptionalModelUnavailable
 from canvas.models.registry import load_catalog
 from canvas.models.user_lora import (
     FAMILY_TURBO,
-    ZIMAGE_LORA_DEFAULT_STRENGTH,
     LoraRejected,
+    apply_trigger,
     prepare_cli_lora,
     retrain_rejection,
     route_lora,
@@ -293,7 +293,7 @@ def safety_error_fields(exc: BaseException | None) -> dict[str, str]:
     return fields
 
 
-def bind_lora(path: Path, strength: float) -> tuple[Any, float]:
+def bind_lora(path: Path, strength: float | None) -> tuple[Any, float]:
     """Open ``path`` and accept it only when it may load on Z-Image-Turbo."""
     lora = prepare_cli_lora(path)
     catalog = load_catalog()
@@ -303,7 +303,7 @@ def bind_lora(path: Path, strength: float) -> tuple[Any, float]:
     route = route_lora(lora, catalog.text_bases, FAMILY_TURBO)
     if not route.base:
         raise LoraRejected("lora.retrain", base=route.retrain_from)
-    return lora, strength
+    return lora, lora.default_strength if strength is None else strength
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -317,8 +317,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--lora-strength",
         type=float,
-        default=ZIMAGE_LORA_DEFAULT_STRENGTH,
-        help="LoRA strength (default 1.0; no auto-scaling)",
+        default=None,
+        help="LoRA strength (default: the LoRA's recommended strength, else 1.0; no auto-scaling)",
     )
     parser.add_argument("--preset", choices=PRESETS, default="balanced")
     parser.add_argument("--adult-content", choices=("on", "off"), required=True)
@@ -389,7 +389,7 @@ def main(argv: Sequence[str] | None = None, hooks: Hooks | None = None) -> int:
     lora_bind: tuple[Any, float] | None = None
     if args.lora is not None:
         try:
-            lora_bind = bind_lora(args.lora, float(args.lora_strength))
+            lora_bind = bind_lora(args.lora, None if args.lora_strength is None else float(args.lora_strength))
         except FileNotFoundError:
             print(f"The LoRA file is missing: {args.lora}", file=log)
             return 2
@@ -612,6 +612,9 @@ class _Session:
 
     def generate(self, prompt: str, seed: int) -> tuple[SafeImage | None, str]:
         self.last_error = None
+        if self.lora_bind is not None:
+            # Alias to trigger, trigger first: the gate and the encoder get this prompt.
+            prompt = apply_trigger(prompt, self.lora_bind[0])
         try:
             if self.hooks.generate is not None:
                 image = self.hooks.generate(prompt, seed, explicit=self.adult)

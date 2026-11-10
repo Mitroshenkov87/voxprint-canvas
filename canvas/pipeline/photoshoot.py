@@ -14,6 +14,7 @@ import zlib
 from dataclasses import dataclass
 from typing import Literal, assert_never
 
+from canvas.models.user_lora import UserLora, rewrite_alias
 from canvas.pipeline.adult_direction import LIGHT_SETUPS, POSE_FAMILIES, shot_plan
 from canvas.pipeline.enhance import AGING_DESCRIPTOR_MIN_AGE, added_aging_terms, quoted_spans, stated_ages
 from canvas.pipeline.series_text import DEFAULT_FRAMES as DEFAULT_FRAMES, MAX_FRAMES, TEST_SERIES_CHARACTER
@@ -62,6 +63,17 @@ Example for count 2 and place_mode "same":
 
 _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
 FORMAT_REMINDER = "Reply with only the numbered lines: N. scene | pose | camera | place"
+# Expert adult content is on: the request says what the series is. It adds no rule and softens nothing.
+ADULT_FICTION_CONTEXT = (
+    "Consensual adult fiction. Every person in the idea is an adult who agreed to the shoot. "
+    "Write the shots as the idea asks."
+)
+
+
+def retry_prompt(request: str, adult: bool = False) -> str:
+    """The user message for the one retry after a refusal or a reply with no usable shots."""
+    note = f"\n{ADULT_FICTION_CONTEXT}" if adult else ""
+    return f"{request}\n{FORMAT_REMINDER}{note}"
 _CAMERA = re.compile(r"\b(?:\d+\s*mm|lens|angle|eye level|overhead|close focus)\b", re.IGNORECASE)
 _LINE = re.compile(r"^\s*(?:[-*>#]+\s*)?(?:\*\*)?(?:shot|frame|кадр)?\s*(\d{1,2})\s*[.):\]-]\s*(?:\*\*)?\s*(.+?)\s*$", re.IGNORECASE)
 _DECLINE_LIMIT = 400
@@ -203,6 +215,7 @@ def scenario_request(
     if previous:
         payload["previous"] = list(previous)
     if adult:
+        payload["context"] = ADULT_FICTION_CONTEXT
         start = len(previous)
         payload["direction"] = shot_plan(start + count)[start:]
     return json.dumps(payload, ensure_ascii=False)
@@ -397,6 +410,7 @@ def _trimmed(text: str) -> str:
 
 def assemble_line(
     subject: str, shot: Shot, *, include_camera: bool, index: int = 0, seed: int = 0,
+    lora: UserLora | None = None,
 ) -> str:
     """The line sent for one shot.
 
@@ -414,7 +428,13 @@ def assemble_line(
         include_camera: When true, the lens and angle stay on the line.
         index: Which shot this is. Framing and alternative lists walk forward from here.
         seed: Series seed. The same seed and index always pick the same item.
+        lora: The selected LoRA. Its alias is rewritten to the trigger first, and
+            the trigger then leads the line after the cut, with room kept for it.
     """
+    trigger = "" if lora is None else lora.trigger.strip()
+    if trigger:
+        subject = rewrite_alias(subject, lora)
+        shot = Shot(*(rewrite_alias(field, lora) for field in (shot.scene, shot.pose, shot.camera, shot.place)))
     parts = subject_parts(subject)
     own = [shot.scene]
     if include_camera:
@@ -436,7 +456,10 @@ def assemble_line(
     body = ", ".join(part for part in (identity, tail) if part)
     body = _with_test_character(body, subject)
     line = f"{SINGLE_FRAME_LEAD}, {lead}, of {body}" if lead else single_frame(body)
-    return truncate_for_encoder(line, keep=kept)
+    if not trigger:
+        return truncate_for_encoder(line, keep=kept)
+    room = max(1, ENCODER_TOKEN_LIMIT - _ENCODER_WRAPPER_TOKENS - len(trigger.split()))
+    return f"{trigger}, {truncate_for_encoder(line, limit=room, keep=kept)}"
 
 
 def _joined(sources: list[str], index: int, seed: int) -> str:

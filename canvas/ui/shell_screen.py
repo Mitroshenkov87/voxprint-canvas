@@ -40,8 +40,8 @@ from canvas.models.mdl_layout import on_disk_manifest
 from canvas.models.mdl_registry import selectable
 from canvas.models.forge_retrain import request_retrain
 from canvas.models.lora_library import LibraryEntry
-from canvas.models.user_lora import LoraIndex, UserLora, discover, resolve_selected, route_lora
-from canvas.ui.lora_panel import ImportedDialog, LibraryDialog, dark, import_with_dialog, library_loras
+from canvas.models.user_lora import LoraIndex, UserLora, chip_word, discover, installed_loras, resolve_selected, route_lora
+from canvas.ui.lora_panel import ImportedDialog, LibraryDialog, dark, import_with_dialog
 from canvas.models.modes import Mode, Tier
 from canvas.models.sizes import closest_aspect
 from canvas.ui.about import AboutDialog
@@ -259,7 +259,7 @@ class ShellWindow(QMainWindow):
         strength = layout.get("shell.lora_weight")
         number = float(strength) if isinstance(strength, int | float) and not isinstance(strength, bool) else None
         found = discover()
-        index = LoraIndex(tuple(library_loras()) + found.available, found.skipped)
+        index = LoraIndex(installed_loras()[0], found.skipped)
         return AddonsWizard(
             self, index, str(layout.get("shell.addons") or ""), number, self._save_addons, self._import_from_addons,
         )
@@ -361,9 +361,33 @@ class ShellWindow(QMainWindow):
         found = self._selected_retrain(key)
         if found is None:
             self._hide_lora_bar()
+            self._show_alias_note(key)
             return
         lora, trained, code = found
         self._present_retrain(lora, trained, code)
+
+    def _show_alias_note(self, key: str) -> None:
+        """Say so when the pick's alias was renamed because another LoRA already had it."""
+        if not key:
+            return
+        try:
+            selected = resolve_selected(key)
+            notes = installed_loras()[1]
+        except Exception:  # noqa: BLE001 - a lookup failure shows nothing
+            return
+        if selected is None:
+            return
+        for lora_id, wanted, given in notes:
+            if lora_id == selected.id and given == selected.alias:
+                bar = InfoBar(
+                    self,
+                    text("canvas.lora.alias_clash_title"),
+                    text("canvas.lora.alias_clash", lora=lora_id, wanted=wanted, given=given),
+                )
+                bar.present()
+                self._lora_bar = bar
+                QTimer.singleShot(LORA_NOTE_MS, bar.widget.hide)
+                return
 
     def _present_retrain(self, lora: UserLora, trained: str, code: str = "lora.retrain") -> None:
         """Show the retrain title, note, and Forge button for ``lora``."""
@@ -413,11 +437,12 @@ class ShellWindow(QMainWindow):
         QTimer.singleShot(LORA_NOTE_MS, bar.widget.hide)
 
     def lora_trigger(self) -> str:
-        """The trigger word of the selected LoRA, or empty when nothing is selected."""
-        selected = resolve_selected(str(self.shell.layout.get("shell.addons") or ""))
-        if selected is None:
-            return ""
-        return selected.trigger
+        """The word the chip shows and inserts: the alias when the LoRA has one, else its trigger.
+
+        Empty when nothing is selected. The rare trigger itself is added to the
+        final prompt on its own; the prompt box keeps what the user typed.
+        """
+        return chip_word(resolve_selected(str(self.shell.layout.get("shell.addons") or "")))
 
     def insert_trigger(self) -> None:
         """Insert the selected trigger word at the cursor. Nothing is inserted on its own."""

@@ -65,6 +65,7 @@ class ModelSpec:
     nbytes: int = 0
     optional: bool = False
     pin_note: str = ""
+    display_name: str = ""
 
     def pinned(self) -> bool:
         """True when every listed file has a 64-character SHA-256."""
@@ -192,6 +193,7 @@ def _spec(row: dict[str, Any]) -> ModelSpec:
         nbytes=_nbytes(files),
         optional=row.get("optional") is True,
         pin_note=str(row.get("pin_note") or ""),
+        display_name=str(row.get("display_name") or ""),
     )
 
 

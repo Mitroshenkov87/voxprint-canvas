@@ -31,6 +31,7 @@ from canvas.infra.phase_vram import Phase, ResidualVram, start_phase
 from canvas.infra.stage_timer import StageTimes, set_current
 from canvas.models import hot_tier as hot
 from canvas.models.runtime import pipeline_scope
+from canvas.models.user_lora import apply_trigger, rewrite_alias
 from canvas.pipeline.bf16_schedule import VramRefused, is_out_of_memory
 from canvas.pipeline.device_guard import DeviceRefused
 from canvas.pipeline.photoshoot import Scenario, scenario_request
@@ -166,12 +167,29 @@ def _run(
     if mode is None:
         _fill(entries, results, _stop("scenario", "", "scenario.format"))
         return
+    # One draw function per entry, made once. It carries the entry's LoRA (its ``lora`` attribute).
+    frames: dict[int, DrawFrame] = {}
+
+    def frame_of(index: int) -> DrawFrame:
+        if index not in frames:
+            frames[index] = frame_for(entries[index])
+        return frames[index]
+
     # 1. Every prompt and every negative is checked before the writer and before any picture.
     for index, entry in enumerate(entries):
         if entry.prompt and scenario_request(entry.prompt, entry.count, style, mode, adult=adult) is None:
             results[index] = _stop("scenario", "", "scenario.format")
             continue
-        refused = screen_idea(gate, entry.text, entry.negative, adult, clock)
+        # The gate sees the text with the alias swapped for the trigger and the trigger led in,
+        # the same words the writer and the encoder get.
+        try:
+            lora = getattr(frame_of(index), "lora", None)
+        except (DeviceRefused, ResidualVram, SafetyUnavailable):
+            raise
+        except Exception as exc:
+            results[index] = _internal(exc)
+            continue
+        refused = screen_idea(gate, apply_trigger(entry.text, lora), entry.negative, adult, clock)
         if refused is not None:
             results[index] = refused
     # 2. One writer session for every prompt entry.
@@ -189,7 +207,7 @@ def _run(
                 continue
             try:
                 scenario, fail_code, source = write_scenario(
-                    entry.prompt, entry.count, style, mode, rewrite, adult, entry.seed, clock,
+                    rewrite_alias(entry.prompt, getattr(frame_of(index), "lora", None)), entry.count, style, mode, rewrite, adult, entry.seed, clock,
                 )
             except (DeviceRefused, ResidualVram, SafetyUnavailable):
                 raise
@@ -223,7 +241,7 @@ def _run(
                     gate=gate, idea=entry.text, scenario=scenario, source=source, style=style, mode=mode,
                     seed=entry.seed, strength=series_strength(entry.text, mode, None), adult=adult,
                     include_camera=lambda: True, line_for=None, clock=clock, on_scenario=keep, on_status=None,
-                    cancelled=lambda: False, folder=folder / entry.name, draw_frame=frame_for(entry),
+                    cancelled=lambda: False, folder=folder / entry.name, draw_frame=frame_of(index),
                 )
             except (DeviceRefused, ResidualVram, SafetyUnavailable):
                 raise

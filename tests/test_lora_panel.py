@@ -88,7 +88,7 @@ def test_the_pick_follows_the_library_and_the_strength_range(app, home: Path, mo
     assert [combo.itemText(index) for index in range(combo.count())] == [text("canvas.lora.none"), "Brass Lamp"]
     combo.setCurrentIndex(1)
     slider = window.findChild(QSlider, "loraStrength")
-    assert (slider.minimum(), slider.maximum(), slider.value()) == (10, 100, 60)
+    assert (slider.minimum(), slider.maximum(), slider.value()) == (10, 100, 100)
     assert window.shell.layout.get("shell.addons") == entry.id
     assert window.lora_trigger() == "brsslmp"
     slider.setValue(90)

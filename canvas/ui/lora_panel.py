@@ -42,7 +42,7 @@ from canvas.models.lora_library import (
     remove_entry,
     set_trigger,
 )
-from canvas.models.user_lora import LoraRejected, UserLora, discover, strength_or_default
+from canvas.models.user_lora import LoraRejected, UserLora, installed_loras, strength_or_default
 from canvas.ui.theme import BUTTON_RADIUS
 from canvas.ui.picture_file import load_pixmap
 
@@ -450,8 +450,16 @@ def library_loras(root: Path | None = None) -> list[UserLora]:
 
 
 def available_loras(root: Path | None = None) -> list[UserLora]:
-    """Imported LoRAs first, then the listed add-on folders."""
-    return [*library_loras(root), *discover().available]
+    """Imported LoRAs first, then the listed add-on folders. Aliases are unique across both."""
+    return list(installed_loras(library=root)[0])
+
+
+def alias_notes(root: Path | None = None) -> list[str]:
+    """One visible line per alias that had to be renamed because two LoRAs asked for it."""
+    return [
+        text("canvas.lora.alias_clash", lora=lora_id, wanted=wanted, given=given)
+        for lora_id, wanted, given in installed_loras(library=root)[1]
+    ]
 
 
 class _Value(QLabel):

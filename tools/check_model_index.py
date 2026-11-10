@@ -3,7 +3,7 @@
 The index is fetched with its detached ``index.json.sig`` and accepted only when
 the Ed25519 signature verifies against the Model Forge key bundled in
 voxprint-common 0.7.0 and its serial is not older than the index bundled there
-(no rollback). Each descriptor is then checked against the signed index digest,
+or than serial 13, the first one with the writer row (no rollback). Each descriptor is then checked against the signed index digest,
 and every file in mdl.json must match a signed descriptor by path, size and SHA-256.
 mdl.json keeps those explicit hashes. In the FP32 ``-upstream`` fallback rows, the
 transformer files are matched against the ``z-image-turbo`` descriptor (or its
@@ -18,6 +18,12 @@ and must stay absent-safe if a residual reference remains. Canvas treats
 Z-Image-Turbo as the default generator; MOSS is an optional download. This
 checker still only verifies the ids in ``CANVAS_IDS`` and does not fetch
 Z-Image or MOSS weights.
+
+``CANVAS_IDS`` includes the required scenario writer ``qwen3-4b-writer`` (serial 13 and
+later). The index is read from ``main`` so a later serial is checked as it lands; the
+serial floor keeps it from going backwards. Every descriptor must declare the
+``diffusers`` engine (all the schema can express); only the writer may also declare
+``transformers``, which is what Canvas loads it with.
 
     python tools/check_model_index.py          # network: huggingface.co
 """
@@ -48,6 +54,23 @@ CANVAS_IDS: dict[str, tuple[str, ...]] = {
     "mirror-fairface-age-image-detection": ("fairface-age",),
     "mirror-nsfw-image-detection": ("nsfw-image-detection",),
     "yunet-2023mar": ("yunet-face",),
+    # Required scenario writer (optional:false, default:false in the index).
+    "qwen3-4b-writer": ("qwen3-4b-writer",),
+}
+
+# Serial 13 is the first index that lists qwen3-4b-writer. The check never accepts an
+# older index, even if the bundled copy in voxprint-common is older still.
+CANVAS_MIN_SERIAL = 13
+
+# The index schema can only express the "diffusers" engine today, so every signed
+# descriptor declares it. An id may declare another engine only when listed here.
+SIGNED_ENGINE = "diffusers"
+# qwen3-4b-writer is a causal text model. The schema cannot express transformers yet, so its
+# descriptor says "diffusers"; Canvas loads it with QwenRewriter (transformers) whatever that
+# field says. The writer may therefore declare "diffusers" (today) or "transformers" (once the
+# schema allows it). No other id gets this allowance: any other engine value is a problem.
+ENGINE_ALLOWED: dict[str, frozenset[str]] = {
+    "qwen3-4b-writer": frozenset({SIGNED_ENGINE, "transformers"}),
 }
 
 # Canvas BF16 pack id -> signed index row that covers transformer/* only.
@@ -121,7 +144,7 @@ def check(
         return ["index.json signature is missing or does not verify with the Model Forge key"]
     index = json.loads(raw.decode("utf-8"))
     parse_index(index)
-    floor = _bundled_serial() if min_serial is None else min_serial
+    floor = max(_bundled_serial(), CANVAS_MIN_SERIAL) if min_serial is None else min_serial
     serial = index.get("serial")
     if not isinstance(serial, int) or serial < floor:
         problems.append(f"index serial is {serial}, older than the bundled serial {floor}")
@@ -178,6 +201,10 @@ def _signed_table(
         problems.append(f"{index_id}: descriptor does not match the index sha256")
         return None
     descriptor = json.loads(blob.decode("utf-8"))
+    runtime = descriptor.get("runtime")
+    engine = runtime.get("engine") if isinstance(runtime, dict) else None
+    if engine not in ENGINE_ALLOWED.get(index_id, frozenset({SIGNED_ENGINE})):
+        problems.append(f"{index_id}: descriptor runtime.engine is {engine!r}")
     files = {f["path"]: f for f in descriptor["files"]}
     fallback = {
         f["path"]: f

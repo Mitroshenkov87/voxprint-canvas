@@ -35,7 +35,7 @@ from canvas.pipeline.series import SeriesFrame, run_series
 from canvas.safety.gate import AgeGate
 from canvas.safety.image import RawImage
 from canvas.safety.inputs import ImageRole, PendingInput
-from canvas.models.user_lora import UserLora
+from canvas.models.user_lora import UserLora, apply_trigger
 from canvas.ui.shell_layout import PictureJob
 from canvas.ui.styles import look_for
 
@@ -112,7 +112,8 @@ def model_generate(
     policy = adult_boundary.policy(adult)
 
     def _prompt(line: str) -> str:
-        return " ".join(part for part in (policy.template, line.strip(), look.suffix) if part)
+        # The line already leads with the trigger; this only adds it if a caller passed a bare line.
+        return apply_trigger(" ".join(part for part in (policy.template, line.strip(), look.suffix) if part), lora)
 
     def prepare(lines: list[str]) -> None:
         precompute = getattr(runner, "precompute", None)
@@ -173,6 +174,8 @@ def model_generate(
 
     generate.prepare = prepare  # type: ignore[attr-defined]
     generate.sample = sample  # type: ignore[attr-defined]
+    # The series reads it to put the trigger first on every shot line the gate reviews.
+    generate.lora = lora  # type: ignore[attr-defined]
     return generate
 
 
@@ -271,7 +274,7 @@ def _run_command(
             result.code, result.source,
         ), 1
     lines = [
-        assemble_line(scenario.subject_block, shot, include_camera=True, index=index, seed=seed)
+        assemble_line(scenario.subject_block, shot, include_camera=True, index=index, seed=seed, lora=getattr(generate, "lora", None))
         for index, shot in enumerate(scenario.shots)
     ]
     scenario_path = result.folder / "scenario.txt"

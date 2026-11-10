@@ -39,9 +39,11 @@ from canvas.models.user_lora import (
     FORGE_BASE_ID,
     LoraRejected,
     UserLora,
+    apply_trigger,
     cli_scale,
     prepare_cli_lora,
     retrain_rejection,
+    rewrite_alias,
 )
 from canvas.models.modes import Mode, Tier
 from canvas.models.plan import BaseNotSelected, ModeUnavailable, OptionalModelUnavailable, build_plan
@@ -464,7 +466,9 @@ def _generate(args: argparse.Namespace) -> int:
     # canvas.toml can turn the writer on for a prompt; the flag still works on its own.
     enhance = bool(args.enhance) or (mode is Mode.TEXT and settings.get().writer)
     outcome: EnhanceResult | None = None
-    active = active_prompt
+    # The alias becomes the trigger and the trigger leads, before the gate and the encoder see the prompt.
+    chosen_lora = None if chosen is None else chosen[0]
+    active = apply_trigger(active_prompt, chosen_lora)
     reset_image_seconds()
     progress = lambda message: print(message, file=sys.stderr)
     started = time.perf_counter()
@@ -476,13 +480,14 @@ def _generate(args: argparse.Namespace) -> int:
             gate = AgeGate(stack)
             gate.warm()
             if enhance:
-                gate.review_prompt(prompt)
+                seen = rewrite_alias(prompt, chosen_lora)
+                gate.review_prompt(seen)
                 release_gate_weights(gate)
                 rewritten = rewrite_text(
-                    open_rewriter(catalog, gpu.tier, root, progress, stage="enhancer"), prompt,
+                    open_rewriter(catalog, gpu.tier, root, progress, stage="enhancer"), seen,
                 )
-                outcome = resolve_prompt(gate, prompt, rewritten)
-                active = outcome.prompt
+                outcome = resolve_prompt(gate, seen, rewritten)
+                active = apply_trigger(outcome.prompt, chosen_lora)
             screened = gate.release_request(active, mode.value, source)
             try:
                 plan = build_plan(catalog, screened, gpu.tier)

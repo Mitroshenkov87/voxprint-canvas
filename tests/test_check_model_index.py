@@ -29,8 +29,11 @@ def _files(entry, predicate=None):
     }
 
 
-def _row(index_id, files, prebuilt=None):
-    blob = json.dumps({"files": list(files.values()), "prebuilt": prebuilt or []}).encode()
+def _row(index_id, files, prebuilt=None, engine="diffusers"):
+    # Signed descriptors declare runtime.engine "diffusers": the index schema cannot express transformers yet.
+    blob = json.dumps({
+        "files": list(files.values()), "prebuilt": prebuilt or [], "runtime": {"engine": engine},
+    }).encode()
     return blob, {"id": index_id, "repo": "r", "revision": "v", "sha256": hashlib.sha256(blob).hexdigest()}
 
 
@@ -154,3 +157,94 @@ def test_an_upstream_transformer_is_checked_against_z_image_turbo():
         for p in problems
     )
 
+
+def _with_engine(index_id, engine):
+    index, descriptors = _world(MANIFEST)
+    descriptors = dict(descriptors)
+    document = json.loads(descriptors[index_id])
+    document["runtime"] = {"engine": engine}
+    blob = json.dumps(document).encode()
+    rows = json.loads(index)
+    for row in rows["models"]:
+        if row["id"] == index_id:
+            row["sha256"] = hashlib.sha256(blob).hexdigest()
+    descriptors[index_id] = blob
+    return json.dumps(rows).encode(), descriptors
+
+
+def test_the_writer_row_is_checked_against_the_signed_descriptor():
+    assert tool.CANVAS_IDS["qwen3-4b-writer"] == ("qwen3-4b-writer",)
+    changed = copy.deepcopy(MANIFEST)
+    entry = next(e for e in changed["models"] if e["id"] == "qwen3-4b-writer")
+    entry["files"][0]["sha256"] = "0" * 64
+    entry["files"][1]["size"] += 1
+    problems = _run(changed)
+    assert len([p for p in problems if p.startswith("qwen3-4b-writer/")]) == 2
+    missing = copy.deepcopy(MANIFEST)
+    missing["models"] = [e for e in missing["models"] if e["id"] != "qwen3-4b-writer"]
+    assert "qwen3-4b-writer: missing from mdl.json" in _run(missing)
+
+
+def test_a_missing_writer_row_in_the_index_is_reported():
+    index, descriptors = _world(MANIFEST)
+    rows = json.loads(index)
+    rows["models"] = [row for row in rows["models"] if row["id"] != "qwen3-4b-writer"]
+    problems = _run(MANIFEST, index=json.dumps(rows).encode(), descriptors=descriptors)
+    assert "qwen3-4b-writer: not in the index" in problems
+
+
+def test_the_writer_may_declare_diffusers_because_the_schema_cannot_express_transformers():
+    # Canvas loads the writer with transformers (QwenRewriter) whatever the descriptor says.
+    assert tool.ENGINE_ALLOWED == {"qwen3-4b-writer": frozenset({"diffusers", "transformers"})}
+    assert "transformers" in (ROOT / "canvas" / "pipeline" / "enhance.py").read_text(encoding="utf-8")
+    for engine in ("diffusers", "transformers"):
+        index, descriptors = _with_engine("qwen3-4b-writer", engine)
+        assert _run(MANIFEST, index=index, descriptors=descriptors) == []
+
+
+def test_the_writer_may_not_declare_any_other_engine():
+    index, descriptors = _with_engine("qwen3-4b-writer", "onnx")
+    assert _run(MANIFEST, index=index, descriptors=descriptors) == [
+        "qwen3-4b-writer: descriptor runtime.engine is 'onnx'"
+    ]
+
+
+def test_no_other_id_may_declare_a_different_engine():
+    for index_id in ("mirror-qwen3guard-gen-0.6b", "yunet-2023mar", "z-image-turbo", "z-image-turbo-bf16"):
+        index, descriptors = _with_engine(index_id, "transformers")
+        problems = _run(MANIFEST, index=index, descriptors=descriptors)
+        assert f"{index_id}: descriptor runtime.engine is 'transformers'" in problems, index_id
+
+
+def test_a_descriptor_without_a_runtime_block_is_reported():
+    index, descriptors = _world(MANIFEST)
+    document = json.loads(descriptors["yunet-2023mar"])
+    del document["runtime"]
+    blob = json.dumps(document).encode()
+    rows = json.loads(index)
+    for row in rows["models"]:
+        if row["id"] == "yunet-2023mar":
+            row["sha256"] = hashlib.sha256(blob).hexdigest()
+    descriptors["yunet-2023mar"] = blob
+    assert _run(MANIFEST, index=json.dumps(rows).encode(), descriptors=descriptors) == [
+        "yunet-2023mar: descriptor runtime.engine is None"
+    ]
+
+
+def test_the_default_floor_is_serial_13_or_the_bundled_serial_whichever_is_higher(monkeypatch):
+    assert tool.CANVAS_MIN_SERIAL == 13
+    index, descriptors = _world(MANIFEST)
+    files = {"index.json": index, "index.json.sig": sign(index, SEED)}
+    keys = (public_key(SEED),)
+
+    def run():
+        return tool.check(
+            lambda path: files[path], lambda row: descriptors[row["id"]], MANIFEST,
+            verify=lambda payload, sig: verify_index(payload, sig, keys),
+        )
+
+    # The fake index is serial 9: refused by the default floor even if the bundled copy were older.
+    monkeypatch.setattr(tool, "_bundled_serial", lambda: 5)
+    assert run() == [f"index serial is {SERIAL}, older than the bundled serial 13"]
+    monkeypatch.setattr(tool, "_bundled_serial", lambda: 20)
+    assert run() == [f"index serial is {SERIAL}, older than the bundled serial 20"]

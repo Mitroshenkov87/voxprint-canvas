@@ -74,7 +74,7 @@ def plan_blobs(
                     apps=["canvas"],
                     model_ids=[spec.id],
                     model_id=spec.id,
-                    display_name=spec.id,
+                    display_name=spec.display_name or spec.id,
                 )
                 seen[digest] = current
                 planned.append(current)

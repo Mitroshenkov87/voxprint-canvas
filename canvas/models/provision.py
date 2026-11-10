@@ -51,6 +51,11 @@ OPTIONAL_IDS = (
 )
 
 
+# Required downloads that are not the default generator: the scenario writer is in the
+# signed index as optional:false, default:false.
+REQUIRED_EXTRA_IDS = ("qwen3-4b-writer",)
+
+
 class DownloadDeclined(Exception):
     """The user left an optional pack uninstalled."""
 

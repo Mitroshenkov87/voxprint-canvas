@@ -225,6 +225,21 @@ def _prompts(ctx: JobContext, current: Session, payload: Mapping[str, object]) -
     return reply("prompts")
 
 
+def _selected_lora(lora_path: str, runner: object):
+    """The LoRA a job uses: the runner's bound one, else the one its path names. None without a LoRA."""
+    from canvas.models.user_lora import UserLora, resolve_selected
+
+    lora = getattr(runner, "bound_lora", None)
+    if isinstance(lora, UserLora):
+        return lora
+    if not lora_path:
+        return None
+    try:
+        return resolve_selected(lora_path)
+    except Exception:  # noqa: BLE001 - a lookup failure means no trigger, never a stopped job
+        return None
+
+
 def _retrain_refusal(op: str, lora_path: str, runner: object) -> dict[str, object] | None:
     """Refuse a job whose LoRA was trained on a base Canvas cannot run.
 
@@ -260,7 +275,12 @@ def _generate(ctx: JobContext, current: Session, payload: Mapping[str, object]) 
     stopped = _retrain_refusal("generate", job.lora_path, current.runner)
     if stopped is not None:
         return stopped
-    layout_prompt = str(payload.get("layout_prompt") or "")
+    from canvas.models.user_lora import apply_trigger, rewrite_alias
+
+    # The alias becomes the trigger and the trigger leads. The gate and the encoder get this prompt.
+    lora = _selected_lora(job.lora_path, current.runner)
+    job = job._replace(prompt=apply_trigger(job.prompt, lora))
+    layout_prompt = rewrite_alias(str(payload.get("layout_prompt") or ""), lora)
     out_dir = Path(str(payload.get("out_dir")))
     _apply_vram(payload.get("vram"))
     reason = _review_prompts(current, [layout_prompt, job.prompt])
@@ -411,7 +431,10 @@ def _series(ctx: JobContext, current: Session, payload: Mapping[str, object]) ->
     stopped = _retrain_refusal("series", base.lora_path, current.runner)
     if stopped is not None:
         return stopped
-    idea = str(payload.get("idea") or "")
+    from canvas.models.user_lora import apply_trigger, rewrite_alias
+
+    lora = _selected_lora(base.lora_path, current.runner)
+    idea = rewrite_alias(str(payload.get("idea") or ""), lora)
     style = str(payload.get("style") or "photo")
     template = str(payload.get("template") or "")
     suffix = str(payload.get("suffix") or "")
@@ -425,7 +448,7 @@ def _series(ctx: JobContext, current: Session, payload: Mapping[str, object]) ->
     strength = REFERENCE_STRENGTH if payload.get("strength") == "high" else None
     container = OutputFormat(str(payload.get("container") or "png"))
     runner = current.runner
-    reason = _review_prompts(current, [idea])
+    reason = _review_prompts(current, [apply_trigger(idea, lora)])
     if reason is not None:
         return refused("series", "prompt", reason, unavailable=False)
     # Adult content off: the same boundary on the idea. The gate review above ran first and is unchanged.
@@ -436,7 +459,7 @@ def _series(ctx: JobContext, current: Session, payload: Mapping[str, object]) ->
         return refused("series", "adult_off", off, unavailable=False)
 
     def compose(line: str) -> str:
-        return " ".join(part for part in (template, line.strip(), suffix) if part)
+        return apply_trigger(" ".join(part for part in (template, line.strip(), suffix) if part), lora)
 
     def note(message: str) -> None:
         ctx.progress(message=encode_event("note", text=str(message)))
@@ -512,6 +535,8 @@ def _series(ctx: JobContext, current: Session, payload: Mapping[str, object]) ->
 
     generate.prepare = prepare  # type: ignore[attr-defined]
     generate.sample = sample  # type: ignore[attr-defined]
+    # The series puts the trigger first on every shot line before the gate reviews it.
+    generate.lora = lora  # type: ignore[attr-defined]
 
     def on_scenario(scenario: object) -> None:
         scenario_box["scenario"] = scenario
@@ -530,6 +555,7 @@ def _series(ctx: JobContext, current: Session, payload: Mapping[str, object]) ->
         shots = getattr(scenario, "shots", ())
         return assemble_line(
             str(getattr(scenario, "subject_block", "")), shots[index], include_camera=True, index=index, seed=base_seed,
+            lora=lora,
         )
 
     if hasattr(runner, "cook"):

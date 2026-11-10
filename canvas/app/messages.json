@@ -620,6 +620,12 @@
     "canvas.lora.trigger_tip": {
       "en": "Insert «{trigger}» into the prompt"
     },
+    "canvas.lora.alias_clash_title": {
+      "en": "Same LoRA name"
+    },
+    "canvas.lora.alias_clash": {
+      "en": "Two LoRAs used the name «{wanted}». «{lora}» is now «{given}»."
+    },
     "canvas.lora.pick_tip": {
       "en": "LoRA for this picture. Import more under More → Import LoRA."
     },

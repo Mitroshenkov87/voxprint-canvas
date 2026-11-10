@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -61,6 +62,8 @@ _KOHYA = "lora_unet_"
 THIRD_PARTY_KIND = "unknown"
 _B_WEIGHT = ".lora_B.weight"
 _HEADER_TRIGGER = "voxprint.subject.trigger"
+_HEADER_ALIAS = "voxprint.subject.alias"
+_HEADER_STRENGTH = "voxprint.lora.recommended_strength"
 _HEADER_KIND = "voxprint.lora.kind"
 _HEADER_BASE = "voxprint.lora.base"
 _HEADER_BASE_VARIANT = "voxprint.lora.base_variant"
@@ -74,6 +77,8 @@ _LOG = logging.getLogger(__name__)
 _HEADER_KIND_ALIAS = {"thing": "object"}
 _HEADER_KEYS = (
     _HEADER_TRIGGER,
+    _HEADER_ALIAS,
+    _HEADER_STRENGTH,
     _HEADER_KIND,
     _HEADER_BASE,
     _HEADER_TRAINED_BASE,
@@ -116,6 +121,7 @@ class UserLora:
     base_variant: str = ""
     base_sha256: str = ""
     warnings: tuple[str, ...] = ()
+    alias: str = ""
 
 
 @dataclass(frozen=True)
@@ -231,7 +237,7 @@ def inspect_folder(folder: Path) -> tuple[UserLora | None, str | None]:
         folder,
         weights,
         header.get(_HEADER_TRIGGER, ""),
-        default_strength,
+        recommended_or_default(header.get(_HEADER_STRENGTH)),
         (low, high),
         adult,
         base=mdl_id,
@@ -239,6 +245,7 @@ def inspect_folder(folder: Path) -> tuple[UserLora | None, str | None]:
         base_variant=variant,
         base_sha256=base_sha,
         warnings=warnings,
+        alias=parse_alias(header.get(_HEADER_ALIAS)) if header.get(_HEADER_TRIGGER, "").strip() else "",
     ), None
 
 
@@ -256,22 +263,61 @@ def resolve_selected(path: str | Path, root: Path | None = None) -> UserLora | N
 
     imported = resolve_library(text)
     if imported is not None:
-        return imported
+        return _unique_alias(imported, root)
     candidate = Path(text)
     if not candidate.is_absolute():
         candidate = _lora_root(root) / text
     if candidate.is_file() and candidate.suffix == ".safetensors":
         found, _reason = inspect_folder(candidate.parent)
         if found is not None and _same_file(found.weights, candidate):
-            return found
+            return _unique_alias(found, root)
         try:
-            return open_weights(candidate)
+            return _unique_alias(open_weights(candidate), root)
         except LoraRejected:
             return None
     if candidate.is_file():
         candidate = candidate.parent
     found, _reason = inspect_folder(candidate)
-    return found
+    return None if found is None else _unique_alias(found, root)
+
+
+def installed_loras(
+    root: Path | None = None, library: Path | None = None,
+) -> tuple[tuple[UserLora, ...], tuple[tuple[str, str, str], ...]]:
+    """Library LoRAs, then the listed add-ons, with aliases made unique, and a note per renamed alias.
+
+    Args:
+        root: Models folder holding the add-on folders.
+        library: Library folder. The app's library when omitted.
+    """
+    from canvas.models.lora_library import list_library
+
+    items: list[UserLora] = []
+    for entry in list_library(library):
+        try:
+            items.append(entry.as_lora())
+        except LoraRejected:
+            continue
+    items.extend(discover(root).available)
+    return resolve_aliases(tuple(items))
+
+
+def _unique_alias(found: UserLora, root: Path | None) -> UserLora:
+    """``found`` with the alias it was given across the installed set, so two LoRAs never share one."""
+    if not found.alias:
+        return found
+    try:
+        listed, _notes = installed_loras(root)
+    except OSError:
+        return found
+    for item in listed:
+        if item.id == found.id and _same_file(item.weights, found.weights):
+            return replace(found, alias=item.alias)
+    # A file chosen by path that is not installed: it yields to every installed alias.
+    taken = {item.alias for item in listed if item.alias}
+    if found.alias not in taken:
+        return found
+    return resolve_aliases((*listed, found))[0][-1]
 
 
 def _strip_revision(token: str) -> str:
@@ -565,7 +611,7 @@ def open_weights(path: Path) -> UserLora:
         path.parent,
         weights,
         meta.get(_HEADER_TRIGGER, ""),
-        default_strength,
+        recommended_or_default(meta.get(_HEADER_STRENGTH)),
         (low, high),
         adult,
         base=stored_base,
@@ -573,7 +619,105 @@ def open_weights(path: Path) -> UserLora:
         base_variant=variant,
         base_sha256=base_sha,
         warnings=warnings,
+        alias=parse_alias(meta.get(_HEADER_ALIAS)) if meta.get(_HEADER_TRIGGER, "").strip() else "",
     )
+
+
+_ALIAS_RE = re.compile(r"vox_[a-z0-9_]+")
+ALIAS_MAX = 32
+_STRENGTH_TEXT = re.compile(r"\s*[0-9]+(?:\.[0-9]+)?\s*")
+
+
+def parse_alias(value: object) -> str:
+    """The alias in a weight header, or empty when it is absent or not ``vox_<slug>``.
+
+    The slug is lowercase ASCII letters, digits, and underscores. At most 32 characters in all.
+    """
+    if not isinstance(value, str):
+        return ""
+    text = value.strip()
+    if len(text) > ALIAS_MAX or len(text) == len("vox_") or _ALIAS_RE.fullmatch(text) is None:
+        return ""
+    return text
+
+
+DEFAULT_RECOMMENDED_STRENGTH = 1.0
+
+
+def recommended_or_default(value: object) -> float:
+    """The recommended strength key when it parses, else 1.0 (not the record's or the family's default)."""
+    found = parse_recommended_strength(value)
+    return DEFAULT_RECOMMENDED_STRENGTH if found is None else found
+
+
+def parse_recommended_strength(value: object) -> float | None:
+    """A decimal string such as ``"1.0"`` as a strength, or None when absent or unparsable."""
+    if not isinstance(value, str) or _STRENGTH_TEXT.fullmatch(value) is None:
+        return None
+    number = float(value)
+    return number if 0.0 < number <= 4.0 else None
+
+
+def chip_word(lora: UserLora | None) -> str:
+    """The word the chip shows and inserts: the alias when there is one, else the trigger."""
+    if lora is None:
+        return ""
+    return lora.alias or lora.trigger
+
+
+def _word_pattern(word: str) -> re.Pattern[str]:
+    return re.compile(r"(?<![A-Za-z0-9_])" + re.escape(word) + r"(?![A-Za-z0-9_])", re.IGNORECASE)
+
+
+def rewrite_alias(text: str, lora: UserLora | None) -> str:
+    """``text`` with the LoRA's alias replaced by its trigger. Unchanged without both."""
+    if lora is None or not lora.alias or not lora.trigger.strip():
+        return text
+    trigger = lora.trigger.strip()
+    return _word_pattern(lora.alias).sub(lambda _match: trigger, text)
+
+
+def apply_trigger(prompt: str, lora: UserLora | None) -> str:
+    """The final prompt for a selected LoRA: alias replaced by the trigger, trigger led in when missing.
+
+    The alias rewrite runs first, then the insert check. A trigger already in
+    the prompt is not added again. A LoRA without a trigger leaves the prompt as it is.
+    Run it on the composed prompt that is encoded and reviewed, not on the prompt box.
+    """
+    trigger = (lora.trigger if lora is not None else "").strip()
+    if lora is None or not trigger:
+        return prompt
+    text = rewrite_alias(prompt, lora)
+    if _word_pattern(trigger).search(text) is not None:
+        return text
+    body = text.strip()
+    return f"{trigger}, {body}" if body else trigger
+
+
+def resolve_aliases(loras: tuple[UserLora, ...]) -> tuple[tuple[UserLora, ...], tuple[tuple[str, str, str], ...]]:
+    """Make aliases unique across a set. A later clash gets ``_2``, ``_3`` and so on.
+
+    Returns:
+        The LoRAs with their resolved alias, and a ``(lora id, wanted, given)`` note per clash.
+    """
+    taken: set[str] = set()
+    out: list[UserLora] = []
+    notes: list[tuple[str, str, str]] = []
+    for item in loras:
+        alias = item.alias
+        if alias:
+            given = alias
+            count = 1
+            while given in taken:
+                count += 1
+                suffix = f"_{count}"
+                given = alias[: ALIAS_MAX - len(suffix)] + suffix
+            taken.add(given)
+            if given != alias:
+                notes.append((item.id, alias, given))
+                item = replace(item, alias=given)
+        out.append(item)
+    return tuple(out), tuple(notes)
 
 
 def running_base_id() -> str:
@@ -1210,14 +1354,13 @@ def open_third_party(path: Path) -> UserLora:
     base = meta.get(_HEADER_BASE, "") or _canonical_base(str(meta.get(_HEADER_TRAINED_BASE) or ""))
     fits_base(path)
     variant, base_sha, warnings = _provenance(meta, path, base)
-    default_strength = ZIMAGE_LORA_DEFAULT_STRENGTH if _is_zimage_family(base or detect_base(path)) else CLI_DEFAULT_STRENGTH
     return UserLora(
         path.stem,
         THIRD_PARTY_KIND,
         path.parent,
         weights,
         "",
-        default_strength,
+        recommended_or_default(meta.get(_HEADER_STRENGTH)),
         CLI_STRENGTH_RANGE,
         False,
         name=path.stem,

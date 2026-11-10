@@ -202,6 +202,8 @@
   "canvas.lora.third_party.short": "It may work less well than a Model Forge LoRA.",
   "canvas.lora.more": "Details",
   "canvas.lora.trigger_tip": "Insert «{trigger}» into the prompt",
+  "canvas.lora.alias_clash_title": "Same LoRA name",
+  "canvas.lora.alias_clash": "Two LoRAs used the name «{wanted}». «{lora}» is now «{given}».",
   "canvas.lora.pick_tip": "LoRA for this picture. Import more under More → Import LoRA.",
   "canvas.lora.strength_tip": "LoRA strength",
   "canvas.menu.compact": "{value}  ▾",

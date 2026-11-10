@@ -1360,6 +1360,7 @@
     },
     {
       "id": "qwen3-4b-writer",
+      "display_name": "Huihui Qwen3 4B Instruct 2507 (scenario writer)",
       "role": "writer",
       "tier": "any",
       "repo": "huihui-ai/Huihui-Qwen3-4B-Instruct-2507-abliterated",
@@ -1374,73 +1375,73 @@
           "sha256": "79f6ec6fcc423d3a82bfac8b9033b1daac7b7bce06a5f5f441637b480cc605de",
           "size": 735,
           "mirror": "added_tokens.json",
-          "upstream": "added_tokens.json"
+          "upstream": "-"
         },
         "chat_template.jinja": {
           "sha256": "65adea29f923a4eda2dad1f080cd6ac9458dea65bd581f9fc086e3e7d556d4db",
           "size": 4125,
           "mirror": "chat_template.jinja",
-          "upstream": "chat_template.jinja"
+          "upstream": "-"
         },
         "config.json": {
           "sha256": "5443f8ef61f1602830e997f577dc333179cf28240135f13438e750f4fb2fc839",
           "size": 1616,
           "mirror": "config.json",
-          "upstream": "config.json"
+          "upstream": "-"
         },
         "generation_config.json": {
           "sha256": "f88ce669f055db035352d6f4d029e64a51392d7e816f837f106998ed28030c43",
           "size": 231,
           "mirror": "generation_config.json",
-          "upstream": "generation_config.json"
+          "upstream": "-"
         },
         "merges.txt": {
           "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
           "size": 1671853,
           "mirror": "merges.txt",
-          "upstream": "merges.txt"
+          "upstream": "-"
         },
         "model-00001-of-00002.safetensors": {
           "sha256": "c6bbaf4d73c46bd9c4ef1a32cd65e6524fe9e71aa28ca63865c1eb6a7ad51a98",
           "size": 4967215360,
           "mirror": "model-00001-of-00002.safetensors",
-          "upstream": "model-00001-of-00002.safetensors"
+          "upstream": "-"
         },
         "model-00002-of-00002.safetensors": {
           "sha256": "b248ed21539e354dedbab9d73f06b0b2f633396664121fd0b3e1c17bc560840f",
           "size": 3077766632,
           "mirror": "model-00002-of-00002.safetensors",
-          "upstream": "model-00002-of-00002.safetensors"
+          "upstream": "-"
         },
         "model.safetensors.index.json": {
           "sha256": "9b7c1c8de866a007d7aeed14befcc84114f26f8c317e77a66b3c58c41359f85d",
           "size": 33261,
           "mirror": "model.safetensors.index.json",
-          "upstream": "model.safetensors.index.json"
+          "upstream": "-"
         },
         "special_tokens_map.json": {
           "sha256": "57255613bbe23c9497211ca68561ff429a51e871dbaf5a59998fa4c8f7fe168a",
           "size": 644,
           "mirror": "special_tokens_map.json",
-          "upstream": "special_tokens_map.json"
+          "upstream": "-"
         },
         "tokenizer.json": {
           "sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
           "size": 11422654,
           "mirror": "tokenizer.json",
-          "upstream": "tokenizer.json"
+          "upstream": "-"
         },
         "tokenizer_config.json": {
           "sha256": "3b17b67dd43b8b9eeb75798501c0be6a52d034ef241cd138c2ae06810bf314cd",
           "size": 5643,
           "mirror": "tokenizer_config.json",
-          "upstream": "tokenizer_config.json"
+          "upstream": "-"
         },
         "vocab.json": {
           "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
           "size": 2776833,
           "mirror": "vocab.json",
-          "upstream": "vocab.json"
+          "upstream": "-"
         }
       },
       "sources": [
@@ -1450,7 +1451,7 @@
         },
         {
           "kind": "huggingface-mirror",
-          "uri": "https://huggingface.co/Mitroshenkov87/voxprint-mirror-huihui-qwen3-4b-instruct-2507-abliterated"
+          "uri": "https://huggingface.co/Mitroshenkov87/voxprint-huihui-qwen3-4b-instruct-2507-abliterated"
         },
         {
           "kind": "huggingface",
@@ -1465,7 +1466,7 @@
           "uri": ""
         }
       ],
-      "mirror_revision": "2c219b659d064d24236fd748c19cc2e579cbe3be"
+      "mirror_revision": "6e368340799452e5cba7a1e423120c7b0bc0473d"
     }
   ]
 }

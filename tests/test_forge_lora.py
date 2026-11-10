@@ -132,8 +132,8 @@ def test_a_forge_export_keeps_its_keys_name_and_trigger(tmp_path: Path) -> None:
     assert lora.id == _LORA_ID
     assert lora.trigger == "kettleword"
     assert lora.weights == path
-    # The record's own default strength is kept (the sidecar names 0.8).
-    assert lora.default_strength == 0.8
+    # No recommended_strength key in the header: 1.0, not the sidecar's 0.8.
+    assert lora.default_strength == 1.0
     assert lora.strength_range == CLI_STRENGTH_RANGE
     assert cli_scale(0) == 0
     assert cli_scale(2) == 2

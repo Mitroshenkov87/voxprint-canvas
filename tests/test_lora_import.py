@@ -87,7 +87,8 @@ def test_the_strength_range_comes_from_the_manifest_and_stays_inside_0_to_2(home
     package = write_voxlora(home / "in", record=manifest(scale_min=0.2, scale_max=3.5, scale_default=0.9))
     lora = _import(package).as_lora()
     assert lora.strength_range == (0.2, 2.0)
-    assert lora.default_strength == 0.9
+    # The weight header carries no recommended strength here, so the default is 1.0, not the json's 0.9.
+    assert lora.default_strength == 1.0
 
 
 def test_attest_is_kept_as_information(home: Path):

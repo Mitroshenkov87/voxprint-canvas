@@ -288,6 +288,7 @@ def test_render_batch_prints_models_dir_and_exits_on_a_live_preflight_miss(
     monkeypatch.setattr("canvas.app.platform.check_gpu", lambda info: GpuCheck(ok=True, tier=Tier.GB16, message=""))
     monkeypatch.setattr("canvas.infra.gpu.probe_gpu", lambda: object())
     monkeypatch.setattr("canvas.models.snapshots.snapshot_ready", lambda spec, root, cache=None: None)
+    monkeypatch.setattr("canvas.tools.render_batch.missing_gate_imports", lambda: [])
     log = io.StringIO()
     # No weights_ready hook: this is the live preflight path.
     code = main(
@@ -313,3 +314,81 @@ def test_render_batch_prints_models_dir_and_exits_on_a_live_preflight_miss(
     assert "qwen3guard-gen-0.6b" in text
     assert "z-image-turbo-bf16-16gb" in text
     assert "voxprint-mdl download" in text
+
+
+def test_missing_gate_imports_names_a_missing_package(monkeypatch) -> None:
+    import importlib
+
+    from canvas.tools.render_batch import format_deps_error, missing_gate_imports
+
+    real = importlib.import_module
+
+    def fake(name: str, package: str | None = None):
+        if name in {"transformers", "timm"}:
+            raise ImportError(name)
+        return real(name, package)
+
+    monkeypatch.setattr("canvas.tools.render_batch.importlib.import_module", fake)
+    missing = missing_gate_imports()
+    assert "transformers" in missing
+    assert "timm" in missing
+    message = format_deps_error(missing)
+    assert "transformers" in message
+    assert "timm" in message
+    assert "pip install .[gen]" in message
+
+
+def test_missing_gate_imports_rejects_opencv_without_utils_logging(monkeypatch) -> None:
+    import importlib
+    import types
+
+    from canvas.tools.render_batch import missing_gate_imports
+
+    real = importlib.import_module
+    fake_cv2 = types.SimpleNamespace(__version__="4.10.0", utils=types.SimpleNamespace())
+
+    def fake(name: str, package: str | None = None):
+        if name == "cv2":
+            return fake_cv2
+        return real(name, package)
+
+    monkeypatch.setattr("canvas.tools.render_batch.importlib.import_module", fake)
+    missing = missing_gate_imports()
+    assert any("opencv-python-headless" in item and "4.10.0" in item and "5.x" in item for item in missing)
+
+
+def test_render_batch_exits_on_missing_gate_imports(tmp_path: Path, monkeypatch) -> None:
+    from canvas.app.platform import GpuCheck
+    from canvas.models.modes import Tier
+
+    prompts = _prompts(tmp_path / "p.json", [{"id": "one", "prompt": "a 32-year-old adult woman in a studio"}])
+    models = tmp_path / "mdl-root"
+    models.mkdir()
+    monkeypatch.setattr("canvas.tools.render_batch.missing_gate_imports", lambda: ["transformers", "timm"])
+    monkeypatch.setattr("canvas.app.platform.check_gpu", lambda info: GpuCheck(ok=True, tier=Tier.GB16, message=""))
+    monkeypatch.setattr("canvas.infra.gpu.probe_gpu", lambda: object())
+    monkeypatch.setattr("canvas.models.snapshots.snapshot_ready", lambda spec, root, cache=None: None)
+    log = io.StringIO()
+    code = main(
+        [
+            "--prompts",
+            str(prompts),
+            "--preset",
+            "balanced",
+            "--adult-content",
+            "on",
+            "--out",
+            str(tmp_path / "out"),
+            "--seed",
+            "1001",
+            "--models-dir",
+            str(models),
+        ],
+        hooks=Hooks(log=log),
+    )
+    text = log.getvalue()
+    assert code == 2
+    assert "transformers" in text
+    assert "timm" in text
+    assert "pip install .[gen]" in text
+    assert "qwen3guard-gen-0.6b" not in text

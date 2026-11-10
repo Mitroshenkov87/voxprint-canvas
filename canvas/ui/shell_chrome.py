@@ -14,6 +14,7 @@ from PySide6.QtCore import QRect, QSize, Qt, QTimer
 from PySide6.QtGui import QAction, QFont, QFontInfo, QFontMetrics, QIcon
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
+    QCheckBox,
     QComboBox,
     QFormLayout,
     QLabel,
@@ -213,6 +214,8 @@ def mount(window):
     layout.setContentsMargins(12, 4, 12, 4)
     layout.setSpacing(8)
     _toolbar(window, view._top)
+    _adult_box(window, view._top)
+    _seed_box(window, view._top)
     layout.addWidget(view.root, 1)
     footer = QLabel(text("notice.responsibility"))
     footer.setObjectName("footer")
@@ -279,6 +282,8 @@ def polish(window):
     _output(window)
     _detail(window)
     _mask_button(window)
+    _sync_adult_box(window)
+    _sync_seed_box(window)
     _result(window)
     _thumbs(window)
     if window.view._expert_panel.isVisible():
@@ -359,6 +364,82 @@ def _toolbar(window, row):
     mask.hide()
     window._picture_button = picture
     window._mask_button = mask
+
+
+def _adult_box(window, row):
+    """Put the 18+ box on the top bar in Simple mode.
+
+    It reads and writes only the stored 18+ setting through the layout. It
+    never touches Expert mode, and Expert on or off leaves it where it is.
+    """
+    box = QCheckBox(tr("canvas.adult.box"))
+    box.setObjectName("adultBox")
+    box.setToolTip(tr("canvas.adult.tip"))
+    box.setChecked(window.shell.layout.adult_content())
+    # `clicked` is the user's action (and what the GUI smoke test counts);
+    # `toggled` keeps code-driven changes in step. The handler is idempotent.
+    box.clicked.connect(lambda checked=False: _set_adult(window, bool(checked)))
+    box.toggled.connect(lambda checked: _set_adult(window, checked))
+    window.shell.layout.on_adult_change(lambda _value: _sync_adult_box(window))
+    row.insertWidget(0, box)
+    window._adult_box = box
+
+
+def _seed_box(window, row):
+    """Put the Random seed toggle on the top bar in Simple mode, on by default.
+
+    On means every picture (and every copy) gets a new random seed. Off locks
+    the last seed so it repeats. It writes only the seed lock, never Expert mode.
+    """
+    box = QCheckBox(tr("canvas.seed.box"))
+    box.setObjectName("seedDice")
+    box.setToolTip(tr("canvas.seed.tip"))
+    box.setChecked(not window.shell.layout.seed_locked())
+    box.clicked.connect(lambda checked=False: _set_seed_lock(window, not checked))
+    box.toggled.connect(lambda checked: _set_seed_lock(window, not checked))
+    window.shell.layout.on_seed_lock_change(lambda _value: _sync_seed_box(window))
+    row.insertWidget(1, box)
+    window._seed_box = box
+
+
+def _set_seed_lock(window, locked):
+    layout = window.shell.layout
+    if layout.seed_locked() is not locked:
+        layout.set_seed_locked(locked)
+    if window.view._expert_panel.isVisible():
+        _paint_panel(window)
+
+
+def _sync_seed_box(window):
+    box = getattr(window, "_seed_box", None)
+    if box is None:
+        return
+    wanted = not window.shell.layout.seed_locked()
+    if box.isChecked() is not wanted:
+        box.blockSignals(True)
+        box.setChecked(wanted)
+        box.blockSignals(False)
+    if window.view._expert_panel.isVisible():
+        _paint_panel(window)
+
+
+def _set_adult(window, checked):
+    layout = window.shell.layout
+    if layout.adult_content() is not checked:
+        layout.set_adult_content(checked)
+    if window.view._expert_panel.isVisible():
+        _paint_panel(window)
+
+
+def _sync_adult_box(window):
+    box = getattr(window, "_adult_box", None)
+    if box is None:
+        return
+    wanted = window.shell.layout.adult_content()
+    if box.isChecked() is not wanted:
+        box.blockSignals(True)
+        box.setChecked(wanted)
+        box.blockSignals(False)
 
 
 def _menu(window, menu):
@@ -547,6 +628,7 @@ def _result(window):
     row = bar.layout()
     if row is None or bar.findChild(QPushButton, "useInput") is not None:
         wrap_result(bar)
+        _seed_line(window, bar)
         return
     use = QPushButton(tr("simple.history.use_input"))
     use.setObjectName("useInput")
@@ -558,6 +640,24 @@ def _result(window):
     row.insertWidget(at, use)
     row.insertWidget(at + 1, delete)
     wrap_result(bar)
+    _seed_line(window, bar)
+
+
+def _seed_line(window, bar):
+    """The seed the shown picture was made with, on the result line."""
+    label = bar.findChild(QLabel, "seedInfo")
+    if label is None:
+        label = QLabel()
+        label.setObjectName("seedInfo")
+        label.setProperty("setupHint", True)
+        label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        bar.layout().addWidget(label)
+    layout = window.shell.layout
+    seed = window._seeds.get(layout.selected or "")
+    if seed is None and layout.history:
+        seed = window._seeds.get(layout.history[0].item_id)
+    label.setText(tr("canvas.seed.shown", seed=seed) if seed is not None else "")
+    label.setVisible(seed is not None)
 
 
 def _history_action(window, action):

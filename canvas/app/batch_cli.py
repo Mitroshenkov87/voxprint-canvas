@@ -9,7 +9,8 @@ The manifest is a JSON object with an ``entries`` list::
 
 Each entry has exactly one of ``prompt`` (an idea the scenario writer turns
 into ``count`` shots) or ``shot`` (one pose or shot line drawn ``count`` times
-with consecutive seeds). ``negative``, ``seed``, ``count`` and ``name`` are
+with consecutive seeds when the entry has a ``seed``, a new random seed per
+picture when it has none). ``negative``, ``seed``, ``count`` and ``name`` are
 optional. Any other key, a wrong type, or a value out of range stops the
 command with exit code 2 before any model loads.
 
@@ -26,6 +27,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from canvas.core.formats import EXPORT_FORMAT, OutputFormat, extension
+from canvas.core.seeds import fresh_seed
 from canvas.infra.stage_timer import StageTimes
 from canvas.infra.watchdog import CODE, on_abort
 from canvas.pipeline.batch import BatchEntry, EntryResult, run_batch
@@ -121,10 +123,12 @@ def _entry(index: int, item: object) -> BatchEntry:
     if bool(prompt) == bool(shot):
         raise ManifestInvalid(f'{where}: needs exactly one of "prompt" or "shot".')
     negative = _text(item, "negative", where)
-    seed = _whole(item, "seed", where, default=1, low=0, high=2**32 - 1)
+    seeded = item.get("seed") is not None
+    # No seed in the entry: a fresh base, and every picture draws its own random seed.
+    seed = _whole(item, "seed", where, default=fresh_seed(), low=0, high=2**32 - 1)
     count = _whole(item, "count", where, default=1, low=1, high=MAX_FRAMES)
     name = _folder_name(item, index, where)
-    return BatchEntry(name=name, prompt=prompt, shot=shot, negative=negative, seed=seed, count=count)
+    return BatchEntry(name=name, prompt=prompt, shot=shot, negative=negative, seed=seed, count=count, seeded=seeded)
 
 
 def _text(item: dict[str, object], key: str, where: str) -> str:
@@ -274,6 +278,18 @@ def write_failed(folder: Path, entries: list[BatchEntry], code: str, message: st
         return
 
 
+def _used_seeds(outcome: EntryResult) -> list[int]:
+    """The seed of every picture the entry kept, read from the series record. Empty when there is none."""
+    folder = outcome.result.folder
+    if folder is None:
+        return []
+    try:
+        found = json.loads((Path(folder) / "series.json").read_text(encoding="utf-8")).get("seeds")
+    except (OSError, ValueError, AttributeError):
+        return []
+    return [seed for seed in found if isinstance(seed, int) and not isinstance(seed, bool)] if isinstance(found, list) else []
+
+
 def _row(index: int, outcome: EntryResult, fmt: OutputFormat) -> dict[str, object]:
     entry = outcome.entry
     result = outcome.result
@@ -294,6 +310,7 @@ def _row(index: int, outcome: EntryResult, fmt: OutputFormat) -> dict[str, objec
         "frames": frames,
         "scenario": scenario_path,
         "seed": entry.seed,
+        "seeds": _used_seeds(outcome),
         "format": extension(fmt).lstrip("."),
     }
     if status != "ok":

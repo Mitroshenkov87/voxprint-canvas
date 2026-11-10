@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from canvas.core.formats import OutputFormat
+from canvas.core.seeds import SeedPlan
 from canvas.infra import cuda_health
 from canvas.infra.errors import note_error, note_timing
 from canvas.infra.phase_vram import Phase, ResidualVram, start_phase
@@ -71,6 +72,9 @@ class BatchEntry:
     negative: str
     seed: int
     count: int
+    # False when the manifest gave no seed: ``seed`` is then only a fresh base for the wording,
+    # and every picture of the entry draws its own random seed.
+    seeded: bool = True
 
     @property
     def text(self) -> str:
@@ -241,7 +245,8 @@ def _run(
                     gate=gate, idea=entry.text, scenario=scenario, source=source, style=style, mode=mode,
                     seed=entry.seed, strength=series_strength(entry.text, mode, None), adult=adult,
                     include_camera=lambda: True, line_for=None, clock=clock, on_scenario=keep, on_status=None,
-                    cancelled=lambda: False, folder=folder / entry.name, draw_frame=frame_of(index),
+                    cancelled=lambda: False, folder=folder / entry.name,
+                    draw_frame=SeedPlan("series" if entry.seeded else "random", entry.seed).wrap(frame_of(index)),
                 )
             except (DeviceRefused, ResidualVram, SafetyUnavailable):
                 raise

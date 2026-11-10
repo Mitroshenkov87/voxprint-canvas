@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from canvas.pipeline.pipeline import Pipeline
 
 from canvas.core.formats import OutputFormat, save_image
+from canvas.core.seeds import pick_seed
 from canvas.models.modes import Mode, Tier
 from canvas.models.plan import OptionalModelUnavailable
 from canvas.models.registry import load_catalog
@@ -323,7 +324,13 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--preset", choices=PRESETS, default="balanced")
     parser.add_argument("--adult-content", choices=("on", "off"), required=True)
     parser.add_argument("--out", required=True, type=Path, help="output folder")
-    parser.add_argument("--seed", type=int, default=1001, help="base seed; dataset mode adds the image index")
+    parser.add_argument(
+        "--seed", type=int, default=None,
+        help=(
+            "base seed (0 to 4294967295); each item without its own seed adds its index to it. "
+            "Leave it out for a new random seed per item. The seed used is saved in every picture."
+        ),
+    )
     parser.add_argument("--aspect", default="1:1")
     parser.add_argument(
         "--models-dir",
@@ -404,10 +411,10 @@ def main(argv: Sequence[str] | None = None, hooks: Hooks | None = None) -> int:
 
     apply_preset_steps(steps)
     if args.mode == "dataset":
-        return _run_dataset(items, persona, adult=adult, out=out, base_seed=int(args.seed),
+        return _run_dataset(items, persona, adult=adult, out=out, base_seed=None if args.seed is None else int(args.seed),
                             steps=steps, guidance=guidance, sampler=sampler, aspect=args.aspect,
                             hooks=hooks, log=log)
-    return _run_render(items, adult=adult, out=out, base_seed=int(args.seed), steps=steps,
+    return _run_render(items, adult=adult, out=out, base_seed=None if args.seed is None else int(args.seed), steps=steps,
                        guidance=guidance, sampler=sampler, aspect=args.aspect, lora_bind=lora_bind,
                        hooks=hooks, log=log)
 
@@ -446,7 +453,7 @@ def _run_render(
     *,
     adult: bool,
     out: Path,
-    base_seed: int,
+    base_seed: int | None,
     steps: int,
     guidance: float,
     sampler: str,
@@ -459,7 +466,7 @@ def _run_render(
     written = 0
     failed = 0
     for index, item in enumerate(items):
-        seed = item.seed if item.seed is not None else base_seed + index
+        seed = item.seed if item.seed is not None else pick_seed(base_seed, index)
         stem = _safe_stem(item.item_id or f"{index + 1:02d}")
         image_path = out / f"{stem}.webp"
         log_path = out / f"{stem}.json"
@@ -482,7 +489,7 @@ def _run_render(
             record["gate"] = gate
             record.update(safety_error_fields(session.last_error))
             if image is not None:
-                save_image(image, image_path, OutputFormat.WEBP, metadata=None, purpose="picture")
+                save_image(image, image_path, OutputFormat.WEBP, metadata={"seed": seed}, purpose="picture")
                 record["file"] = image_path.name
                 written += 1
         except SafetyError as exc:
@@ -509,7 +516,7 @@ def _run_dataset(
     *,
     adult: bool,
     out: Path,
-    base_seed: int,
+    base_seed: int | None,
     steps: int,
     guidance: float,
     sampler: str,
@@ -529,7 +536,7 @@ def _run_dataset(
     written = 0
     failed = 0
     for index, item in enumerate(items):
-        seed = item.seed if item.seed is not None else base_seed + index
+        seed = item.seed if item.seed is not None else pick_seed(base_seed, index)
         prompt = compose_prompt(item, persona)
         stem = f"{index + 1:02d}"
         image_path = photos / f"{stem}.webp"
@@ -547,7 +554,7 @@ def _run_dataset(
             row["gate"] = gate
             row.update(safety_error_fields(session.last_error))
             if image is not None:
-                save_image(image, image_path, OutputFormat.WEBP, metadata=None, purpose="master")
+                save_image(image, image_path, OutputFormat.WEBP, metadata={"seed": seed}, purpose="master")
                 digest = photo_id(image_path.read_bytes())
                 long = item.caption or prompt
                 short = item.short or long

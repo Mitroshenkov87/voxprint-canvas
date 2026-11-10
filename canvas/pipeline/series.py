@@ -18,7 +18,7 @@ import time
 import zipfile
 import zlib
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal, Protocol, cast
 
@@ -677,7 +677,7 @@ def _render_group(group: _Plan, cancelled: Callable[[], bool], clock: StageTimes
             continue
         if group.hero is None:
             group.hero = image
-        group.drawn.append(_Drawn(shot.index, shot.line, shot.seed, image))
+        group.drawn.append(_Drawn(shot.index, shot.line, _used_seed(draw_frame, shot.seed), image))
     return False
 
 
@@ -712,7 +712,7 @@ def _decode_shots(
             group.blocked.append(shot.index)
             _status(group.on_status, shot.index, "blocked")
             continue
-        drawn.append(_Drawn(shot.index, shot.line, shot.seed, image))
+        drawn.append(_Drawn(shot.index, shot.line, _used_seed(group.draw_frame, shot.seed), image))
     return drawn, None, False
 
 
@@ -779,7 +779,7 @@ def _review_frames(
             _status(on_status, item.index, "blocked")
             continue
         with clock.measure("save"):
-            path = _store_frame(folder, item.index, released, container)
+            path = _store_frame(folder, item.index, replace(released, seed=item.seed), container)
         kept.append(path)
         saved_lines.append(item.line)
         seeds.append(item.seed)
@@ -1036,6 +1036,7 @@ class _Released:
     height: int
     data: bytes
     safe: SafeImage | None
+    seed: int | None = None
 
 
 def _release_check_cache() -> None:
@@ -1064,6 +1065,12 @@ def _released_frame(
     return _Released(image.width, image.height, image.to_bytes(), None), None
 
 
+def _used_seed(draw_frame: object, seed: int) -> int:
+    """The seed the draw hook really used. A hook may swap the planned seed for a fresh one."""
+    used = getattr(draw_frame, "used_seed", None)
+    return int(used(seed)) if callable(used) else int(seed)
+
+
 def _store_frame(folder: Path, index: int, released: _Released, container: OutputFormat | None) -> Path:
     """Write one frame in the export format. WebP is the Forge default.
 
@@ -1072,13 +1079,13 @@ def _store_frame(folder: Path, index: int, released: _Released, container: Outpu
     """
     fmt = EXPORT_FORMAT if container is None else container
     with timed("encode"):
-        if fmt is OutputFormat.PNG or released.safe is None:
+        if released.safe is None:
             path = folder / f"{index + 1:02}.png"
             _write_png(path, released.width, released.height, released.data)
             return path
+        # The seed is the one field every saved frame carries, even with full metadata off.
         path = folder / f"{index + 1:02}{extension(fmt)}"
-        if released.safe is not None:
-            handoff_image(released.safe, path, fmt)
+        handoff_image(released.safe, path, fmt, seed=released.seed)
         return path
 
 

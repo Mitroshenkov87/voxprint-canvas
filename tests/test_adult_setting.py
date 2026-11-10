@@ -258,3 +258,61 @@ def test_the_expert_checkbox_writes_both_keys_and_survives_a_reopen(tmp_path: Pa
     app.processEvents()
     assert second.findChild(QCheckBox, COMMON).isChecked()
     second.close()
+
+
+# 8. the Simple-mode 18+ box (offscreen Qt)
+
+
+def _simple_window(home: Path):
+    from tests.worker_support import inline_window
+    from canvas.models.modes import Tier
+
+    return inline_window(home / "state", tier=Tier.GB16, enlarge=object())
+
+
+def test_simple_mode_has_its_own_18_box(monkeypatch, tmp_path: Path) -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication, QCheckBox, QWidget
+
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
+    expert = ExpertMode()
+    assert expert.enabled() is False
+
+    window = _simple_window(tmp_path)
+    window.show()
+    app.processEvents()
+    box = window.findChild(QCheckBox, "adultBox")
+    assert box is not None and box.isVisible() and not box.isChecked()
+
+    box.setChecked(True)
+    app.processEvents()
+    layout = window.shell.layout
+    assert expert.enabled() is False
+    assert layout.get(KEY) is True and layout.get(COMMON) is True
+    assert job_from(layout).adult_content is True
+
+    # Expert on shows the mirror; Expert off keeps the value and the Simple box.
+    window.set_expert(True)
+    app.processEvents()
+    mirror = window.findChild(QWidget, "expertForm").findChild(QCheckBox, COMMON)
+    assert mirror is not None and mirror.isChecked()
+    mirror.setChecked(False)
+    app.processEvents()
+    assert layout.get(KEY) is False and not box.isChecked()
+    mirror.setChecked(True)
+    app.processEvents()
+    assert box.isChecked()
+    window.set_expert(False)
+    app.processEvents()
+    assert layout.get(KEY) is True and box.isVisible() and box.isChecked()
+    window.close()
+
+    # A reopen from the same state dir keeps the value, with Expert still off.
+    again = _simple_window(tmp_path)
+    again.show()
+    app.processEvents()
+    assert ExpertMode().enabled() is False
+    assert again.findChild(QCheckBox, "adultBox").isChecked()
+    assert job_from(again.shell.layout).adult_content is True
+    again.close()

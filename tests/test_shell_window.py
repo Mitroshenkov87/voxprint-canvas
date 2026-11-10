@@ -219,8 +219,12 @@ def test_a_manual_edit_hides_the_back_segment(app, home: Path) -> None:
     assert not window.findChild(QPushButton, "revertPrompt").isEnabled()
 
 
-def test_generate_without_models_says_they_are_not_ready(app, home: Path) -> None:
+def test_generate_without_models_says_they_are_not_ready(app, home: Path, monkeypatch, tmp_path: Path) -> None:
     del app
+    # With no real pinned manifest anywhere, only the placeholder stub is left.
+    from canvas.models import mdl_registry
+
+    monkeypatch.setattr(mdl_registry, "_BUNDLED", tmp_path / "missing.json")
     window = _window(home)
     window.view.set_prompt_text("a red bicycle")
     window.findChild(QPushButton, "generate").click()

@@ -77,7 +77,7 @@ class PhotoshootBar:
         self.writer: Callable[[str], str] | None = None
         self.enabled = False
         self.place = "same"
-        self.seed_mode = "series"
+        self.seed_mode = "random"
         self.strength = "medium"
         self._stop = False
         self.rows: list[ShotRow] = []

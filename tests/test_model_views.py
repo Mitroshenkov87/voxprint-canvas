@@ -21,6 +21,14 @@ from canvas.models.snapshots import SnapshotError, snapshot_ready, snapshot_stat
 WEIGHTS = b"w" * 4096
 CONFIG = b'{"a": 1}'
 
+@pytest.fixture(autouse=True)
+def _placeholder_manifest(monkeypatch, tmp_path_factory):
+    # These tests describe the placeholder list; the real bundled pins would otherwise win.
+    from canvas.models import mdl_registry
+
+    monkeypatch.setattr(mdl_registry, "_BUNDLED", tmp_path_factory.mktemp("nobundle") / "mdl.json")
+
+
 
 def _blob(root: Path, data: bytes) -> str:
     digest = hashlib.sha256(data).hexdigest()

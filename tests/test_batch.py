@@ -125,7 +125,9 @@ def test_a_valid_manifest_parses_with_defaults() -> None:
         {"prompt": IDEA},
         {"shot": CUP, "negative": NEGATIVE, "seed": 7, "count": 3, "name": "My cup/shot 1"},
     )
-    assert entries[0] == BatchEntry("001", IDEA, "", "", 1, 1)
+    assert (entries[0].name, entries[0].prompt, entries[0].shot, entries[0].count) == ("001", IDEA, "", 1)
+    assert entries[0].seeded is False  # no seed in the entry: random per picture, not a silent seed 1
+    assert 0 <= entries[0].seed <= 2**32 - 1
     assert entries[1] == BatchEntry("My_cup_shot_1", "", CUP, NEGATIVE, 7, 3)
 
 

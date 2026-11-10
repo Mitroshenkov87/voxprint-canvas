@@ -135,7 +135,8 @@ def test_render_goes_through_the_gate_and_writes_lossy_webp(tmp_path: Path, monk
     assert seen == [("a 28-year-old adult woman, face clearly visible, studio light", 1001, True)]
     assert saved[0][0] is OutputFormat.WEBP
     assert saved[0][1] == "picture"
-    assert saved[0][2] is None
+    # Metadata is off, but the seed is always written.
+    assert saved[0][2] == {"seed": 1001}
     record = json.loads((tmp_path / "out" / "studio.json").read_text(encoding="utf-8"))
     assert record["seed"] == 1001
     assert record["steps"] == 8

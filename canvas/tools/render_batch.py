@@ -280,6 +280,19 @@ def format_deps_error(missing: list[str]) -> str:
     )
 
 
+
+def safety_error_fields(exc: BaseException | None) -> dict[str, str]:
+    """Diagnosable fields for a SafetyError, without prompt text."""
+    if not isinstance(exc, SafetyError):
+        return {}
+    fields = {"error_type": type(exc).__name__}
+    cause = exc.__cause__
+    if cause is not None:
+        message = " ".join(str(cause).split())
+        fields["error_cause"] = f"{type(cause).__name__}: {message}"
+    return fields
+
+
 def bind_lora(path: Path, strength: float) -> tuple[Any, float]:
     """Open ``path`` and accept it only when it may load on Z-Image-Turbo."""
     lora = prepare_cli_lora(path)
@@ -467,10 +480,16 @@ def _run_render(
         try:
             image, gate = session.generate(item.prompt, seed)
             record["gate"] = gate
+            record.update(safety_error_fields(session.last_error))
             if image is not None:
                 save_image(image, image_path, OutputFormat.WEBP, metadata=None, purpose="picture")
                 record["file"] = image_path.name
                 written += 1
+        except SafetyError as exc:
+            record["gate"] = getattr(exc, "code", None) or "error"
+            record.update(safety_error_fields(exc))
+            failed += 1
+            print(f"{stem}: {exc}", file=log)
         except Exception as exc:  # noqa: BLE001 — batch log, then continue
             record["gate"] = record["gate"] if record["gate"] != "pending" else "error"
             record["error"] = str(exc)
@@ -526,6 +545,7 @@ def _run_dataset(
         try:
             image, gate = session.generate(prompt, seed)
             row["gate"] = gate
+            row.update(safety_error_fields(session.last_error))
             if image is not None:
                 save_image(image, image_path, OutputFormat.WEBP, metadata=None, purpose="master")
                 digest = photo_id(image_path.read_bytes())
@@ -534,6 +554,11 @@ def _run_dataset(
                 row["id"] = digest
                 caption_rows.append({"id": digest, "long": long, "short": short})
                 written += 1
+        except SafetyError as exc:
+            row["gate"] = getattr(exc, "code", None) or "error"
+            row.update(safety_error_fields(exc))
+            failed += 1
+            print(f"{stem}: {exc}", file=log)
         except Exception as exc:  # noqa: BLE001 — batch log, then continue
             row["gate"] = row["gate"] if row["gate"] != "pending" else "error"
             row["error"] = str(exc)
@@ -583,12 +608,18 @@ class _Session:
         self.lora_bind = lora_bind
         self._pipeline: Pipeline | None = None
         self._gate: AgeGate | None = None
+        self.last_error: SafetyError | None = None
 
     def generate(self, prompt: str, seed: int) -> tuple[SafeImage | None, str]:
-        if self.hooks.generate is not None:
-            image = self.hooks.generate(prompt, seed, explicit=self.adult)
-            return image, "passed"
-        return self._live(prompt, seed)
+        self.last_error = None
+        try:
+            if self.hooks.generate is not None:
+                image = self.hooks.generate(prompt, seed, explicit=self.adult)
+                return image, "passed"
+            return self._live(prompt, seed)
+        except SafetyError as exc:
+            self.last_error = exc
+            return None, getattr(exc, "code", None) or str(exc)
 
     def _live(self, prompt: str, seed: int) -> tuple[SafeImage | None, str]:
         from canvas.app.platform import check_gpu
@@ -621,8 +652,6 @@ class _Session:
         try:
             setattr(self._pipeline.generator, "seed", seed)
             image = self._pipeline.generate(prompt, Mode.TEXT, (), aspect=self.aspect, output="native", explicit=self.adult)
-        except SafetyError as exc:
-            return None, getattr(exc, "code", None) or str(exc)
         except (ModeUnavailable, BaseNotSelected, OptionalModelUnavailable) as exc:
             raise RuntimeError(str(exc)) from exc
         return image, "passed"

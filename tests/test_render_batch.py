@@ -392,3 +392,65 @@ def test_render_batch_exits_on_missing_gate_imports(tmp_path: Path, monkeypatch)
     assert "timm" in text
     assert "pip install .[gen]" in text
     assert "qwen3guard-gen-0.6b" not in text
+
+
+def test_safety_error_fields_record_type_and_one_line_cause() -> None:
+    from canvas.safety.gate import SafetyUnavailable
+    from canvas.tools.render_batch import safety_error_fields
+
+    bare = SafetyUnavailable("classifier_error")
+    assert safety_error_fields(bare) == {"error_type": "SafetyUnavailable"}
+    assert safety_error_fields(None) == {}
+    assert safety_error_fields(RuntimeError("no")) == {}
+
+    try:
+        raise SafetyUnavailable("classifier_error") from AttributeError(
+            "module 'cv2.utils' has no attribute 'logging'\nsecond line"
+        )
+    except SafetyUnavailable as exc:
+        fields = safety_error_fields(exc)
+    assert fields["error_type"] == "SafetyUnavailable"
+    assert fields["error_cause"] == (
+        "AttributeError: module 'cv2.utils' has no attribute 'logging' second line"
+    )
+    assert "\n" not in fields["error_cause"]
+
+
+def test_render_records_a_safety_error_cause_in_the_image_json(tmp_path: Path) -> None:
+    from canvas.safety.gate import SafetyUnavailable
+
+    def generate(prompt: str, seed: int, *, explicit: bool) -> SafeImage:
+        del prompt, seed, explicit
+        raise SafetyUnavailable("classifier_error") from AttributeError(
+            "module 'cv2.utils' has no attribute 'logging'"
+        )
+
+    prompts = _prompts(
+        tmp_path / "p.json",
+        [{"id": "blocked", "prompt": "a 32-year-old adult woman in a studio"}],
+    )
+    log = io.StringIO()
+    code = main(
+        [
+            "--prompts",
+            str(prompts),
+            "--preset",
+            "balanced",
+            "--adult-content",
+            "on",
+            "--out",
+            str(tmp_path / "out"),
+            "--seed",
+            "1001",
+        ],
+        hooks=Hooks(weights_ready=lambda: True, generate=generate, log=log),
+    )
+    record = json.loads((tmp_path / "out" / "blocked.json").read_text(encoding="utf-8"))
+    assert code == 1
+    assert not (tmp_path / "out" / "blocked.webp").exists()
+    assert record["gate"] == "classifier_error"
+    assert record["error_type"] == "SafetyUnavailable"
+    assert record["error_cause"] == "AttributeError: module 'cv2.utils' has no attribute 'logging'"
+    assert "prompt" not in record["error_cause"]
+    assert "\n" not in record["error_cause"]
+    assert "error" not in record

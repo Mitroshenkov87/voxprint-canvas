@@ -148,8 +148,10 @@ def test_turbo_plans_compose_the_bf16_transformer_and_shared_text_stack():
 
 # The shipped installer catalog (root mdl.json) has 14 rows: the 12 pinned
 # catalog models plus the two FP32 ``-upstream`` fallbacks. It does not
-# include the unpinned MOSS generators or the uncatalogued SVDQuant ids
-# that appear only in the canvas/mdl.json placeholder (13 rows).
+# include the unpinned MOSS generators or the uncatalogued SVDQuant ids.
+# The packaged canvas/mdl.json placeholder carries those 14 ids plus the
+# two SVDQuant stubs (16 rows); SVDQuant cannot be added to the installer
+# catalog until it has real pins.
 # Task groups recognised by voxprint-common 0.7.1 (docs/mdl-fields.md).
 _KNOWN_GROUPS = frozenset({
     "generate", "edit", "upscale", "restore", "voice", "transcribe",

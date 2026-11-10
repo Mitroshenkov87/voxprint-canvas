@@ -18,6 +18,20 @@
       "optional": true
     },
     {
+      "id": "z-image-turbo-bf16-16gb-upstream",
+      "version": "placeholder",
+      "vram_tier": "16gb",
+      "label": "Z-Image Turbo for 16 GB cards (full precision)",
+      "purpose": "The full-precision fallback when the BF16 weights cannot be opened.",
+      "group": "generate",
+      "status": "unavailable",
+      "reason": "placeholder",
+      "files": [],
+      "display_name": "z-image-turbo-bf16-16gb-upstream",
+      "on_demand": true,
+      "optional": true
+    },
+    {
       "id": "z-image-turbo-bf16",
       "version": "placeholder",
       "vram_tier": "24gb",
@@ -28,6 +42,20 @@
       "reason": "placeholder",
       "files": [],
       "display_name": "z-image-turbo-bf16",
+      "on_demand": true,
+      "optional": true
+    },
+    {
+      "id": "z-image-turbo-bf16-upstream",
+      "version": "placeholder",
+      "vram_tier": "24gb",
+      "label": "Z-Image Turbo (full precision)",
+      "purpose": "The full-precision fallback when the BF16 weights cannot be opened.",
+      "group": "generate",
+      "status": "unavailable",
+      "reason": "placeholder",
+      "files": [],
+      "display_name": "z-image-turbo-bf16-upstream",
       "on_demand": true,
       "optional": true
     },
@@ -126,6 +154,20 @@
       "reason": "placeholder",
       "files": [],
       "display_name": "fairface-age",
+      "on_demand": true,
+      "optional": true
+    },
+    {
+      "id": "mivolo-v2-age",
+      "version": "placeholder",
+      "vram_tier": "any",
+      "label": "Fine age check",
+      "purpose": "A closer age estimate used with the adults-only check.",
+      "group": "safety",
+      "status": "unavailable",
+      "reason": "placeholder",
+      "files": [],
+      "display_name": "mivolo-v2-age",
       "on_demand": true,
       "optional": true
     },

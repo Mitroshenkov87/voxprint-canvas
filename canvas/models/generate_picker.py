@@ -1,13 +1,16 @@
 """The Generate-model picker list, read from the app manifest.
 
 voxprint-common 0.7.1 surfaces the optional ``label``, ``purpose`` and ``group``
-fields on ``Model``. Canvas still reads them from the raw manifest JSON (the
-bundled ``canvas/mdl.json`` and the installed ``mdl.json``) so the picker stays
-consistent with synthetic test manifests and with rows that only live in the
-app file. A row joins the picker when it is installed — not an unavailable
-placeholder and its files are on disk — and its group is ``generate``. A row
-without an explicit ``group`` is ``generate`` only when the Canvas catalog lists
-it with the ``generator`` role; every other row stays out of the picker.
+fields on ``Model``. Canvas still reads them from the raw manifest JSON so the
+picker stays consistent with synthetic test manifests. In a real install the
+list comes from the pinned installer catalog (repo-root ``mdl.json``, 14 rows)
+via :func:`canvas.models.mdl_registry.manifest_path`. The packaged
+``canvas/mdl.json`` stub is only the last resort when no pinned catalog is
+found; it carries the same 14 ids plus two uncatalogued SVDQuant placeholders.
+A row joins the picker when it is installed — not an unavailable placeholder
+and its files are on disk — and its group is ``generate``. A row without an
+explicit ``group`` is ``generate`` only when the Canvas catalog lists it with
+the ``generator`` role; every other row stays out of the picker.
 
 ``group`` must be a recognised task group from the 0.7.1 field spec
 (``generate``, ``edit``, ``upscale``, ``restore``, ``voice``, ``transcribe``,

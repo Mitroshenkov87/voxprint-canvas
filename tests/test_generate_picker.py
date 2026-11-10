@@ -26,6 +26,10 @@ from canvas.models.plan import PIPELINE_MOSS, PIPELINE_TEXT, build_plan
 from canvas.models.registry import load_catalog
 from tests.fakes import World, rgb
 
+# The installer copies repo-root mdl.json (14 pinned rows). The packaged
+# canvas/mdl.json stub is a last-resort placeholder (those 14 ids plus the two
+# uncatalogued SVDQuant builds, all marked unavailable).
+SHIPPED = Path("mdl.json")
 MDL = Path("canvas/mdl.json")
 
 
@@ -64,24 +68,27 @@ KNOWN_GROUPS = frozenset({
     "translate", "writer", "safety", "internal",
 })
 
-# Exact picker metadata for every row in the canvas/mdl.json placeholder
-# (13 rows, including the two uncatalogued SVDQuant builds). The shipped
-# installer catalog is root mdl.json (14 rows, including mivolo-v2-age and
-# the two FP32 -upstream fallbacks); that file is covered in test_mdl_manifest.
+# Exact picker metadata for every row in the packaged canvas/mdl.json
+# placeholder (16 rows): the 14 ids from the shipped installer catalog plus
+# the two uncatalogued SVDQuant builds. Shared ids use the same label,
+# purpose and group as root mdl.json.
 EXPECTED = {
-    "z-image-turbo-bf16": ("generate", "24gb", "Z-Image Turbo (recommended)", "Fast, high-quality pictures from text; the default."),
     "z-image-turbo-bf16-16gb": ("generate", "16gb", "Z-Image Turbo for 16 GB cards", "The default model, sized to fit 16 GB graphics cards."),
-    "z-image-turbo-svdquant-int4": ("generate", "16gb", "Z-Image Turbo, compact 4-bit", "Smaller and lighter; slightly lower detail."),
-    "z-image-turbo-svdquant-int4-r256": ("generate", "16gb", "Z-Image Turbo, compact 4-bit (higher detail)", "4-bit build that keeps more fine detail."),
+    "z-image-turbo-bf16-16gb-upstream": ("generate", "16gb", "Z-Image Turbo for 16 GB cards (full precision)", "The full-precision fallback when the BF16 weights cannot be opened."),
+    "z-image-turbo-bf16": ("generate", "24gb", "Z-Image Turbo (recommended)", "Fast, high-quality pictures from text; the default."),
+    "z-image-turbo-bf16-upstream": ("generate", "24gb", "Z-Image Turbo (full precision)", "The full-precision fallback when the BF16 weights cannot be opened."),
     "z-image-creative-bf16": ("generate", "24gb", "Z-Image Creative", "Slower, more varied and artistic results."),
-    "z-image-turbo-fun-controlnet-union-bf16": ("edit", "24gb", "Pose & edge guidance", "Follows a pose, edges or depth from a reference picture."),
     "z-image-turbo-fun-controlnet-union-bf16-lite": ("edit", "16gb", "Pose & edge guidance, lite", "The same guidance, sized for 16 GB cards."),
-    "qwen3-4b-writer": ("writer", "any", "Photoshoot writer (Qwen3 4B)", "Writes the shot list for Photoshoot series."),
+    "z-image-turbo-fun-controlnet-union-bf16": ("edit", "24gb", "Pose & edge guidance", "Follows a pose, edges or depth from a reference picture."),
     "qwen3guard-gen-0.6b": ("safety", "any", "Prompt safety check", "Checks prompts before generating."),
     "siglip2-so400m-patch14-384": ("safety", "any", "Image safety check", "Checks input and output pictures."),
     "yunet-face": ("safety", "any", "Face finder", "Finds faces for the safety and likeness checks."),
     "fairface-age": ("safety", "any", "Age check", "Part of the adults-only check."),
+    "mivolo-v2-age": ("safety", "any", "Fine age check", "A closer age estimate used with the adults-only check."),
     "nsfw-image-detection": ("safety", "any", "Content check", "Classifies picture content for the 18+ setting."),
+    "z-image-turbo-svdquant-int4": ("generate", "16gb", "Z-Image Turbo, compact 4-bit", "Smaller and lighter; slightly lower detail."),
+    "z-image-turbo-svdquant-int4-r256": ("generate", "16gb", "Z-Image Turbo, compact 4-bit (higher detail)", "4-bit build that keeps more fine detail."),
+    "qwen3-4b-writer": ("writer", "any", "Photoshoot writer (Qwen3 4B)", "Writes the shot list for Photoshoot series."),
 }
 
 
@@ -98,10 +105,33 @@ def _row(model_id: str, tier: str, group: str | None, files: list, **extra) -> d
     return row
 
 
-def test_the_13_placeholder_rows_carry_the_exact_picker_metadata():
+def test_the_14_shipped_rows_carry_label_purpose_and_a_known_group():
+    """The picker reads repo-root mdl.json when that catalog has pins."""
+    from tests.test_mdl_manifest import SHIPPED_EXPECTED
+
+    doc = json.loads(SHIPPED.read_text(encoding="utf-8"))
+    rows = {row["id"]: row for row in doc["models"]}
+    assert len(rows) == 14
+    assert set(rows) == set(SHIPPED_EXPECTED)
+    for model_id, (group, label, purpose) in SHIPPED_EXPECTED.items():
+        row = rows[model_id]
+        assert row["label"] == label, model_id
+        assert row["purpose"] == purpose, model_id
+        assert row["group"] == group, model_id
+        assert group in KNOWN_GROUPS, model_id
+    # Shared ids agree with the packaged placeholder.
+    placeholder = {row["id"]: row for row in json.loads(MDL.read_text(encoding="utf-8"))["models"]}
+    for model_id in rows:
+        assert placeholder[model_id]["label"] == rows[model_id]["label"], model_id
+        assert placeholder[model_id]["purpose"] == rows[model_id]["purpose"], model_id
+        assert placeholder[model_id]["group"] == rows[model_id]["group"], model_id
+
+
+def test_the_placeholder_rows_carry_the_exact_picker_metadata():
     doc = json.loads(MDL.read_text(encoding="utf-8"))
     rows = {row["id"]: row for row in doc["models"]}
-    assert len(rows) == 13
+    assert len(rows) == 16
+    assert set(rows) == set(EXPECTED)
     for model_id, (group, tier, label, purpose) in EXPECTED.items():
         row = rows[model_id]
         assert row["vram_tier"] == tier, model_id
@@ -112,11 +142,14 @@ def test_the_13_placeholder_rows_carry_the_exact_picker_metadata():
         assert row["status"] == "unavailable" and row["files"] == [], model_id
         assert row["display_name"] and row["version"], model_id
         assert group in KNOWN_GROUPS, model_id
+    # SVDQuant lives only in the placeholder: the installer catalog has no pin.
+    shipped_ids = {row["id"] for row in json.loads(SHIPPED.read_text(encoding="utf-8"))["models"]}
+    assert {"z-image-turbo-svdquant-int4", "z-image-turbo-svdquant-int4-r256"} == set(rows) - shipped_ids
 
 
 def test_every_canvas_mdl_group_is_recognised() -> None:
     doc = json.loads(MDL.read_text(encoding="utf-8"))
-    assert len(doc["models"]) == 13
+    assert len(doc["models"]) == 16
     for row in doc["models"]:
         assert row.get("group") in KNOWN_GROUPS, row["id"]
 
@@ -124,9 +157,9 @@ def test_every_canvas_mdl_group_is_recognised() -> None:
 def test_common_loader_and_plan_accept_the_optional_fields(tmp_path: Path):
     catalog_mod = pytest.importorskip("voxprint_common.mdl.catalog")
     gpu = pytest.importorskip("voxprint_common.gpu_probe")
-    # The shipped placeholder loads fine with the extra fields present.
+    # The packaged placeholder loads fine with the extra fields present.
     manifest = catalog_mod.load_manifest(MDL.resolve())
-    assert len(manifest.models) == 13
+    assert len(manifest.models) == 16
     # Common 0.7.1 surfaces them on Model. Canvas still reads the JSON itself
     # for the picker, and the loaded models carry the same strings.
     by_id = {model.id: model for model in manifest.models}

@@ -74,6 +74,7 @@ _HEADER_CONSENT = "voxprint.subject.consent_obtained"
 _HEADER_CONFIRMED = "voxprint.subject.adult_confirmed"
 _ADULT_LABEL = "voxprint.lora.adult_content"
 _LOG = logging.getLogger(__name__)
+_LAST_MODULES_PATCHED = 0
 # Older Model Forge exports wrote "thing" for an object LoRA; a .voxlora package maps it the same way.
 _HEADER_KIND_ALIAS = {"thing": "object"}
 _HEADER_KEYS = (
@@ -1055,8 +1056,7 @@ def apply_bound_lora(
     if target is None:
         return LoraApplyResult(lora.id, lora.alias, applied, lora.base, 0)
     applied = apply_lora(target, lora, applied)
-    patched = int(getattr(apply_lora, "last_modules_patched", 0) or 0)
-    return LoraApplyResult(lora.id, lora.alias, applied, lora.base, patched)
+    return LoraApplyResult(lora.id, lora.alias, applied, lora.base, _LAST_MODULES_PATCHED)
 
 
 def _bind_holder(holder: object | None, lora: UserLora, strength: float) -> None:
@@ -1128,7 +1128,8 @@ def apply_lora(transformer: object, lora: UserLora, strength: float) -> float:
         raise LoraRejected(CODE_INVALID)
     _fuse_adapter(transformer)
     _log_lora_applied(lora, applied, patched)
-    apply_lora.last_modules_patched = patched
+    global _LAST_MODULES_PATCHED
+    _LAST_MODULES_PATCHED = patched
     return applied
 
 
@@ -1178,7 +1179,8 @@ def _modules_patched(transformer: object) -> int:
         count = 0
         for _name, module in modules():
             layers = getattr(module, "lora_A", None)
-            if isinstance(layers, dict) and _ADAPTER in layers:
+            # peft stores lora_A as a ModuleDict, which is a Mapping, not a dict.
+            if layers is not None and _ADAPTER in layers:
                 count += 1
         return count
     config = getattr(transformer, "peft_config", None)

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections import UserDict
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -39,7 +40,8 @@ def home(monkeypatch, tmp_path: Path) -> Path:
 
 class _Layer:
     def __init__(self) -> None:
-        self.lora_A: dict[str, object] = {}
+        # peft uses ModuleDict here; a UserDict is also a Mapping, not a dict.
+        self.lora_A: UserDict[str, object] = UserDict()
 
 
 class _Transformer:

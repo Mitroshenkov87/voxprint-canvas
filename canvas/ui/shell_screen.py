@@ -114,13 +114,13 @@ def watch_history_select(view: SimpleWidget, listener: Callable[[str], None]) ->
     The shared widget keeps history selection to itself; the Photoshoot
     script links its rows to the selected picture through this hook.
     """
-    select = view._select
+    select = getattr(view, "_select")
 
     def watched(item_id: str) -> None:
         select(item_id)
         listener(item_id)
 
-    view._select = watched  # type: ignore[method-assign]
+    setattr(view, "_select", watched)
 
 
 class ShellWindow(QMainWindow):

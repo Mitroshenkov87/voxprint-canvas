@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFileIconProvider,
     QFrame,
+    QGraphicsOpacityEffect,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -473,6 +474,7 @@ class LoraPicker(QWidget):
         self._root = root
         self._items: list[UserLora | None] = []
         self._loading = False
+        self._chip_width = 0
         self.setToolTip(text("canvas.lora.pick_tip"))
         policy = self.sizePolicy()
         policy.setHorizontalPolicy(QSizePolicy.Policy.Expanding)
@@ -502,6 +504,8 @@ class LoraPicker(QWidget):
         self.value.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.value.setFixedHeight(ROW_HEIGHT)
         self.value.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        # Widest value is "2.00"; keep that column fixed so the slider does not jump.
+        self.value.setFixedWidth(max(VALUE_WIDTH, self.value.fontMetrics().horizontalAdvance("2.00") + 24))
         self.value.setStyleSheet(
             f"QLabel#loraStrengthValue {{ background: {CONTROL_BG}; border: 1px solid {CONTROL_BORDER};"
             f" border-radius: {BUTTON_RADIUS}px; }}"
@@ -520,8 +524,16 @@ class LoraPicker(QWidget):
         self._row.addWidget(self._strength_row, 2)
 
     def set_chip(self, chip: QWidget) -> None:
-        """Show the trigger chip beside the LoRA name."""
+        """Show the trigger chip beside the LoRA name.
+
+        The chip is reserved in the row even when it has no trigger word, so
+        the slider and value label do not shift when the word appears or
+        when the user switches Simple, a preset, or Expert.
+        """
         chip.setFixedHeight(ROW_HEIGHT)
+        policy = chip.sizePolicy()
+        policy.setRetainSizeWhenHidden(True)
+        chip.setSizePolicy(policy)
         self._row.insertWidget(self._chip_at, chip)
 
     def reload(self, selected: str, strength: float) -> None:
@@ -543,8 +555,27 @@ class LoraPicker(QWidget):
         self._fit_shown()
 
     def show_chip(self, chip: QWidget, word: str) -> None:
-        """Show the trigger chip when there is a word; the row stays up for it alone."""
-        chip.setVisible(bool(word))
+        """Keep the trigger chip's width; hide it without collapsing the row."""
+        chip.setText(word)
+        # Opacity plus a reserved size: hide() would reflow the slider.
+        effect_on = bool(word)
+        chip.setEnabled(effect_on)
+        # Visible but empty still takes space when retainSizeWhenHidden is set
+        # only if the widget was shown; keep it shown and transparent when empty.
+        effect = chip.graphicsEffect()
+        if effect is None or not isinstance(effect, QGraphicsOpacityEffect):
+            effect = QGraphicsOpacityEffect(chip)
+            chip.setGraphicsEffect(effect)
+        effect.setOpacity(1.0 if effect_on else 0.0)
+        chip.setVisible(True)
+        policy = chip.sizePolicy()
+        policy.setRetainSizeWhenHidden(True)
+        chip.setSizePolicy(policy)
+        if word:
+            self._chip_width = max(self._chip_width, chip.fontMetrics().horizontalAdvance(word) + 24)
+        if self._chip_width:
+            chip.setMinimumWidth(self._chip_width)
+            chip.setFixedWidth(self._chip_width)
         self._word = word
         self._fit_shown()
 

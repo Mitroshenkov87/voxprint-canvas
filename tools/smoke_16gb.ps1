@@ -8,7 +8,7 @@
 #   (no cap, or 0) 24 GB pass: uncapped, on the 24 GB tier path.
 #
 # Steps: find Python (the one the Canvas installer ships, or -Python), fetch and
-# verify the voxprint-common 0.6.3 wheel, download the models through VOXPrint MDL
+# verify the voxprint-common 0.7.0 wheel, download the models through VOXPrint MDL
 # (mdl.json), generate five neutral 1024x1024 pictures through the content gate,
 # then time the gate by stage. Writes <Out>\result-16gb.json or result-24gb.json.
 #
@@ -29,9 +29,9 @@ if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction Sile
 }
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 $Root = Split-Path -Parent $PSScriptRoot
-$CommonVersion = "0.6.3"
-$CommonUrl = "https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.6.3/voxprint_common-0.6.3-py3-none-any.whl"
-$CommonSha = "a18e5760863e34042c6eb16dd25d37d28055b9eb90a460c62407cdc2a09b43e4"
+$CommonVersion = "0.7.0"
+$CommonUrl = "https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.7.0/voxprint_common-0.7.0-py3-none-any.whl"
+$CommonSha = "582ed667ef51896086b6f70c85148c525ea24b5c3dacb64f546a76486d311eca"
 $Installed = Join-Path $env:ProgramFiles "VOXPrint AI Suite\Canvas\venv\Scripts\python.exe"
 
 if ($Python -eq "") { $Python = $Installed }
@@ -48,11 +48,11 @@ $Out = (Resolve-Path -LiteralPath $Out).Path
 Write-Host "Python: $Python"
 Write-Host "Pass: $Pass"
 
-# voxprint-common 0.6.3: fetch, verify, and use it when the interpreter has another version.
+# voxprint-common 0.7.0: fetch, verify, and use it when the interpreter has another version.
 $Work = Join-Path $Out ".smoke-work"
 $Lib = Join-Path $Work "lib"
 New-Item -ItemType Directory -Force -Path $Work | Out-Null
-$Wheel = Join-Path $Work "voxprint_common-0.6.3-py3-none-any.whl"
+$Wheel = Join-Path $Work "voxprint_common-0.7.0-py3-none-any.whl"
 try {
     Invoke-WebRequest -Uri $CommonUrl -OutFile $Wheel -UseBasicParsing
 } catch {
@@ -92,7 +92,11 @@ try {
     $probe = $LASTEXITCODE
     $ErrorActionPreference = "Stop"
     if ($probe -ne 0) { Write-Host "Canvas is not installed in this Python."; exit 2 }
-    # The 16 GB generator is a required entry. The 24 GB generator is optional and is requested by id.
+    # The 16 GB pack is the required default and is already in the default
+    # MDL plan on a 16 GB card. Do not pass --model for that pass: on a
+    # machine with no GPU, a forced id fails with "not available for this
+    # card" (exit 5) instead of letting the smoke tool exit 3.
+    # The 24 GB pack is optional and is requested by id. MOSS is not fetched.
     $mdlArgs = @("-m", "canvas.models.install_fetch", "--app", "canvas", "--manifest", $Manifest)
     if ($Pass -eq "24gb") { $mdlArgs += @("--model", "z-image-turbo-bf16") }
     Write-Host "Models: python $($mdlArgs -join ' ')"

@@ -13,7 +13,7 @@ One-page map of the VOXPrint AI Canvas repository. Read this before touching cod
 - `docs/` — mkdocs guide, architecture notes, release notes.
 - `bakeoff/` — prompt bakeoff harness with its own requirements.
 - `assets/` — splash and icon art.
-- `pyproject.toml`, `constraints*.txt` — packaging and pinned dependencies.
+- `pyproject.toml`, `constraints*.txt` — packaging and pinned dependencies (voxprint-common 0.7.0).
 - `mdl.json` — VOXPrint MDL manifest, generated from `canvas/models/catalog.json`.
 - `BUILD.json` — the only copy of version, channel, build and codename.
 
@@ -30,7 +30,7 @@ One-page map of the VOXPrint AI Canvas repository. Read this before touching cod
 - `platform.py`, `preflight.py`, `provision.py`, `updates.py`, `branding.py`, `info.py`.
 
 ### canvas/core — formats and memory policy
-- `formats.py` — `save_image()`, `read_metadata()`, `parse_format()`; WebP is the default.
+- `formats.py` — `save_image()`, `read_metadata()`, `parse_format()`; WebP is the default. PNG/WebP/AVIF/JPEG go through `voxprint_common.image.save_image` (`purpose="picture"` is lossy WebP q90; `purpose="master"` / `lossless=True` is lossless for series and Forge). Metadata is off unless the caller passes a mapping; read-back is a flat string dict.
 - `exchange.py` — pictures handed to Enlarge and Forge.
 - `vram_policy.py` — how much VRAM a batch may plan for.
 

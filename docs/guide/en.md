@@ -24,7 +24,7 @@ Canvas can:
 - shoot a whole series of the same subject with **Photoshoot**;
 - use a style, object or person add-on (LoRA) that you trained in VOXPrint AI Model Forge.
 
-The picture model is **Z-Image-Turbo** in BF16 on every graphics card that Canvas supports.
+The picture model is **MOSS-Image-SFT** on every graphics card that Canvas supports. **Z-Image-Turbo** stays available as an optional download.
 
 ![The Canvas main window in simple mode.](screens/main-window-simple.png)
 
@@ -37,7 +37,7 @@ The picture model is **Z-Image-Turbo** in BF16 on every graphics card that Canva
 | Operating system | Windows 11 24H2 (build 26100) or newer, 64-bit; or a Linux distribution released in 2025 or later |
 | Graphics card | NVIDIA GeForce RTX 40 series or newer, with at least 16 GB of video memory (VRAM) |
 | Without such a card | Not supported. Canvas has no processor-only mode. |
-| Disk space | About 28 GB for the default model pack, plus room for the program libraries and your pictures. Optional packs need more (see below). |
+| Disk space | The default MOSS-Image-SFT pack size is pending — its compact build is not published yet. Leave room for the program libraries and your pictures; the optional Z-Image pack is about 20.5 GB, and other optional packs need more (see below). |
 | Internet | During installation and for each optional pack you download |
 
 Setup also downloads the program libraries (Python, PyTorch and the shared suite runtime). This release does not fix their size; leave free space beyond the model pack.
@@ -59,7 +59,8 @@ The setup file is small. It does not contain the graphics libraries or the model
 
 | Pack | When | Size |
 |---|---|---|
-| Default pack (Z-Image-Turbo and the supporting models) | During installation | about 28 GB |
+| Default pack (MOSS-Image-SFT and the supporting models) | During installation | pending — the compact build is not published yet |
+| Z-Image-Turbo (optional alternative generator) | When you choose it | about 20.5 GB |
 | ControlNet lite (structure guidance, 16 GB tier) | When you choose it | about 2 GB |
 | ControlNet (structure guidance, 24 GB tier) | When you choose it | about 6.7 GB |
 | Creative Z-Image (**Bolder**, 24 GB tier) | When you choose it | about 20.5 GB |
@@ -67,7 +68,7 @@ The setup file is small. It does not contain the graphics libraries or the model
 
 Models are kept in the shared VOXPrint models folder, so other VOXPrint apps can use the same files without downloading them again.
 
-On a 24 GB card the plan names a separate Z-Image-Turbo entry (`z-image-turbo-bf16`). That entry is the same files as the default 16 GB pack, stored once, so it is not downloaded again. The 24 GB tier still adds the optional Creative Z-Image pack (**Bolder**) and the full ControlNet pack when you choose them.
+On a 24 GB card the plan names the BF16 build of MOSS-Image-SFT (`moss-image-sft-bf16`) instead of the 16 GB compact build. That build is also still pending publication, so it is not downloaded yet either. The 24 GB tier still adds the optional Creative Z-Image pack (**Bolder**) and the full ControlNet pack when you choose them.
 
 # Installing on Windows
 
@@ -110,7 +111,7 @@ Canvas works the same either way. PowerShell 7 is recommended; you can install i
 
 ## Model download
 
-The default model pack (about 28 GB) is downloaded during Setup through VOXPrint MDL, the shared model downloader of the suite. Each file is checked against its pinned checksum before it is used. A file that is already complete, with a matching size and a verification marker, is not downloaded again. A stopped download is kept as a partial file. The next run continues that file from where it stopped when the source accepts a range request. If the source ignores the range, that file starts again.
+The default model pack (Z-Image-Turbo and the supporting models) is meant to download during Setup through VOXPrint MDL, the shared model downloader of the suite. MOSS-Image is an optional later download: it is marked optional in Manage models, offered when it is not installed, and is never fetched automatically. Its 16 GB compact row, `voxprint-moss-image-sft-compact`, is not published yet: its repository, revision and SHA-256 are still pending, so MDL does not download it until they are pinned. Each file is checked against its pinned checksum before it is used. A file that is already complete, with a matching size and a verification marker, is not downloaded again. A stopped download is kept as a partial file. The next run continues that file from where it stopped when the source accepts a range request. If the source ignores the range, that file starts again.
 
 ## First launch
 
@@ -348,9 +349,9 @@ Choose the file type in **More → Picture setup → File type**:
 
 | Type | Notes |
 |---|---|
-| **AVIF** | The default. Small files with very high quality. |
+| **WebP** | The default. Regular pictures are written at quality 90; Photoshoot series and the Forge hand-off are written lossless. |
+| **AVIF** | Small files with very high quality. |
 | **JPEG XL** | Very high quality; supported by fewer viewers. |
-| **WebP** | Widely supported. |
 
 # Editing an existing image
 
@@ -367,7 +368,7 @@ Open **More → Picture setup**.
 | **Start from** | **From text**: the picture is created from the description. **From a picture**: the chosen image is the base. |
 | **Variation** | For **From text**: **Usual** (the familiar result) or **Bolder** (more unusual ideas, 24 GB tier only) |
 | **Change** | For **From a picture**: **Restyle**, **Paint over**, **Extend**, **Copy the pose**, **Depth map**, **Outlines** |
-| **File type** | **AVIF**, **JPEG XL**, **WebP** |
+| **File type** | **WebP** (the default), **AVIF**, **JPEG XL** |
 
 Click **Done** to close the window. Your choices stay until you change them.
 
@@ -498,7 +499,7 @@ The `photoshoot` command writes the same series into a folder you name:
 voxprint-canvas-cli photoshoot --prompt "A yellow kettle with a blue handle" --frames 6 --out ./kettle
 ```
 
-`--frames` sets the number of shots, from 1 to 99. The default is 6. `--style` takes the same style ids as the **Style** row (`photo` by default). `--places` is `same` or `different` (`same` by default). `--seed` starts at 1. Each frame is an AVIF file. The folder also contains `scenario.txt`, with one scenario line per shot. Add `--json` for the frame paths, the path of `scenario.txt`, and how many frames were made of those requested. `scenario_source` is `writer` when the text model wrote every line, `planned` when the lines were built from the idea, and `mixed` for both. `--adult` follows the Expert **Adult content (18+)** switch. `--negative` sets a negative prompt for every frame; it is checked like the prompt, and a refused negative stops the command before anything is generated.
+`--frames` sets the number of shots, from 1 to 99. The default is 6. `--style` takes the same style ids as the **Style** row (`photo` by default). `--places` is `same` or `different` (`same` by default). `--seed` starts at 1. Each frame is a WebP file, written lossless. The folder also contains `scenario.txt`, with one scenario line per shot. Add `--json` for the frame paths, the path of `scenario.txt`, and how many frames were made of those requested. `scenario_source` is `writer` when the text model wrote every line, `planned` when the lines were built from the idea, and `mixed` for both. `--adult` follows the Expert **Adult content (18+)** switch. `--negative` sets a negative prompt for every frame; it is checked like the prompt, and a refused negative stops the command before anything is generated.
 
 The `batch` command runs many prompts or shots in one go, from a JSON manifest:
 
@@ -517,7 +518,7 @@ Each entry has either `prompt` (an idea, written into `count` shots like a Photo
 
 # LoRAs from Model Forge
 
-VOXPrint AI Model Forge trains small add-ons (LoRAs) for Z-Image-Turbo: a style, an object or a person. Canvas lists the add-ons that Model Forge saved into the shared models folder.
+VOXPrint AI Model Forge trains small add-ons (LoRAs) for the picture model: by default for **MOSS-Image-SFT**, the base Canvas ships with — a style, an object or a person. Canvas lists the add-ons that Model Forge saved into the shared models folder.
 
 ## Where Canvas looks
 
@@ -538,7 +539,7 @@ The folder name is the add-on's id. Model Forge writes each add-on into that fol
 
 To use another models folder, set `VOXPRINT_MODELS_DIR` to an absolute path, or set `models_dir` to an absolute path in the suite settings file (`suite.json`, see chapter 2). `VOXPRINT_MODELS_DIR` wins when both are set. Canvas does not name a Model Forge screen or button for this export.
 
-Add-ons trained for Z-Image or Z-Image-Turbo are listed.
+Add-ons trained for the default MOSS-Image-SFT base are listed. Add-ons trained for the optional Z-Image or Z-Image-Turbo base are listed too; they run only together with that base.
 
 ## Choose an add-on
 
@@ -568,7 +569,7 @@ To stop using the add-on, open **More → Add-ons**, choose **None** and click *
 `generate` and `photoshoot` each take one `--lora` path. Use the `.safetensors` file Model Forge writes, by default `project/export/<id>.safetensors`, or an add-on folder under the shared models folder. `--lora-scale` sets the strength from 0 to 2. The default is 0.7. With `--json`, the result includes the LoRA name, the scale, and the trigger word. The trigger word is the same one the chip inserts. The command does not write it into the prompt on its own.
 
 ```text
-voxprint-canvas-cli generate --prompt "A yellow kettle with a blue handle" --out picture.avif --lora project/export/<id>.safetensors --lora-scale 0.7 --json
+voxprint-canvas-cli generate --prompt "A yellow kettle with a blue handle" --out picture.webp --lora project/export/<id>.safetensors --lora-scale 0.7 --json
 voxprint-canvas-cli photoshoot --prompt "A yellow kettle with a blue handle" --frames 6 --out ./kettle --lora project/export/<id>.safetensors --lora-scale 0.7 --json
 ```
 
@@ -586,6 +587,8 @@ The same LoRA stays on for every frame of the series and is released when the ru
 | Installation logs | `C:\Program Files\VOXPrint AI Suite\Canvas\setup-work\canvas-install.log` and `%LOCALAPPDATA%\VOXPrint AI Suite\logs\canvas-install.log` | Printed in the terminal |
 
 Pictures get a generated file name and the extension of the chosen file type (`.avif`, `.jxl` or `.webp`). **More → Open folder** and **Open folder** under a picture open the pictures folder; for a series, the series folder.
+
+Pictures are saved without metadata by default. To write the prompt, seed, steps and LoRA into each saved picture, turn on **Save prompt in file** (the `canvas.save_metadata` setting), set `VOXPRINT_CANVAS_SAVE_METADATA=1`, or pass `--save-metadata` on the command line.
 
 # Updating and uninstalling
 
@@ -647,7 +650,7 @@ Open both logs; the last lines name the step that failed.
 | Message | What to do |
 |---|---|
 | *uv could not install Python 3.14. Install Python 3.14 from … and run this setup again.* | Install Python 3.14 from the address in the message, then run Setup again |
-| *voxprint-common 0.6.3 failed the SHA-256 check.* | The download was damaged. Check the connection and run Setup again |
+| *voxprint-common 0.7.0 failed the SHA-256 check.* | The download was damaged. Check the connection and run Setup again |
 | *CUDA 13.0 PyTorch is still missing.* | The graphics libraries did not install. Check the connection and the free space, then run Setup again |
 | *Setup stopped because this path contains a link: …* | A folder Setup writes to is a link or junction. Replace it with a normal folder and run Setup again |
 | *VOXPrint AI Canvas could not start its setup script.* | PowerShell could not be started. Install PowerShell 7 and run Setup again |
@@ -701,7 +704,7 @@ The **Manage models** window (VOXPrint MDL) shows what is installed (**Installed
 
 **VOXPrint AI Canvas** is free software under the Apache License 2.0. © 2026 Aleksandr Mitroshenkov. The licence text (`LICENSE`) and the notices (`NOTICE`) are in the program folder.
 
-The models that Canvas downloads keep their own licences. Z-Image-Turbo, Creative Z-Image, the ControlNet packs, and the scenario writer are published under Apache-2.0 by their authors. The **Manage models** window shows each model and where it comes from.
+The models that Canvas downloads keep their own licences. MOSS-Image-SFT (the default), Z-Image-Turbo, Creative Z-Image, the ControlNet packs, and the scenario writer are published under Apache-2.0 by their authors. The **Manage models** window shows each model and where it comes from.
 
 The libraries that Setup installs (for example PyTorch and Qt for Python) keep their own licences.
 

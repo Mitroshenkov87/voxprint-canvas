@@ -20,7 +20,7 @@ import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from voxprint_common.worker import JobCancelled, JobContext
 
@@ -231,7 +231,7 @@ def _retrain_refusal(op: str, lora_path: str, runner: object) -> dict[str, objec
     The diffusion model is not opened.
     """
     from canvas.app.i18n import text
-    from canvas.models.user_lora import MOSS_IMAGE_SFT, UserLora, retrain_rejection, resolve_selected
+    from canvas.models.user_lora import FORGE_BASE_ID, UserLora, retrain_rejection, resolve_selected
 
     lora = getattr(runner, "bound_lora", None)
     if not isinstance(lora, UserLora) and lora_path:
@@ -245,7 +245,7 @@ def _retrain_refusal(op: str, lora_path: str, runner: object) -> dict[str, objec
     if rejected is None:
         return None
     body = refused(op, rejected.code, text(rejected.code, **rejected.details), unavailable=True)
-    body["retrain"] = {"from": str(rejected.details.get("base") or ""), "to": MOSS_IMAGE_SFT}
+    body["retrain"] = {"from": str(rejected.details.get("base") or ""), "to": FORGE_BASE_ID}
     return body
 
 
@@ -428,6 +428,12 @@ def _series(ctx: JobContext, current: Session, payload: Mapping[str, object]) ->
     reason = _review_prompts(current, [idea])
     if reason is not None:
         return refused("series", "prompt", reason, unavailable=False)
+    # Adult content off: the same boundary on the idea. The gate review above ran first and is unchanged.
+    from canvas.pipeline import adult_boundary
+
+    off = adult_boundary.refusal(idea, allowed=adult)
+    if off is not None:
+        return refused("series", "adult_off", off, unavailable=False)
 
     def compose(line: str) -> str:
         return " ".join(part for part in (template, line.strip(), suffix) if part)
@@ -447,6 +453,12 @@ def _series(ctx: JobContext, current: Session, payload: Mapping[str, object]) ->
     scenario_box: dict[str, object] = {}
 
     def job_for(line: str, seed: int, hero: SeriesFrame | None, frame_strength: float | None):
+        # Adult content off: every per-image line follows the same boundary. The gate calls stay as they are.
+        from canvas.pipeline import adult_boundary
+
+        off = adult_boundary.refusal(line, allowed=adult)
+        if off is not None:
+            raise RunStopped(off, code="adult_off")
         used = seeds.setdefault(seed, _series_seed(seed_mode, base_seed, seed))
         picture = base._replace(
             prompt=compose(line),
@@ -610,29 +622,32 @@ def _series_seed(mode: str, base: int, series_seed: int) -> int:
     raise ValueError(mode)
 
 
-def _picture_metadata(job: PictureJob) -> dict[str, str]:
-    """PNG text fields recorded on one saved picture. Empty when the job turned metadata off.
+def _picture_metadata(job: PictureJob) -> dict[str, Any]:
+    """Metadata recorded on one saved picture, in the shared schema. Empty when the job turned it off.
 
-    Every field is best-effort: a LoRA that cannot be re-read never stops the
-    picture; its raw strength field is recorded instead.
+    ``seed`` and ``steps`` are integers, the LoRA strength is a float, and a
+    resolved LoRA is listed under ``loras`` with only the fields that are
+    known. Every field is best-effort: a LoRA that cannot be re-read never
+    stops the picture; its raw strength field is recorded instead.
     """
     if not job.save_metadata:
         return {}
     from canvas.models.user_lora import clamp_strength, resolve_selected, running_base_id
 
-    fields = {
-        "seed": str(job.seed),
-        "steps": str(job.steps),
+    fields: dict[str, Any] = {
         "prompt": job.prompt,
+        "seed": int(job.seed),
+        "steps": int(job.steps),
     }
     base = running_base_id()
     if base:
-        fields["base_model"] = base
+        fields["base"] = base
     if not job.lora_path:
         return fields
     strength: float = job.lora_weight
     name = ""
     digest = ""
+    lora_base = ""
     try:
         selected = resolve_selected(job.lora_path)
     except Exception:  # noqa: BLE001 - metadata never blocks a job
@@ -641,11 +656,16 @@ def _picture_metadata(job: PictureJob) -> dict[str, str]:
         strength = clamp_strength(selected, job.lora_weight)
         name = selected.name or selected.id
         digest = selected.sha256
-    fields["lora_strength"] = str(strength)
-    if name:
-        fields["lora_name"] = name
+        lora_base = selected.base
+    fields["lora_strength"] = strength
+    if not name:
+        return fields
+    lora: dict[str, Any] = {"name": name, "strength": strength}
     if digest:
-        fields["lora_sha256"] = digest
+        lora["sha256"] = digest
+    if lora_base:
+        lora["base"] = lora_base
+    fields["loras"] = [lora]
     return fields
 
 

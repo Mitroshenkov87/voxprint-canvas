@@ -8,7 +8,8 @@ from __future__ import annotations
 from typing import assert_never
 
 from canvas.models.modes import Mode
-from canvas.models.plan import BaseNotSelected
+from canvas.models.default_base import selected_text_base
+from canvas.models.plan import BaseNotSelected, OptionalModelUnavailable
 from canvas.models.registry import Catalog, FrameSize, RegistryError
 
 ASPECT_GROUPS = (
@@ -23,8 +24,12 @@ FOUR_K_LONG = 3840
 def family_for(mode: Mode, catalog: Catalog) -> str:
     """Which size table a mode uses. Image modes stay on Z-Image."""
     if mode is Mode.TEXT:
-        family = catalog.default_text_base
-        if family is None:
+        family = selected_text_base()
+        if not family:
+            raise BaseNotSelected()
+        if catalog.sizes is None or family not in catalog.sizes:
+            if family != (catalog.default_text_base or "z-image-turbo"):
+                raise OptionalModelUnavailable()
             raise BaseNotSelected()
         return family
     if mode is Mode.TEXT_CREATIVE or mode is Mode.RESTYLE or mode is Mode.INPAINT or mode is Mode.OUTPAINT:

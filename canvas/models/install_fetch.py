@@ -65,7 +65,7 @@ def fetch(manifest: Path, *, app: str = "canvas", extra: tuple[str, ...] = (), r
 
 
 def _installed_optional(catalog: Catalog, root: Path) -> tuple[ModelSpec, ...]:
-    """Optional pinned rows (Z-Image) whose legacy folder is already on disk stay managed."""
+    """Optional pinned rows whose legacy folder is already on disk stay managed."""
     return tuple(
         spec for spec in catalog.models
         if spec.optional and spec.pinned() and weight_dir(root, spec.repo).is_dir()

@@ -106,4 +106,36 @@ def test_mdl_accepts_the_manifest_and_plans_the_default_pack():
     ids = {item.model_id for item in planned}
     catalog = load_catalog()
     assert {spec.id for spec in default_specs(catalog) if not spec.optional} <= ids
-    assert "z-image-turbo-bf16-16gb" not in ids
+    assert "z-image-turbo-bf16-16gb" in ids
+
+
+def test_turbo_plans_compose_the_bf16_transformer_and_shared_text_stack():
+    """A 16 GB or 24 GB plan fetches the BF16 transformer plus the shared TE/VAE/tokenizer."""
+    catalog_mod = pytest.importorskip("voxprint_common.mdl.catalog")
+    gpu = pytest.importorskip("voxprint_common.gpu_probe")
+    manifest = catalog_mod.load_manifest(MANIFEST.resolve())
+    cases = (
+        (gpu.VramTier.GB16, "z-image-turbo-bf16-16gb", None),
+        (gpu.VramTier.GB24, "z-image-turbo-bf16-16gb", None),
+        (gpu.VramTier.GB24, "z-image-turbo-bf16", ("z-image-turbo-bf16",)),
+    )
+    rows = {row["id"]: row for row in _doc()["models"]}
+    for tier, model_id, only in cases:
+        planned = catalog_mod.plan_files(
+            [manifest], tier, models_root=Path("/nonexistent-models"), only=only,
+        )
+        files = {
+            item.name: item
+            for item in planned
+            if model_id in (item.model_ids or ([item.model_id] if item.model_id else []))
+        }
+        expected = {item["path"]: item for item in rows[model_id]["files"]}
+        assert set(files) == set(expected)
+        for path, item in files.items():
+            want = expected[path]
+            assert item.sha256 == want["sha256"] and item.size == want["size"]
+            if path.startswith("transformer/"):
+                assert "voxprint-z-image-turbo-bf16" in item.urls[0]
+            else:
+                assert "voxprint-mirror-z-image-turbo" in item.urls[0]
+

@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -341,12 +342,22 @@ def test_expert_combos_fill_the_field_column(app, home: Path) -> None:
     app.processEvents()
     window.set_expert(True)
     # The form settles on a queued call once the refilled fields are shown.
-    app.processEvents()
-    app.processEvents()
     form = window.findChild(QWidget, "expertForm")
-    steps = form.findChild(QSpinBox, "shell.steps")
-    combos = [combo for combo in form.findChildren(QComboBox) if combo.isVisible()]
-    assert steps is not None and steps.isVisible() and len(combos) >= 3
+    steps = form.findChild(QSpinBox, "shell.steps") if form is not None else None
+    combos: list[QComboBox] = []
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline:
+        app.processEvents()
+        if form is None or steps is None:
+            form = window.findChild(QWidget, "expertForm")
+            steps = form.findChild(QSpinBox, "shell.steps") if form is not None else None
+            continue
+        combos = [combo for combo in form.findChildren(QComboBox) if combo.isVisible()]
+        if steps.isVisible() and len(combos) >= 3 and all(
+            combo.width() == steps.width() and combo.x() == steps.x() for combo in combos
+        ):
+            break
+    assert form is not None and steps is not None and steps.isVisible() and len(combos) >= 3
     for combo in combos:
         assert combo.width() == steps.width(), combo.objectName()
         assert combo.x() == steps.x(), combo.objectName()
@@ -713,7 +724,26 @@ def test_expert_values_start_at_the_turbo_defaults(app, home: Path) -> None:
     del app
     window = _window(home)
     assert window.shell.layout.get("shell.steps") == 8
-    assert window.shell.layout.get("shell.guidance") == 1.0
+    assert window.shell.layout.get("shell.guidance") == 0.0
+    window.close()
+
+
+def test_expert_accepts_zero_guidance(app, home: Path) -> None:
+    del app
+    from PySide6.QtWidgets import QDoubleSpinBox
+
+    window = _window(home)
+    window.set_expert(True)
+    window.resize(1280, 800)
+    window.show()
+    settle(window)
+    window.shell.layout.set_value("shell.guidance", 0.0)
+    assert window.shell.layout.get("shell.guidance") == 0.0
+    box = window.findChild(QDoubleSpinBox, "shell.guidance")
+    assert box is not None
+    assert float(box.minimum()) == 0.0
+    box.setValue(0.0)
+    assert window.shell.layout.get("shell.guidance") == 0.0
     window.close()
 
 

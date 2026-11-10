@@ -35,6 +35,7 @@ def test_gate_is_unavailable_when_a_classifier_is_missing():
 def test_manifest_failures_cover_empty_missing_and_hash(tmp_path):
     good = {
         "models": [{"id": "z-image-turbo-bf16-16gb", "ok": True, "detail": ""},
+                   {"id": "voxprint-moss-image-sft-compact", "ok": True, "detail": "not_downloaded"},
                    {"id": "z-image-creative-bf16", "ok": True, "detail": "not_downloaded"}],
         "classifiers": [{"id": "nsfw-image-detection", "ok": True, "detail": ""}],
     }
@@ -52,13 +53,15 @@ def test_manifest_failures_cover_empty_missing_and_hash(tmp_path):
 
 def test_shipped_manifest_requires_no_optional_entry():
     ids = manifest_ids()
-    assert "z-image-turbo-bf16-16gb" not in ids  # Z-Image is an optional download now
+    assert "z-image-turbo-bf16-16gb" in ids  # Z-Image-Turbo 16 GB is the default pack
+    assert "voxprint-moss-image-sft-compact" not in ids  # MOSS is optional / unpinned
     assert not {i for i in ids if i.endswith("-upstream")}
     assert "z-image-creative-bf16" not in ids
 
 
 def test_smoke_script_requests_the_pass_generator():
     text = (Path(__file__).resolve().parents[1] / "tools" / "smoke_16gb.ps1").read_text(encoding="utf-8")
+    assert 'if ($Pass -eq "16gb") { $mdlArgs += @("--model", "z-image-turbo-bf16-16gb") }' not in text
     assert 'if ($Pass -eq "24gb") { $mdlArgs += @("--model", "z-image-turbo-bf16") }' in text
     assert "& $Python @mdlArgs" in text
 
@@ -75,7 +78,7 @@ def test_summary_counts_gate_results_and_peaks():
     assert body["size"] == [1024, 1024]
 
 
-COMMON_SHA = "a18e5760863e34042c6eb16dd25d37d28055b9eb90a460c62407cdc2a09b43e4"
+COMMON_SHA = "582ed667ef51896086b6f70c85148c525ea24b5c3dacb64f546a76486d311eca"
 
 
 def test_wrappers_pin_common_025_fetch_through_mdl_and_run_the_tool():
@@ -83,11 +86,11 @@ def test_wrappers_pin_common_025_fetch_through_mdl_and_run_the_tool():
     shell = (root / "smoke_16gb.sh").read_text(encoding="utf-8")
     windows = (root / "smoke_16gb.ps1").read_text(encoding="utf-8")
     installer = Path("installer/linux/install.sh").read_text(encoding="utf-8")
-    assert COMMON_SHA in installer and "v0.6.3/voxprint_common-0.6.3-py3-none-any.whl" in installer
+    assert COMMON_SHA in installer and "v0.7.0/voxprint_common-0.7.0-py3-none-any.whl" in installer
     for text in (shell, windows):
         assert "canvas.models.install_fetch" in text and "mdl.json" in text
         assert "smoke_16gb" in text
-        assert COMMON_SHA in text and "v0.6.3/voxprint_common-0.6.3-py3-none-any.whl" in text
+        assert COMMON_SHA in text and "v0.7.0/voxprint_common-0.7.0-py3-none-any.whl" in text
         assert "0.2.4" not in text and "3051bc64" not in text
         assert "exit 2" in text and "exit 5" in text
     assert "constraints-cuda.txt" in shell and "set -eu" in shell

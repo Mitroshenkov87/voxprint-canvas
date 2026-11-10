@@ -9,15 +9,14 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from collections.abc import Mapping
 from typing import NamedTuple
 
 from voxprint_common.paths import state_dir
 from voxprint_common.ui.presets import PresetFile, PresetGroup, PresetOption
-from voxprint_common.ui.settings import Choice, SettingSpec, SettingType, Settings
-from voxprint_common.ui.safety import adult_prompt_policy
+from voxprint_common.ui.settings import Choice, SettingSpec, SettingType, Settings, reference_settings
 from voxprint_common.ui.simple_image import SimpleImageLayout as SimpleLayout
 from voxprint_common.ui.variants import AppSurface, settings_for, state_names, surface_for, variant_presets
 
@@ -25,7 +24,7 @@ from typing import TYPE_CHECKING
 
 from canvas.core.formats import OutputFormat
 from canvas.models.modes import Mode
-from canvas.models.pins import TURBO_GUIDANCE, TURBO_STEPS
+from canvas.pipeline import adult_boundary
 from canvas.ui.styles import LOOKS, look_for, style_label
 from canvas.ui.worker_checks import WorkerChecks
 
@@ -53,6 +52,82 @@ class PictureJob(NamedTuple):
     lora_weight: float = 0.7
     # XMP/PNG text is written only when this is on.
     save_metadata: bool = False
+
+
+class CanvasLayout(SimpleLayout):
+    """The shared image screen, with Adult content (18+) as a setting of its own.
+
+    ``canvas.adult_content`` is the stored value. It does not depend on Expert
+    mode, a preset, or any other Expert value. The shared layout reads
+    ``image.adult_content``, so every write goes to both keys, and a preset
+    choice or reset that touches the shared key is undone from the Canvas one.
+    """
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._keep_adult()
+
+    def adult_content(self) -> bool:
+        """The stored Adult content (18+) setting."""
+        return adult_boundary.enabled(self)
+
+    def set_adult_content(self, value: object) -> None:
+        """Store the setting under both keys. Nothing else changes.
+
+        Raises:
+            ValueError: ``value`` is not a bool.
+        """
+        if not isinstance(value, bool):
+            raise ValueError("adult content must be true or false")
+        super().set_value(adult_boundary.KEY, value)
+        super().set_value(adult_boundary.COMMON_KEY, value)
+
+    def set_value(self, key: str, value: object) -> None:
+        """Hand-edit a setting. Either adult key writes both."""
+        if key in (adult_boundary.KEY, adult_boundary.COMMON_KEY):
+            self.set_adult_content(value)
+            return
+        super().set_value(key, value)
+        self._keep_adult()
+
+    def choose(self, row_id: str, value: str) -> None:
+        """Pick a chip. The adult setting stays as it was."""
+        super().choose(row_id, value)
+        self._keep_adult()
+
+    def reset_group(self, group_id: str) -> None:
+        """Reset a preset group. The adult setting stays as it was."""
+        super().reset_group(group_id)
+        self._keep_adult()
+
+    def prompt_policy(self):
+        """The audience words for the stored setting."""
+        return adult_boundary.policy(self.adult_content())
+
+    def _keep_adult(self) -> None:
+        """Put the shared key back to the Canvas value when anything moved it."""
+        state = self.state
+        if state is None or not state.has(adult_boundary.KEY):
+            return
+        wanted = state.get(adult_boundary.KEY) is True
+        if state.has(adult_boundary.COMMON_KEY) and state.get(adult_boundary.COMMON_KEY) is wanted:
+            return
+        super().set_value(adult_boundary.COMMON_KEY, wanted)
+
+    def _review_prompt(self, prompt: str) -> bool:
+        """The shared gate review first, unchanged. Then the OFF boundary on the same words.
+
+        Every route that starts a picture asks this: generation, and the edit
+        routes (restyle, inpaint, outpaint, pose, depth, edge), because the
+        edit words are the prompt.
+        """
+        if not super()._review_prompt(prompt):
+            return False
+        reason = adult_boundary.refusal(prompt, allowed=self.adult_content())
+        if reason is None:
+            return True
+        self.block(reason)
+        return False
 
 
 @dataclass
@@ -118,7 +193,8 @@ def _open(state_dir_path: Path, check: ContentCheck | WorkerChecks, enlarge_inst
     names = state_names(surface)
     state_dir_path.mkdir(parents=True, exist_ok=True)
     migrate_old_defaults(state_dir_path / names[0])
-    layout = SimpleLayout(
+    migrate_adult_content(state_dir_path / names[0])
+    layout = CanvasLayout(
         presets=presets,
         settings=settings,
         state_dir=state_dir_path,
@@ -135,8 +211,16 @@ def _open(state_dir_path: Path, check: ContentCheck | WorkerChecks, enlarge_inst
 _OLD_DEFAULTS = {"shell.steps": 20, "shell.guidance": 7.0}
 
 
+def _shared_image_defaults() -> tuple[int, float]:
+    """Steps and guidance from common's shared image settings, not a Canvas copy."""
+    settings = reference_settings()
+    steps = settings.get("shell.steps")
+    guidance = settings.get("shell.guidance")
+    return int(steps.default), float(guidance.default)
+
+
 def migrate_old_defaults(path: Path) -> bool:
-    """Move saved steps and guidance that still equal the old defaults to the Turbo defaults.
+    """Move saved steps and guidance that still equal the old defaults to the shared Turbo values.
 
     Values the user changed are kept. Returns True when the file was rewritten.
     """
@@ -151,13 +235,39 @@ def migrate_old_defaults(path: Path) -> bool:
         found = values.get(key)
         if isinstance(found, bool) or not isinstance(found, (int, float)) or float(found) != float(old):
             return False
-    values["shell.steps"] = int(TURBO_STEPS)
-    values["shell.guidance"] = max(1.0, float(TURBO_GUIDANCE))
+    steps, guidance = _shared_image_defaults()
+    values["shell.steps"] = steps
+    values["shell.guidance"] = guidance
     overrides = payload.get("overrides")
     if isinstance(overrides, dict):
         for group, keys in overrides.items():
             if isinstance(keys, list):
                 overrides[group] = [key for key in keys if key not in _OLD_DEFAULTS]
+    try:
+        path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    except OSError:
+        return False
+    return True
+
+
+def migrate_adult_content(path: Path) -> bool:
+    """Copy a stored ``image.adult_content`` into ``canvas.adult_content`` when the new key is missing.
+
+    Old configs only had the shared key. A config that already has the Canvas
+    key is left alone: Canvas keeps the two in step from then on. Returns True
+    when the file was rewritten.
+    """
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return False
+    values = payload.get("values") if isinstance(payload, dict) else None
+    if not isinstance(values, dict) or adult_boundary.KEY in values:
+        return False
+    old = values.get(adult_boundary.COMMON_KEY)
+    if not isinstance(old, bool):
+        return False
+    values[adult_boundary.KEY] = old
     try:
         path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     except OSError:
@@ -205,7 +315,7 @@ def job_from(layout: SimpleLayout, live: Mapping[str, object] | None = None) -> 
         guidance=_decimal(pick("shell.guidance")),
         sampler=str(pick("shell.sampler")),
         copies=layout.batch_size(),
-        adult_content=layout.prompt_policy() == adult_prompt_policy(allowed=True),
+        adult_content=adult_boundary.enabled(layout),
         lora_path=str(pick("shell.addons") or ""),
         lora_weight=_decimal(pick("shell.lora_weight")),
         save_metadata=metadata_enabled(layout.get("canvas.save_metadata")),
@@ -289,7 +399,6 @@ def output_name(layout: SimpleLayout) -> str:
 
 def _settings() -> Settings:
     settings = settings_for(surface_for("canvas"))
-    _turbo_defaults(settings)
     settings.add(_enum("canvas.style", "photo", tuple((look.style_id, style_label(look.style_id)) for look in LOOKS)))
     settings.add(_enum("canvas.source", "words", (("words", "canvas.source.words"), ("picture", "canvas.source.picture"))))
     settings.add(
@@ -321,6 +430,7 @@ def _settings() -> Settings:
         )
     )
     settings.add(_bool("canvas.save_metadata", False))
+    settings.add(_bool(adult_boundary.KEY, False))
     settings.add(
         _enum(
             "canvas.export",
@@ -347,16 +457,6 @@ def _settings() -> Settings:
         )
     )
     return settings
-
-
-def _turbo_defaults(settings: Settings) -> None:
-    """Start Expert mode on the Turbo steps and guidance. The field minimum bounds the guidance."""
-    for setting_id, wanted in (("shell.steps", TURBO_STEPS), ("shell.guidance", TURBO_GUIDANCE)):
-        spec = settings.get(setting_id)
-        if spec is None:
-            continue
-        value = max(float(wanted), spec.minimum or 0.0)
-        settings._specs[setting_id] = replace(spec, default=int(value) if spec.type is SettingType.INT else value)
 
 
 def _enum(
@@ -396,22 +496,8 @@ def _presets(settings: Settings, *, enlarge_installed: bool) -> PresetFile:
     for group in document.groups:
         if group.group_id == "style":
             group = _style_group()
-        elif group.group_id == "quality":
-            group = _turbo_quality(group)
         groups.append(group)
     return PresetFile(tuple(groups))
-
-
-def _turbo_quality(group: PresetGroup) -> PresetGroup:
-    """The default quality chip writes the Turbo steps and guidance."""
-    turbo = {"shell.steps": TURBO_STEPS, "shell.guidance": max(1.0, TURBO_GUIDANCE)}
-    options = tuple(
-        replace(option, values=tuple((key, turbo.get(key, value)) for key, value in option.values))
-        if option.option_id == group.default
-        else option
-        for option in group.options
-    )
-    return replace(group, options=options)
 
 
 def _style_group() -> PresetGroup:

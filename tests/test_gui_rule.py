@@ -152,3 +152,166 @@ def test_the_bundled_font_is_registered(app):
     assert "Open Font License" in (FONT_DIR / "OFL.txt").read_text(encoding="utf-8")
     assert FAMILY == "Noto Sans"
 
+
+def _process(window, app, times: int = 6) -> None:
+    for _ in range(times):
+        app.processEvents()
+
+
+def test_use_a_picture_sits_left_of_improve_across_modes(window, app):
+    """Use a picture stays on the Improve prompt row, immediately to its left."""
+    picture = window.findChild(QPushButton, "actionPicture")
+    improve = window.findChild(QPushButton, "improvePrompt")
+    assert picture is not None and improve is not None and picture.isVisible()
+    assert picture.parentWidget() is not None
+    assert window._action_options.isAncestorOf(picture)
+
+    def geometry():
+        _process(window, app)
+        left = picture.mapTo(window, picture.rect().topLeft())
+        right = picture.mapTo(window, picture.rect().topRight())
+        other = improve.mapTo(window, improve.rect().topLeft())
+        return left.x(), left.y(), picture.height(), improve.height(), other.x() - right.x(), other.y()
+
+    positions = [geometry()]
+    # A quality preset change must not move the button.
+    for button in window.findChildren(QPushButton):
+        if button.text() == "Best" and button.isVisible():
+            button.click()
+            break
+    positions.append(geometry())
+    window.set_expert(True)
+    positions.append(geometry())
+    window.set_expert(False)
+    positions.append(geometry())
+    for item in positions:
+        x, y, height, improve_height, gap, improve_y = item
+        assert height == improve_height == 36, item
+        assert abs(y - improve_y) <= 2, item
+        assert 0 <= gap <= 16, item  # immediate left, 8 px row spacing
+    xs = {item[0] for item in positions}
+    ys = {item[1] for item in positions}
+    assert len(xs) == 1 and len(ys) == 1, positions
+
+
+def test_the_lora_slider_row_stays_put_across_modes_and_values(window, app):
+    """Slider, value label, and trigger chip keep their x and width in every mode."""
+    picker = window._lora_picker
+    chip = window._lora_chip
+
+    def geometry():
+        _process(window, app)
+        def box(widget):
+            pos = widget.mapTo(window, widget.rect().topLeft())
+            return pos.x(), pos.y(), widget.width(), widget.height()
+        return box(picker.slider), box(picker.value), box(chip)
+
+    start = geometry()
+    # min and max strength must not move the value column
+    picker.slider.setValue(picker.slider.minimum())
+    at_min = geometry()
+    picker.slider.setValue(picker.slider.maximum())
+    at_max = geometry()
+    picker.slider.setValue(70)
+    # A quality preset, Expert on, and Expert off.
+    for button in window.findChildren(QPushButton):
+        if button.text() == "Best" and button.isVisible():
+            button.click()
+            break
+    preset = geometry()
+    window.set_expert(True)
+    expert = geometry()
+    window.set_expert(False)
+    simple = geometry()
+    # Hide the trigger word the way a LoRA without one would: the reserved
+    # column must still hold the slider and value in place.
+    picker.show_chip(chip, "")
+    hidden = geometry()
+    picker.show_chip(chip, "brsslmp")
+    restored = geometry()
+    rows = (start, at_min, at_max, preset, expert, simple, hidden, restored)
+    # Compare slider x/w and value x/w only (chip opacity may change, not its box).
+    slider_boxes = {item[0] for item in rows}
+    value_boxes = {item[1] for item in rows}
+    chip_boxes = {item[2][:3] for item in rows}  # x, y, width
+    assert len(slider_boxes) == 1, rows
+    assert len(value_boxes) == 1, rows
+    assert len(chip_boxes) == 1, rows
+
+
+def _prompt_button_geometry(window):
+    """x, y, width for every visible named button in the left prompt panel."""
+    panel = window.view.root.findChild(QWidget, "promptPanel")
+    assert panel is not None
+    boxes = {}
+    for button in panel.findChildren(QPushButton):
+        if not button.isVisible() or not button.objectName():
+            continue
+        pos = button.mapTo(window, button.rect().topLeft())
+        boxes[button.objectName()] = (pos.x(), pos.y(), button.width())
+    return boxes
+
+
+def test_button_rows_keep_geometry_when_expert_toggles(window, app):
+    """Opening and closing Expert must not move or resize the prompt-panel buttons."""
+    def cycle():
+        _process(window, app)
+        before = _prompt_button_geometry(window)
+        window.set_expert(True)
+        _process(window, app)
+        opened = _prompt_button_geometry(window)
+        window.set_expert(False)
+        _process(window, app)
+        closed = _prompt_button_geometry(window)
+        assert before == opened, (before, opened)
+        assert before == closed, (before, closed)
+        return before
+
+    off = cycle()
+    assert off
+    window.shell.layout.set_adult_content(True)
+    window.view.refresh()
+    _process(window, app)
+    on = cycle()
+    assert on
+
+
+def test_the_lora_picker_survives_the_adult_switch_in_every_mode(window, app):
+    """The LoRA pick stays visible and keeps the selected LoRA when 18+ toggles."""
+    picker = window._lora_picker
+    assert picker is not None
+    selected = window.shell.layout.get("shell.addons")
+    strength = window.shell.layout.get("shell.lora_weight")
+    assert selected and float(strength) > 0
+
+    def check(mode: str) -> None:
+        _process(window, app)
+        assert picker.isVisible() and picker.isEnabled(), mode
+        assert picker.combo.isVisible() and picker.combo.isEnabled(), mode
+        assert window.shell.layout.get("shell.addons") == selected, mode
+        assert window.shell.layout.get("shell.lora_weight") == strength, mode
+
+    # simple, a quality preset, Expert; 18+ off then on, then off again.
+    check("simple-off")
+    window.shell.layout.set_adult_content(True)
+    window.view.refresh()
+    check("simple-on")
+    for button in window.findChildren(QPushButton):
+        if button.text() == "Best" and button.isVisible():
+            button.click()
+            break
+    check("preset-on")
+    window.set_expert(True)
+    check("expert-on")
+    window.shell.layout.set_adult_content(False)
+    window.view.refresh()
+    check("expert-off")
+    window.set_expert(False)
+    check("simple-off-again")
+    window.shell.layout.set_adult_content(True)
+    window.view.refresh()
+    window.shell.layout.set_adult_content(False)
+    window.view.refresh()
+    check("off-on-off")
+    assert window.shell.layout.get("shell.addons") == selected
+    assert window.shell.layout.get("shell.lora_weight") == strength

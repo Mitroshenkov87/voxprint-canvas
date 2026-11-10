@@ -7,7 +7,7 @@
       "id": "z-image-turbo-bf16-16gb",
       "version": "f332072aa78be7aecdf3ee76d5c247082da564a6",
       "vram_tier": "16gb",
-      "optional": true,
+      "optional": false,
       "licence": "Apache-2.0",
       "source": "primary",
       "files": [
@@ -1323,7 +1323,7 @@
     },
     {
       "id": "voxprint-moss-image-sft-compact",
-      "note": "PENDING: compressed once by VOXPrint on the test VM; repo, revision and sha256 TBD; MDL will not download until pinned. Quant (fp8/int8/nf4, chosen by moss-prequant)."
+      "note": "PENDING: compressed once by VOXPrint on the test VM; repo, revision and sha256 TBD; MDL will not download until pinned. The voxprint-common 0.7.0 index no longer lists moss-image-compressed; do not invent a hash or treat a removed placeholder as a pin. Quant (fp8/int8/nf4, chosen by moss-prequant)."
     }
   ]
 }

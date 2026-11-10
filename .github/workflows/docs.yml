@@ -49,9 +49,9 @@ jobs:
         run: |
           python -m pip install -q uv
           mkdir -p wheels
-          curl -fsSL -o wheels/voxprint_common-0.6.3-py3-none-any.whl \
-            https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.6.3/voxprint_common-0.6.3-py3-none-any.whl
-          python -c "import hashlib, pathlib; p=pathlib.Path('wheels/voxprint_common-0.6.3-py3-none-any.whl'); d=hashlib.sha256(p.read_bytes()).hexdigest(); e='a18e5760863e34042c6eb16dd25d37d28055b9eb90a460c62407cdc2a09b43e4'; raise SystemExit(None if d==e else 'voxprint-common 0.6.3 failed the SHA-256 check: '+d)"
+          curl -fsSL -o wheels/voxprint_common-0.7.0-py3-none-any.whl \
+            https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.7.0/voxprint_common-0.7.0-py3-none-any.whl
+          python -c "import hashlib, pathlib; p=pathlib.Path('wheels/voxprint_common-0.7.0-py3-none-any.whl'); d=hashlib.sha256(p.read_bytes()).hexdigest(); e='582ed667ef51896086b6f70c85148c525ea24b5c3dacb64f546a76486d311eca'; raise SystemExit(None if d==e else 'voxprint-common 0.7.0 failed the SHA-256 check: '+d)"
           uv venv .venv
           uv pip install --python .venv/bin/python --find-links wheels -e ".[docs]"
       - name: Build

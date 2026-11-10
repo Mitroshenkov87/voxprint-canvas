@@ -233,10 +233,15 @@ def load_catalog(path: Path | None = None) -> Catalog:
     for spec in models:
         if spec.text_base and spec.text_base not in text_bases:
             raise RegistryError("a text model is not listed")
+    present: list[str] = []
     for family in text_bases:
         tiers = {spec.tier for spec in models if spec.text_base == family}
         if "16gb" not in tiers or "24gb" not in tiers:
-            raise RegistryError("a text model is missing a tier")
+            if family == default_text_base:
+                raise RegistryError("a text model is missing a tier")
+            continue
+        present.append(family)
+    text_bases = tuple(present)
     sizes = _sizes(raw.get("sizes"), text_bases)
     return Catalog(diffusers, models, default_text_base, text_bases, sizes, _features(raw.get("features")))
 

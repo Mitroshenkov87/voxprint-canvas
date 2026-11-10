@@ -9,13 +9,13 @@ from canvas.models.mdl_fetch import MANIFEST
 from canvas.models.registry import Catalog, ModelSpec, RegistryError, load_catalog
 from canvas.models.views import ViewError, blobs_present, ensure_view
 
-# The check models, the default text generator, the optional Turbo packs, and the writer.
+# The check models, the default Z-Image-Turbo generator, optional packs, and the writer.
 _GATE_ROLES = ("prompt-guard", "zero-shot", "face-detector", "age", "nsfw", "age-fine")
 _MODEL_IDS = (
     "qwen3-4b-writer",
-    "voxprint-moss-image-sft-compact",
     "z-image-turbo-bf16-16gb",
     "z-image-turbo-bf16",
+    "voxprint-moss-image-sft-compact",
 )
 
 

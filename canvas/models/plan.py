@@ -14,6 +14,7 @@ from canvas.models.pins import (
     PIPELINE_INPAINT,
     PIPELINE_TEXT,
 )
+from canvas.models.default_base import selected_text_base
 from canvas.models.registry import Catalog, ModelSpec, RegistryError
 from canvas.safety.image import ScreenedInput
 from canvas.safety.inputs import ImageRole
@@ -41,6 +42,16 @@ class BaseNotSelected(Exception):
         return text("error.base")
 
 
+class OptionalModelUnavailable(Exception):
+    """The optional model is not in the catalog or is not available to generate."""
+
+    def __init__(self) -> None:
+        super().__init__(text("error.optional_model"))
+
+    def __str__(self) -> str:
+        return text("error.optional_model")
+
+
 @dataclass(frozen=True)
 class CallPlan:
     """The diffusers call selected for one request. No weights are loaded."""
@@ -61,6 +72,14 @@ class CallPlan:
 
 def _one(catalog: Catalog, model_id: str) -> ModelSpec:
     return catalog.by_id(model_id)
+
+
+def _lookup(catalog: Catalog, model_id: str) -> ModelSpec | None:
+    """Return the row, or None when the optional id is not in the catalog."""
+    try:
+        return catalog.by_id(model_id)
+    except RegistryError:
+        return None
 
 
 def build_plan(catalog: Catalog, screened: ScreenedInput, tier: Tier, *, base: str | None = None) -> CallPlan:
@@ -110,12 +129,10 @@ def build_plan(catalog: Catalog, screened: ScreenedInput, tier: Tier, *, base: s
 
 
 def _text_model(catalog: Catalog, tier: Tier, base: str | None = None) -> tuple[ModelSpec, str]:
-    """The text-to-image row for ``base``, or the catalog default when ``base`` is omitted."""
-    family = base or catalog.default_text_base
-    if family is None:
+    """The text-to-image row for ``base``, or the shared ``model.default`` when ``base`` is omitted."""
+    family = base or selected_text_base()
+    if not family:
         raise BaseNotSelected()
-    if family not in catalog.text_bases:
-        raise RegistryError("the default text model is not in the registry")
     if family == "z-image-turbo":
         if tier is Tier.GB16:
             return _one(catalog, "z-image-turbo-bf16-16gb"), PIPELINE_TEXT
@@ -124,11 +141,28 @@ def _text_model(catalog: Catalog, tier: Tier, base: str | None = None) -> tuple[
         assert_never(tier)
     if family == "moss-image-sft":
         if tier is Tier.GB16:
-            return _one(catalog, "voxprint-moss-image-sft-compact"), PIPELINE_MOSS
-        if tier is Tier.GB24:
-            return _one(catalog, "moss-image-sft-bf16"), PIPELINE_MOSS
-        assert_never(tier)
-    raise RegistryError("the default text model has no plan")
+            moss = _lookup(catalog, "voxprint-moss-image-sft-compact") or _lookup(
+                catalog, "moss-image-sft-bf16-16gb"
+            )
+        elif tier is Tier.GB24:
+            moss = _lookup(catalog, "moss-image-sft-bf16")
+        else:
+            assert_never(tier)
+        if moss is None:
+            raise OptionalModelUnavailable()
+        return moss, PIPELINE_MOSS
+    if family == "z-image":
+        # Optional full Z-Image. There is no Canvas pin yet; stay absent-safe.
+        wanted = "16gb" if tier is Tier.GB16 else "24gb" if tier is Tier.GB24 else None
+        if wanted is None:
+            assert_never(tier)
+        full = next((spec for spec in catalog.models if spec.text_base == "z-image" and spec.tier == wanted), None)
+        if full is None:
+            raise OptionalModelUnavailable()
+        return full, PIPELINE_TEXT
+    if family not in catalog.text_bases:
+        raise BaseNotSelected()
+    raise BaseNotSelected()
 
 
 def _plan(mode: Mode, tier: Tier, pipeline: str, specs: tuple[ModelSpec, ...], steps: int | None,

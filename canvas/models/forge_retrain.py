@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 MOSS_IMAGE_SFT = "moss-image-sft"
+ZIMAGE_FORGE_BASE = "z-image"
 
 
 def forge_inbox() -> Path:
@@ -25,7 +26,7 @@ def forge_inbox() -> Path:
 
 
 def request_retrain(
-    lora_path: Path | str, trained_base: str, target_base: str = MOSS_IMAGE_SFT,
+    lora_path: Path | str, trained_base: str, target_base: str = ZIMAGE_FORGE_BASE,
 ) -> Path:
     """Write one retrain request and return its path.
 
@@ -35,7 +36,7 @@ def request_retrain(
     Args:
         lora_path: The LoRA weight file to retrain.
         trained_base: The base that file was trained on.
-        target_base: The base Forge should train. MOSS-Image-SFT when omitted.
+        target_base: The base Forge should train. Z-Image when omitted.
     """
     folder = forge_inbox()
     folder.mkdir(parents=True, exist_ok=True)

@@ -8,9 +8,9 @@ Local text-to-image and image-to-image generation for the VOXPrint AI Suite. Eve
 
 > Status: 0.1.0 release candidate.
 
-Text to image uses Z-Image-Turbo in BF16 on every tier. Image to image covers restyle, inpaint, outpaint, pose, depth, and edge. On a 24 GB GPU, Creative is available as well.
+Text to image uses MOSS-Image-SFT on every tier. Image to image covers restyle, inpaint, outpaint, pose, depth, and edge. On a 24 GB GPU, Creative is available as well. Z-Image and Z-Image-Turbo stay available as an optional download. The 16 GB compact build of MOSS-Image-SFT is not published yet — its repository, revision and checksum are still pending, so the model downloader does not fetch the default pack until they are pinned.
 
-Third-party add-ons are off until you turn them on. Third-party weights are provided by their authors, who are responsible for the licence and training data. Voxprint does not host or redistribute them. Output defaults to AVIF, with JPEG XL and WebP beside it.
+Third-party add-ons are off until you turn them on. Third-party weights are provided by their authors, who are responsible for the licence and training data. Voxprint does not host or redistribute them. Output defaults to WebP — quality 90 for regular pictures, lossless for series and Forge hand-offs — with AVIF, JPEG XL, PNG and JPEG beside it. Saved pictures carry no prompt metadata unless you opt in: the **Save prompt in file** setting, `VOXPRINT_CANVAS_SAVE_METADATA=1`, or `--save-metadata`.
 
 ## Install
 
@@ -24,7 +24,7 @@ Pictures, models, and the shared manifest stay in `%LOCALAPPDATA%\VOXPrint AI Su
 
 - **OS:** Windows 11 24H2 or newer, or a Linux distribution released in 2025 or later.
 - **GPU:** NVIDIA GeForce RTX 40 series or newer, with 16 GB of memory (24 GB unlocks the larger plans). PCs without a supported NVIDIA GPU are not supported.
-- **Python:** 3.14 or newer, when running from source.
+- **Python:** 3.14 or newer, when running from source. The shipped runtime and required CI stay on 3.14. A non-blocking CI job probes 3.15.
 
 ## Responsibility
 
@@ -38,7 +38,7 @@ python -m pytest
 python tools/audit.py --python python
 ```
 
-Tests do not download weights and do not need a GPU. AVIF, JPEG XL, WebP and JPEG are written by the installed libraries. HEIC still needs a system codec. The Windows setup and the Linux archive install Python when it is missing, the GPU libraries, and the default Z-Image-Turbo pack. Optional packs download when you choose them, after the window shows the size and the estimated time.
+Tests do not download weights and do not need a GPU. AVIF, JPEG XL, WebP and JPEG are written by the installed libraries. HEIC still needs a system codec. The Windows setup and the Linux archive install Python when it is missing, the GPU libraries, and the default MOSS-Image-SFT pack. Optional packs download when you choose them, after the window shows the size and the estimated time.
 
 ### GPU smoke test on Windows
 
@@ -62,11 +62,11 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File $smoke -Out .\smoke-results       
 
 Without PowerShell 7, run the same lines with `powershell` instead of `pwsh`. A silent Setup uses PowerShell 7 when it is installed and Windows PowerShell 5.1 otherwise; an interactive Setup offers to install PowerShell 7 from Microsoft first.
 
-The script uses the Python the Setup installed (`-Python <python.exe>` picks another one). It verifies the voxprint-common 0.6.3 wheel, downloads the models through VOXPrint MDL, generates five neutral 1024x1024 pictures through the content gate, and times the gate by stage. The results are `smoke-results\result-16gb.json` and `smoke-results\result-24gb.json`. Exit codes: 0 pass, 1 a picture failed, 2 setup (no Python, wheel hash, wrong tier), 3 no GPU, 4 gate unavailable, 5 an MDL download or hash check failed.
+The script uses the Python the Setup installed (`-Python <python.exe>` picks another one). It verifies the voxprint-common 0.7.0 wheel, downloads the models through VOXPrint MDL, generates five neutral 1024x1024 pictures through the content gate, and times the gate by stage. The results are `smoke-results\result-16gb.json` and `smoke-results\result-24gb.json`. Exit codes: 0 pass, 1 a picture failed, 2 setup (no Python, wheel hash, wrong tier), 3 no GPU, 4 gate unavailable, 5 an MDL download or hash check failed.
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE). Models downloaded by the app keep their own licences.
+Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE). Models downloaded by the app keep their own licences; the default model, Z-Image-Turbo, is published under Apache-2.0. MOSS-Image is an optional download, also under Apache-2.0.
 
 ## Roadmap
 

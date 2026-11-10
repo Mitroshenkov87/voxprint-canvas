@@ -27,7 +27,7 @@ def test_old_saved_defaults_move_to_turbo(tmp_path: Path) -> None:
     assert migrate_old_defaults(path) is True
     saved = json.loads(path.read_text(encoding="utf-8"))
     assert saved["values"]["shell.steps"] == 8
-    assert saved["values"]["shell.guidance"] == 1.0
+    assert saved["values"]["shell.guidance"] == 0.0
     assert saved["values"]["shell.sampler"] == "euler"
     assert saved["overrides"]["quality"] == []
 

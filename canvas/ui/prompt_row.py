@@ -232,6 +232,7 @@ def _left_panel(window, outer, row, parts) -> None:
     body.addWidget(scroll, 0)
     body.addLayout(right, 1)
     outer.insertLayout(index, body, 1)
+    # History cells snap through SimpleImageWidget (HISTORY_CELL_SIZE / GAP).
 
 
 

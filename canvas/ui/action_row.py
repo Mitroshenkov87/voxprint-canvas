@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 from voxprint_common.i18n import tr
-from voxprint_common.ui.theme import CONTROL_BG, CONTROL_BORDER, TEXT
+from voxprint_common.ui.theme import CONTROL_BG, CONTROL_BORDER, TEXT, mark_compact
 
 from canvas.app.i18n import text
 from canvas.ui.theme import BUTTON_RADIUS
@@ -47,6 +47,7 @@ def build(window, parts) -> QWidget:
     policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
     policy.setHeightForWidth(True)
     options.setSizePolicy(policy)
+    flow.addWidget(_picture_actions(window))
     flow.addWidget(_improve_split(window, parts["improve"], parts["revert"]))
     flow.addWidget(_proportions(window))
     flow.addWidget(_image_size(window))
@@ -97,6 +98,36 @@ def _photoshoot_line(mode, label, frames) -> QWidget:
     return line
 
 
+
+def _picture_actions(window) -> QWidget:
+    """Use a picture (and Edit the mask once a picture is chosen) on the Improve line.
+
+    The picture button stays immediately left of Improve prompt. The mask button
+    is hidden with no reserved gap until a picture is in use, so the two stay
+    adjacent. Height, compact style, and horizontal padding match Improve prompt;
+    width comes from the label's font metrics.
+    """
+    box = QWidget()
+    box.setObjectName("pictureActions")
+    line = QHBoxLayout(box)
+    line.setContentsMargins(0, 0, 0, 0)
+    line.setSpacing(8)
+    for button, name in (
+        (getattr(window, "_picture_button", None), "actionPicture"),
+        (getattr(window, "_mask_button", None), "actionMask"),
+    ):
+        if button is None:
+            continue
+        # Same compact style and fixed height as Improve prompt.
+        mark_compact(button)
+        button.setFixedHeight(HEIGHT)
+        metrics = button.fontMetrics()
+        button.setMinimumWidth(metrics.horizontalAdvance(button.text()) + 24)
+        line.addWidget(button)
+    box.setFixedHeight(HEIGHT)
+    return box
+
+
 def _improve_split(window, improve, revert) -> QWidget:
     """Improve, with a back segment joined on its left once a rewrite can be undone."""
     box = QWidget()
@@ -115,9 +146,10 @@ def _improve_split(window, improve, revert) -> QWidget:
     back.setStyleSheet(
         f"QPushButton#revertSegment {{ background: {CONTROL_BG}; color: {TEXT};"
         f" border: 1px solid {CONTROL_BORDER}; border-radius: {BUTTON_RADIUS}px;"
-        " border-top-right-radius: 0; border-bottom-right-radius: 0; padding: 0; font-size: 16px; }"
+        " border-top-right-radius: 0; border-bottom-right-radius: 0; padding: 0; min-height: 0; font-size: 16px; }"
     )
     improve.setProperty("chip", False)
+    mark_compact(improve)
     improve.setFixedHeight(HEIGHT)
     revert.hide()
     revert.setMaximumWidth(0)
@@ -137,6 +169,8 @@ def _improve_split(window, improve, revert) -> QWidget:
             if on
             else ""
         )
+        mark_compact(improve)
+        improve.setFixedHeight(HEIGHT)
 
     def after_improve() -> None:
         if revert.isEnabled():
@@ -170,8 +204,11 @@ def _menu_button(name: str) -> QPushButton:
     button = QPushButton()
     button.setObjectName(name)
     button.setAutoDefault(False)
+    mark_compact(button)
     button.setFixedHeight(HEIGHT)
-    button.setStyleSheet("QPushButton::menu-indicator { image: none; width: 0; }")
+    button.setStyleSheet(
+        f"QPushButton#{name}::menu-indicator {{ image: none; width: 0; }}"
+    )
     return button
 
 

@@ -16,25 +16,36 @@ from PySide6.QtWidgets import QApplication, QLabel, QPushButton
 from canvas.app.i18n import text
 from voxprint_common.i18n import set_language
 from canvas.app.main import _with_lora, main
-from canvas.models.forge_retrain import request_retrain
+from canvas.models.forge_retrain import ZIMAGE_FORGE_BASE, request_retrain
 from canvas.models.loader import ZImageGenerator
 from canvas.models.modes import Tier
 from canvas.models.registry import load_catalog
 from canvas.models.user_lora import (
     CODE_BASE_MISMATCH,
+    CODE_NEEDS_OPTIONAL_MOSS,
     CODE_RETRAIN,
+    FAMILY_TURBO,
+    FAMILY_ZIMAGE,
+    FORGE_BASE_ID,
     EXPECTED_BASE_VARIANT,
     MOSS_IMAGE_SFT,
     MOSS_LORA_BASE,
+    ZIMAGE_LORA_DEFAULT_STRENGTH,
+    ZIMAGE_SHORT_TAG,
     ZIMAGE_TURBO_MDL_ID,
     LoraRejected,
     LoraRoute,
     UserLora,
     base_choice,
     detect_base,
+    family_of,
     fits_base,
+    lora_accepts_family,
+    open_weights,
+    parse_compatible_bases,
     prepare_cli_lora,
     route_lora,
+    strength_or_default,
 )
 from canvas.safety.image import RawImage
 from canvas.worker_jobs import Session, _generate, _retrain_refusal
@@ -51,7 +62,7 @@ _FOREIGN = {
 }
 _RETRAIN = (
     "This LoRA was trained on sdxl, which Canvas cannot run. "
-    "Retrain it for MOSS-Image in Model Forge (voxprint-forge prepare --base moss)."
+    "Retrain it for Z-Image-Turbo in Model Forge (voxprint-forge prepare --base z-image)."
 )
 _CREATED = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 
@@ -107,7 +118,7 @@ def test_detect_base_reads_the_header_then_metadata_then_the_filename(tmp_path: 
     assert detect_base(_file(tmp_path / "tag", "cup.safetensors", {"voxprint.lora.base": "moss5b"})) == MOSS_LORA_BASE
     assert detect_base(_file(tmp_path / "sft", "cup.safetensors", {"voxprint.lora.base": "moss-image-sft"})) == MOSS_LORA_BASE
     assert detect_base(_file(tmp_path / "base", "cup.safetensors", {"voxprint.lora.base": "moss-image-base"})) == MOSS_LORA_BASE
-    assert detect_base(_file(tmp_path / "turbo", "cup.safetensors", {"voxprint.lora.base": "z-image"})) == ZIMAGE_TURBO_MDL_ID
+    assert detect_base(_file(tmp_path / "turbo", "cup.safetensors", {"voxprint.lora.base": "z-image"})) == FAMILY_ZIMAGE
     assert detect_base(_file(tmp_path / "sdxl", "cup.safetensors", {"voxprint.lora.base": "sdxl"})) == "sdxl"
     # The header wins over a filename tag.
     tagged = _file(tmp_path / "both", "cup.moss.safetensors", {"voxprint.lora.base": "sdxl"})
@@ -118,13 +129,13 @@ def test_detect_base_reads_the_header_then_metadata_then_the_filename(tmp_path: 
     assert detect_base(version) == ZIMAGE_TURBO_MDL_ID
     # A metadata family wins over the filename. A string that names neither falls through to it.
     mixed = _file(tmp_path / "mixed", "cup.moss.safetensors", {"modelspec.architecture": "z-image"})
-    assert detect_base(mixed) == ZIMAGE_TURBO_MDL_ID
+    assert detect_base(mixed) == FAMILY_ZIMAGE
     named = _file(tmp_path / "named", "cup.moss.safetensors", {"modelspec.architecture": "sdxl"})
     assert detect_base(named) == MOSS_LORA_BASE
-    assert detect_base(_file(tmp_path / "zname", "cup.z-image.safetensors", {})) == ZIMAGE_TURBO_MDL_ID
+    assert detect_base(_file(tmp_path / "zname", "cup.z-image.safetensors", {})) == FAMILY_ZIMAGE
     assert detect_base(_file(tmp_path / "case", "cup.MOSS.safetensors", {})) == MOSS_LORA_BASE
     untagged = _file(tmp_path / "old", "cup.safetensors", {})
-    assert detect_base(untagged) == ZIMAGE_TURBO_MDL_ID
+    assert detect_base(untagged) == FAMILY_ZIMAGE
     recorded = _entry(_file(tmp_path / "side", "cup.moss.safetensors", {}), "sdxl")
     assert detect_base(recorded) == "sdxl"
 
@@ -141,9 +152,11 @@ def test_route_lora_loads_a_listed_base_and_asks_for_a_retrain_otherwise(tmp_pat
     assert base_choice(moss, bases, MOSS_IMAGE_SFT).run_on == MOSS_IMAGE_SFT
     assert base_choice(moss, bases, MOSS_IMAGE_SFT).note_base == ""
     zimage = _entry(_file(tmp_path / "z", "cup.safetensors", {"voxprint.lora.base": "z-image"}))
-    assert route_lora(zimage, bases, MOSS_IMAGE_SFT) == LoraRoute(ZIMAGE_TURBO_MDL_ID)
+    assert route_lora(zimage, bases, ZIMAGE_TURBO_MDL_ID) == LoraRoute(ZIMAGE_TURBO_MDL_ID)
+    assert route_lora(zimage, bases, MOSS_IMAGE_SFT) == LoraRoute("", FAMILY_ZIMAGE)
     untagged = _entry(_file(tmp_path / "old", "cup.safetensors", {}))
-    assert route_lora(untagged, bases, MOSS_IMAGE_SFT) == LoraRoute(ZIMAGE_TURBO_MDL_ID, "")
+    assert route_lora(untagged, bases, ZIMAGE_TURBO_MDL_ID) == LoraRoute(ZIMAGE_TURBO_MDL_ID)
+    assert route_lora(untagged, bases, MOSS_IMAGE_SFT) == LoraRoute("", FAMILY_ZIMAGE)
     other = _entry(_file(tmp_path / "sdxl", "cup.safetensors", {"voxprint.lora.base": "sdxl"}))
     assert route_lora(other, bases, MOSS_IMAGE_SFT) == LoraRoute("", "sdxl")
     choice = base_choice(other, bases, MOSS_IMAGE_SFT)
@@ -218,7 +231,12 @@ def test_fits_base_checks_z_image_module_names_only(tmp_path: Path) -> None:
 
 
 def test_a_moss_lora_selects_the_moss_generator(monkeypatch, tmp_path: Path) -> None:
+    from voxprint_common.suite_settings import set_model_default
+
     calls = _patch_draw(monkeypatch, tmp_path)
+    monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path / "home"))
+    set_model_default("moss")
+    monkeypatch.setattr("canvas.models.user_lora.moss_weights_ready", lambda root=None: True)
     folder = write_lora(tmp_path, "moss-aaaaaaaa", base="moss-image")
     generator = ZImageGenerator(load_catalog(), Tier.GB24)
     generator.lora_path = str(folder)
@@ -260,7 +278,7 @@ def test_the_cli_exits_2_with_a_retrain_error(capsys, tmp_path: Path) -> None:
     assert body["ok"] is False
     assert body["error"] == CODE_RETRAIN
     assert body["message"] == _RETRAIN
-    assert body["retrain"] == {"from": "sdxl", "to": MOSS_IMAGE_SFT}
+    assert body["retrain"] == {"from": "sdxl", "to": ZIMAGE_FORGE_BASE}
     assert not out.exists()
 
 
@@ -287,7 +305,7 @@ def test_request_retrain_writes_one_inbox_file(monkeypatch, tmp_path: Path) -> N
         "kind": "retrain",
         "lora": str(weights),
         "trained_base": "sdxl",
-        "target_base": MOSS_IMAGE_SFT,
+        "target_base": ZIMAGE_FORGE_BASE,
         "created": body["created"],
     }
     assert _CREATED.match(body["created"])
@@ -329,8 +347,8 @@ def test_the_worker_refuses_a_mismatched_lora_before_the_runner(tmp_path: Path) 
     assert runner.calls == 0
     assert reply["code"] == CODE_RETRAIN
     assert reply["unavailable"] is True
-    assert reply["retrain"] == {"from": "sdxl", "to": MOSS_IMAGE_SFT}
-    assert "voxprint-forge prepare --base moss" in str(reply["message"])
+    assert reply["retrain"] == {"from": "sdxl", "to": ZIMAGE_FORGE_BASE}
+    assert "voxprint-forge prepare --base z-image" in str(reply["message"])
     matched = _entry(_forge(tmp_path / "z", "z-image-turbo"))
     assert _retrain_refusal("generate", "", _Runner(matched)) is None
 
@@ -385,5 +403,132 @@ def test_the_window_offers_a_retrain_and_does_not_run_the_job(monkeypatch, tmp_p
     assert saved["kind"] == "retrain"
     assert saved["lora"] == str(weights)
     assert saved["trained_base"] == "sdxl"
-    assert saved["target_base"] == MOSS_IMAGE_SFT
+    assert saved["target_base"] == ZIMAGE_FORGE_BASE
     window.close()
+
+def test_a_moss_lora_asks_for_the_optional_model_and_offers_a_retrain(tmp_path: Path, monkeypatch) -> None:
+    """A moss-base LoRA does not auto-download MOSS; it names the optional pack and offers a retrain."""
+    from canvas.models.loader import ModelNotReady
+    from canvas.models.user_lora import retrain_rejection
+    from tests.fakes import World, rgb
+    from canvas.safety.inputs import PendingInput
+    from canvas.models.modes import Mode
+    from canvas.safety.image import ScreenedInput
+
+    from voxprint_common.suite_settings import set_model_default
+
+    monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("VOXPRINT_MODELS_DIR", str(tmp_path / "models"))
+    set_model_default("moss")
+    queued: list[str] = []
+    monkeypatch.setattr(
+        "canvas.models.loader.request_download",
+        lambda model_id: queued.append(model_id) or True,
+    )
+    monkeypatch.setattr("canvas.models.user_lora.moss_weights_ready", lambda root=None: False)
+    weights = _forge(tmp_path / "moss", "moss5b")
+    lora = _entry(weights, base="moss5b")
+    rejected = retrain_rejection(lora)
+    assert rejected is not None
+    assert rejected.code == CODE_NEEDS_OPTIONAL_MOSS
+    message = text(rejected.code, **rejected.details)
+    assert "optional MOSS-Image" in message
+    assert "Manage models" in message
+    assert "Z-Image-Turbo" in message
+    generator = ZImageGenerator(load_catalog(), Tier.GB16)
+    generator.bound_lora = lora
+    generator.models = tmp_path / "models"
+    world = World()
+    screened = world.gate().release_request("a red teapot on a table", Mode.TEXT.value, [])
+    with pytest.raises(LoraRejected) as caught:
+        generator.generate(screened, 32, 32)
+    assert caught.value.code == CODE_NEEDS_OPTIONAL_MOSS
+    assert queued == []
+    runner = _Runner(lora)
+    session = Session(gate=None, check=None, tier=None, runner=runner, improver=lambda **_kwargs: "")
+    reply = _generate(object(), session, {"job": _job(str(weights))})
+    assert runner.calls == 0
+    assert reply["code"] == CODE_NEEDS_OPTIONAL_MOSS
+    assert reply["retrain"] == {"from": "moss-image-sft", "to": ZIMAGE_FORGE_BASE}
+    assert "optional MOSS-Image" in str(reply["message"])
+
+
+
+
+def test_compatible_bases_accepts_the_loaded_family(tmp_path: Path) -> None:
+    """A Forge LoRA with compatible_bases loads on Turbo when that family is listed."""
+    bases = (MOSS_IMAGE_SFT, ZIMAGE_TURBO_MDL_ID, FAMILY_ZIMAGE)
+    path = _file(
+        tmp_path / "new",
+        "cup.safetensors",
+        {
+            "voxprint.lora.trained_base": "z-image@04cc4abb",
+            "voxprint.lora.compatible_bases": '["z-image","z-image-turbo"]',
+            "voxprint.lora.kind": "object",
+            "voxprint.subject.trigger": "teapot",
+        },
+    )
+    lora = _entry(path, base="")
+    assert detect_base(path) == FAMILY_ZIMAGE
+    assert family_of("z-image@04cc4abb") == FAMILY_ZIMAGE
+    assert lora_accepts_family(lora, FAMILY_TURBO)
+    assert lora_accepts_family(lora, FAMILY_ZIMAGE)
+    assert not lora_accepts_family(lora, MOSS_IMAGE_SFT)
+    assert route_lora(lora, bases, ZIMAGE_TURBO_MDL_ID) == LoraRoute(ZIMAGE_TURBO_MDL_ID)
+    assert route_lora(lora, bases, FAMILY_ZIMAGE) == LoraRoute(FAMILY_ZIMAGE)
+    assert route_lora(lora, bases, MOSS_IMAGE_SFT) == LoraRoute("", FAMILY_ZIMAGE)
+    opened = open_weights(path)
+    assert opened.default_strength == ZIMAGE_LORA_DEFAULT_STRENGTH
+    assert strength_or_default(opened, None) == 1.0
+
+
+def test_malformed_compatible_bases_falls_back_to_the_legacy_tag(tmp_path: Path) -> None:
+    bases = (MOSS_IMAGE_SFT, ZIMAGE_TURBO_MDL_ID)
+    assert parse_compatible_bases("not-json") is None
+    assert parse_compatible_bases("[") is None
+    assert parse_compatible_bases('["z-image", 1]') is None
+    path = _file(
+        tmp_path / "bad",
+        "cup.safetensors",
+        {
+            "voxprint.lora.base": "z-image",
+            "voxprint.lora.compatible_bases": "not-a-json-list",
+        },
+    )
+    lora = _entry(path, "z-image")
+    assert route_lora(lora, bases, ZIMAGE_TURBO_MDL_ID) == LoraRoute(ZIMAGE_TURBO_MDL_ID)
+    assert route_lora(lora, bases, MOSS_IMAGE_SFT) == LoraRoute("", FAMILY_ZIMAGE)
+
+
+def test_legacy_zimage_and_zimg6b_load_on_turbo(tmp_path: Path) -> None:
+    bases = (MOSS_IMAGE_SFT, ZIMAGE_TURBO_MDL_ID)
+    legacy = _entry(_file(tmp_path / "legacy", "cup.safetensors", {"voxprint.lora.base": "z-image"}))
+    assert route_lora(legacy, bases, ZIMAGE_TURBO_MDL_ID) == LoraRoute(ZIMAGE_TURBO_MDL_ID)
+    short = _entry(_file(tmp_path / "short", "cup.zimg6b.safetensors", {}))
+    assert detect_base(short.weights) == FAMILY_ZIMAGE
+    assert route_lora(short, bases, ZIMAGE_TURBO_MDL_ID) == LoraRoute(ZIMAGE_TURBO_MDL_ID)
+    tagged = _entry(_file(tmp_path / "tag", "cup.safetensors", {"voxprint.lora.base": ZIMAGE_SHORT_TAG}))
+    assert detect_base(tagged.weights) == FAMILY_ZIMAGE
+    assert route_lora(tagged, bases, ZIMAGE_TURBO_MDL_ID) == LoraRoute(ZIMAGE_TURBO_MDL_ID)
+
+
+def test_legacy_moss_on_turbo_is_a_retrain(tmp_path: Path) -> None:
+    bases = (MOSS_IMAGE_SFT, ZIMAGE_TURBO_MDL_ID)
+    moss = _entry(_file(tmp_path / "moss", "cup.safetensors", {"voxprint.lora.base": "moss-image-base"}))
+    assert route_lora(moss, bases, ZIMAGE_TURBO_MDL_ID) == LoraRoute("", MOSS_LORA_BASE)
+    rejected = __import__("canvas.models.user_lora", fromlist=["retrain_rejection"]).retrain_rejection(
+        moss, bases, ZIMAGE_TURBO_MDL_ID
+    )
+    assert rejected is not None
+    assert rejected.code == CODE_RETRAIN
+
+
+def test_a_zimage_lora_on_moss_is_a_retrain(tmp_path: Path) -> None:
+    bases = (MOSS_IMAGE_SFT, ZIMAGE_TURBO_MDL_ID)
+    zimage = _entry(_file(tmp_path / "z", "cup.safetensors", {"voxprint.lora.base": "z-image"}))
+    assert route_lora(zimage, bases, MOSS_IMAGE_SFT) == LoraRoute("", FAMILY_ZIMAGE)
+    from canvas.models.user_lora import retrain_rejection
+
+    rejected = retrain_rejection(zimage, bases, MOSS_IMAGE_SFT)
+    assert rejected is not None
+    assert rejected.code == CODE_RETRAIN

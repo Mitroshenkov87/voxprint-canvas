@@ -1,10 +1,10 @@
 {
   "schema": 1,
   "diffusers": "0.41.0",
-  "default_text_base": "moss-image-sft",
+  "default_text_base": "z-image-turbo",
   "text_bases": [
-    "moss-image-sft",
-    "z-image-turbo"
+    "z-image-turbo",
+    "moss-image-sft"
   ],
   "sizes": {
     "qwen-image-2512": {
@@ -86,7 +86,7 @@
   "models": [
     {
       "id": "z-image-turbo-bf16-16gb",
-      "optional": true,
+      "optional": false,
       "role": "generator",
       "tier": "16gb",
       "repo": "Tongyi-MAI/Z-Image-Turbo",
@@ -678,6 +678,7 @@
     },
     {
       "id": "voxprint-moss-image-sft-compact",
+      "optional": true,
       "role": "generator",
       "tier": "16gb",
       "repo": "voxprint/moss-image-sft-compact",
@@ -703,7 +704,7 @@
       "min_vram_gb": 16,
       "status": "ready",
       "files": {},
-      "pin_note": "PENDING: compressed once by VOXPrint on the test VM; repo, revision and sha256 TBD; MDL will not download until pinned. Quant (fp8/int8/nf4, chosen by moss-prequant).",
+      "pin_note": "PENDING: compressed once by VOXPrint on the test VM; repo, revision and sha256 TBD; MDL will not download until pinned. The voxprint-common 0.7.0 index no longer lists moss-image-compressed; do not invent a hash or treat a removed placeholder as a pin. Quant (fp8/int8/nf4, chosen by moss-prequant).",
       "sources": [
         {
           "kind": "local",

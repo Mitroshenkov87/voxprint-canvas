@@ -47,7 +47,7 @@ BLOCKED = "This request cannot be completed."
 UNAVAILABLE = "Image generation is unavailable."
 EXIT_GATE_UNAVAILABLE = 4
 EXIT_MANIFEST = 5
-PASSES = {"16gb": ("z-image-turbo-bf16-16gb", "Z-Image-Turbo BF16 (16 GB group offload)"),
+PASSES = {"16gb": ("z-image-turbo-bf16-16gb", "Z-Image-Turbo BF16 (16 GB)"),
           "24gb": ("z-image-turbo-bf16", "Z-Image-Turbo BF16 (24 GB)")}
 ROOT = Path(__file__).resolve().parents[1]
 

@@ -22,7 +22,7 @@ Pictures, models, and the shared manifest stay in `%LOCALAPPDATA%\VOXPrint AI Su
 
 ## Requirements
 
-- **OS:** Windows 11 24H2 or newer, or a Linux distribution released in 2025 or later.
+- **OS:** Windows 11 24H2 or newer, or a Linux distribution released in 2024 or later (including Ubuntu 24.04 LTS).
 - **GPU:** NVIDIA GeForce RTX 40 series or newer, with 16 GB of memory (24 GB unlocks the larger plans). PCs without a supported NVIDIA GPU are not supported.
 - **Python:** 3.14 or newer, when running from source. The shipped runtime and required CI stay on 3.14. A non-blocking CI job probes 3.15.
 

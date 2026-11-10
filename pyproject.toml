@@ -24,9 +24,10 @@ dev = ["pytest>=8.3", "pytest-qt>=4.5", "ruff>=0.8", "mypy>=1.13", "opencv-pytho
 docs = ["mkdocs>=1.6,<2", "mkdocs-material>=9.5,<10", "mkdocstrings[python]>=0.26,<2"]
 # Generation and safety weights are not installed in CI. The worker imports them only when a pinned model is ready.
 gen = [
-    # The installer keeps an exact lock (torch 2.11.0+cu130, torchvision 0.26.0+cu130)
-    # in constraints.txt. A plain pip install of the gen extra must still resolve
-    # when a compatible newer CUDA wheel is already present (for example 2.14.1 / 0.29.2).
+    # The installer keeps the tested default (torch 2.11.0+cu130, torchvision 0.26.0+cu130)
+    # exact in constraints-cuda.txt; constraints.txt repeats these same ranges, so the
+    # two files cannot fight each other. A plain pip install of the gen extra must
+    # still resolve when a compatible newer CUDA wheel is already present (for example 2.14.1 / 0.29.2).
     "torch>=2.11,<2.15",
     "torchvision>=0.26,<0.30",
     "accelerate==1.15.0",

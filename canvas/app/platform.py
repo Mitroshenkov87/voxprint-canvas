@@ -1,4 +1,5 @@
 """OS and GPU requirements. Importing this module does not check the machine."""
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -7,6 +8,11 @@ from typing import Mapping
 from canvas.app.info import MIN_LINUX_YEAR, MIN_WINDOWS_BUILD
 from canvas.infra.gpu import GpuInfo
 from canvas.models.modes import Tier, select_tier
+
+# Set to exactly "1" to run on an unsupported Linux distribution. The check then
+# warns and continues instead of refusing. This override is Linux-only; it does
+# not bypass the Windows 11 24H2 requirement and it does not accept macOS.
+ALLOW_UNSUPPORTED_DISTRO_VAR = "VOXPRINT_ALLOW_UNSUPPORTED_DISTRO"
 
 
 @dataclass(frozen=True)
@@ -52,8 +58,18 @@ def linux_year(release: Mapping[str, str]) -> int | None:
     return None
 
 
+def _allow_unsupported_distro() -> bool:
+    """True only for the exact value ``"1"`` (surrounding whitespace is ignored)."""
+    return os.environ.get(ALLOW_UNSUPPORTED_DISTRO_VAR, "").strip() == "1"
+
+
 def check_platform(*, system: str, windows_build: int | None, linux_release: Mapping[str, str] | None) -> OsCheck:
-    """Windows 11 24H2+ or a 2025-or-later Linux. Other systems are refused."""
+    """Windows 11 24H2+ or a 2024-or-later Linux. Other systems are refused.
+
+    An unsupported Linux (unknown or pre-2024 release) still runs when
+    ``VOXPRINT_ALLOW_UNSUPPORTED_DISTRO=1`` is set; the check then returns ok
+    with a warning message instead of a refusal.
+    """
     if system == "Windows":
         if windows_build is None or windows_build < MIN_WINDOWS_BUILD:
             return OsCheck(False, "Windows 11 24H2 or newer is required.")
@@ -61,9 +77,16 @@ def check_platform(*, system: str, windows_build: int | None, linux_release: Map
     if system == "Linux":
         year = linux_year(linux_release or {})
         if year is None or year < MIN_LINUX_YEAR:
-            return OsCheck(False, "A Linux distribution from 2025 or later is required.")
+            if _allow_unsupported_distro():
+                return OsCheck(
+                    True,
+                    "Warning: this Linux distribution is unsupported; a distribution from "
+                    "2024 or later is required. Continuing anyway because "
+                    f"{ALLOW_UNSUPPORTED_DISTRO_VAR}=1 is set.",
+                )
+            return OsCheck(False, "A Linux distribution from 2024 or later is required.")
         return OsCheck(True, "")
-    return OsCheck(False, "Windows 11 24H2 or a 2025 Linux distribution is required.")
+    return OsCheck(False, "Windows 11 24H2 or a 2024 Linux distribution is required.")
 
 
 def check_gpu(info: GpuInfo | None) -> GpuCheck:

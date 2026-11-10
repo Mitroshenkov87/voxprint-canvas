@@ -42,6 +42,24 @@ def test_selftest_register_and_update(monkeypatch, tmp_path, capsys):
     assert capsys.readouterr().out.strip() == "v9.9.9"
 
 
+def test_preflight_os_check_prints_an_override_warning(monkeypatch, capsys):
+    from canvas.app.main import _preflight_os_check
+
+    warning = (
+        "Warning: this Linux distribution is unsupported; a distribution from "
+        "2024 or later is required. Continuing anyway because "
+        "VOXPRINT_ALLOW_UNSUPPORTED_DISTRO=1 is set."
+    )
+    monkeypatch.setattr("canvas.app.main.current_os_check", lambda: OsCheck(True, warning))
+    result = _preflight_os_check()
+    assert result.ok and result.message == warning
+    assert warning in capsys.readouterr().err
+    monkeypatch.setattr("canvas.app.main.current_os_check", lambda: OsCheck(True, ""))
+    silent = _preflight_os_check()
+    assert silent.ok and silent.message == ""
+    assert capsys.readouterr().err == ""
+
+
 def test_vram_cap_flag_selects_the_16gb_tier(monkeypatch, tmp_path):
     monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
     monkeypatch.setenv("VOXPRINT_FAKE_VRAM", "RTX 4090,24,20,8.9")

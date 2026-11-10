@@ -18,7 +18,7 @@ from canvas.app.branding import icon_path, set_app_user_model_id
 from canvas.app.identity import splash_line
 from canvas.app.i18n import text
 from canvas.app.info import APP_NAME, APP_VERSION, ENLARGE_NAME
-from canvas.app.platform import GpuCheck, check_gpu, current_os_check
+from canvas.app.platform import GpuCheck, OsCheck, check_gpu, current_os_check
 from canvas.app.updates import check_for_update
 from canvas.core.formats import parse_export_format, parse_format
 from canvas.safety.image import RawImage
@@ -387,6 +387,16 @@ def _emit(payload: dict[str, object], as_json: bool, code: int) -> int:
     return code
 
 
+def _preflight_os_check() -> OsCheck:
+    """The startup OS check. An ok result can still carry a warning (unsupported
+    Linux distro with VOXPRINT_ALLOW_UNSUPPORTED_DISTRO=1); that warning is
+    printed to stderr so it is not silently swallowed."""
+    result = current_os_check()
+    if result.ok and result.message:
+        print(result.message, file=sys.stderr)
+    return result
+
+
 def _load_rgb(path: Path) -> RawImage:
     """Read one RGB image from disk. PNG, JPEG, WebP, and AVIF are accepted as inputs."""
     from PIL import Image
@@ -420,7 +430,7 @@ def _generate(args: argparse.Namespace) -> int:
     chosen, stopped = _take_lora(args, as_json)
     if stopped is not None:
         return stopped
-    os_result = current_os_check()
+    os_result = _preflight_os_check()
     if not os_result.ok:
         return _emit({"ok": False, "error": os_result.message}, as_json, 2)
     gpu = check_gpu(probe_gpu())
@@ -512,7 +522,7 @@ def _photoshoot_bench(args: argparse.Namespace) -> int:
     """Time a 6-frame series on this machine. A missing GPU writes no duration."""
     _command_imports()
     as_json = bool(args.json)
-    os_result = current_os_check()
+    os_result = _preflight_os_check()
     if not os_result.ok:
         return _emit({"ok": False, "error": os_result.message}, as_json, 2)
     gpu = check_gpu(probe_gpu())
@@ -560,7 +570,7 @@ def _photoshoot(args: argparse.Namespace) -> int:
     chosen, stopped = _take_lora(args, as_json)
     if stopped is not None:
         return stopped
-    os_result = current_os_check()
+    os_result = _preflight_os_check()
     if not os_result.ok:
         return _emit({"ok": False, "error": os_result.message}, as_json, 2)
     gpu = check_gpu(probe_gpu())
@@ -628,7 +638,7 @@ def _batch(args: argparse.Namespace) -> int:
     chosen, stopped = _take_lora(args, as_json)
     if stopped is not None:
         return stopped
-    os_result = current_os_check()
+    os_result = _preflight_os_check()
     if not os_result.ok:
         return _emit({"ok": False, "error": os_result.message}, as_json, 2)
     gpu = check_gpu(probe_gpu())
@@ -812,7 +822,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     app = _application()
     splash = show_splash()
-    os_result = current_os_check()
+    os_result = _preflight_os_check()
     if not os_result.ok:
         splash.close()
         print(os_result.message, file=sys.stderr)

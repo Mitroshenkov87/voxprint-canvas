@@ -1,13 +1,20 @@
 """OS and GPU gates, and the installer tier hook."""
 from pathlib import Path
 
-from canvas.app.platform import check_gpu, check_platform, linux_year, read_os_release
+from canvas.app.platform import (
+    ALLOW_UNSUPPORTED_DISTRO_VAR,
+    check_gpu,
+    check_platform,
+    linux_year,
+    read_os_release,
+)
 from canvas.infra.gpu import GpuInfo
 from canvas.models.modes import Tier
 from canvas.models.tiers import main as tier_main
 
 
-def test_windows_and_linux_years():
+def test_windows_and_linux_years(monkeypatch):
+    monkeypatch.delenv(ALLOW_UNSUPPORTED_DISTRO_VAR, raising=False)
     assert check_platform(system="Windows", windows_build=26100, linux_release=None).ok
     assert check_platform(system="Windows", windows_build=26099, linux_release=None).ok is False
     assert check_platform(system="Windows", windows_build=None, linux_release=None).ok is False
@@ -17,9 +24,37 @@ def test_windows_and_linux_years():
     assert linux_year({"ID": "fedora", "VERSION_ID": "41"}) == 2024
     assert linux_year({"ID": "debian", "VERSION_ID": "13"}) is None
     assert check_platform(system="Linux", windows_build=None, linux_release={"ID": "ubuntu", "VERSION_ID": "25.04"}).ok
-    assert check_platform(system="Linux", windows_build=None, linux_release={"ID": "ubuntu", "VERSION_ID": "24.04"}).ok is False
+    assert check_platform(system="Linux", windows_build=None, linux_release={"ID": "ubuntu", "VERSION_ID": "24.04"}).ok
+    refused = check_platform(system="Linux", windows_build=None, linux_release={"ID": "ubuntu", "VERSION_ID": "22.04"})
+    assert refused.ok is False and "2024 or later" in refused.message
     assert check_platform(system="Linux", windows_build=None, linux_release={}).ok is False
     assert check_platform(system="Darwin", windows_build=None, linux_release=None).ok is False
+
+
+def test_allow_unsupported_distro_override(monkeypatch):
+    monkeypatch.setenv(ALLOW_UNSUPPORTED_DISTRO_VAR, "1")
+    old = check_platform(system="Linux", windows_build=None, linux_release={"ID": "ubuntu", "VERSION_ID": "22.04"})
+    assert old.ok
+    assert "VOXPRINT_ALLOW_UNSUPPORTED_DISTRO" in old.message
+    assert "unsupported" in old.message
+    assert "continuing anyway" in old.message.lower()
+    unknown = check_platform(system="Linux", windows_build=None, linux_release={"ID": "debian", "VERSION_ID": "13"})
+    assert unknown.ok and unknown.message
+    empty = check_platform(system="Linux", windows_build=None, linux_release={})
+    assert empty.ok and empty.message
+    # The override is Linux-only: Windows and macOS checks are unchanged.
+    assert check_platform(system="Windows", windows_build=26099, linux_release=None).ok is False
+    assert check_platform(system="Darwin", windows_build=None, linux_release=None).ok is False
+
+
+def test_allow_unsupported_distro_value_must_be_exactly_one(monkeypatch):
+    for value in ("", "0", "true", "yes", "01"):
+        monkeypatch.setenv(ALLOW_UNSUPPORTED_DISTRO_VAR, value)
+        assert check_platform(system="Linux", windows_build=None, linux_release={}).ok is False
+    # Whitespace around the value is stripped before the comparison.
+    monkeypatch.setenv(ALLOW_UNSUPPORTED_DISTRO_VAR, " 1 ")
+    allowed = check_platform(system="Linux", windows_build=None, linux_release={})
+    assert allowed.ok and "VOXPRINT_ALLOW_UNSUPPORTED_DISTRO" in allowed.message
 
 
 def test_gpu_tier_requirements():

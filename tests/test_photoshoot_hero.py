@@ -163,7 +163,7 @@ def test_a_person_series_anchors_at_the_default_strength(app, home: Path, tmp_pa
         assert kwargs["strength"] >= REFERENCE_MIN
         assert kwargs["image"].tobytes() == hero_pixels.tobytes()
         assert look in kwargs["prompt"]
-    assert all(look in row.full and row.full.count(look) == 1 for row in window.photoshoot.rows)
+    assert all(look in item.prompt and item.prompt.count(look) == 1 for item in window.photoshoot.script.items())
     folder = next((home / "state" / "pictures" / "series").iterdir())
     document = json.loads((folder / "series.json").read_text(encoding="utf-8"))
     assert document["appearance"] == ""

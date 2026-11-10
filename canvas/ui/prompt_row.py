@@ -69,6 +69,9 @@ def _parts(root):
     parts["mode"] = root.findChild(QCheckBox, "photoshootMode")
     parts["frames_label"] = root.findChild(QLabel, "photoshootFramesLabel")
     parts["frames"] = root.findChild(QWidget, "photoshootFrames")
+    parts["script"] = root.findChild(QPushButton, "photoshootScriptButton")
+    parts["progress"] = root.findChild(QLabel, "photoshootFrame")
+    parts["cancel"] = root.findChild(QPushButton, "photoshootCancel")
     return parts
 
 

@@ -88,7 +88,12 @@ def run_photoshoot(window: ShellWindow) -> bool:
         window.view.refresh()
         bar.sync()
         return False
+    from canvas.models.user_lora import clamp_strength, resolve_selected
     from canvas.ui.shell_screen import job_fields
+
+    # The same bound LoRA and strength the series draws with, for the script rows.
+    lora = resolve_selected(job.lora_path) if job.lora_path.strip() else None
+    bar.begin_series(lora, None if lora is None else clamp_strength(lora, job.lora_weight))
 
     series_id = uuid.uuid4().hex
     bar.folder = window.shell.state_dir / "pictures" / "series" / series_id
@@ -135,7 +140,7 @@ def run_photoshoot(window: ShellWindow) -> bool:
             found = data.get("index")
             index = found if isinstance(found, int) and not isinstance(found, bool) else -1
             status = str(data.get("status", ""))
-            total = max(len(bar.rows), 1)
+            total = max(bar.script.count, 1)
             if status == "drawing":
                 window._advance(index, total, tr("photoshoot.progress.frame", current=index + 1, total=total))
             bar.mark(index, status)
@@ -316,6 +321,7 @@ def _record_series(window: ShellWindow, result: SeriesOutcome, idea: str) -> boo
     refresh_pictures(window)
     window._series_folders[item_id] = str(result.folder)
     record_series(window.shell.state_dir, item_id, result.folder, result.kept, idea)
+    window.photoshoot.record_kept(item_id, result.kept)
     return True
 
 

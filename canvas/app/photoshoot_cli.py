@@ -37,7 +37,7 @@ from canvas.safety.gate import AgeGate
 from canvas.safety.image import RawImage
 from canvas.safety.inputs import ImageRole, PendingInput
 from canvas.models.user_lora import UserLora, apply_trigger
-from canvas.ui.shell_layout import PictureJob
+from canvas.ui.shell_layout import PictureJob, metadata_enabled
 from canvas.ui.styles import look_for
 
 _LOCALES = Path(__file__).resolve().parents[1] / "ui" / "locales"
@@ -141,6 +141,7 @@ def model_generate(
             adult_content=adult,
             lora_path="" if lora is None else str(lora.weights),
             lora_weight=lora_scale,
+            save_metadata=metadata_enabled(),
         )
         runner.img2img_strength = None if hero is None else strength
         fresh: tuple[PendingInput, ...] = ()
@@ -177,6 +178,7 @@ def model_generate(
     generate.sample = sample  # type: ignore[attr-defined]
     # The series reads it to put the trigger first on every shot line the gate reviews.
     generate.lora = lora  # type: ignore[attr-defined]
+    generate.lora_scale = lora_scale  # type: ignore[attr-defined]
     return generate
 
 

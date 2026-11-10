@@ -5,6 +5,7 @@ One-page map of the VOXPrint AI Canvas repository. Read this before touching cod
 ## Top level
 
 - `main.py` — thin shim calling `canvas.app.main:main`.
+- `canvas/__main__.py` — the same entry for `python -m canvas`.
 - `canvas/` — the application package (below).
 - `tests/` — pytest suite; `conftest.py` sets offscreen Qt and per-test isolation.
 - `tools/` — repo tooling (audit, icon, screen grabs, model-index check).
@@ -13,7 +14,7 @@ One-page map of the VOXPrint AI Canvas repository. Read this before touching cod
 - `docs/` — mkdocs guide, architecture notes, release notes.
 - `bakeoff/` — prompt bakeoff harness with its own requirements.
 - `assets/` — splash and icon art.
-- `pyproject.toml`, `constraints*.txt` — packaging and pinned dependencies (voxprint-common 0.7.0).
+- `pyproject.toml`, `constraints*.txt` — packaging and pinned dependencies (voxprint-common 0.7.1).
 - `mdl.json` — VOXPrint MDL manifest, generated from `canvas/models/catalog.json`.
 - `BUILD.json` — the only copy of version, channel, build and codename.
 

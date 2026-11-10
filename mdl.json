@@ -178,7 +178,10 @@
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/vae/diffusion_pytorch_model.safetensors"
           ]
         }
-      ]
+      ],
+      "label": "Z-Image Turbo for 16 GB cards",
+      "purpose": "The default model, sized to fit 16 GB graphics cards.",
+      "group": "generate"
     },
     {
       "id": "z-image-turbo-bf16-16gb-upstream",
@@ -359,7 +362,10 @@
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/vae/diffusion_pytorch_model.safetensors"
           ]
         }
-      ]
+      ],
+      "label": "Z-Image Turbo for 16 GB cards (full precision)",
+      "purpose": "The full-precision fallback when the BF16 weights cannot be opened.",
+      "group": "generate"
     },
     {
       "id": "z-image-turbo-bf16",
@@ -536,7 +542,10 @@
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/vae/diffusion_pytorch_model.safetensors"
           ]
         }
-      ]
+      ],
+      "label": "Z-Image Turbo (recommended)",
+      "purpose": "Fast, high-quality pictures from text; the default.",
+      "group": "generate"
     },
     {
       "id": "z-image-turbo-bf16-upstream",
@@ -717,7 +726,10 @@
             "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/vae/diffusion_pytorch_model.safetensors"
           ]
         }
-      ]
+      ],
+      "label": "Z-Image Turbo (full precision)",
+      "purpose": "The full-precision fallback when the BF16 weights cannot be opened.",
+      "group": "generate"
     },
     {
       "id": "z-image-creative-bf16",
@@ -887,7 +899,10 @@
             "https://huggingface.co/Tongyi-MAI/Z-Image/resolve/04cc4abb7c5069926f75c9bfde9ef43d49423021/vae/diffusion_pytorch_model.safetensors"
           ]
         }
-      ]
+      ],
+      "label": "Z-Image Creative",
+      "purpose": "Slower, more varied and artistic results.",
+      "group": "generate"
     },
     {
       "id": "z-image-turbo-fun-controlnet-union-bf16-lite",
@@ -906,7 +921,10 @@
             "https://huggingface.co/alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union-2.1/resolve/5155fc56d17821007d6f62ac192c09e0f0e72016/Z-Image-Turbo-Fun-Controlnet-Union-2.1-lite-2602-8steps.safetensors"
           ]
         }
-      ]
+      ],
+      "label": "Pose & edge guidance, lite",
+      "purpose": "The same guidance, sized for 16 GB cards.",
+      "group": "edit"
     },
     {
       "id": "z-image-turbo-fun-controlnet-union-bf16",
@@ -925,7 +943,10 @@
             "https://huggingface.co/alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union-2.1/resolve/5155fc56d17821007d6f62ac192c09e0f0e72016/Z-Image-Turbo-Fun-Controlnet-Union-2.1-2602-8steps.safetensors"
           ]
         }
-      ]
+      ],
+      "label": "Pose & edge guidance",
+      "purpose": "Follows a pose, edges or depth from a reference picture.",
+      "group": "edit"
     },
     {
       "id": "qwen3guard-gen-0.6b",
@@ -998,7 +1019,10 @@
             "https://huggingface.co/Qwen/Qwen3Guard-Gen-0.6B/resolve/fada3b2f655b89601929198343c94cd2f64d93cc/vocab.json"
           ]
         }
-      ]
+      ],
+      "label": "Prompt safety check",
+      "purpose": "Checks prompts before generating.",
+      "group": "safety"
     },
     {
       "id": "siglip2-so400m-patch14-384",
@@ -1071,7 +1095,10 @@
             "https://huggingface.co/google/siglip2-so400m-patch14-384/resolve/e8e487298228002f3d8a82e0cd5c8ea9c567f57f/tokenizer_config.json"
           ]
         }
-      ]
+      ],
+      "label": "Image safety check",
+      "purpose": "Checks input and output pictures.",
+      "group": "safety"
     },
     {
       "id": "yunet-face",
@@ -1089,7 +1116,10 @@
             "https://github.com/opencv/opencv_zoo/raw/47534e27c9851bb1128ccc0102f1145e27f23f98/models/face_detection_yunet/face_detection_yunet_2023mar.onnx"
           ]
         }
-      ]
+      ],
+      "label": "Face finder",
+      "purpose": "Finds faces for the safety and likeness checks.",
+      "group": "safety"
     },
     {
       "id": "fairface-age",
@@ -1126,7 +1156,10 @@
             "https://huggingface.co/dima806/fairface_age_image_detection/resolve/4e02ab8057ea7fd74b1670940995c5dfda3e6ec0/preprocessor_config.json"
           ]
         }
-      ]
+      ],
+      "label": "Age check",
+      "purpose": "Part of the adults-only check.",
+      "group": "safety"
     },
     {
       "id": "mivolo-v2-age",
@@ -1154,7 +1187,10 @@
             "https://huggingface.co/iitolstykh/mivolo_v2/resolve/53393526c220e34cdd7b722b36d22b6f9e5f4241/model.safetensors"
           ]
         }
-      ]
+      ],
+      "label": "Fine age check",
+      "purpose": "A closer age estimate used with the adults-only check.",
+      "group": "safety"
     },
     {
       "id": "nsfw-image-detection",
@@ -1191,7 +1227,10 @@
             "https://huggingface.co/Falconsai/nsfw_image_detection/resolve/96cb0d0342c7afb80cab76ecc58b265fa44da256/preprocessor_config.json"
           ]
         }
-      ]
+      ],
+      "label": "Content check",
+      "purpose": "Classifies picture content for the 18+ setting.",
+      "group": "safety"
     },
     {
       "id": "qwen3-4b-writer",
@@ -1298,7 +1337,10 @@
           ]
         }
       ],
-      "display_name": "Huihui Qwen3 4B Instruct 2507 (scenario writer)"
+      "display_name": "Huihui Qwen3 4B Instruct 2507 (scenario writer)",
+      "label": "Photoshoot writer (Qwen3 4B)",
+      "purpose": "Writes the shot list for Photoshoot series.",
+      "group": "writer"
     }
   ],
   "pending": [

@@ -87,7 +87,8 @@ def _primary_urls(spec: ModelSpec, name: str) -> list[str]:
 
 
 def _entry(model_id: str, version: str, tier: str, files: list[dict[str, object]], *,
-           optional: bool, licence: str, source: str, display_name: str = "") -> dict[str, object]:
+           optional: bool, licence: str, source: str, display_name: str = "",
+           label: str = "", purpose: str = "", group: str = "") -> dict[str, object]:
     row: dict[str, object] = {
         "id": model_id,
         "version": version,
@@ -99,6 +100,12 @@ def _entry(model_id: str, version: str, tier: str, files: list[dict[str, object]
     }
     if display_name:
         row["display_name"] = display_name
+    if label:
+        row["label"] = label
+    if purpose:
+        row["purpose"] = purpose
+    if group:
+        row["group"] = group
     return row
 
 
@@ -128,7 +135,10 @@ def build(catalog: Catalog | None = None) -> dict[str, object]:
         optional = spec.optional or spec.id in OPTIONAL_IDS or spec.id not in defaults
         models.append(_entry(spec.id, spec.revision, _tier(spec), files,
                              optional=optional, licence=spec.licence, source="primary",
-                             display_name=spec.display_name))
+                             display_name=spec.display_name,
+                             label=str(row.get("label") or ""),
+                             purpose=str(row.get("purpose") or ""),
+                             group=str(row.get("group") or "")))
         fallback = row.get("fallback")
         if fallback:
             revision = str(fallback["revision"])
@@ -139,7 +149,11 @@ def build(catalog: Catalog | None = None) -> dict[str, object]:
                     raise ValueError(f"{spec.id}/{name} has no fallback address")
                 extra.append({"path": name, "size": int(meta["size"]), "sha256": meta["sha256"], "mirrors": urls})
             models.append(_entry(f"{spec.id}-upstream", revision, _tier(spec), extra,
-                                 optional=True, licence=spec.licence, source="fallback"))
+                                 optional=True, licence=spec.licence, source="fallback",
+                                 display_name=str(fallback.get("display_name") or ""),
+                                 label=str(fallback.get("label") or ""),
+                                 purpose=str(fallback.get("purpose") or ""),
+                                 group=str(fallback.get("group") or row.get("group") or "")))
     return {
         "schema": 1,
         "app": "canvas",

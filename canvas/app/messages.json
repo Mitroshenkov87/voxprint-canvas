@@ -829,6 +829,33 @@
     },
     "canvas.file.folder": {
       "en": "Folder"
+    },
+    "canvas.model.section.compact": {
+      "en": "For 16 GB cards (compact)"
+    },
+    "canvas.model.section.full": {
+      "en": "Full size (24 GB+)"
+    },
+    "canvas.model.badge.compact": {
+      "en": "16 GB"
+    },
+    "canvas.model.badge.full": {
+      "en": "24 GB+"
+    },
+    "canvas.model.show_others": {
+      "en": "Show models for other cards"
+    },
+    "canvas.model.hide_others": {
+      "en": "Hide models for other cards"
+    },
+    "canvas.model.pick_tip": {
+      "en": "The installed model that draws a picture made from text."
+    },
+    "canvas.generate_model": {
+      "en": "Generate model"
+    },
+    "canvas.generate_model.help": {
+      "en": "The installed model that draws pictures made from text."
     }
   }
 }

@@ -40,6 +40,7 @@ from canvas.models.user_lora import (
     FORGE_BASE_ID,
     LoraRejected,
     UserLora,
+    apply_bound_lora,
     apply_trigger,
     cli_scale,
     prepare_cli_lora,
@@ -185,7 +186,7 @@ def _parser() -> argparse.ArgumentParser:
         default=argparse.SUPPRESS,
         help="plan as if the GPU had this many GB (CANVAS_VRAM_CAP_GB)",
     )
-    generate.add_argument("--lora", default="", help="LoRA .safetensors file, .voxlora package, add-on folder, or imported LoRA name")
+    generate.add_argument("--lora", default="", help="LoRA .safetensors file, .voxlora package, add-on folder, imported id, or voxprint-model.json alias")
     generate.add_argument("--lora-scale", type=float, default=None, help="LoRA strength, from 0 to 2; the LoRA default when omitted")
     _gpu_argument(generate, argparse.SUPPRESS)
     generate.add_argument("--json", action="store_true")
@@ -250,7 +251,7 @@ def _parser() -> argparse.ArgumentParser:
         default=argparse.SUPPRESS,
         help="plan as if the GPU had this many GB (CANVAS_VRAM_CAP_GB)",
     )
-    photoshoot.add_argument("--lora", default="", help="LoRA .safetensors file, .voxlora package, add-on folder, or imported LoRA name")
+    photoshoot.add_argument("--lora", default="", help="LoRA .safetensors file, .voxlora package, add-on folder, imported id, or voxprint-model.json alias")
     photoshoot.add_argument("--lora-scale", type=float, default=None, help="LoRA strength, from 0 to 2; the LoRA default when omitted")
     photoshoot.add_argument(
         "--vram-trace",
@@ -302,7 +303,7 @@ def _parser() -> argparse.ArgumentParser:
         default=argparse.SUPPRESS,
         help="plan as if the GPU had this many GB (CANVAS_VRAM_CAP_GB)",
     )
-    batch.add_argument("--lora", default="", help="LoRA .safetensors file, .voxlora package, add-on folder, or imported LoRA name")
+    batch.add_argument("--lora", default="", help="LoRA .safetensors file, .voxlora package, add-on folder, imported id, or voxprint-model.json alias")
     batch.add_argument("--lora-scale", type=float, default=None, help="LoRA strength, from 0 to 2; the LoRA default when omitted")
     batch.add_argument(
         "--vram-trace",
@@ -509,12 +510,23 @@ def _generate(args: argparse.Namespace) -> int:
             generator.seed = used_seed
             generator.models = root
             if chosen is not None:
-                generator.lora_path = str(chosen[0].weights)
-                generator.lora_strength = chosen[1]
-                generator.bound_lora = chosen[0]
+                apply_bound_lora(chosen[0], chosen[1], holder=generator)
             pipeline = Pipeline(gate, generator, gpu.tier, use_gpu_lock=True, catalog=catalog, enlarge=EnlargeClient())
             fresh = _inputs(args, mode)
-            pipeline.export(active, mode, fresh, path, fmt, aspect=args.aspect, output=output, seed=used_seed)
+            from canvas.core.picture_meta import picture_fields
+            from canvas.ui.shell_layout import metadata_enabled
+            meta = picture_fields(
+                prompt=active,
+                seed=used_seed,
+                save_metadata=metadata_enabled(),
+                lora=None if chosen is None else chosen[0],
+                lora_path="" if chosen is None else str(chosen[0].weights),
+                lora_weight=0.7 if chosen is None else chosen[1],
+            )
+            pipeline.export(
+                active, mode, fresh, path, fmt, aspect=args.aspect, output=output,
+                seed=used_seed, metadata=meta,
+            )
     except LoraRejected as exc:
         return _emit_lora(exc.code, as_json, **exc.details)
     except GpuLockTimeout as exc:

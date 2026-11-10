@@ -173,16 +173,20 @@ class Pipeline:
 
     def export(self, prompt: str, mode: Mode, inputs: Sequence[PendingInput], path, fmt: OutputFormat = DEFAULT_FORMAT, *,
                aspect: str = "1:1", output: str = "native", probe: PeakVramProbe | None = None,
-               seed: int | None = None) -> None:
+               seed: int | None = None, metadata: dict | None = None) -> None:
         """Generate and save. A refusal writes nothing.
 
-        A given ``seed`` is written into the saved picture as its only metadata field.
+        ``metadata`` is written when given. Otherwise a given ``seed`` is the
+        only metadata field.
         """
+        from canvas.core.picture_meta import merge_metadata
+
         image = self.generate(prompt, mode, inputs, aspect=aspect, output=output, probe=probe)
+        fields = merge_metadata(metadata, seed)
         if fmt in FORGE_EXPORTS:
-            handoff_image(image, path, fmt, seed=seed)
+            handoff_image(image, path, fmt, seed=seed, metadata=fields)
             return
-        save_image(image, path, fmt, metadata=None if seed is None else {"seed": int(seed)})
+        save_image(image, path, fmt, metadata=fields)
 
     def _frame(self, mode: Mode, aspect: str, twok: bool) -> tuple[int | None, int | None]:
         catalog = getattr(self.generator, "catalog", None) or self.catalog

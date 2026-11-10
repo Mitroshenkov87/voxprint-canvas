@@ -70,17 +70,17 @@ def test_a_lora_load_error_names_the_real_cause(tmp_path: Path) -> None:
 
     transformer = types.SimpleNamespace(load_lora_adapter=fail, set_adapters=lambda *a, **k: None)
     lora = types.SimpleNamespace(weights=tmp_path / "a.safetensors", default_strength=1.0)
-    original = runtime.apply_lora
+    original = runtime.apply_bound_lora
 
-    def apply(t, chosen, strength):
-        t.load_lora_adapter(str(chosen.weights), adapter_name="user")
+    def apply(chosen, strength, holder=None, transformer=None):
+        transformer.load_lora_adapter(str(chosen.weights), adapter_name="user")
 
-    runtime.apply_lora = apply
+    runtime.apply_bound_lora = apply
     try:
         with pytest.raises(runtime.LoraLoadError) as caught:
             runtime._apply_lora_reported(transformer, lora, 1.0)
     finally:
-        runtime.apply_lora = original
+        runtime.apply_bound_lora = original
     message = str(caught.value)
     assert "ModuleNotFoundError" in message and "peft" in message
     assert "fit" not in message.lower()

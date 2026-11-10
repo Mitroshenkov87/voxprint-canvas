@@ -51,10 +51,10 @@ def test_saving_overlaps_the_next_render_and_follows_the_check(tmp_path: Path, m
     order: list[str] = []
     real_store = series._store_frame
 
-    def slow_store(folder: Path, index: int, released: object, container: object) -> Path:
+    def slow_store(folder: Path, index: int, released: object, container: object, metadata=None) -> Path:
         time.sleep(0.05)
         order.append(f"save{index}")
-        return real_store(folder, index, released, container)  # type: ignore[arg-type]
+        return real_store(folder, index, released, container, metadata=metadata)  # type: ignore[arg-type]
 
     monkeypatch.setattr(series, "_store_frame", slow_store)
     gate = World().gate()
@@ -164,9 +164,9 @@ def test_gate_weights_are_parked_before_the_frame_is_saved(tmp_path: Path, monke
     real_store = series._store_frame
     real_release = series.release_gate_weights
 
-    def store(folder: Path, index: int, released: object, container: object) -> Path:
+    def store(folder: Path, index: int, released: object, container: object, metadata=None) -> Path:
         order.append(f"save{index}")
-        return real_store(folder, index, released, container)  # type: ignore[arg-type]
+        return real_store(folder, index, released, container, metadata=metadata)  # type: ignore[arg-type]
 
     def release(gate: object) -> None:
         order.append("park")

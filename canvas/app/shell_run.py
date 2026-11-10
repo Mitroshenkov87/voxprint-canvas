@@ -14,7 +14,7 @@ from canvas.infra.errors import note_crash
 from canvas.infra.gpu_lock import GpuLockTimeout, lock_path, release, try_acquire
 from canvas.infra.paths import models_dir
 from canvas.models.loader import ModelNotReady, ZImageGenerator, plan_specs
-from canvas.models.user_lora import LoraRejected, UserLora, retrain_rejection, route_lora
+from canvas.models.user_lora import LoraRejected, UserLora, apply_bound_lora, retrain_rejection, route_lora
 from canvas.models.mdl_registry import selectable
 from canvas.models.modes import Tier
 from canvas.models.plan import BaseNotSelected, ModeUnavailable, OptionalModelUnavailable, build_plan
@@ -234,9 +234,13 @@ class ShellRunner:
         catalog = load_catalog()
         generator = ZImageGenerator(catalog, self.tier)
         generator.seed = job.seed
+        generator.model_id = job.model_id or None
         generator.lora_path = job.lora_path
         generator.lora_strength = job.lora_weight
         generator.bound_lora = self.bound_lora
+        if self.bound_lora is not None:
+            strength = self.lora_strength if self.lora_strength is not None else job.lora_weight
+            apply_bound_lora(self.bound_lora, strength, holder=generator)
         generator.negative_prompt = job.negative
         if self.img2img_strength is not None:
             generator.img2img_strength = self.img2img_strength

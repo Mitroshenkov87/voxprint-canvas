@@ -10,7 +10,7 @@ import pytest
 pytest.importorskip("PySide6")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QAbstractSpinBox, QApplication, QCheckBox, QLabel, QLineEdit, QPushButton, QSpinBox
+from PySide6.QtWidgets import QAbstractSpinBox, QApplication, QCheckBox, QLabel, QLineEdit, QPushButton, QSpinBox, QWidget
 
 from canvas.models.modes import Mode, Tier
 from canvas.safety.gate import SafetyUnavailable
@@ -125,8 +125,9 @@ def test_progress_uses_the_chosen_frame_count(app, home: Path, monkeypatch) -> N
     window.findChild(QSpinBox, "photoshootFrames").setValue(4)
     window.findChild(QPushButton, "generate").click()
     settle(window)
-    lines = window.findChildren(QLabel, "photoshootLine")
-    assert len(lines) == 4
+    rows = window.findChildren(QWidget, "photoshootScriptRow")
+    assert len(rows) == 4
+    assert window.photoshoot.script_window.isVisible()
     assert window.findChild(QLabel, "photoshootFrame").text() == "Shot 4 of 4"
 
 
@@ -172,9 +173,10 @@ def test_generate_writes_a_read_only_series(app, home: Path, monkeypatch) -> Non
         for prompt in prompts
     )
     assert all(IDEA in prompt for prompt in prompts)
-    lines = window.findChildren(QLabel, "photoshootLine")
+    lines = window.findChildren(QWidget, "photoshootScriptRow")
     assert len(lines) == 6
-    assert all(label.isVisible() for label in lines)
+    assert all(row.isVisible() for row in lines)
+    assert window.photoshoot.script_window.isVisible()
     assert window.findChild(QLineEdit, "photoshootCamera") is None
     assert window.findChild(QPushButton, "generate").isVisible()
     assert (home / "state" / "pictures" / "series").exists()
@@ -233,7 +235,7 @@ def test_a_blocked_frame_is_labelled_and_is_not_the_hero(app, home: Path, monkey
     window.findChild(QCheckBox, "photoshootMode").click()
     window.findChild(QPushButton, "generate").click()
     settle(window)
-    labels = [label.text() for label in window.findChildren(QLabel, "photoshootLine")]
+    labels = [label.text() for label in window.findChildren(QLabel, "photoshootScriptStatus")]
     assert any("Shot blocked" in text for text in labels)
     assert modes[0] is Mode.TEXT
     assert all(mode is Mode.TEXT for mode in modes)

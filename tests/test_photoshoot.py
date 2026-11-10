@@ -1032,6 +1032,16 @@ def test_each_frame_keeps_one_listed_outfit_and_covers_the_list(tmp_path: Path) 
     assert seen_places == set(_PLACES)
 
 
+def test_writer_system_prompt_has_the_natural_pose_rule() -> None:
+    from canvas.pipeline.adult_direction import scenario_system
+
+    for text in (SYSTEM_PROMPT, scenario_system(SYSTEM_PROMPT, False), scenario_system(SYSTEM_PROMPT, True)):
+        assert "natural, anatomically plausible, stable pose" in text
+        assert "standing, sitting, leaning, lying or walking" in text
+        assert "No acrobatics, contortions" in text
+        assert "Do not soften or rewrite adult content." in text
+
+
 def test_scenario_token_budget_follows_the_frame_count() -> None:
     assert scenario_token_budget(1) == TOKENS_PER_FRAME
     assert scenario_token_budget(5) == 5 * TOKENS_PER_FRAME

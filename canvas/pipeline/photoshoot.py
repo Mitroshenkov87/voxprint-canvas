@@ -47,6 +47,7 @@ Rules:
 - place: the location, a few words.
 - Do not write an age in a line. Do not add people who are not in the idea. Do not add youthful descriptors.
 - Add age or skin descriptors (mature, middle-aged, older, wrinkles, smile lines, laugh lines, crow's feet, grey hair) only when every stated age in the idea is {AGING_DESCRIPTOR_MIN_AGE} or older; otherwise do not add them. Never add youthful-appearance descriptors (young-looking, petite, smooth skin, round face).
+- When the subject is a person, every scene must describe a natural, anatomically plausible, stable pose that a real model would hold in a photoshoot: standing, sitting, leaning, lying or walking, with natural hand placement. No acrobatics, contortions, impossible limb positions or extreme twists. Open or revealing poses follow the same rule: they stay natural, not gymnastic.
 - Do not soften or rewrite adult content.
 - One scene only. Do not write a collage, a grid, panels, a sequence, a series of views, or a before/after.
 - Keep each line under 18 words.

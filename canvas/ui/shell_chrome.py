@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QSplitter,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -214,9 +215,9 @@ def mount(window):
     layout.setContentsMargins(12, 4, 12, 4)
     layout.setSpacing(8)
     _toolbar(window, view._top)
-    _adult_box(window, view._top)
-    _seed_box(window, view._top)
     layout.addWidget(view.root, 1)
+    _seed_box(window, layout)
+    _more_section(window, layout)
     footer = QLabel(text("notice.responsibility"))
     footer.setObjectName("footer")
     footer.setWordWrap(True)
@@ -366,8 +367,59 @@ def _toolbar(window, row):
     window._mask_button = mask
 
 
+def _seed_box(window, column):
+    """Put the Random seed toggle at the bottom of the Simple panel, on by default.
+
+    On means every picture (and every copy) gets a new random seed. Off locks
+    the last seed so it repeats. It writes only the seed lock, never Expert mode.
+    The Expert seed field and lock stay in the Expert side panel; they do not
+    share this Simple column.
+    """
+    box = QCheckBox(tr("canvas.seed.box"))
+    box.setObjectName("seedDice")
+    box.setToolTip(tr("canvas.seed.tip"))
+    box.setChecked(not window.shell.layout.seed_locked())
+    box.clicked.connect(lambda checked=False: _set_seed_lock(window, not checked))
+    box.toggled.connect(lambda checked: _set_seed_lock(window, not checked))
+    window.shell.layout.on_seed_lock_change(lambda _value: _sync_seed_box(window))
+    column.addWidget(box)
+    window._seed_box = box
+
+
+def _more_section(window, column):
+    """A collapsed More disclosure at the bottom of the Simple panel.
+
+    The 18+ box lives inside it, so it is not shown in the main panel until
+    the section is opened. The section starts collapsed on every open.
+    """
+    toggle = QToolButton()
+    toggle.setObjectName("simpleMore")
+    toggle.setText(tr("canvas.more.section"))
+    toggle.setCheckable(True)
+    toggle.setChecked(False)
+    toggle.setAutoRaise(True)
+    toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+    toggle.setArrowType(Qt.ArrowType.RightArrow)
+    body = QWidget()
+    body.setObjectName("simpleMoreBody")
+    inner = QVBoxLayout(body)
+    inner.setContentsMargins(16, 0, 0, 0)
+    inner.setSpacing(4)
+    _adult_box(window, inner)
+    body.hide()
+
+    def opened(on: bool) -> None:
+        body.setVisible(bool(on))
+        toggle.setArrowType(Qt.ArrowType.DownArrow if on else Qt.ArrowType.RightArrow)
+
+    toggle.toggled.connect(opened)
+    column.addWidget(toggle)
+    column.addWidget(body)
+    window._simple_more = toggle
+
+
 def _adult_box(window, row):
-    """Put the 18+ box on the top bar in Simple mode.
+    """Put the 18+ box in the Simple More section.
 
     It reads and writes only the stored 18+ setting through the layout. It
     never touches Expert mode, and Expert on or off leaves it where it is.
@@ -381,25 +433,8 @@ def _adult_box(window, row):
     box.clicked.connect(lambda checked=False: _set_adult(window, bool(checked)))
     box.toggled.connect(lambda checked: _set_adult(window, checked))
     window.shell.layout.on_adult_change(lambda _value: _sync_adult_box(window))
-    row.insertWidget(0, box)
+    row.addWidget(box)
     window._adult_box = box
-
-
-def _seed_box(window, row):
-    """Put the Random seed toggle on the top bar in Simple mode, on by default.
-
-    On means every picture (and every copy) gets a new random seed. Off locks
-    the last seed so it repeats. It writes only the seed lock, never Expert mode.
-    """
-    box = QCheckBox(tr("canvas.seed.box"))
-    box.setObjectName("seedDice")
-    box.setToolTip(tr("canvas.seed.tip"))
-    box.setChecked(not window.shell.layout.seed_locked())
-    box.clicked.connect(lambda checked=False: _set_seed_lock(window, not checked))
-    box.toggled.connect(lambda checked: _set_seed_lock(window, not checked))
-    window.shell.layout.on_seed_lock_change(lambda _value: _sync_seed_box(window))
-    row.insertWidget(1, box)
-    window._seed_box = box
 
 
 def _set_seed_lock(window, locked):

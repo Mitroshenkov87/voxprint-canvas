@@ -41,7 +41,7 @@ from canvas.models.mdl_registry import selectable
 from canvas.models.forge_retrain import request_retrain
 from canvas.models.lora_library import LibraryEntry
 from canvas.models.user_lora import LoraIndex, UserLora, chip_word, discover, installed_loras, resolve_selected, route_lora
-from canvas.ui.lora_panel import ImportedDialog, LibraryDialog, dark, import_with_dialog, library_loras
+from canvas.ui.lora_panel import ImportedDialog, LibraryDialog, dark, import_with_dialog
 from canvas.models.modes import Mode, Tier
 from canvas.models.sizes import closest_aspect
 from canvas.ui.about import AboutDialog

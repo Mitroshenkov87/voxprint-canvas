@@ -3,7 +3,7 @@
 Improve with its back segment, Proportions and Image size share a centred
 line that wraps when the panel is narrow. The large Generate button sits
 centred under them, and the Photoshoot option is centred under Generate with
-Frames beside it."""
+Frames, the Script button, progress and Cancel beside it."""
 from __future__ import annotations
 
 from PySide6.QtCore import QSize, Qt
@@ -63,14 +63,17 @@ def build(window, parts) -> QWidget:
     column.addWidget(generate, 0, Qt.AlignmentFlag.AlignHCenter)
     mode = parts["mode"]
     if mode is not None:
-        column.addWidget(_photoshoot_line(mode, parts["frames_label"], parts["frames"]))
+        column.addWidget(_photoshoot_line(
+            mode, parts["frames_label"], parts["frames"],
+            parts.get("script"), parts.get("progress"), parts.get("cancel"),
+        ))
     window._action_row = host
     window._action_options = options
     return host
 
 
-def _photoshoot_line(mode, label, frames) -> QWidget:
-    """The Photoshoot checkbox centred on Generate, with Frames on its right."""
+def _photoshoot_line(mode, label, frames, script=None, progress=None, cancel=None) -> QWidget:
+    """The Photoshoot checkbox centred on Generate, with Frames and script controls on its right."""
     line = QWidget()
     line.setObjectName("photoshootOption")
     row = QHBoxLayout(line)
@@ -83,9 +86,12 @@ def _photoshoot_line(mode, label, frames) -> QWidget:
     beside = QHBoxLayout(side)
     beside.setContentsMargins(0, 0, 0, 0)
     beside.setSpacing(8)
-    for widget in (label, frames):
+    for widget in (label, frames, script, progress, cancel):
         if widget is not None:
-            widget.setFixedHeight(HEIGHT if widget is frames else widget.sizeHint().height())
+            if widget is progress:
+                widget.setFixedHeight(widget.sizeHint().height())
+            else:
+                widget.setFixedHeight(HEIGHT)
             beside.addWidget(widget)
     beside.addStretch(1)
     # Two equal sides keep the checkbox on the centre line whether Frames shows or not.

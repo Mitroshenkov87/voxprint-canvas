@@ -245,6 +245,9 @@ def test_the_script_button_reopens_the_same_window(app, home: Path, monkeypatch)
     assert bar.script.count == 6
     assert button.isVisible()
     assert button.text() == "Script (6)"
+    host = window.findChild(QWidget, "photoshootOption")
+    assert host is not None
+    assert host.isAncestorOf(button)
     # Reopen: same window, same model.
     button.click()
     app.processEvents()

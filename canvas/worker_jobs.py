@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import json
 import os
-import random
 import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, field
@@ -24,6 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 from voxprint_common.worker import JobCancelled, JobContext
 
+from canvas.core.seeds import SEED_MAX, as_seed, fresh_seed
 from canvas.ipc.schema import PROTO, encode_event, refused, reply
 
 if TYPE_CHECKING:
@@ -326,7 +326,9 @@ def _generate(ctx: JobContext, current: Session, payload: Mapping[str, object]) 
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{item_id}{extension(job.fmt)}"
     save_image(safe, path, job.fmt, metadata=_picture_metadata(job))
-    return reply("generate", item_id=item_id, path=str(path), width=int(safe.width), height=int(safe.height))
+    return reply(
+        "generate", item_id=item_id, path=str(path), width=int(safe.width), height=int(safe.height), seed=int(job.seed),
+    )
 
 
 def _improve(ctx: JobContext, current: Session, payload: Mapping[str, object]) -> dict[str, object]:
@@ -438,8 +440,10 @@ def _series(ctx: JobContext, current: Session, payload: Mapping[str, object]) ->
     style = str(payload.get("style") or "photo")
     template = str(payload.get("template") or "")
     suffix = str(payload.get("suffix") or "")
-    seed_mode = str(payload.get("seed_mode") or "series")
-    base_seed = _whole(payload.get("seed"))
+    seed_mode = str(payload.get("seed_mode") or "random")
+    # No base seed given: the series draws a fresh one, so the wording choices vary too.
+    given = as_seed(payload.get("seed"))
+    base_seed = fresh_seed() if given is None else given
     adult = bool(payload.get("adult"))
     series_id = str(payload.get("series_id"))
     session_dir = Path(str(payload.get("out_dir")))
@@ -534,6 +538,7 @@ def _series(ctx: JobContext, current: Session, payload: Mapping[str, object]) ->
             raise _Halt(str(exc), unavailable=True) from exc
 
     generate.prepare = prepare  # type: ignore[attr-defined]
+    generate.used_seed = lambda planned: seeds.get(planned, planned)  # type: ignore[attr-defined]
     generate.sample = sample  # type: ignore[attr-defined]
     # The series puts the trigger first on every shot line before the gate reviews it.
     generate.lora = lora  # type: ignore[attr-defined]
@@ -610,6 +615,10 @@ def _series(ctx: JobContext, current: Session, payload: Mapping[str, object]) ->
         "kept": [path.name for path in result.kept],
         "hero_released": hero_released,
         "hero_reason": hero_reason,
+        # Every frame's seed, in draw order, and the series base.
+        "seeds": list(seeds.values()),
+        "seed": base_seed,
+        "seed_mode": seed_mode,
     }
     if ctx.cancelled():
         # The host drops a cancelled job's return value. The same fields go to a noted file instead.
@@ -639,17 +648,26 @@ def _writer_session(current: Session, adult: bool, note: Callable[[str], None]):
 
 
 def _series_seed(mode: str, base: int, series_seed: int) -> int:
+    """The seed one shot really uses.
+
+    ``random`` (the default) draws a fresh seed per shot. ``series`` counts up
+    from the locked base, ``locked`` repeats the base on every shot.
+    """
     if mode == "series":
-        return series_seed
+        return series_seed % (SEED_MAX + 1)
     if mode == "locked":
         return base
     if mode == "random":
-        return random.SystemRandom().randrange(1, 2**31)
+        return fresh_seed()
     raise ValueError(mode)
 
 
 def _picture_metadata(job: PictureJob) -> dict[str, Any]:
-    """Metadata recorded on one saved picture, in the shared schema. Empty when the job turned it off.
+    """Metadata recorded on one saved picture, in the shared schema.
+
+    With full metadata off the picture still carries its ``seed`` and nothing
+    else: no prompt, model, steps or LoRA. With it on, ``seed`` sits in the
+    full block.
 
     ``seed`` and ``steps`` are integers, the LoRA strength is a float, and a
     resolved LoRA is listed under ``loras`` with only the fields that are
@@ -657,7 +675,7 @@ def _picture_metadata(job: PictureJob) -> dict[str, Any]:
     stops the picture; its raw strength field is recorded instead.
     """
     if not job.save_metadata:
-        return {}
+        return {"seed": int(job.seed)}
     from canvas.models.user_lora import clamp_strength, resolve_selected, running_base_id
 
     fields: dict[str, Any] = {

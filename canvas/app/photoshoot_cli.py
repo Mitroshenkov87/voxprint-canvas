@@ -11,6 +11,7 @@ from canvas.app.i18n import text
 from canvas.app.info import ENLARGE_NAME
 from canvas.app.shell_run import RunStopped, ShellRunner
 from canvas.core.formats import EXPORT_FORMAT, OutputFormat, extension
+from canvas.core.seeds import SeedPlan, fresh_seed
 from canvas.infra.enlarge import EnlargeClient
 from canvas.infra.paths import models_dir
 from canvas.models.loader import ModelNotReady
@@ -184,7 +185,7 @@ def run_command(
     idea: str,
     folder: Path,
     frames: int,
-    seed: int,
+    seed: int | None,
     style: str,
     places: str,
     adult: bool,
@@ -195,6 +196,7 @@ def run_command(
     timings: StageTimes | None = None,
     container: OutputFormat | None = None,
     negative: str = "",
+    seed_mode: str = "series",
 ) -> tuple[dict[str, object], int]:
     """Run one series into ``folder`` and describe what was written.
 
@@ -202,7 +204,7 @@ def run_command(
         idea: Theme or idea.
         folder: Directory for the frames and ``scenario.txt``.
         frames: How many frames were requested.
-        seed: First frame seed.
+        seed: First frame seed. None draws a fresh random seed for every frame.
         style: Look id. Scenario text uses photo, cinematic, or portrait.
         places: ``same`` or ``different``.
         adult: Use the Expert adult-content prompt policy.
@@ -214,6 +216,8 @@ def run_command(
         container: Forge export format. PNG when omitted. AVIF stays available.
         negative: Negative prompt. It is checked like the prompt before anything is
             generated; a refusal stops the command like a refused prompt.
+        seed_mode: With a ``seed``: ``series`` counts up from it, ``locked`` repeats it.
+            Without a seed every frame is random.
     """
     catalogs()
     if frames < 1 or frames > MAX_FRAMES:
@@ -222,7 +226,7 @@ def run_command(
     body, code = _run_command(
         idea=idea, folder=folder, frames=frames, seed=seed, style=style, places=places, adult=adult,
         age_gate=age_gate, rewrite=rewrite, generate=generate, strength=strength, clock=clock,
-        container=container, negative=negative,
+        container=container, negative=negative, seed_mode=seed_mode,
     )
     body["timings"] = clock.summary()
     note_timing(clock.log_line())
@@ -230,11 +234,16 @@ def run_command(
 
 
 def _run_command(
-    *, idea: str, folder: Path, frames: int, seed: int, style: str, places: str, adult: bool,
+    *, idea: str, folder: Path, frames: int, seed: int | None, style: str, places: str, adult: bool,
     age_gate: AgeGate, rewrite: Callable[[str], str],
     generate: Callable[[str, int, SeriesFrame | None, float | None], SeriesFrame | None],
     strength: float | None, clock: StageTimes, container: OutputFormat | None, negative: str = "",
+    seed_mode: str = "series",
 ) -> tuple[dict[str, object], int]:
+    # No seed given: a fresh base for the wording and a fresh random seed per frame.
+    plan = SeedPlan("random" if seed is None else seed_mode, fresh_seed() if seed is None else seed)
+    seed = plan.base
+    generate = plan.wrap(generate)
     fmt = EXPORT_FORMAT if container is None else container
     scenario_style = style if style in _SCENARIO_STYLES else "photo"
     held: dict[str, Scenario] = {}
@@ -282,7 +291,7 @@ def _run_command(
     shots = _shot_rows(
         scenario, statuses, result.kept,
         "internal" if result.stopped == "error" and (result.code or "internal") == "internal" else "",
-        fmt,
+        fmt, lambda index: plan.used.get(seed + index),
     )
     frame_paths = tuple(str(shot["path"]) for shot in shots if shot["code"] == "ok")
     made = len(frame_paths)
@@ -312,6 +321,7 @@ def _run_command(
 def _shot_rows(
     scenario: Scenario, statuses: dict[int, str], kept: tuple[Path, ...],
     error: str = "", container: OutputFormat = EXPORT_FORMAT,
+    seed_of: Callable[[int], int | None] | None = None,
 ) -> list[dict[str, object]]:
     """One row per shot. After an error stop, unkept shots carry the error code, not ``not_produced``."""
     by_name = {path.name: path for path in kept}
@@ -322,7 +332,11 @@ def _shot_rows(
     for index, _shot in enumerate(scenario.shots):
         path = by_name.get(f"{index + 1:02}{suffix}")
         if statuses.get(index) == "kept" and path is not None:
-            rows.append({"index": index + 1, "code": "ok", "path": str(path)})
+            row: dict[str, object] = {"index": index + 1, "code": "ok", "path": str(path)}
+            used = None if seed_of is None else seed_of(index)
+            if used is not None:
+                row["seed"] = used
+            rows.append(row)
         elif error:
             rows.append({"index": index + 1, "code": error, "message": failed})
         else:

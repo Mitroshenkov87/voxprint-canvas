@@ -11,7 +11,7 @@ import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import NamedTuple
 
 from voxprint_common.paths import state_dir
@@ -23,6 +23,7 @@ from voxprint_common.ui.variants import AppSurface, settings_for, state_names, s
 from typing import TYPE_CHECKING
 
 from canvas.core.formats import OutputFormat
+from canvas.core.seeds import field_value, fresh_seed, offset_seed
 from canvas.models.modes import Mode
 from canvas.pipeline import adult_boundary
 from canvas.ui.styles import LOOKS, look_for, style_label
@@ -31,6 +32,9 @@ from canvas.ui.worker_checks import WorkerChecks
 if TYPE_CHECKING:
     from canvas.app.shell_gate import ContentCheck
     from canvas.safety.gate import AgeGate
+
+
+SEED_LOCK_KEY = "canvas.seed_lock"
 
 
 class PictureJob(NamedTuple):
@@ -64,8 +68,66 @@ class CanvasLayout(SimpleLayout):
     """
 
     def __init__(self, *args, **kwargs) -> None:
+        self._adult_listeners: list[Callable[[bool], None]] = []
+        self._seed_listeners: list[Callable[[bool], None]] = []
+        # The exact seed of the last picture. The Expert field holds 31 bits; this holds all 32.
+        self.used_seed: int | None = None
         super().__init__(*args, **kwargs)
         self._keep_adult()
+
+    # --- seed ---------------------------------------------------------------------------------------------------
+
+    def seed_locked(self) -> bool:
+        """True when the seed is locked. Unlocked (the default) means a new random seed for every picture."""
+        return self.get(SEED_LOCK_KEY) is True
+
+    def set_seed_locked(self, value: object) -> None:
+        """Store the lock. It is its own setting: it never touches Expert mode.
+
+        Raises:
+            ValueError: ``value`` is not a bool.
+        """
+        if not isinstance(value, bool):
+            raise ValueError("the seed lock must be true or false")
+        super().set_value(SEED_LOCK_KEY, value)
+        self._keep_adult()
+        for listener in tuple(self._seed_listeners):
+            listener(value)
+
+    def on_seed_lock_change(self, listener: Callable[[bool], None]) -> None:
+        """Call ``listener`` with the new value after every lock write."""
+        self._seed_listeners.append(listener)
+
+    def base_seed(self) -> int:
+        """The seed a locked run starts from: the typed seed, or the exact last used one when untouched."""
+        typed = int(self.seed)
+        used = self.used_seed
+        if used is not None and field_value(used) == typed:
+            return used
+        return typed
+
+    def plan_seed(self, index: int = 0, base: int | None = None) -> int:
+        """The seed for copy ``index`` of a run.
+
+        Unlocked: a fresh random seed for every copy. Locked: ``base`` (the typed
+        seed by default) counted up by the copy index, so the same locked run
+        repeats exactly.
+        """
+        if not self.seed_locked():
+            return fresh_seed()
+        return offset_seed(self.base_seed() if base is None else base, index)
+
+    def note_seed_used(self, seed: int) -> None:
+        """Remember the seed a picture really used and show it in the Expert field.
+
+        The screen puts a locked base back in the field when the run ends.
+        """
+        self.used_seed = int(seed)
+        self.seed = field_value(seed)
+
+    def on_adult_change(self, listener: Callable[[bool], None]) -> None:
+        """Call ``listener`` with the new value after every 18+ write."""
+        self._adult_listeners.append(listener)
 
     def adult_content(self) -> bool:
         """The stored Adult content (18+) setting."""
@@ -81,11 +143,16 @@ class CanvasLayout(SimpleLayout):
             raise ValueError("adult content must be true or false")
         super().set_value(adult_boundary.KEY, value)
         super().set_value(adult_boundary.COMMON_KEY, value)
+        for listener in tuple(self._adult_listeners):
+            listener(value)
 
     def set_value(self, key: str, value: object) -> None:
         """Hand-edit a setting. Either adult key writes both."""
         if key in (adult_boundary.KEY, adult_boundary.COMMON_KEY):
             self.set_adult_content(value)
+            return
+        if key == SEED_LOCK_KEY:
+            self.set_seed_locked(value)
             return
         super().set_value(key, value)
         self._keep_adult()
@@ -310,7 +377,7 @@ def job_from(layout: SimpleLayout, live: Mapping[str, object] | None = None) -> 
         aspect=str(layout.presets.get("size", "1:1")),
         output=output_name(layout),
         fmt=_format(layout.get("canvas.format")),
-        seed=int(layout.seed),
+        seed=layout.base_seed() if isinstance(layout, CanvasLayout) else int(layout.seed),
         steps=_whole(pick("shell.steps")),
         guidance=_decimal(pick("shell.guidance")),
         sampler=str(pick("shell.sampler")),
@@ -431,6 +498,7 @@ def _settings() -> Settings:
     )
     settings.add(_bool("canvas.save_metadata", False))
     settings.add(_bool(adult_boundary.KEY, False))
+    settings.add(_bool(SEED_LOCK_KEY, False, expert=True))
     settings.add(
         _enum(
             "canvas.export",

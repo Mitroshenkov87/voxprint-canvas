@@ -12,6 +12,14 @@ from canvas.models.plan import CallPlan
 from canvas.models.registry import Catalog, RegistryError, load_catalog
 from canvas.safety.gate import SafetyUnavailable
 
+@pytest.fixture(autouse=True)
+def _placeholder_manifest(monkeypatch, tmp_path_factory):
+    # These tests describe the placeholder list; the real bundled pins would otherwise win.
+    from canvas.models import mdl_registry
+
+    monkeypatch.setattr(mdl_registry, "_BUNDLED", tmp_path_factory.mktemp("nobundle") / "mdl.json")
+
+
 
 def _rewrite(tmp_path: Path, mutate) -> Path:
     raw = json.loads(Path("canvas/models/catalog.json").read_text(encoding="utf-8"))

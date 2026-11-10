@@ -67,7 +67,8 @@ def test_parser_accepts_one_and_ninety_nine_frames(tmp_path: Path) -> None:
     assert default.frames == 6
     assert default.style == "photo"
     assert default.places == "same"
-    assert default.seed == 1
+    assert default.seed is None  # omitted means a new random seed
+    assert default.seed_mode == "series"
     assert default.adult is False
     assert default.export_format == "png"
     assert default.command == "photoshoot"

@@ -25,14 +25,15 @@ def write_rgb(path: Path, width: int, height: int, data: bytes) -> None:
     path.write_bytes(_PREFIX + f"{width} {height}\n".encode("ascii") + data)
 
 
-def handoff_image(image: SafeImage, path: Path, fmt: OutputFormat = EXPORT_FORMAT) -> None:
+def handoff_image(image: SafeImage, path: Path, fmt: OutputFormat = EXPORT_FORMAT, *, seed: int | None = None) -> None:
     """Write one picture for Forge. Lossless WebP is the default. PNG stays an option.
 
-    Forge opens PNG, JPEG and WebP. Any other container is refused.
+    Forge opens PNG, JPEG and WebP. Any other container is refused. A given
+    ``seed`` is written into the picture as its only metadata field.
     """
     if fmt not in FORGE_EXPORTS:
         raise UnsupportedFormat("Forge export accepts PNG, JPEG, WebP or AVIF")
-    save_image(image, path, fmt, lossless=True)
+    save_image(image, path, fmt, lossless=True, metadata=None if seed is None else {"seed": int(seed)})
 
 
 def write_png(path: Path, width: int, height: int, data: bytes) -> None:

@@ -21,6 +21,7 @@ from canvas.app.info import APP_NAME, APP_VERSION, ENLARGE_NAME
 from canvas.app.platform import GpuCheck, OsCheck, check_gpu, current_os_check
 from canvas.app.updates import check_for_update
 from canvas.core.formats import parse_export_format, parse_format
+from canvas.core.seeds import fresh_seed
 from canvas.safety.image import RawImage
 from canvas.safety.inputs import ImageRole, PendingInput
 from canvas.infra.enlarge import EnlargeClient, EnlargeError
@@ -112,6 +113,10 @@ def _command_imports() -> None:
         if name not in globals():
             __getattr__(name)
 
+_SEED_HELP = (
+    "whole number from 0 to 4294967295. Leave it out for a new random seed every time; "
+    "the seed used is printed and saved in the picture."
+)
 _EXIT_CODES = (
     "exit codes:\n"
     "  0  the picture was written\n"
@@ -132,7 +137,7 @@ def _parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=_EXIT_CODES,
     )
-    parser.add_argument("--register-models", action="store_true", help="register Canvas in the shared resource manifest")
+    parser.add_argument("--register-models", action="store_true", help="register Canvas in the shared resource manifest and the installed-apps list")
     parser.add_argument("--unregister-models", action="store_true", help="remove Canvas from the shared resource manifest")
     parser.add_argument("--check-update", action="store_true", help="print a newer GitHub release tag, if one exists")
     parser.add_argument("--selftest", action="store_true", help="check the GPU, model files and encoders")
@@ -168,7 +173,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     generate.add_argument("--mask", default="", help="mask image for inpaint, used with --input")
     generate.add_argument("--output-size", default="native", choices=("native", "2k", "4k"))
-    generate.add_argument("--seed", type=int, default=0)
+    generate.add_argument("--seed", type=int, default=None, help=_SEED_HELP)
     generate.add_argument(
         "--enhance",
         action="store_true",
@@ -217,7 +222,11 @@ def _parser() -> argparse.ArgumentParser:
         help=f"how many frames to write, from 1 to {MAX_FRAMES}",
     )
     photoshoot.add_argument("--out", required=True, help="folder for the frames and scenario.txt")
-    photoshoot.add_argument("--seed", type=int, default=1)
+    photoshoot.add_argument("--seed", type=int, default=None, help=_SEED_HELP + " Frames count up from it.")
+    photoshoot.add_argument(
+        "--seed-mode", choices=("series", "locked"), default="series",
+        help="with --seed: series counts up from it (default), locked repeats the same seed on every frame",
+    )
     photoshoot.add_argument(
         "--style",
         default="photo",
@@ -233,7 +242,7 @@ def _parser() -> argparse.ArgumentParser:
     photoshoot.add_argument(
         "--adult",
         action="store_true",
-        help="use the Expert adult-content prompt policy",
+        help="use the adult-content (18+) prompt policy",
     )
     photoshoot.add_argument(
         "--vram-cap-gb",
@@ -286,7 +295,7 @@ def _parser() -> argparse.ArgumentParser:
         choices=("same", "different"),
         help="one place, or a different place for each frame of an entry",
     )
-    batch.add_argument("--adult", action="store_true", help="use the Expert adult-content prompt policy")
+    batch.add_argument("--adult", action="store_true", help="use the adult-content (18+) prompt policy")
     batch.add_argument(
         "--vram-cap-gb",
         type=float,
@@ -495,7 +504,9 @@ def _generate(args: argparse.Namespace) -> int:
                 screened.wipe()
             ensure_plan(catalog, plan, progress, confirm=None)
             generator = ZImageGenerator(catalog, gpu.tier)
-            generator.seed = args.seed
+            # No --seed: a fresh random seed. --seed 0 is a real seed.
+            used_seed = fresh_seed() if args.seed is None else int(args.seed)
+            generator.seed = used_seed
             generator.models = root
             if chosen is not None:
                 generator.lora_path = str(chosen[0].weights)
@@ -503,7 +514,7 @@ def _generate(args: argparse.Namespace) -> int:
                 generator.bound_lora = chosen[0]
             pipeline = Pipeline(gate, generator, gpu.tier, use_gpu_lock=True, catalog=catalog, enlarge=EnlargeClient())
             fresh = _inputs(args, mode)
-            pipeline.export(active, mode, fresh, path, fmt, aspect=args.aspect, output=output)
+            pipeline.export(active, mode, fresh, path, fmt, aspect=args.aspect, output=output, seed=used_seed)
     except LoraRejected as exc:
         return _emit_lora(exc.code, as_json, **exc.details)
     except GpuLockTimeout as exc:
@@ -517,7 +528,7 @@ def _generate(args: argparse.Namespace) -> int:
     if outcome is not None and outcome.fallback and not as_json:
         print(fallback_message(outcome), file=sys.stderr)
     return _emit(
-        _with_lora(_generate_payload(path, active_prompt, outcome, time.perf_counter() - started), chosen),
+        _with_lora(_generate_payload(path, active_prompt, outcome, time.perf_counter() - started, used_seed), chosen),
         as_json,
         0,
     )
@@ -600,7 +611,8 @@ def _photoshoot(args: argparse.Namespace) -> int:
                 idea=str(args.prompt),
                 folder=folder,
                 frames=frames,
-                seed=int(args.seed),
+                seed=None if args.seed is None else int(args.seed),
+                seed_mode=str(args.seed_mode),
                 style=style,
                 places=str(args.places),
                 adult=adult,
@@ -814,6 +826,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if report["ok"] else 2
     if args.register_models:
         register(shared_dir())
+        _register_install()
         return 0
     if args.unregister_models:
         unregister(shared_dir())
@@ -838,6 +851,7 @@ def main(argv: list[str] | None = None) -> int:
         splash.close()
         print(gpu.message, file=sys.stderr)
         return 2
+    _register_install()
     _repair_shared(splash.set_stage)
     code = _launch(gpu.tier, splash, app)
     if code is None:
@@ -905,7 +919,7 @@ def _with_lora(payload: dict[str, object], chosen: tuple[UserLora, float] | None
 
 
 def _generate_payload(
-    path: Path, original: str, outcome: EnhanceResult | None, seconds: float,
+    path: Path, original: str, outcome: EnhanceResult | None, seconds: float, seed: int | None = None,
 ) -> dict[str, object]:
     """JSON body for one generate command. Both prompts are present when enhancing."""
     if outcome is None:
@@ -927,6 +941,8 @@ def _generate_payload(
             "fallback": outcome.fallback,
         }
     body["seconds_per_image"] = round(float(seconds), 3)
+    if seed is not None:
+        body["seed"] = int(seed)
     diffusion = last_image_seconds()
     if diffusion is not None:
         body["diffusion_seconds"] = round(diffusion, 3)
@@ -973,6 +989,16 @@ def _apply_vram_cap(args: argparse.Namespace) -> int | None:
         print("The VRAM cap must be greater than 0.", file=sys.stderr)
         return 2
     return None
+
+
+def _register_install() -> None:
+    """List Canvas in installed-apps.json. Safe to repeat; a failure never stops a launch."""
+    from canvas.models.mdl_registry import register_install
+
+    try:
+        register_install()
+    except OSError as exc:
+        print(f"Canvas could not be listed in the app registry: {exc}", file=sys.stderr)
 
 
 def _repair_shared(stage: Callable[[str], None]) -> None:

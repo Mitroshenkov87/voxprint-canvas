@@ -25,6 +25,14 @@ from canvas.infra.paths import models_dir
 from canvas.safety.gate import AgeGate
 from tests.fakes import World
 
+@pytest.fixture(autouse=True)
+def _placeholder_manifest(monkeypatch, tmp_path_factory):
+    # These tests describe the placeholder list; the real bundled pins would otherwise win.
+    from canvas.models import mdl_registry
+
+    monkeypatch.setattr(mdl_registry, "_BUNDLED", tmp_path_factory.mktemp("nobundle") / "mdl.json")
+
+
 
 @pytest.fixture
 def home(monkeypatch, tmp_path: Path) -> Path:

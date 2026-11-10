@@ -139,6 +139,10 @@ def test_startup_refuses_or_launches(monkeypatch, tmp_path):
 
 
 def test_missing_models_do_not_fail_selftest_and_a_bad_hash_does(monkeypatch, tmp_path):
+    # This test reads the placeholder manifest; the real bundled pins would otherwise win.
+    from canvas.models import mdl_registry
+
+    monkeypatch.setattr(mdl_registry, "_BUNDLED", tmp_path / "no-bundled-mdl.json")
     monkeypatch.setattr("canvas.app.selftest.current_os_check", lambda: OsCheck(True, ""))
     monkeypatch.setattr(
         "canvas.app.selftest.probe_gpu",

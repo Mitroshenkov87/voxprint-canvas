@@ -21,6 +21,7 @@ from voxprint_common.ui.simple_image import Phase
 
 from canvas.app.i18n import text
 from canvas.core.formats import EXPORT_FORMAT, OutputFormat, UnsupportedFormat, parse_export_format
+from canvas.core.seeds import as_seed, field_value
 from canvas.app.info import ENLARGE_NAME
 from canvas.ipc.schema import Reply, decode_event, inside, series_fields
 from canvas.ui.shell_chrome import refresh_pictures
@@ -55,6 +56,7 @@ class _SeriesRun:
         self.series_id = series_id
         self.idea = idea
         self.job_id = ""
+        self.base_seed = 0
 
 
 def run_photoshoot(window: ShellWindow) -> bool:
@@ -91,15 +93,19 @@ def run_photoshoot(window: ShellWindow) -> bool:
     series_id = uuid.uuid4().hex
     bar.folder = window.shell.state_dir / "pictures" / "series" / series_id
     bar._stop = False
-    base_seed = int(layout.seed)
+    # Unlocked: a fresh random base and a fresh seed for every shot. Locked: the base counts up per shot.
+    locked = layout.seed_locked()
+    base_seed = layout.plan_seed()
+    seed_mode = "locked" if bar.seed_mode == "locked" else ("series" if locked else "random")
     run = _SeriesRun(series_id, idea)
+    run.base_seed = base_seed
     window._series = run
     fields = {
         "idea": idea,
         "count": bar.count,
         "style": style,
         "place": bar.place,
-        "seed_mode": bar.seed_mode,
+        "seed_mode": seed_mode,
         "strength": bar.strength,
         "seed": base_seed,
         "adult": adult_content(layout),
@@ -189,9 +195,24 @@ def _series_done(window: ShellWindow, run: _SeriesRun, reply: Reply) -> None:
                 layout.block(message)
         _end(window, run)
         return
+    _show_used_seed(window, run, data)
     outcome = _adopt(window, run, data)
     _end(window, run)
     _finish(window, outcome, run.idea)
+
+
+def _show_used_seed(window: ShellWindow, run: _SeriesRun, data: dict[str, object]) -> None:
+    """Put the last seed used in the Expert field. A locked base goes back in, so a repeat starts from it."""
+    layout = window.shell.layout
+    if layout.seed_locked():
+        layout.used_seed = run.base_seed
+        layout.seed = field_value(run.base_seed)
+        return
+    seeds = data.get("seeds")
+    if isinstance(seeds, list) and seeds:
+        last = as_seed(seeds[-1])
+        if last is not None:
+            layout.note_seed_used(last)
 
 
 def _cancelled_manifest(window: ShellWindow, reply: Reply) -> dict[str, object] | None:
@@ -367,5 +388,5 @@ def _export_format(layout: SimpleLayout) -> OutputFormat:
 
 
 def adult_content(layout: SimpleLayout) -> bool:
-    """True when the Expert «Для взрослых (18+)» prompt policy is on."""
+    """True when the 18+ setting is on. It is the same in Simple and Expert and changes only the prompt policy."""
     return adult_boundary.enabled(layout)

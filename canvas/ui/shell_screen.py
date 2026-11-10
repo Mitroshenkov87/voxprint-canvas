@@ -33,6 +33,7 @@ from voxprint_common.worker.qt import InfoBar
 from canvas.app.i18n import text
 from canvas.app.info import APP_VERSION, ENLARGE_NAME
 from canvas.app.updates import check_for_update
+from canvas.core.seeds import as_seed, field_value
 from canvas.infra.enlarge import EnlargeClient
 from canvas.ipc.client import WorkerClient, default_host
 from canvas.ipc.schema import Reply, decode_event
@@ -94,6 +95,7 @@ class _Run:
     layout_prompt: str
     index: int = 0
     job_id: str = ""
+    seed: int = 0
 
 
 def job_fields(job: PictureJob) -> dict[str, object]:
@@ -143,6 +145,8 @@ class ShellWindow(QMainWindow):
         self._mask: RawImage | None = None
         self._mask_file: Path | None = None
         self._pictures: dict[str, str] = {}
+        # Exact seed of each kept picture, shown on the result line.
+        self._seeds: dict[str, int] = {}
         self._series_folders: dict[str, str] = load_series_folders(shell.state_dir)
         self._busy = False
         # The worker keeps the loaded pipeline between generations while this window is open.
@@ -658,7 +662,7 @@ class ShellWindow(QMainWindow):
             layout.block(text("gate.unavailable"))
             self.view.refresh()
             return False
-        run = _Run(job=job, total=max(1, job.copies), base_seed=layout.seed, layout_prompt=layout.prompt.strip())
+        run = _Run(job=job, total=max(1, job.copies), base_seed=job.seed, layout_prompt=layout.prompt.strip())
         self._run = run
         self.worker.when_ready(lambda: self._check_prompts(run), lambda reason: self._stop_run(run, reason))
         return True
@@ -688,8 +692,12 @@ class ShellWindow(QMainWindow):
     def _start_copy(self, run: _Run) -> None:
         layout = self.shell.layout
         index = run.index
+        # Unlocked: a fresh random seed for every copy. Locked: the base counts up, so a locked run repeats.
+        seed = layout.plan_seed(index, run.base_seed)
+        run.seed = seed
+        run.job = run.job._replace(seed=seed)
+        layout.note_seed_used(seed)
         if index:
-            layout.seed = run.base_seed + index
             if not layout.generate():
                 self.view.refresh()
                 self._end_run(run)
@@ -759,6 +767,11 @@ class ShellWindow(QMainWindow):
         if self._run is run:
             self._run = None
             self._busy = False
+            layout = self.shell.layout
+            if layout.seed_locked():
+                # A locked seed stays in the field, so the next run repeats it.
+                layout.used_seed = run.base_seed
+                layout.seed = field_value(run.base_seed)
 
     def _discard(self, reply: Reply) -> None:
         if reply.ok:
@@ -778,9 +791,10 @@ class ShellWindow(QMainWindow):
 
     def _keep(self, reply: Reply, job: PictureJob) -> bool:
         """Store a picture the worker released. The screen accepts only that file."""
-        del job
         layout = self.shell.layout
         item_id = str(reply.data["item_id"])
+        used = as_seed(reply.data.get("seed"))
+        self._seeds[item_id] = job.seed if used is None else used
         path = Path(str(reply.data["path"]))
         checks = self.shell.gate
         if isinstance(checks, WorkerChecks):

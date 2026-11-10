@@ -130,15 +130,46 @@ def test_default_picture_job_has_metadata_off() -> None:
     assert job.save_metadata is False
 
 
-def test_job_with_metadata_off_saves_a_clean_picture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("fmt", _CONTAINERS)
+@pytest.mark.parametrize("seed", (0, 42, 2**32 - 1))
+def test_job_with_metadata_off_still_writes_only_the_seed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fmt: OutputFormat, seed: int
+) -> None:
     from canvas.worker_jobs import _picture_metadata
 
-    job = _job()
+    _require_container(fmt)
+    job = _job()._replace(seed=seed, fmt=fmt)
     fields = _picture_metadata(job)
-    assert fields == {}
-    path = tmp_path / "picture.png"
+    assert fields == {"seed": seed}
+    path = tmp_path / f"picture{extension(fmt)}"
     save_image(_released_image(monkeypatch), path, job.fmt, metadata=fields)
-    assert read_metadata(path) == {}
+    # Only the seed: no prompt, steps, model or LoRA.
+    assert read_metadata(path) == {"seed": str(seed)}
+
+
+@pytest.mark.parametrize("fmt", _CONTAINERS)
+def test_job_with_metadata_on_keeps_the_seed_in_the_full_block(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fmt: OutputFormat
+) -> None:
+    from canvas.worker_jobs import _picture_metadata
+
+    _require_container(fmt)
+    job = _job(save_metadata=True)._replace(fmt=fmt)
+    path = tmp_path / f"picture{extension(fmt)}"
+    save_image(_released_image(monkeypatch), path, job.fmt, metadata=_picture_metadata(job))
+    written = read_metadata(path)
+    assert written["seed"] == "42"
+    assert written["prompt"] == job.prompt
+    assert written["steps"] == "8"
+
+
+def test_series_frames_and_the_forge_handoff_carry_the_seed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from canvas.core.exchange import handoff_image
+
+    for fmt in (OutputFormat.PNG, OutputFormat.WEBP, OutputFormat.JPEG):
+        path = tmp_path / f"frame{extension(fmt)}"
+        handoff_image(_released_image(monkeypatch), path, fmt, seed=1234567890)
+        assert read_metadata(path) == {"seed": "1234567890"}
 
 
 def test_job_with_metadata_on_writes_the_recipe_into_the_picture(

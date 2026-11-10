@@ -548,7 +548,12 @@ def open_weights(path: Path) -> UserLora:
         if labelled is None:
             raise LoraRejected(CODE_INVALID)
         adult = labelled
-    if kind not in _KINDS or _bad_id(lora_id):
+    if not kind:
+        # Raw Forge checkpoints record voxprint.lora.base but not kind.
+        kind = THIRD_PARTY_KIND
+    if kind not in _KINDS and kind != THIRD_PARTY_KIND:
+        raise LoraRejected(CODE_INVALID)
+    if _bad_id(lora_id):
         raise LoraRejected(CODE_INVALID)
     variant, base_sha, warnings = _provenance(meta, path, stored_base)
     return UserLora(
@@ -1250,6 +1255,9 @@ def _safetensors(path: Path) -> tuple[dict[str, object], bytes] | None:
 def _peft_key(key: str) -> str:
     """A transformer-relative ``lora_A`` / ``lora_B`` / ``alpha`` name.
 
+    PEFT prefixes (``base_model.model.``) and ``.lora_A.default.weight`` names
+    are folded into the same form as a Forge export.
+
     Raises:
         LoraRejected: A Kohya name that maps to no z-image module (``lora.base_mismatch``).
     """
@@ -1262,9 +1270,11 @@ def _peft_key(key: str) -> str:
         name = f"{stem}.{rest}"
     elif name.startswith(("lora_te", "lora_te1_", "lora_te2_")):
         raise LoraRejected(CODE_BASE_MISMATCH)
-    for prefix in ("transformer.", "diffusion_model."):
+    for prefix in ("base_model.model.", "base_model.", "transformer.", "diffusion_model."):
         if name.startswith(prefix):
             name = name[len(prefix):]
+            break
+    name = name.replace(".lora_A.default.", ".lora_A.").replace(".lora_B.default.", ".lora_B.")
     return name.replace(".lora_down.weight", _A_WEIGHT).replace(".lora_up.weight", _B_WEIGHT)
 
 

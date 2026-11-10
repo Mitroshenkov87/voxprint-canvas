@@ -187,6 +187,47 @@ def turbo_weights_ready(tier: Tier) -> bool:
     return snapshot_ready(spec, models_dir()) is not None
 
 
+def _turbo_id(tier: Tier) -> str:
+    return "z-image-turbo-bf16-16gb" if tier is Tier.GB16 else "z-image-turbo-bf16"
+
+
+def missing_model_ids(root, tier: Tier) -> list[str]:
+    """MDL ids that are not a complete snapshot under ``root``.
+
+    The generator snapshot and the six gate models are required. A job must
+    not start when any of them are missing.
+    """
+    from canvas.models.required import gate_specs
+    from canvas.models.snapshots import snapshot_ready
+
+    catalog = load_catalog()
+    wanted: list[str] = [_turbo_id(tier)]
+    for spec in gate_specs(catalog):
+        if spec.id not in wanted:
+            wanted.append(spec.id)
+    missing: list[str] = []
+    for model_id in wanted:
+        try:
+            spec = catalog.by_id(model_id)
+        except Exception:
+            missing.append(model_id)
+            continue
+        if snapshot_ready(spec, root) is None:
+            missing.append(model_id)
+    return missing
+
+
+def format_preflight_error(root, source: str, missing: list[str]) -> str:
+    """One message naming the folder, how it was resolved, and the missing ids."""
+    ids = ", ".join(missing)
+    return (
+        f"Required models are missing from {root} (from {source}): {ids}. "
+        "Download them with voxprint-mdl download into that folder "
+        "(Z-Image-Turbo as z-image-turbo-bf16 or z-image-turbo-bf16-16gb, "
+        "plus the six gate models), then run this command again."
+    )
+
+
 def bind_lora(path: Path, strength: float) -> tuple[Any, float]:
     """Open ``path`` and accept it only when it may load on Z-Image-Turbo."""
     lora = prepare_cli_lora(path)
@@ -219,14 +260,28 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--out", required=True, type=Path, help="output folder")
     parser.add_argument("--seed", type=int, default=1001, help="base seed; dataset mode adds the image index")
     parser.add_argument("--aspect", default="1:1")
+    parser.add_argument(
+        "--models-dir",
+        type=Path,
+        default=None,
+        help="Weights folder (sets VOXPRINT_MODELS_DIR for this process)",
+    )
     return parser
 
 
 def main(argv: Sequence[str] | None = None, hooks: Hooks | None = None) -> int:
     """CLI entry. Returns a process exit code. 2 means a missing input or weights."""
+    import os
+
+    from canvas.infra.paths import resolved_models_dir
+
     args = _parser().parse_args(argv)
     hooks = hooks or Hooks()
     log = hooks.log
+    if args.models_dir is not None:
+        os.environ["VOXPRINT_MODELS_DIR"] = str(args.models_dir.expanduser().resolve())
+    root, source = resolved_models_dir()
+    print(f"Models folder: {root} (from {source})", file=log)
     try:
         items = load_prompts(args.prompts)
         persona = load_persona(args.persona) if args.persona is not None else None
@@ -254,14 +309,17 @@ def main(argv: Sequence[str] | None = None, hooks: Hooks | None = None) -> int:
 
     if hooks.weights_ready is not None:
         ready = hooks.weights_ready()
+        if not ready:
+            print(
+                "The Z-Image-Turbo weights are missing. Install them with VOXPrint MDL, then run this command again.",
+                file=log,
+            )
+            return 2
     else:
-        ready = _live_ready(log)
-    if not ready:
-        print(
-            "The Z-Image-Turbo weights are missing. Install them with VOXPrint MDL, then run this command again.",
-            file=log,
-        )
-        return 2
+        ready, message = _live_preflight(log, root, source)
+        if not ready:
+            print(message, file=log)
+            return 2
 
     lora_bind: tuple[Any, float] | None = None
     if args.lora is not None:
@@ -298,6 +356,21 @@ def _live_ready(log: TextIO) -> bool:
         print(gpu.message or "No supported GPU is available.", file=log)
         return False
     return turbo_weights_ready(gpu.tier)
+
+
+def _live_preflight(log: TextIO, root, source: str) -> tuple[bool, str]:
+    """Check the GPU, the Turbo snapshot, and the six gate models. Never skip the gate."""
+    from canvas.app.platform import check_gpu
+    from canvas.infra.gpu import probe_gpu
+
+    del log
+    gpu = check_gpu(probe_gpu())
+    if not gpu.ok or gpu.tier is None:
+        return False, gpu.message or "No supported GPU is available."
+    missing = missing_model_ids(root, gpu.tier)
+    if missing:
+        return False, format_preflight_error(root, source, missing)
+    return True, ""
 
 
 def _run_render(

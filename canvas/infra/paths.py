@@ -42,6 +42,28 @@ def models_dir() -> Path:
     return path
 
 
+def resolved_models_dir() -> tuple[Path, str]:
+    """The weights folder and how it was chosen.
+
+    The first absolute path wins, matching :func:`voxprint_common.paths.models_dir`:
+
+    - ``VOXPRINT_MODELS_DIR``
+    - ``models_dir`` in ``suite.json``
+    - the legacy ``state/models_dir.txt``
+    - otherwise ``<data home>/models`` (``default``)
+    """
+    env = _common_paths._absolute_env("VOXPRINT_MODELS_DIR")
+    if env is not None:
+        return env, "VOXPRINT_MODELS_DIR"
+    suite = _common_paths._suite_models_dir()
+    if suite is not None:
+        return suite, "suite.json"
+    legacy = _common_paths._legacy_models_dir()
+    if legacy is not None:
+        return legacy, "models_dir.txt"
+    return _common_paths.home() / "models", "default"
+
+
 def lora_library_dir() -> Path:
     """Imported LoRAs: ``<data home>/canvas/lora-library``."""
     path = voxprint_home() / "canvas" / "lora-library"

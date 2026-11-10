@@ -251,3 +251,65 @@ def test_load_prompts_rejects_an_empty_file(tmp_path: Path) -> None:
     path.write_text("{}", encoding="utf-8")
     with pytest.raises(ValueError, match="no prompts"):
         load_prompts(path)
+
+
+def test_preflight_names_the_models_dir_and_missing_ids(tmp_path: Path, monkeypatch) -> None:
+    from canvas.models.modes import Tier
+    from canvas.tools.render_batch import format_preflight_error, missing_model_ids
+
+    monkeypatch.setattr("canvas.models.snapshots.snapshot_ready", lambda spec, root, cache=None: None)
+    missing = missing_model_ids(tmp_path / "models", Tier.GB16)
+    assert "z-image-turbo-bf16-16gb" in missing
+    for model_id in (
+        "qwen3guard-gen-0.6b",
+        "siglip2-so400m-patch14-384",
+        "yunet-face",
+        "fairface-age",
+        "mivolo-v2-age",
+        "nsfw-image-detection",
+    ):
+        assert model_id in missing
+    message = format_preflight_error(tmp_path / "models", "VOXPRINT_MODELS_DIR", missing)
+    assert str(tmp_path / "models") in message
+    assert "VOXPRINT_MODELS_DIR" in message
+    assert "qwen3guard-gen-0.6b" in message
+    assert "voxprint-mdl download" in message
+
+
+def test_render_batch_prints_models_dir_and_exits_on_a_live_preflight_miss(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    from canvas.app.platform import GpuCheck
+    from canvas.models.modes import Tier
+
+    prompts = _prompts(tmp_path / "p.json", [{"id": "one", "prompt": "a 32-year-old adult woman in a studio"}])
+    models = tmp_path / "mdl-root"
+    models.mkdir()
+    monkeypatch.setattr("canvas.app.platform.check_gpu", lambda info: GpuCheck(ok=True, tier=Tier.GB16, message=""))
+    monkeypatch.setattr("canvas.infra.gpu.probe_gpu", lambda: object())
+    monkeypatch.setattr("canvas.models.snapshots.snapshot_ready", lambda spec, root, cache=None: None)
+    log = io.StringIO()
+    # No weights_ready hook: this is the live preflight path.
+    code = main(
+        [
+            "--prompts",
+            str(prompts),
+            "--preset",
+            "balanced",
+            "--adult-content",
+            "on",
+            "--out",
+            str(tmp_path / "out"),
+            "--seed",
+            "1001",
+            "--models-dir",
+            str(models),
+        ],
+        hooks=Hooks(log=log),
+    )
+    text = log.getvalue()
+    assert code == 2
+    assert f"Models folder: {models.resolve()} (from VOXPRINT_MODELS_DIR)" in text
+    assert "qwen3guard-gen-0.6b" in text
+    assert "z-image-turbo-bf16-16gb" in text
+    assert "voxprint-mdl download" in text

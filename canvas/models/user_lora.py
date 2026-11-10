@@ -550,6 +550,9 @@ def open_weights(path: Path) -> UserLora:
         adult = labelled
     if not kind:
         # Raw Forge checkpoints record voxprint.lora.base but not kind.
+        # A Kohya file that only claims a Forge base header is still invalid.
+        if _has_kohya_keys(path):
+            raise LoraRejected(CODE_INVALID)
         kind = THIRD_PARTY_KIND
     if kind not in _KINDS and kind != THIRD_PARTY_KIND:
         raise LoraRejected(CODE_INVALID)
@@ -1103,6 +1106,20 @@ def _preview_reason(document: dict[str, object], folder: Path) -> str | None:
 
 def _person_flags(header: dict[str, str]) -> bool:
     return header.get(_HEADER_CONSENT) == "true" and header.get(_HEADER_CONFIRMED) == "true"
+
+
+def _has_kohya_keys(path: Path) -> bool:
+    """True when the file still uses Kohya ``lora_unet_*`` / text-encoder names."""
+    opened = _safetensors(path)
+    if opened is None:
+        return False
+    for key in opened[0]:
+        if key == "__metadata__":
+            continue
+        name = str(key)
+        if name.startswith(_KOHYA) or name.startswith(("lora_te", "lora_te1_", "lora_te2_")):
+            return True
+    return False
 
 
 def _header(path: Path) -> dict[str, str] | None:

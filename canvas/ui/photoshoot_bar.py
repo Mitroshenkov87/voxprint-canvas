@@ -165,6 +165,7 @@ class PhotoshootBar:
         self.frames.setVisible(self.enabled)
         self.frames.setEnabled(self.enabled and not busy)
         self.cancel.setVisible(busy and self._showing)
+        self.frame.setVisible(busy and self._showing and bool(self.frame.text()))
         self.script_button.setVisible(self.script.count > 0 and not self.script_window.isVisible())
 
     def cancel_series(self) -> None:

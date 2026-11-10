@@ -288,6 +288,7 @@ def test_render_batch_prints_models_dir_and_exits_on_a_live_preflight_miss(
     monkeypatch.setattr("canvas.app.platform.check_gpu", lambda info: GpuCheck(ok=True, tier=Tier.GB16, message=""))
     monkeypatch.setattr("canvas.infra.gpu.probe_gpu", lambda: object())
     monkeypatch.setattr("canvas.models.snapshots.snapshot_ready", lambda spec, root, cache=None: None)
+    monkeypatch.setattr("canvas.tools.render_batch.missing_gate_imports", lambda: [])
     log = io.StringIO()
     # No weights_ready hook: this is the live preflight path.
     code = main(
@@ -313,3 +314,143 @@ def test_render_batch_prints_models_dir_and_exits_on_a_live_preflight_miss(
     assert "qwen3guard-gen-0.6b" in text
     assert "z-image-turbo-bf16-16gb" in text
     assert "voxprint-mdl download" in text
+
+
+def test_missing_gate_imports_names_a_missing_package(monkeypatch) -> None:
+    import importlib
+
+    from canvas.tools.render_batch import format_deps_error, missing_gate_imports
+
+    real = importlib.import_module
+
+    def fake(name: str, package: str | None = None):
+        if name in {"transformers", "timm"}:
+            raise ImportError(name)
+        return real(name, package)
+
+    monkeypatch.setattr("canvas.tools.render_batch.importlib.import_module", fake)
+    missing = missing_gate_imports()
+    assert "transformers" in missing
+    assert "timm" in missing
+    message = format_deps_error(missing)
+    assert "transformers" in message
+    assert "timm" in message
+    assert "pip install .[gen]" in message
+
+
+def test_missing_gate_imports_rejects_opencv_without_utils_logging(monkeypatch) -> None:
+    import importlib
+    import types
+
+    from canvas.tools.render_batch import missing_gate_imports
+
+    real = importlib.import_module
+    fake_cv2 = types.SimpleNamespace(__version__="4.10.0", utils=types.SimpleNamespace())
+
+    def fake(name: str, package: str | None = None):
+        if name == "cv2":
+            return fake_cv2
+        return real(name, package)
+
+    monkeypatch.setattr("canvas.tools.render_batch.importlib.import_module", fake)
+    missing = missing_gate_imports()
+    assert any("opencv-python-headless" in item and "4.10.0" in item and "5.x" in item for item in missing)
+
+
+def test_render_batch_exits_on_missing_gate_imports(tmp_path: Path, monkeypatch) -> None:
+    from canvas.app.platform import GpuCheck
+    from canvas.models.modes import Tier
+
+    prompts = _prompts(tmp_path / "p.json", [{"id": "one", "prompt": "a 32-year-old adult woman in a studio"}])
+    models = tmp_path / "mdl-root"
+    models.mkdir()
+    monkeypatch.setattr("canvas.tools.render_batch.missing_gate_imports", lambda: ["transformers", "timm"])
+    monkeypatch.setattr("canvas.app.platform.check_gpu", lambda info: GpuCheck(ok=True, tier=Tier.GB16, message=""))
+    monkeypatch.setattr("canvas.infra.gpu.probe_gpu", lambda: object())
+    monkeypatch.setattr("canvas.models.snapshots.snapshot_ready", lambda spec, root, cache=None: None)
+    log = io.StringIO()
+    code = main(
+        [
+            "--prompts",
+            str(prompts),
+            "--preset",
+            "balanced",
+            "--adult-content",
+            "on",
+            "--out",
+            str(tmp_path / "out"),
+            "--seed",
+            "1001",
+            "--models-dir",
+            str(models),
+        ],
+        hooks=Hooks(log=log),
+    )
+    text = log.getvalue()
+    assert code == 2
+    assert "transformers" in text
+    assert "timm" in text
+    assert "pip install .[gen]" in text
+    assert "qwen3guard-gen-0.6b" not in text
+
+
+def test_safety_error_fields_record_type_and_one_line_cause() -> None:
+    from canvas.safety.gate import SafetyUnavailable
+    from canvas.tools.render_batch import safety_error_fields
+
+    bare = SafetyUnavailable("classifier_error")
+    assert safety_error_fields(bare) == {"error_type": "SafetyUnavailable"}
+    assert safety_error_fields(None) == {}
+    assert safety_error_fields(RuntimeError("no")) == {}
+
+    try:
+        raise SafetyUnavailable("classifier_error") from AttributeError(
+            "module 'cv2.utils' has no attribute 'logging'\nsecond line"
+        )
+    except SafetyUnavailable as exc:
+        fields = safety_error_fields(exc)
+    assert fields["error_type"] == "SafetyUnavailable"
+    assert fields["error_cause"] == (
+        "AttributeError: module 'cv2.utils' has no attribute 'logging' second line"
+    )
+    assert "\n" not in fields["error_cause"]
+
+
+def test_render_records_a_safety_error_cause_in_the_image_json(tmp_path: Path) -> None:
+    from canvas.safety.gate import SafetyUnavailable
+
+    def generate(prompt: str, seed: int, *, explicit: bool) -> SafeImage:
+        del prompt, seed, explicit
+        raise SafetyUnavailable("classifier_error") from AttributeError(
+            "module 'cv2.utils' has no attribute 'logging'"
+        )
+
+    prompts = _prompts(
+        tmp_path / "p.json",
+        [{"id": "blocked", "prompt": "a 32-year-old adult woman in a studio"}],
+    )
+    log = io.StringIO()
+    code = main(
+        [
+            "--prompts",
+            str(prompts),
+            "--preset",
+            "balanced",
+            "--adult-content",
+            "on",
+            "--out",
+            str(tmp_path / "out"),
+            "--seed",
+            "1001",
+        ],
+        hooks=Hooks(weights_ready=lambda: True, generate=generate, log=log),
+    )
+    record = json.loads((tmp_path / "out" / "blocked.json").read_text(encoding="utf-8"))
+    assert code == 1
+    assert not (tmp_path / "out" / "blocked.webp").exists()
+    assert record["gate"] == "classifier_error"
+    assert record["error_type"] == "SafetyUnavailable"
+    assert record["error_cause"] == "AttributeError: module 'cv2.utils' has no attribute 'logging'"
+    assert "prompt" not in record["error_cause"]
+    assert "\n" not in record["error_cause"]
+    assert "error" not in record

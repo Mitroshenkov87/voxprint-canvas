@@ -16,7 +16,7 @@ from canvas.models.default_base import selected_text_base
 from canvas.models.plan import PIPELINE_MOSS, CallPlan, build_plan
 from canvas.models.registry import Catalog, ModelSpec, RegistryError, load_catalog
 from canvas.models.runtime import WeightsLoadError, render, sample_latent
-from canvas.models.user_lora import LoraRejected, UserLora, resolve_selected, retrain_rejection, route_lora
+from canvas.models.user_lora import UserLora, resolve_selected, retrain_rejection, route_lora
 from canvas.models.snapshots import SnapshotError, fallback_ready, request_download, snapshot_ready
 from canvas.models.verified import VerifiedCache, flush_process_cache, process_cache
 from canvas.pipeline.bf16_schedule import (

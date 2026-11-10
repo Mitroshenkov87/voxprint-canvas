@@ -22,7 +22,10 @@ import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, TextIO
+from typing import TYPE_CHECKING, Any, TextIO
+
+if TYPE_CHECKING:
+    from canvas.pipeline.pipeline import Pipeline
 
 from canvas.core.formats import OutputFormat, save_image
 from canvas.models.modes import Mode, Tier
@@ -526,7 +529,7 @@ class _Session:
         self.adult = adult
         self.aspect = aspect
         self.lora_bind = lora_bind
-        self._pipeline = None
+        self._pipeline: Pipeline | None = None
         self._gate: AgeGate | None = None
 
     def generate(self, prompt: str, seed: int) -> tuple[SafeImage | None, str]:
@@ -564,7 +567,7 @@ class _Session:
             self._pipeline = Pipeline(gate, generator, gpu.tier, use_gpu_lock=True, catalog=catalog, enlarge=EnlargeClient())
         assert self._gate is not None
         try:
-            self._pipeline.generator.seed = seed
+            setattr(self._pipeline.generator, "seed", seed)
             image = self._pipeline.generate(prompt, Mode.TEXT, (), aspect=self.aspect, output="native", explicit=self.adult)
         except SafetyError as exc:
             return None, getattr(exc, "code", None) or str(exc)

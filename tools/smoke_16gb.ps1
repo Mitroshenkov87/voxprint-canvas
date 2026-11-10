@@ -92,10 +92,12 @@ try {
     $probe = $LASTEXITCODE
     $ErrorActionPreference = "Stop"
     if ($probe -ne 0) { Write-Host "Canvas is not installed in this Python."; exit 2 }
-    # The 16 GB generator is the default Z-Image-Turbo 16 GB pack.
-    # The 24 GB pack is requested by id. MOSS-Image is optional and is not fetched here.
+    # The 16 GB pack is the required default and is already in the default
+    # MDL plan on a 16 GB card. Do not pass --model for that pass: on a
+    # machine with no GPU, a forced id fails with "not available for this
+    # card" (exit 5) instead of letting the smoke tool exit 3.
+    # The 24 GB pack is optional and is requested by id. MOSS is not fetched.
     $mdlArgs = @("-m", "canvas.models.install_fetch", "--app", "canvas", "--manifest", $Manifest)
-    if ($Pass -eq "16gb") { $mdlArgs += @("--model", "z-image-turbo-bf16-16gb") }
     if ($Pass -eq "24gb") { $mdlArgs += @("--model", "z-image-turbo-bf16") }
     Write-Host "Models: python $($mdlArgs -join ' ')"
     & $Python @mdlArgs

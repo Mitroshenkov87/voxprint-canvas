@@ -57,6 +57,13 @@ def _close_shell_windows():
         if isinstance(widget, ShellWindow) and widget.isVisible():
             widget.close()
 
+# Task groups recognised by voxprint-common 0.7.1 (docs/mdl-fields.md).
+# A missing or unknown group falls under "Other" in Manage models.
+KNOWN_GROUPS = frozenset({
+    "generate", "edit", "upscale", "restore", "voice", "transcribe",
+    "translate", "writer", "safety", "internal",
+})
+
 # The exact picker metadata every shipped placeholder row must carry.
 EXPECTED = {
     "z-image-turbo-bf16": ("generate", "24gb", "Z-Image Turbo (recommended)", "Fast, high-quality pictures from text; the default."),
@@ -101,6 +108,14 @@ def test_the_13_placeholder_rows_carry_the_exact_picker_metadata():
         # Every pre-existing field is kept.
         assert row["status"] == "unavailable" and row["files"] == [], model_id
         assert row["display_name"] and row["version"], model_id
+        assert group in KNOWN_GROUPS, model_id
+
+
+def test_every_canvas_mdl_group_is_recognised() -> None:
+    doc = json.loads(MDL.read_text(encoding="utf-8"))
+    assert len(doc["models"]) == 13
+    for row in doc["models"]:
+        assert row.get("group") in KNOWN_GROUPS, row["id"]
 
 
 def test_common_loader_and_plan_accept_the_optional_fields(tmp_path: Path):
@@ -109,8 +124,14 @@ def test_common_loader_and_plan_accept_the_optional_fields(tmp_path: Path):
     # The shipped placeholder loads fine with the extra fields present.
     manifest = catalog_mod.load_manifest(MDL.resolve())
     assert len(manifest.models) == 13
-    # Common 0.7.0 does not surface them on Model, so Canvas reads the JSON itself.
-    assert not hasattr(manifest.models[0], "label")
+    # Common 0.7.1 surfaces them on Model. Canvas still reads the JSON itself
+    # for the picker, and the loaded models carry the same strings.
+    by_id = {model.id: model for model in manifest.models}
+    for model_id, (group, _tier, label, purpose) in EXPECTED.items():
+        model = by_id[model_id]
+        assert model.label == label, model_id
+        assert model.purpose == purpose, model_id
+        assert model.group == group, model_id
     # An available row with the fields plans like any other row.
     payload = b"toy-weights"
     digest = hashlib.sha256(payload).hexdigest()

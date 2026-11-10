@@ -403,9 +403,9 @@ if [ "$app_ready" -eq 0 ]; then
     exit 1
   fi
 fi
-COMMON_URL="https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.7.0/voxprint_common-0.7.0-py3-none-any.whl"
-COMMON_SHA="582ed667ef51896086b6f70c85148c525ea24b5c3dacb64f546a76486d311eca"
-common_wheel="$WHEELS/voxprint_common-0.7.0-py3-none-any.whl"
+COMMON_URL="https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.7.1/voxprint_common-0.7.1-py3-none-any.whl"
+COMMON_SHA="7e5b1dd62ca1a4d298bc7fb610f03398929b231823151a312012d1d327b6f029"
+common_wheel="$WHEELS/voxprint_common-0.7.1-py3-none-any.whl"
 curl -fsSL -o "$common_wheel" "$COMMON_URL"
 echo "$COMMON_SHA  $common_wheel" | sha256sum -c -
 "$UV" pip install --no-config --python "$VENV/bin/python" "$common_wheel"

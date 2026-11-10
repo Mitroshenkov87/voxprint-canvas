@@ -1,15 +1,19 @@
 """The Generate-model picker list, read from the app manifest.
 
-voxprint-common 0.7.0 does not surface the optional ``label``, ``purpose`` and
-``group`` manifest fields on its ``Model`` dataclass, so Canvas reads them from
-the raw manifest JSON (the bundled ``canvas/mdl.json`` and the installed
-``mdl.json``). A row joins the picker when it is installed — not an unavailable
+voxprint-common 0.7.1 surfaces the optional ``label``, ``purpose`` and ``group``
+fields on ``Model``. Canvas still reads them from the raw manifest JSON (the
+bundled ``canvas/mdl.json`` and the installed ``mdl.json``) so the picker stays
+consistent with synthetic test manifests and with rows that only live in the
+app file. A row joins the picker when it is installed — not an unavailable
 placeholder and its files are on disk — and its group is ``generate``. A row
 without an explicit ``group`` is ``generate`` only when the Canvas catalog lists
 it with the ``generator`` role; every other row stays out of the picker.
 
-The ``group`` field is the picker grouping (generate / edit / writer / safety).
-It is unrelated to the ``file_groups`` file-grouping field on common's Model.
+``group`` must be a recognised task group from the 0.7.1 field spec
+(``generate``, ``edit``, ``upscale``, ``restore``, ``voice``, ``transcribe``,
+``translate``, ``writer``, ``safety``, ``internal``). An unknown value falls
+under ``other`` in Manage models. This field is unrelated to the
+``file_groups`` file-grouping field on common's Model.
 """
 from __future__ import annotations
 

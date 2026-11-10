@@ -21,20 +21,47 @@ SEED = bytes(range(32))
 SERIAL = 9
 
 
+def _files(entry, predicate=None):
+    return {
+        f["path"]: {"path": f["path"], "size": f["size"], "sha256": f["sha256"]}
+        for f in entry["files"]
+        if predicate is None or predicate(f["path"])
+    }
+
+
+def _row(index_id, files, prebuilt=None):
+    blob = json.dumps({"files": list(files.values()), "prebuilt": prebuilt or []}).encode()
+    return blob, {"id": index_id, "repo": "r", "revision": "v", "sha256": hashlib.sha256(blob).hexdigest()}
+
+
 def _world(manifest):
     ours = {e["id"]: e for e in manifest["models"]}
     descriptors, rows = {}, []
     for index_id, ids in tool.CANVAS_IDS.items():
-        files = {f["path"]: {"path": f["path"], "size": f["size"], "sha256": f["sha256"]}
-                 for model_id in ids for f in ours[model_id]["files"]}
+        files = {}
+        for model_id in ids:
+            files.update(_files(ours[model_id]))
         prebuilt = []
         if f"{ids[0]}-upstream" in ours:
-            prebuilt = [{"role": "fallback", "files": [
-                {"path": f["path"], "size": f["size"], "sha256": f["sha256"]}
-                for f in ours[f"{ids[0]}-upstream"]["files"] if f["path"].startswith("transformer/")]}]
-        blob = json.dumps({"files": list(files.values()), "prebuilt": prebuilt}).encode()
+            prebuilt = [{"role": "fallback", "files": list(_files(
+                ours[f"{ids[0]}-upstream"], tool._transformer_path,
+            ).values())}]
+        blob, row = _row(index_id, files, prebuilt)
         descriptors[index_id] = blob
-        rows.append({"id": index_id, "repo": "r", "revision": "v", "sha256": hashlib.sha256(blob).hexdigest()})
+        rows.append(row)
+    # Shared FP32 default: TE/VAE/tokenizer/scheduler plus upstream transformers.
+    shared = {}
+    pack0 = next(iter(tool.TURBO_PACKS))
+    shared.update(_files(ours[pack0], tool._shared_path))
+    if f"{pack0}-upstream" in ours:
+        shared.update(_files(ours[f"{pack0}-upstream"], tool._transformer_path))
+    blob, row = _row(tool.SHARED_INDEX_ID, shared)
+    descriptors[tool.SHARED_INDEX_ID] = blob
+    rows.append(row)
+    for pack_id, index_id in tool.TURBO_PACKS.items():
+        blob, row = _row(index_id, _files(ours[pack_id], tool._transformer_path))
+        descriptors[index_id] = blob
+        rows.append(row)
     index = json.dumps({"serial": SERIAL, "models": rows}).encode()
     return index, descriptors
 
@@ -89,3 +116,41 @@ def test_a_descriptor_that_does_not_match_the_index_is_refused():
 def test_the_fp32_fallback_stays_in_the_manifest():
     ids = {e["id"] for e in MANIFEST["models"]}
     assert {"z-image-turbo-bf16-16gb-upstream", "z-image-turbo-bf16-upstream"} <= ids
+
+
+def test_a_bf16_transformer_mismatch_is_reported_against_its_own_row():
+    changed = copy.deepcopy(MANIFEST)
+    entry = next(e for e in changed["models"] if e["id"] == "z-image-turbo-bf16-16gb")
+    item = next(f for f in entry["files"] if f["path"].startswith("transformer/") and f["path"].endswith(".safetensors"))
+    item["sha256"] = "0" * 64
+    problems = _run(changed)
+    assert any(
+        p.startswith("z-image-turbo-bf16-16gb/") and p.endswith("differs from z-image-turbo-bf16-16gb")
+        for p in problems
+    )
+    assert not any("differs from z-image-turbo" == p.rsplit(" ", 1)[-1] and "/transformer/" in p for p in problems)
+
+
+def test_a_shared_text_encoder_mismatch_is_reported_against_z_image_turbo():
+    changed = copy.deepcopy(MANIFEST)
+    entry = next(e for e in changed["models"] if e["id"] == "z-image-turbo-bf16")
+    item = next(f for f in entry["files"] if f["path"].startswith("text_encoder/"))
+    item["sha256"] = "0" * 64
+    problems = _run(changed)
+    assert any(
+        p.startswith("z-image-turbo-bf16/text_encoder/") and p.endswith("differs from z-image-turbo")
+        for p in problems
+    )
+
+
+def test_an_upstream_transformer_is_checked_against_z_image_turbo():
+    changed = copy.deepcopy(MANIFEST)
+    entry = next(e for e in changed["models"] if e["id"] == "z-image-turbo-bf16-16gb-upstream")
+    item = next(f for f in entry["files"] if f["path"].startswith("transformer/") and f["path"].endswith(".safetensors"))
+    item["sha256"] = "0" * 64
+    problems = _run(changed)
+    assert any(
+        p.startswith("z-image-turbo-bf16-16gb-upstream/") and p.endswith("differs from z-image-turbo")
+        for p in problems
+    )
+

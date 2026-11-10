@@ -51,6 +51,10 @@ def selftest_report(
         and all(bool(row["ok"]) for row in classifiers)
     )
     notes: list[str] = []
+    if os_result.ok and os_result.message:
+        # The unsupported-distro override: ok is True, and the warning must be
+        # visible in the report instead of silently dropped.
+        notes.append(os_result.message)
     if not python_supports_tensorrt():
         notes.append(text("splash.tensorrt_skip", "en"))
     return {

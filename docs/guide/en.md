@@ -34,7 +34,7 @@ The picture model is **MOSS-Image-SFT** on every graphics card that Canvas suppo
 
 | | Requirement |
 |---|---|
-| Operating system | Windows 11 24H2 (build 26100) or newer, 64-bit; or a Linux distribution released in 2025 or later |
+| Operating system | Windows 11 24H2 (build 26100) or newer, 64-bit; or a Linux distribution released in 2024 or later (including Ubuntu 24.04 LTS) |
 | Graphics card | NVIDIA GeForce RTX 40 series or newer, with at least 16 GB of video memory (VRAM) |
 | Without such a card | Not supported. Canvas has no processor-only mode. |
 | Disk space | The default MOSS-Image-SFT pack size is pending — its compact build is not published yet. Leave room for the program libraries and your pictures; the optional Z-Image pack is about 20.5 GB, and other optional packs need more (see below). |
@@ -135,7 +135,7 @@ A silent Setup does not offer PowerShell 7. It uses PowerShell 7 when it is inst
 
 # Installing on Linux
 
-You need a Linux distribution released in 2025 or later, and `curl`, `tar` and `sha256sum`. The installer needs permission to create `/opt/voxprint-ai-suite/canvas/` (`sudo` when you are not root). It does not run `nvidia-smi` and it does not name a minimum driver version. The graphics-card rules in chapter 1 still apply.
+You need a Linux distribution released in 2024 or later (including Ubuntu 24.04 LTS), and `curl`, `tar` and `sha256sum`. The installer needs permission to create `/opt/voxprint-ai-suite/canvas/` (`sudo` when you are not root). It does not run `nvidia-smi` and it does not name a minimum driver version. The graphics-card rules in chapter 1 still apply. An older or otherwise unsupported distribution is not refused when you set `VOXPRINT_ALLOW_UNSUPPORTED_DISTRO=1`; Canvas then warns that the distribution is unsupported and continues anyway.
 
 1. Download `voxprint-canvas-<version>-linux-x86_64.tar.gz` and `SHA256SUMS` from the releases page and check the archive:
 
@@ -663,7 +663,8 @@ If the startup window closes and no main window appears, Canvas found a requirem
 | Message | Meaning |
 |---|---|
 | *Windows 11 24H2 or newer is required.* | Update Windows |
-| *A Linux distribution from 2025 or later is required.* | Use a newer distribution |
+| *A Linux distribution from 2024 or later is required.* | Use a newer distribution, or set `VOXPRINT_ALLOW_UNSUPPORTED_DISTRO=1` to continue anyway (see below) |
+| *Warning: this Linux distribution is unsupported; a distribution from 2024 or later is required. Continuing anyway because VOXPRINT_ALLOW_UNSUPPORTED_DISTRO=1 is set.* | The distribution is below the 2024 floor or its release is unknown. The run continues only because the override is set; use a newer distribution for a supported setup |
 | *An NVIDIA RTX 40 series GPU or newer is required.* | The graphics card is not supported, or the NVIDIA driver is missing |
 | *This GPU does not have enough memory.* | The card has less than 15.5 GB of video memory |
 

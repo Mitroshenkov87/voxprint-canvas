@@ -12,7 +12,8 @@ APP_VERSION = version()
 APP_ID = "canvas"
 # Windows 11 24H2.
 MIN_WINDOWS_BUILD = 26100
-MIN_LINUX_YEAR = 2025
+# Ubuntu 24.04 LTS and any distro whose linux_year() is 2024 or newer.
+MIN_LINUX_YEAR = 2024
 MIN_COMPUTE_CAPABILITY = (8, 9)
 
 RESPONSIBILITY = text("notice.responsibility", "en")

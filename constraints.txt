@@ -1,9 +1,13 @@
-# Exact runtime pins. Installers pass this file to pip with -c.
-# torch and torchvision resolve as 2.11.0+cu130 and 0.26.0+cu130 from
-# https://download.pytorch.org/whl/cu130. Other pins, including numpy, resolve from PyPI.
+# Runtime pins. Installers pass this file to pip with -c.
+# torch and torchvision keep the same ranges as the [gen] extra in pyproject.toml
+# (torch>=2.11,<2.15; torchvision>=0.26,<0.30), so this file cannot fight the extra
+# or a compatible CUDA local version already present (for example 2.14.1 / 0.29.2).
+# The tested CUDA 13.0 builds, 2.11.0+cu130 and 0.26.0+cu130, stay exact in
+# constraints-cuda.txt; they satisfy these ranges.
+# Other pins, including numpy, resolve from PyPI.
 # huggingface-hub stays on 1.x because diffusers 0.41.0 requires huggingface-hub<2.
-torch==2.11.0
-torchvision==0.26.0
+torch>=2.11,<2.15
+torchvision>=0.26,<0.30
 accelerate==1.15.0
 diffusers==0.41.0
 peft==0.21.2

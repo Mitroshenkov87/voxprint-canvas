@@ -31,6 +31,7 @@ from canvas.infra.errors import note_error, note_timing
 from canvas.infra.phase_vram import Phase, ResidualVram, start_phase
 from canvas.infra.stage_timer import StageTimes, set_current
 from canvas.models import hot_tier as hot
+from canvas.models.decode_noise import DecodeNoiseError
 from canvas.models.runtime import pipeline_scope
 from canvas.models.user_lora import apply_trigger, rewrite_alias
 from canvas.pipeline.bf16_schedule import VramRefused, is_out_of_memory
@@ -139,6 +140,9 @@ def run_batch(
     except ResidualVram as exc:
         note_error(exc.code)
         _fill(entries, results, SeriesResult("error", str(VramRefused()), (), None, exc.code))
+    except DecodeNoiseError as exc:
+        note_error(exc.code)
+        _fill(entries, results, SeriesResult("error", str(exc), (), None, exc.code))
     except Exception as exc:
         _fill(entries, results, _internal(exc))
     finally:

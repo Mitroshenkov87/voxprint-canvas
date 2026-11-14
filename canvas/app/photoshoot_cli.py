@@ -364,6 +364,8 @@ def _english_stop_message(code: str) -> str:
         return text("error.vram", "en")
     if code.startswith("lora."):
         return text(code, "en")
+    if code.startswith("inference."):
+        return text(code, "en")
     if code == "enlarge_unavailable":
         return text("enlarge.hint", "en", name=ENLARGE_NAME)
     return _series_message(code)

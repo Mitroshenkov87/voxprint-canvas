@@ -57,6 +57,7 @@ from canvas.models.pins import (
     PIPELINE_TEXT,
 )
 from canvas.models.plan import CallPlan
+from canvas.models.decode_noise import assert_not_noise
 from canvas.models.user_lora import LoraRejected, UserLora, apply_bound_lora, unload_lora
 from canvas.pipeline.bf16_schedule import VramRefused, is_out_of_memory
 from canvas.pipeline.device_guard import DeviceRefused, pretrained_attempts, require_cuda
@@ -1587,6 +1588,8 @@ def _image_from_result(pipe: Any, result: Any, torch: Any) -> RawImage:
         decoded = _decode_latents(pipe, held, torch)
     with timed("to_pil"):
         image = _latents_to_pil(pipe, decoded, torch)
+    # Fail closed: a noise frame is never handed to the writer.
+    assert_not_noise(image)
     return RawImage(image.width, image.height, image.tobytes())
 
 
@@ -2462,21 +2465,22 @@ def _release_cuda_cache(torch: Any) -> None:
 
 
 def _vae_for_decode(pipe: Any, vae: Any, torch: Any) -> Any:
-    """Put this VAE on CUDA in BF16. A replacement object becomes ``pipe.vae``."""
+    """Put this VAE on CUDA in the dtype it was loaded with. A replacement object becomes ``pipe.vae``.
+
+    Stock diffusers fixes the VAE dtype at ``from_pretrained(torch_dtype=...)``
+    and then only moves the module between devices. A bare ``to("cuda",
+    bfloat16)`` here force-cast every parameter at decode time (the diffusers
+    "kept in float32" warning on the rc.44 acceptance run) and silently
+    degraded an fp32 or FP8-stored VAE.
+    """
     if not _cuda_is_up(torch):
         return vae
-    dtype = getattr(torch, "bfloat16", None)
     mover = getattr(vae, "to", None)
     if not callable(mover):
         return vae
     try:
-        moved = mover("cuda", dtype) if dtype is not None else mover("cuda")
-    except TypeError:
-        try:
-            moved = mover("cuda")
-        except (TypeError, RuntimeError, AttributeError):
-            return vae
-    except (RuntimeError, AttributeError):
+        moved = mover("cuda")
+    except (TypeError, RuntimeError, AttributeError):
         return vae
     if moved is None:
         return vae
@@ -2491,8 +2495,10 @@ def _strip_casting_hooks(vae: Any) -> tuple[int, bool]:
     """Drop FP8 layerwise-casting hooks. The VAE stays a plain BF16 module.
 
     ``LayerwiseCastingHook`` refuses deinitialization, so the hook is removed
-    without that call and ``forward`` is put back. Returns how many hooks were
-    removed and whether any of them copied with ``non_blocking``.
+    without that call and ``forward`` is put back. The stored weights are
+    upcast to the hook's compute dtype first; without the hook they would
+    otherwise stay FP8 while a plain ``forward`` runs. Returns how many hooks
+    were removed and whether any of them copied with ``non_blocking``.
     """
     modules = getattr(vae, "modules", None)
     found = list(modules()) if callable(modules) else [vae]
@@ -2505,15 +2511,55 @@ def _strip_casting_hooks(vae: Any) -> tuple[int, bool]:
             hook = hooks.get("layerwise_casting")
             if bool(getattr(hook, "non_blocking", False)):
                 saw_non_blocking = True
+            _upcast_hooked_module(module, hook)
             _drop_layerwise_hook(module, registry, hook)
             removed += 1
         hf_hook = getattr(module, "_hf_hook", None)
         if hf_hook is not None and _is_casting_hook(hf_hook):
             if bool(getattr(hf_hook, "non_blocking", False)):
                 saw_non_blocking = True
+            _upcast_hooked_module(module, hf_hook)
             _clear_attr(module, "_hf_hook")
             removed += 1
     return removed, saw_non_blocking
+
+
+def _upcast_hooked_module(module: Any, hook: Any) -> None:
+    """Cast weights stored in the hook's storage dtype up to its compute dtype.
+
+    The hook upcast them per forward; once it is gone nothing would. ``.data``
+    casts keep diffusers' ``to()`` dtype warning out of the log.
+    """
+    storage = getattr(hook, "storage_dtype", None)
+    compute = getattr(hook, "compute_dtype", None)
+    if storage is None or compute is None:
+        return
+    for name in ("parameters", "buffers"):
+        getter = getattr(module, name, None)
+        if not callable(getter):
+            continue
+        try:
+            tensors = list(getter())
+        except (TypeError, RuntimeError):
+            continue
+        for tensor in tensors:
+            if getattr(tensor, "dtype", None) != storage:
+                continue
+            data = getattr(tensor, "data", None)
+            target = data if data is not None else tensor
+            mover = getattr(target, "to", None)
+            if not callable(mover):
+                continue
+            try:
+                moved = mover(dtype=compute)
+            except (TypeError, RuntimeError, AttributeError):
+                continue
+            if data is None:
+                continue
+            try:
+                tensor.data = moved
+            except (AttributeError, TypeError, RuntimeError):
+                continue
 
 
 def _drop_layerwise_hook(module: Any, registry: Any, hook: Any) -> None:

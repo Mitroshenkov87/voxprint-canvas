@@ -21,6 +21,7 @@ from canvas.models.plan import BaseNotSelected, ModeUnavailable, OptionalModelUn
 from canvas.models.provision import DownloadDeclined
 from canvas.models.registry import load_catalog
 from canvas.models.runtime import InferenceUnavailable, LoraLoadError, prepare_series_embeds
+from canvas.models.decode_noise import DecodeNoiseError
 from canvas.models.sizes import frame_size
 from canvas.models.snapshots import SnapshotError, snapshot_ready
 from canvas.models.verified import flush_process_cache, process_cache
@@ -168,6 +169,9 @@ class ShellRunner:
             except LoraRejected as exc:
                 # A LoRA that does not fit fails the same way on every frame: end the run.
                 _halt(text(exc.code, **exc.details), exc, exc.code, unavailable=True, crash=False)
+            except DecodeNoiseError as exc:
+                # The decoder produced noise; nothing was saved. Fail closed with the code.
+                _halt(text(exc.code), exc, exc.code, unavailable=True, crash=False)
             except (
                 ModelNotReady,
                 InferenceUnavailable,

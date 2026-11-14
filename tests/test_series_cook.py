@@ -209,7 +209,7 @@ def test_the_text_encoder_is_not_on_cuda_during_cook(tmp_path: Path, monkeypatch
             assert held is not None
             assert runtime.text_encoder_on_cuda(held.pipe) is False
             assert transformer.calls == []
-            assert vae.calls == [(("cuda", "bf16"), {})]
+            assert vae.calls == [(("cuda",), {})]
     finally:
         runtime.clear_series_embeds()
         runtime.reset_pipeline_cache()

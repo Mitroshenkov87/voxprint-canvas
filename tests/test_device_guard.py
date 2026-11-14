@@ -364,7 +364,7 @@ def test_cpu_encoder_storage_stops_on_cuda() -> None:
     assert encoder.history == []
 
 
-def test_a_latent_is_decoded_on_cuda_in_bf16(monkeypatch) -> None:
+def test_a_latent_is_decoded_on_cuda_in_its_loaded_dtype(monkeypatch) -> None:
     class _Latent:
         def __truediv__(self, other: object) -> _Latent:
             calls.append(("div", other))
@@ -405,7 +405,9 @@ def test_a_latent_is_decoded_on_cuda_in_bf16(monkeypatch) -> None:
     assert vae.config.force_upcast is False
     assert vae.calls == []
     raw = runtime._image_from_result(pipe, types.SimpleNamespace(images=[_Latent()]), torch)
-    assert ("cuda", "bf16") in vae.calls
+    # rc.45: decode moves the device only, like stock diffusers; no dtype cast.
+    assert ("cuda",) in vae.calls
+    assert ("cuda", "bf16") not in vae.calls
     assert ("tile",) in vae.calls
     assert ("div", 0.3611) in calls
     assert ("add", 0.1159) in calls

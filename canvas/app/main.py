@@ -67,6 +67,7 @@ if TYPE_CHECKING:
     from canvas.app.photoshoot_bench import live_generate, live_rewrite, run_bench
     from canvas.app.photoshoot_cli import model_generate, model_rewrite, reject_frames, run_command
     from canvas.app.selftest import selftest_report
+    from canvas.models.decode_noise import DecodeNoiseError
     from canvas.models.loader import ModelNotReady, ZImageGenerator, load_catalog_stack
     from canvas.models.runtime import InferenceUnavailable
     from canvas.pipeline.bf16_schedule import VramRefused, is_out_of_memory
@@ -85,6 +86,7 @@ _COMMAND_NAMES: dict[str, tuple[str, ...]] = {
     "canvas.app.photoshoot_cli": ("model_generate", "model_rewrite", "reject_frames", "run_command"),
     "canvas.app.selftest": ("selftest_report",),
     "canvas.models.loader": ("ModelNotReady", "ZImageGenerator", "load_catalog_stack"),
+    "canvas.models.decode_noise": ("DecodeNoiseError",),
     "canvas.models.runtime": ("InferenceUnavailable",),
     "canvas.pipeline.bf16_schedule": ("VramRefused", "is_out_of_memory"),
     "canvas.pipeline.device_guard": ("DeviceRefused",),
@@ -529,6 +531,8 @@ def _generate(args: argparse.Namespace) -> int:
             )
     except LoraRejected as exc:
         return _emit_lora(exc.code, as_json, **exc.details)
+    except DecodeNoiseError as exc:
+        return _emit_decode_noise(exc.code, as_json)
     except GpuLockTimeout as exc:
         return _emit({"ok": False, "error": str(exc), "code": "gpu_busy"}, as_json, 1)
     except (
@@ -915,6 +919,16 @@ def _emit_lora(code: str, as_json: bool, **values: object) -> int:
     else:
         print(message, file=sys.stderr)
     return 2
+
+
+def _emit_decode_noise(code: str, as_json: bool) -> int:
+    """Exit 1. The decoder produced noise, so no picture was saved."""
+    message = text(code, "en")
+    if as_json:
+        print(json.dumps({"ok": False, "error": code, "message": message}))
+    else:
+        print(message, file=sys.stderr)
+    return 1
 
 
 def _with_lora(payload: dict[str, object], chosen: tuple[UserLora, float] | None) -> dict[str, object]:

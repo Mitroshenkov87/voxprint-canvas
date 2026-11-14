@@ -31,6 +31,7 @@ from canvas.infra.phase_vram import Phase, ResidualVram, phase, require_released
 from canvas.infra.stage_timer import StageTimes, log_detail, note_peak_mib, set_current, timed
 from canvas.infra.vram import peak_allocated_bytes
 from canvas.models import hot_tier as hot
+from canvas.models.decode_noise import DecodeNoiseError
 from canvas.models.runtime import (
     clear_series_embeds,
     decode_phase,
@@ -176,6 +177,11 @@ def run_series(
         if timings is None and not noted:
             note_timing(clock.log_line())
         return SeriesResult("error", str(VramRefused()), (), None, exc.code)
+    except DecodeNoiseError as exc:
+        note_error(exc.code)
+        if timings is None and not noted:
+            note_timing(clock.log_line())
+        return SeriesResult("error", str(exc), (), None, exc.code)
     finally:
         _release_writer(rewrite)
         prep.finish()

@@ -164,6 +164,9 @@
     "error.download": {
       "en": "The model could not be downloaded."
     },
+    "inference.decode_noise": {
+      "en": "The decoder produced noise, so no picture was saved."
+    },
     "model.missing": {
       "en": "Model missing, fetch it with MDL."
     },

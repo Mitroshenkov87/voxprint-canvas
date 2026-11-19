@@ -1,0 +1,46 @@
+# Build output
+build/
+dist/
+out/
+*.egg-info/
+*.spec
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+# Downloaded weights. The registry under canvas/models stays in git.
+/models/
+*.safetensors
+*.ckpt
+*.gguf
+*.onnx
+!bakeoff/models/face_detection_yunet_2023mar.onnx
+*.pt
+*.bin
+# Generated images
+outputs/
+# Logs and debug dumps
+*.log
+logs/
+*.local.*
+scripts/_*.json
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+# Local audit and tool environments
+audit-report.txt
+.enlarge-release/
+.app/
+.tools/
+# MkDocs output and the CLI page written at docs build time
+/site/
+docs/cli.md
+.smoke-venv/
+smoke-16gb/
+/installer/windows/vxsigcheck.exe
+/installer/windows/voxprint-canvas.exe

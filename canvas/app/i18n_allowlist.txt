@@ -1,0 +1,4 @@
+# Literals a Qt text setter may still receive.
+# Empty text clears a status line. Aspect ratios are numeric tokens, not sentences.
+^$
+^\d+:\d+$

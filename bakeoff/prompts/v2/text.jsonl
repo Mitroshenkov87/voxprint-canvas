@@ -1,0 +1,35 @@
+{"id": "v2ten00", "category": "text_en", "prompt": "A wooden cafe sign hanging outside a shop that reads \"OPEN 24 HOURS\"", "target": "OPEN 24 HOURS"}
+{"id": "v2ten01", "category": "text_en", "prompt": "A movie poster with the title \"THE LAST HARBOR\" in large bold letters", "target": "THE LAST HARBOR"}
+{"id": "v2ten02", "category": "text_en", "prompt": "A neon sign on a brick wall that says \"NIGHT OWL BAR\"", "target": "NIGHT OWL BAR"}
+{"id": "v2ten03", "category": "text_en", "prompt": "A chalkboard menu in a bakery with the words \"FRESH BREAD DAILY\"", "target": "FRESH BREAD DAILY"}
+{"id": "v2ten04", "category": "text_en", "prompt": "A street sign at an intersection reading \"MAPLE AVENUE\"", "target": "MAPLE AVENUE"}
+{"id": "v2ten05", "category": "text_en", "prompt": "A coffee cup with the printed logo text \"VOXPRINT CANVAS\"", "target": "VOXPRINT CANVAS"}
+{"id": "v2ten06", "category": "text_en", "prompt": "A book cover titled \"Silent Rivers\" with a minimalist mountain illustration", "target": "Silent Rivers"}
+{"id": "v2ten07", "category": "text_en", "prompt": "A road warning sign that says \"SLOW DOWN\"", "target": "SLOW DOWN"}
+{"id": "v2ten08", "category": "text_en", "prompt": "A protest placard held up in a crowd reading \"CLEAN AIR NOW\"", "target": "CLEAN AIR NOW"}
+{"id": "v2ten09", "category": "text_en", "prompt": "A t-shirt mockup with the text \"BORN TO CODE\" printed on the chest", "target": "BORN TO CODE"}
+{"id": "v2ten10", "category": "text_en", "prompt": "A vintage train station board showing \"PLATFORM 9\"", "target": "PLATFORM 9"}
+{"id": "v2ten11", "category": "text_en", "prompt": "A birthday cake with icing that spells \"HAPPY 40TH ANNA\"", "target": "HAPPY 40TH ANNA"}
+{"id": "v2ten12", "category": "text_en", "prompt": "A smartphone screen showing a notification that reads \"Meeting at 3 PM\"", "target": "Meeting at 3 PM"}
+{"id": "v2ten13", "category": "text_en", "prompt": "A wine bottle label with the name \"Chateau Lumiere 2019\"", "target": "Chateau Lumiere 2019"}
+{"id": "v2ten14", "category": "text_en", "prompt": "A glowing shop window with the sticker \"SALE 50% OFF\"", "target": "SALE 50% OFF"}
+{"id": "v2ten15", "category": "text_en", "prompt": "A hand-painted wooden trail marker that says \"SUMMIT 2 KM\"", "target": "SUMMIT 2 KM"}
+{"id": "v2ten16", "category": "text_en", "prompt": "A billboard on a highway advertising \"SOLAR POWER FOR ALL\"", "target": "SOLAR POWER FOR ALL"}
+{"id": "v2ten17", "category": "text_en", "prompt": "A museum plaque that reads \"ANCIENT EGYPT GALLERY\"", "target": "ANCIENT EGYPT GALLERY"}
+{"id": "v2ten18", "category": "text_en", "prompt": "A laptop sticker with the words \"LOCAL FIRST\"", "target": "LOCAL FIRST"}
+{"id": "v2ten19", "category": "text_en", "prompt": "A cinema marquee showing the words \"NOW SHOWING\"", "target": "NOW SHOWING"}
+{"id": "v2tru00", "category": "text_ru", "prompt": "A wooden shop sign above a door with the Russian text \"\u0425\u041b\u0415\u0411 \u0418 \u041a\u041e\u0424\u0415\"", "target": "\u0425\u041b\u0415\u0411 \u0418 \u041a\u041e\u0424\u0415"}
+{"id": "v2tru01", "category": "text_ru", "prompt": "A Moscow metro station wall sign reading \"\u0412\u042b\u0425\u041e\u0414 \u0412 \u0413\u041e\u0420\u041e\u0414\"", "target": "\u0412\u042b\u0425\u041e\u0414 \u0412 \u0413\u041e\u0420\u041e\u0414"}
+{"id": "v2tru02", "category": "text_ru", "prompt": "A poster with the large Russian title \"\u041d\u041e\u0412\u042b\u0419 \u0413\u041e\u0420\u041e\u0414\"", "target": "\u041d\u041e\u0412\u042b\u0419 \u0413\u041e\u0420\u041e\u0414"}
+{"id": "v2tru03", "category": "text_ru", "prompt": "A neon sign in a dark street that says \"\u0410\u041f\u0422\u0415\u041a\u0410\"", "target": "\u0410\u041f\u0422\u0415\u041a\u0410"}
+{"id": "v2tru04", "category": "text_ru", "prompt": "A chalkboard in a cafe with the words \"\u0421\u0423\u041f \u0414\u041d\u042f\"", "target": "\u0421\u0423\u041f \u0414\u041d\u042f"}
+{"id": "v2tru05", "category": "text_ru", "prompt": "A book cover with the Russian title \"\u0422\u0438\u0445\u0438\u0439 \u0414\u043e\u043d\"", "target": "\u0422\u0438\u0445\u0438\u0439 \u0414\u043e\u043d"}
+{"id": "v2tru06", "category": "text_ru", "prompt": "A yellow road warning sign with the Russian text \"\u041e\u0421\u0422\u041e\u0420\u041e\u0416\u041d\u041e \u041b\u041e\u0421\u0418\"", "target": "\u041e\u0421\u0422\u041e\u0420\u041e\u0416\u041d\u041e \u041b\u041e\u0421\u0418"}
+{"id": "v2tru07", "category": "text_ru", "prompt": "A shop window sticker that says \"\u0421\u041a\u0418\u0414\u041a\u0418 50%\"", "target": "\u0421\u041a\u0418\u0414\u041a\u0418 50%"}
+{"id": "v2tru08", "category": "text_ru", "prompt": "A train station departure board showing \"\u041f\u0423\u0422\u042c 3\"", "target": "\u041f\u0423\u0422\u042c 3"}
+{"id": "v2tru09", "category": "text_ru", "prompt": "A birthday cake with icing that spells \"\u0421 \u0414\u041d\u0401\u041c \u0420\u041e\u0416\u0414\u0415\u041d\u0418\u042f\"", "target": "\u0421 \u0414\u041d\u0401\u041c \u0420\u041e\u0416\u0414\u0415\u041d\u0418\u042f"}
+{"id": "v2tru10", "category": "text_ru", "prompt": "A museum plaque with the text \"\u0417\u0410\u041b \u0418\u041a\u041e\u041d\"", "target": "\u0417\u0410\u041b \u0418\u041a\u041e\u041d"}
+{"id": "v2tru11", "category": "text_ru", "prompt": "A coffee cup with the printed text \"\u0414\u041e\u0411\u0420\u041e\u0415 \u0423\u0422\u0420\u041e\"", "target": "\u0414\u041e\u0411\u0420\u041e\u0415 \u0423\u0422\u0420\u041e"}
+{"id": "v2tru12", "category": "text_ru", "prompt": "A billboard advertising \"\u0427\u0418\u0421\u0422\u042b\u0419 \u0412\u041e\u0417\u0414\u0423\u0425\"", "target": "\u0427\u0418\u0421\u0422\u042b\u0419 \u0412\u041e\u0417\u0414\u0423\u0425"}
+{"id": "v2tru13", "category": "text_ru", "prompt": "A hand-painted trail marker that says \"\u0412\u0415\u0420\u0428\u0418\u041d\u0410 2 \u041a\u041c\"", "target": "\u0412\u0415\u0420\u0428\u0418\u041d\u0410 2 \u041a\u041c"}
+{"id": "v2tru14", "category": "text_ru", "prompt": "A cinema marquee showing \"\u0421\u0415\u0413\u041e\u0414\u041d\u042f \u0412 \u041a\u0418\u041d\u041e\"", "target": "\u0421\u0415\u0413\u041e\u0414\u041d\u042f \u0412 \u041a\u0418\u041d\u041e"}

@@ -1,0 +1,26 @@
+[
+  {
+    "file": "torso_40.jpg",
+    "documented_age": 40,
+    "age_basis": "File description: the subject is around forty years old",
+    "license": "CC0",
+    "source": "https://commons.wikimedia.org/wiki/File:Adult_Female_Torso_-_40_Years_Old.jpg",
+    "title": "Adult Female Torso - 40 Years Old.jpg"
+  },
+  {
+    "file": "torso_40_b.jpg",
+    "documented_age": 40,
+    "age_basis": "File description: the subject is around forty years old",
+    "license": "CC0",
+    "source": "https://commons.wikimedia.org/wiki/File:Adult_Female_Torso_-_40_Years_Old_(2).jpg",
+    "title": "Adult Female Torso - 40 Years Old (2).jpg"
+  },
+  {
+    "file": "garden_older_man.jpg",
+    "documented_age": null,
+    "age_basis": "Category:Nude old men",
+    "license": "CC0",
+    "source": "https://commons.wikimedia.org/wiki/File:A_nude_man_poses_in_the_formal_garden_of_a_privately_owned_chateau_near_Paris.jpg",
+    "title": "A nude man poses in the formal garden of a privately owned chateau near Paris.jpg"
+  }
+]

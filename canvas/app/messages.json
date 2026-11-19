@@ -1,0 +1,951 @@
+{
+  "locales": [
+    "en"
+  ],
+  "content_locales": [
+    "ru"
+  ],
+  "strings": {
+    "app.name": {
+      "en": "VOXPrint AI Canvas"
+    },
+    "canvas.settings.title": {
+      "en": "Settings"
+    },
+    "canvas.settings.pictures": {
+      "en": "Pictures"
+    },
+    "canvas.settings.projects": {
+      "en": "Projects folder"
+    },
+    "canvas.settings.open_folder": {
+      "en": "Open folder"
+    },
+    "canvas.settings.folder": {
+      "en": "Projects folder"
+    },
+    "canvas.settings.folder.open": {
+      "en": "Open folder"
+    },
+    "canvas.settings.seed": {
+      "en": "Seed"
+    },
+    "canvas.settings.generation": {
+      "en": "Generation"
+    },
+    "canvas.settings.random_seed": {
+      "en": "Random seed every time"
+    },
+    "canvas.settings.expert": {
+      "en": "Expert mode"
+    },
+    "canvas.settings.content": {
+      "en": "Content"
+    },
+    "canvas.settings.done": {
+      "en": "Done"
+    },
+    "canvas.batch.prompts": {
+      "en": "Batch prompts (one per line)"
+    },
+    "canvas.batch.seeds": {
+      "en": "Seeds (comma-separated)"
+    },
+    "canvas.batch.mixed": {
+      "en": "Use the prompt box or the batch prompts, not both."
+    },
+    "canvas.batch.mismatch": {
+      "en": "The number of seeds must match the number of batch prompts."
+    },
+    "app.about_title": {
+      "en": "About {name}"
+    },
+    "app.close": {
+      "en": "Close"
+    },
+    "prompt.placeholder": {
+      "en": "Describe the picture"
+    },
+    "tab.text": {
+      "en": "Text to image"
+    },
+    "tab.image": {
+      "en": "Image to image"
+    },
+    "label.operation": {
+      "en": "Operation"
+    },
+    "format.avif": {
+      "en": "AVIF"
+    },
+    "format.jxl": {
+      "en": "JPEG XL"
+    },
+    "format.webp": {
+      "en": "WebP"
+    },
+    "checkbox.fourk": {
+      "en": "Output size: 4K"
+    },
+    "checkbox.addons": {
+      "en": "Third-party add-ons"
+    },
+    "button.install_enlarge": {
+      "en": "Install Enlarge"
+    },
+    "button.generate": {
+      "en": "Generate"
+    },
+    "button.enhance": {
+      "en": "Enhance"
+    },
+    "button.enhancing": {
+      "en": "Enhancing…"
+    },
+    "button.about": {
+      "en": "About"
+    },
+    "button.models": {
+      "en": "Manage models"
+    },
+    "models.missing": {
+      "en": "VOXPrint MDL is not installed."
+    },
+    "tooltip.enhance": {
+      "en": "Improve the prompt"
+    },
+    "tooltip.revert": {
+      "en": "Revert"
+    },
+    "aspect.landscape": {
+      "en": "Landscape"
+    },
+    "aspect.square": {
+      "en": "Square"
+    },
+    "aspect.portrait": {
+      "en": "Portrait"
+    },
+    "mode.text": {
+      "en": "Text to image"
+    },
+    "mode.restyle": {
+      "en": "Restyle"
+    },
+    "mode.inpaint": {
+      "en": "Inpaint"
+    },
+    "mode.outpaint": {
+      "en": "Outpaint"
+    },
+    "mode.pose": {
+      "en": "Pose"
+    },
+    "mode.depth": {
+      "en": "Depth"
+    },
+    "mode.edge": {
+      "en": "Edge"
+    },
+    "notice.responsibility": {
+      "en": "Do not use the app to create content that is illegal or socially unacceptable; you are responsible for what you create."
+    },
+    "notice.third_party": {
+      "en": "Third-party weights are provided by their authors, who are responsible for the licence and training data. Voxprint does not host or redistribute them."
+    },
+    "enlarge.hint": {
+      "en": "Install {name} to use this."
+    },
+    "dialog.download": {
+      "en": "Download"
+    },
+    "status.done": {
+      "en": "Done"
+    },
+    "adult_off.refused": {
+      "en": "Adult content (18+) is off. Changing an outfit is fine, but taking off all clothing needs the 18+ box turned on.",
+      "ru": "Режим «Для взрослых (18+)» выключен. Сменить одежду можно, а полностью раздеть можно только при включённом режиме (флажок 18+)."
+    },
+    "gate.blocked": {
+      "en": "This request cannot be completed.",
+      "ru": "Этот запрос нельзя выполнить."
+    },
+    "gate.blocked_youth": {
+      "en": "This request cannot be completed. Explicit content cannot be combined with school, student or young-age themes.",
+      "ru": "Этот запрос нельзя выполнить. Откровенный контент нельзя сочетать со школьной, студенческой или детской тематикой."
+    },
+    "gate.blocked_stylised": {
+      "en": "This request cannot be completed. Explicit content cannot be combined with anime, manga or other stylised characters.",
+      "ru": "Этот запрос нельзя выполнить. Откровенный контент нельзя сочетать с аниме, мангой или другими стилизованными персонажами."
+    },
+    "gate.unavailable": {
+      "en": "Image generation is unavailable.",
+      "ru": "Генерация изображений недоступна."
+    },
+    "photoshoot.code.internal": {
+      "en": "Something went wrong. The series stopped."
+    },
+    "error.job": {
+      "en": "This mode needs another image."
+    },
+    "error.cooling": {
+      "en": "The GPU is cooling down. Try again in a little while."
+    },
+    "error.mode": {
+      "en": "This mode is not available on this GPU."
+    },
+    "error.base": {
+      "en": "The text model has not been selected yet."
+    },
+    "error.optional_model": {
+      "en": "The optional model is not available."
+    },
+    "error.vram": {
+      "en": "This picture does not fit on the GPU."
+    },
+    "error.device": {
+      "en": "The model did not stay on the GPU."
+    },
+    "error.download": {
+      "en": "The model could not be downloaded."
+    },
+    "inference.decode_noise": {
+      "en": "The decoder produced noise, so no picture was saved."
+    },
+    "model.missing": {
+      "en": "Model missing, fetch it with MDL."
+    },
+    "view.link_failed": {
+      "en": "{name} could not be linked to the model store. Weights are not copied."
+    },
+    "view.bad_path": {
+      "en": "A model file must stay inside its folder."
+    },
+    "error.verify": {
+      "en": "The model file could not be verified."
+    },
+    "error.cancelled": {
+      "en": "The download was cancelled."
+    },
+    "error.offload": {
+      "en": "This pipeline cannot offload weights."
+    },
+    "error.package": {
+      "en": "A package could not be installed."
+    },
+    "error.python": {
+      "en": "Python could not be installed."
+    },
+    "error.address": {
+      "en": "unsupported download address"
+    },
+    "enlarge.finish": {
+      "en": "Enlarge could not finish."
+    },
+    "enlarge.read": {
+      "en": "Enlarge could not read this picture."
+    },
+    "enlarge.format": {
+      "en": "Enlarge cannot write this format."
+    },
+    "enlarge.gpu": {
+      "en": "This computer cannot run Enlarge."
+    },
+    "enlarge.busy": {
+      "en": "The GPU is busy."
+    },
+    "enlarge.oom": {
+      "en": "Enlarge ran out of memory."
+    },
+    "enlarge.model_missing": {
+      "en": "Download the upscale model in {name}, then try again."
+    },
+    "enlarge.write": {
+      "en": "Enlarge could not write the picture."
+    },
+    "enlarge.cancelled": {
+      "en": "Enlarge was cancelled."
+    },
+    "enlarge.protocol": {
+      "en": "Enlarge sent a message this app does not understand."
+    },
+    "enlarge.vram": {
+      "en": "Enlarge needs more free GPU memory."
+    },
+    "enlarge.missing": {
+      "en": "Enlarge is not installed."
+    },
+    "enhance.age": {
+      "en": "The enhanced prompt changed a stated age, so the original prompt was used."
+    },
+    "enhance.age_descriptor": {
+      "en": "The enhanced prompt added words about age, so the original prompt was used."
+    },
+    "enhance.quote": {
+      "en": "The enhanced prompt dropped quoted text, so the original prompt was used."
+    },
+    "enhance.empty": {
+      "en": "The enhanced prompt was empty, so the original prompt was used."
+    },
+    "splash.gpu": {
+      "en": "Checking the GPU"
+    },
+    "startup.lock": {
+      "en": "Another Canvas window is still open. Close it, then try again."
+    },
+    "splash.installing": {
+      "en": "Installing {name}"
+    },
+    "splash.repairing": {
+      "en": "Repairing {name}"
+    },
+    "splash.leaving": {
+      "en": "Leaving {name} unchanged"
+    },
+    "splash.install_python": {
+      "en": "Installing Python"
+    },
+    "splash.runtime_left": {
+      "en": "Leaving the suite runtime in place"
+    },
+    "splash.install_torch": {
+      "en": "Installing PyTorch"
+    },
+    "splash.tensorrt_skip": {
+      "en": "TensorRT is skipped on Python 3.14."
+    },
+    "splash.install_tensorrt": {
+      "en": "Installing TensorRT"
+    },
+    "splash.tensorrt_left": {
+      "en": "Leaving TensorRT in place"
+    },
+    "splash.copying": {
+      "en": "{name} copying"
+    },
+    "splash.starting": {
+      "en": "{name} starting"
+    },
+    "splash.progress": {
+      "en": "{name} {percent}% about {seconds}s"
+    },
+    "splash.ready": {
+      "en": "{name} ready"
+    },
+    "pack.controlnet_lite": {
+      "en": "ControlNet lite"
+    },
+    "pack.controlnet": {
+      "en": "ControlNet"
+    },
+    "pack.turbo": {
+      "en": "Z-Image-Turbo"
+    },
+    "download.notice": {
+      "en": "{title} is {size}. Estimated time {duration}."
+    },
+    "unit.gb": {
+      "en": "{value} GB"
+    },
+    "unit.mb": {
+      "en": "{value} MB"
+    },
+    "unit.kb": {
+      "en": "{value} KB"
+    },
+    "unit.b": {
+      "en": "{value} B"
+    },
+    "unit.span": {
+      "en": "{count} {unit}"
+    },
+    "unit.minute.one": {
+      "en": "minute"
+    },
+    "unit.minute.many": {
+      "en": "minutes"
+    },
+    "unit.second.one": {
+      "en": "second"
+    },
+    "unit.second.many": {
+      "en": "seconds"
+    },
+    "edit.removed": {
+      "en": "Instruction editing has been removed."
+    },
+    "canvas.models.missing": {
+      "en": "Models are not ready yet. Use Manage models."
+    },
+    "canvas.models.manage_running": {
+      "en": "Manage models is already open."
+    },
+    "canvas.models.manage_failed": {
+      "en": "Manage models closed with an error."
+    },
+    "canvas.engine.killed": {
+      "en": "The picture engine stopped — not enough memory. Close other apps and try again."
+    },
+    "canvas.stage.prepare": {
+      "en": "Preparing"
+    },
+    "canvas.stage.draw": {
+      "en": "Drawing"
+    },
+    "canvas.stage.step": {
+      "en": "Drawing… step {current} of {total}"
+    },
+    "canvas.stage.load": {
+      "en": "Loading the model…"
+    },
+    "canvas.stage.encode": {
+      "en": "Encoding the prompt…"
+    },
+    "canvas.stage.decode": {
+      "en": "Decoding the picture…"
+    },
+    "canvas.stage.save": {
+      "en": "Saving…"
+    },
+    "canvas.stage.wait": {
+      "en": "Waiting for the GPU…"
+    },
+    "canvas.stage.check": {
+      "en": "Checking the inputs…"
+    },
+    "canvas.progress.count": {
+      "en": "{current} of {total}"
+    },
+    "canvas.progress.picture": {
+      "en": "Picture {current} of {total}"
+    },
+    "canvas.results.header": {
+      "en": "Results ({count})"
+    },
+    "canvas.pictures.count": {
+      "en": "Pictures"
+    },
+    "canvas.pictures.count_tip": {
+      "en": "How many pictures one Generate makes."
+    },
+    "canvas.lora.import_short": {
+      "en": "Import…"
+    },
+    "canvas.revert.symbol": {
+      "en": "↶"
+    },
+    "canvas.menu.value": {
+      "en": "{name}: {value}  ▾"
+    },
+    "canvas.proportions": {
+      "en": "Proportions"
+    },
+    "canvas.image_size": {
+      "en": "Image size"
+    },
+    "canvas.action.picture": {
+      "en": "Use a picture"
+    },
+    "canvas.action.mask": {
+      "en": "Edit the mask"
+    },
+    "canvas.action.addons": {
+      "en": "Add-ons"
+    },
+    "canvas.action.check": {
+      "en": "Check this PC"
+    },
+    "canvas.action.setup": {
+      "en": "Picture setup"
+    },
+    "canvas.output.4k.needs": {
+      "en": "4K (needs Enlarge)"
+    },
+    "canvas.enlarge.title": {
+      "en": "VOXPrint Enlarge"
+    },
+    "canvas.enlarge.confirm": {
+      "en": "4K needs VOXPrint Enlarge. Install it?"
+    },
+    "canvas.enlarge.confirm.size": {
+      "en": "4K needs VOXPrint Enlarge (≈ {size}). Install it?"
+    },
+    "canvas.enlarge.progress": {
+      "en": "Installing VOXPrint Enlarge…"
+    },
+    "canvas.enlarge.progress.bytes": {
+      "en": "Installing VOXPrint Enlarge… {done} of {total}"
+    },
+    "canvas.enlarge.failed": {
+      "en": "VOXPrint Enlarge could not be installed."
+    },
+    "canvas.expert.preset": {
+      "en": "Preset"
+    },
+    "canvas.expert.custom": {
+      "en": "Custom"
+    },
+    "canvas.expert.reset": {
+      "en": "Reset to preset"
+    },
+    "canvas.setup.title": {
+      "en": "Picture setup"
+    },
+    "canvas.setup.done": {
+      "en": "Done"
+    },
+    "canvas.picture.title": {
+      "en": "Use a picture"
+    },
+    "canvas.picture.open": {
+      "en": "Open"
+    },
+    "canvas.picture.use": {
+      "en": "Use this picture"
+    },
+    "canvas.picture.empty": {
+      "en": "No picture yet."
+    },
+    "canvas.mask.title": {
+      "en": "Edit the mask"
+    },
+    "canvas.mask.brush": {
+      "en": "Brush"
+    },
+    "canvas.mask.eraser": {
+      "en": "Eraser"
+    },
+    "canvas.mask.clear": {
+      "en": "Clear"
+    },
+    "canvas.mask.use": {
+      "en": "Use this mask"
+    },
+    "canvas.mask.need": {
+      "en": "Open a picture first."
+    },
+    "canvas.mask.hint": {
+      "en": "Paint the area that should change."
+    },
+    "canvas.mask.size": {
+      "en": "Brush size"
+    },
+    "canvas.addons.title": {
+      "en": "Add-ons"
+    },
+    "canvas.addons.path": {
+      "en": "Folder"
+    },
+    "canvas.addons.strength": {
+      "en": "Strength"
+    },
+    "canvas.addons.save": {
+      "en": "Save"
+    },
+    "canvas.addons.none": {
+      "en": "None"
+    },
+    "canvas.addons.empty": {
+      "en": "No add-ons in the models folder."
+    },
+    "canvas.addons.adult_label": {
+      "en": "Adult content"
+    },
+    "canvas.addons.trigger": {
+      "en": "Insert this word"
+    },
+    "canvas.addons.skipped": {
+      "en": "{name}: {reason}"
+    },
+    "canvas.addons.reason.record": {
+      "en": "This add-on record cannot be read."
+    },
+    "canvas.addons.reason.schema": {
+      "en": "This add-on record uses an unsupported schema."
+    },
+    "canvas.addons.reason.type": {
+      "en": "This add-on is not a LoRA."
+    },
+    "canvas.addons.reason.base": {
+      "en": "This add-on is for a different base model."
+    },
+    "canvas.addons.reason.file": {
+      "en": "This add-on file does not match its record."
+    },
+    "canvas.addons.reason.person": {
+      "en": "This person add-on is missing a required field."
+    },
+    "canvas.addons.reason.incomplete": {
+      "en": "This add-on is incomplete."
+    },
+    "canvas.addons.reason.preview": {
+      "en": "The preview file does not match its record."
+    },
+    "lora.base_mismatch": {
+      "en": "This LoRA is for a different base model."
+    },
+    "lora.retrain": {
+      "en": "This LoRA was trained on {base}, which Canvas cannot run. Retrain it for Z-Image-Turbo in Model Forge (voxprint-forge prepare --base z-image)."
+    },
+    "lora.invalid": {
+      "en": "This LoRA file cannot be read."
+    },
+    "lora.scale": {
+      "en": "LoRA scale must be from 0 to 2."
+    },
+    "lora.kind": {
+      "en": "This kind of LoRA cannot be imported yet."
+    },
+    "lora.preview": {
+      "en": "This LoRA package cannot be imported."
+    },
+    "lora.base_missing": {
+      "en": "The base model for this LoRA could not be requested from VOXPrint MDL."
+    },
+    "canvas.lora.base_queued": {
+      "en": "VOXPrint MDL is downloading the base model for this LoRA."
+    },
+    "canvas.lora.base_title": {
+      "en": "Different base model"
+    },
+    "canvas.lora.base_note": {
+      "en": "This LoRA was trained on {base}, which Canvas does not have. The picture runs on the default base and may look different."
+    },
+    "canvas.lora.retrain_title": {
+      "en": "Retrain this LoRA"
+    },
+    "canvas.lora.retrain_note": {
+      "en": "This LoRA was trained on {base}, which Canvas cannot run. Retrain it for {target}."
+    },
+    "canvas.lora.retrain_action": {
+      "en": "Retrain in Forge"
+    },
+    "canvas.lora.retrain_queued": {
+      "en": "Retrain requested. Model Forge will pick it up from its inbox."
+    },
+    "canvas.lora.import": {
+      "en": "Import LoRA"
+    },
+    "canvas.lora.import_filter": {
+      "en": "Model Forge LoRA (*.voxlora *.safetensors)"
+    },
+    "canvas.lora.imported": {
+      "en": "{name} is in the LoRA library."
+    },
+    "canvas.lora.checking": {
+      "en": "Checking the file…"
+    },
+    "canvas.lora.done": {
+      "en": "Done"
+    },
+    "canvas.lora.library": {
+      "en": "LoRA library"
+    },
+    "canvas.lora.library_empty": {
+      "en": "The library is empty. Import a LoRA from Model Forge."
+    },
+    "canvas.lora.remove": {
+      "en": "Remove"
+    },
+    "canvas.lora.kind_line": {
+      "en": "Kind: {kind}"
+    },
+    "canvas.lora.trigger_line": {
+      "en": "Trigger word: {trigger}"
+    },
+    "canvas.lora.kind.object": {
+      "en": "object"
+    },
+    "canvas.lora.kind.style": {
+      "en": "style"
+    },
+    "canvas.lora.kind.subject": {
+      "en": "subject"
+    },
+    "canvas.lora.pick": {
+      "en": "LoRA"
+    },
+    "canvas.lora.none": {
+      "en": "No LoRA"
+    },
+    "canvas.lora.third_party.title": {
+      "en": "{name} was not made in VOXPrint Model Forge"
+    },
+    "canvas.lora.third_party.body": {
+      "en": "Canvas is optimised for LoRAs made in VOXPrint Model Forge; this LoRA may work less well. It is added without previews and without a trigger word; you can enter one in the LoRA library."
+    },
+    "canvas.lora.continue": {
+      "en": "Continue"
+    },
+    "canvas.lora.cancel": {
+      "en": "Cancel"
+    },
+    "canvas.lora.no_preview": {
+      "en": "No preview"
+    },
+    "canvas.lora.trigger_edit": {
+      "en": "Trigger word"
+    },
+    "canvas.lora.trigger_placeholder": {
+      "en": "Not set"
+    },
+    "canvas.lora.kind.unknown": {
+      "en": "unknown"
+    },
+    "canvas.lora.third_party.short": {
+      "en": "It may work less well than a Model Forge LoRA."
+    },
+    "canvas.lora.more": {
+      "en": "Details"
+    },
+    "canvas.lora.trigger_tip": {
+      "en": "Insert «{trigger}» into the prompt"
+    },
+    "canvas.lora.alias_clash_title": {
+      "en": "Same LoRA name"
+    },
+    "canvas.lora.alias_clash": {
+      "en": "Two LoRAs used the name «{wanted}». «{lora}» is now «{given}»."
+    },
+    "canvas.lora.pick_tip": {
+      "en": "LoRA for this picture. Import more under More → Import LoRA."
+    },
+    "canvas.lora.strength_tip": {
+      "en": "LoRA strength"
+    },
+    "canvas.menu.compact": {
+      "en": "{value}  ▾"
+    },
+    "canvas.menu.value_tip": {
+      "en": "{name}: {value}"
+    },
+    "canvas.lora.strength": {
+      "en": "Strength"
+    },
+    "canvas.check.title": {
+      "en": "Check this PC"
+    },
+    "canvas.check.run": {
+      "en": "Run check"
+    },
+    "canvas.check.deep": {
+      "en": "Check every file"
+    },
+    "canvas.check.update": {
+      "en": "Check for an update"
+    },
+    "canvas.check.ready": {
+      "en": "This PC is ready."
+    },
+    "canvas.check.failed": {
+      "en": "This PC is not ready."
+    },
+    "canvas.check.current": {
+      "en": "This is the current release."
+    },
+    "canvas.check.newer": {
+      "en": "A newer release is {tag}."
+    },
+    "canvas.check.os": {
+      "en": "System"
+    },
+    "canvas.check.gpu": {
+      "en": "Graphics"
+    },
+    "canvas.check.encoders": {
+      "en": "File types"
+    },
+    "canvas.source": {
+      "en": "Start from"
+    },
+    "canvas.source.words": {
+      "en": "From text"
+    },
+    "canvas.source.picture": {
+      "en": "From a picture"
+    },
+    "canvas.source.help": {
+      "en": "From text — the picture is created from the description. From a picture — the chosen image is the base."
+    },
+    "canvas.variation": {
+      "en": "Variation"
+    },
+    "canvas.variation.quick": {
+      "en": "Usual"
+    },
+    "canvas.variation.varied": {
+      "en": "Bolder"
+    },
+    "canvas.variation.help": {
+      "en": "Usual — the familiar result. Bolder — more unusual ideas."
+    },
+    "canvas.change": {
+      "en": "Change"
+    },
+    "canvas.change.restyle": {
+      "en": "Restyle"
+    },
+    "canvas.change.inpaint": {
+      "en": "Paint over"
+    },
+    "canvas.change.outpaint": {
+      "en": "Extend"
+    },
+    "canvas.change.pose": {
+      "en": "Copy the pose"
+    },
+    "canvas.change.depth": {
+      "en": "Depth map"
+    },
+    "canvas.change.edge": {
+      "en": "Outlines"
+    },
+    "canvas.change.help": {
+      "en": "What to change in the picture."
+    },
+    "canvas.change.restyle.hint": {
+      "en": "Redraws the picture in a new look."
+    },
+    "canvas.change.inpaint.hint": {
+      "en": "Paints over one area and replaces it."
+    },
+    "canvas.change.outpaint.hint": {
+      "en": "Grows the picture past its edges."
+    },
+    "canvas.change.pose.hint": {
+      "en": "Keeps the pose from the picture."
+    },
+    "canvas.change.depth.hint": {
+      "en": "Follows what is near and what is far."
+    },
+    "canvas.change.edge.hint": {
+      "en": "Follows the outlines in the picture."
+    },
+    "canvas.format": {
+      "en": "File type"
+    },
+    "canvas.format.avif": {
+      "en": "AVIF"
+    },
+    "canvas.format.jxl": {
+      "en": "JPEG XL"
+    },
+    "canvas.format.webp": {
+      "en": "WebP"
+    },
+    "canvas.format.help": {
+      "en": "The file type of a saved picture."
+    },
+    "canvas.save_metadata": {
+      "en": "Save prompt in file"
+    },
+    "canvas.save_metadata.help": {
+      "en": "Write the prompt, seed, steps and LoRA into each saved picture. Off by default."
+    },
+    "canvas.export": {
+      "en": "Export"
+    },
+    "canvas.export.png": {
+      "en": "PNG"
+    },
+    "canvas.export.jpg": {
+      "en": "JPEG"
+    },
+    "canvas.export.webp": {
+      "en": "WebP"
+    },
+    "canvas.export.avif": {
+      "en": "AVIF"
+    },
+    "canvas.export.help": {
+      "en": "The file type handed to Forge. WebP is the default."
+    },
+    "canvas.style": {
+      "en": "Look"
+    },
+    "canvas.style.help": {
+      "en": "The look added to the prompt."
+    },
+    "canvas.output_size": {
+      "en": "Exact size"
+    },
+    "canvas.output_size.help": {
+      "en": "Standard, 2K, or 4K."
+    },
+    "canvas.output_size.follow": {
+      "en": "Match the choice"
+    },
+    "canvas.output_size.native": {
+      "en": "Standard"
+    },
+    "canvas.output_size.2k": {
+      "en": "2K"
+    },
+    "canvas.output_size.4k": {
+      "en": "4K"
+    },
+    "writer.download": {
+      "en": "Downloading the text model"
+    },
+    "menu.help": {
+      "en": "Help"
+    },
+    "menu.help.guide_en": {
+      "en": "VOXPrint AI Canvas Guide"
+    },
+    "canvas.file.look_in": {
+      "en": "Look in:"
+    },
+    "canvas.file.name": {
+      "en": "File name:"
+    },
+    "canvas.file.type": {
+      "en": "Files of type:"
+    },
+    "canvas.file.open": {
+      "en": "Open"
+    },
+    "canvas.file.cancel": {
+      "en": "Cancel"
+    },
+    "canvas.file.folder": {
+      "en": "Folder"
+    },
+    "canvas.model.section.compact": {
+      "en": "For 16 GB cards (compact)"
+    },
+    "canvas.model.section.full": {
+      "en": "Full size (24 GB+)"
+    },
+    "canvas.model.badge.compact": {
+      "en": "16 GB"
+    },
+    "canvas.model.badge.full": {
+      "en": "24 GB+"
+    },
+    "canvas.model.show_others": {
+      "en": "Show models for other cards"
+    },
+    "canvas.model.hide_others": {
+      "en": "Hide models for other cards"
+    },
+    "canvas.model.pick_tip": {
+      "en": "The installed model that draws a picture made from text."
+    },
+    "canvas.generate_model": {
+      "en": "Generate model"
+    },
+    "canvas.generate_model.help": {
+      "en": "The installed model that draws pictures made from text."
+    },
+    "canvas.batch.section": {
+      "en": "Batch"
+    },
+    "canvas.batch.seeds_tip": {
+      "en": "One seed per picture; the batch count follows the list."
+    },
+    "canvas.batch.prompts_tip": {
+      "en": "Each line draws one picture. Leave the prompt box empty to use them."
+    }
+  }
+}

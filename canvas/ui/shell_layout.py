@@ -1,0 +1,632 @@
+"""Canvas on the shared image screen.
+
+The surface is ``canvas``. Presets from the shared file stay, and the style
+row writes a Canvas look. Start from, variation, change, and file type live
+in Picture setup so the centre result stays large. Instruction editing is
+not a row.
+"""
+from __future__ import annotations
+
+import json
+import os
+from dataclasses import dataclass
+from pathlib import Path
+from collections.abc import Callable, Mapping
+from typing import NamedTuple
+
+from voxprint_common.paths import state_dir
+from voxprint_common.ui.presets import PresetFile, PresetGroup, PresetOption
+from voxprint_common.ui.settings import Choice, SettingSpec, SettingType, Settings, reference_settings
+from voxprint_common.ui.simple_image import SimpleImageLayout as SimpleLayout
+from voxprint_common.ui.variants import AppSurface, settings_for, state_names, surface_for, variant_presets
+
+from typing import TYPE_CHECKING
+
+from canvas.core.formats import OutputFormat
+from canvas.core.seeds import field_value, fresh_seed, offset_seed
+from canvas.models.generate_picker import SETTING_KEY
+from canvas.models.modes import Mode
+from canvas.pipeline import adult_boundary
+from canvas.ui.styles import LOOKS, look_for, style_label
+from canvas.ui.worker_checks import WorkerChecks
+
+if TYPE_CHECKING:
+    from canvas.app.shell_gate import ContentCheck
+    from canvas.safety.gate import AgeGate
+
+
+SEED_LOCK_KEY = "canvas.seed_lock"
+
+
+class PictureJob(NamedTuple):
+    """One picture the screen is about to run. The pipeline reads these fields."""
+
+    prompt: str
+    negative: str
+    mode: Mode
+    aspect: str
+    output: str
+    fmt: OutputFormat
+    seed: int
+    steps: int
+    guidance: float
+    sampler: str
+    copies: int
+    adult_content: bool = False
+    lora_path: str = ""
+    lora_weight: float = 0.7
+    # XMP/PNG text is written only when this is on.
+    save_metadata: bool = False
+    # The Canvas generate-model pick; empty lets the plan follow the family.
+    model_id: str = ""
+
+
+class CanvasLayout(SimpleLayout):
+    """The shared image screen, with Adult content (18+) as a setting of its own.
+
+    ``canvas.adult_content`` is the stored value. It does not depend on Expert
+    mode, a preset, or any other Expert value. The shared layout reads
+    ``image.adult_content``, so every write goes to both keys, and a preset
+    choice or reset that touches the shared key is undone from the Canvas one.
+    """
+
+    def __init__(self, *args, **kwargs) -> None:
+        self._adult_listeners: list[Callable[[bool], None]] = []
+        self._seed_listeners: list[Callable[[bool], None]] = []
+        # The exact seed of the last picture. The Expert field holds 31 bits; this holds all 32.
+        self.used_seed: int | None = None
+        super().__init__(*args, **kwargs)
+        self._keep_adult()
+
+    # --- seed ---------------------------------------------------------------------------------------------------
+
+    def seed_locked(self) -> bool:
+        """True when the seed is locked. Unlocked (the default) means a new random seed for every picture."""
+        return self.get(SEED_LOCK_KEY) is True
+
+    def set_seed_locked(self, value: object) -> None:
+        """Store the lock. It is its own setting: it never touches Expert mode.
+
+        Raises:
+            ValueError: ``value`` is not a bool.
+        """
+        if not isinstance(value, bool):
+            raise ValueError("the seed lock must be true or false")
+        super().set_value(SEED_LOCK_KEY, value)
+        self._keep_adult()
+        for listener in tuple(self._seed_listeners):
+            listener(value)
+
+    def on_seed_lock_change(self, listener: Callable[[bool], None]) -> None:
+        """Call ``listener`` with the new value after every lock write."""
+        self._seed_listeners.append(listener)
+
+    def base_seed(self) -> int:
+        """The seed a locked run starts from: the typed seed, or the exact last used one when untouched."""
+        typed = int(self.seed)
+        used = self.used_seed
+        if used is not None and field_value(used) == typed:
+            return used
+        return typed
+
+    def plan_seed(self, index: int = 0, base: int | None = None) -> int:
+        """The seed for copy ``index`` of a run.
+
+        Unlocked: a fresh random seed for every copy. Locked: ``base`` (the typed
+        seed by default) counted up by the copy index, so the same locked run
+        repeats exactly.
+        """
+        if not self.seed_locked():
+            return fresh_seed()
+        return offset_seed(self.base_seed() if base is None else base, index)
+
+    def note_seed_used(self, seed: int) -> None:
+        """Remember the seed a picture really used and show it in the Expert field.
+
+        The screen puts a locked base back in the field when the run ends.
+        """
+        self.used_seed = int(seed)
+        self.seed = field_value(seed)
+
+    def on_adult_change(self, listener: Callable[[bool], None]) -> None:
+        """Call ``listener`` with the new value after every 18+ write."""
+        self._adult_listeners.append(listener)
+
+    def adult_content(self) -> bool:
+        """The stored Adult content (18+) setting."""
+        return adult_boundary.enabled(self)
+
+    def set_adult_content(self, value: object) -> None:
+        """Store the setting under both keys. Nothing else changes.
+
+        Raises:
+            ValueError: ``value`` is not a bool.
+        """
+        if not isinstance(value, bool):
+            raise ValueError("adult content must be true or false")
+        super().set_value(adult_boundary.KEY, value)
+        super().set_value(adult_boundary.COMMON_KEY, value)
+        for listener in tuple(self._adult_listeners):
+            listener(value)
+
+    def set_value(self, key: str, value: object) -> None:
+        """Hand-edit a setting. Either adult key writes both."""
+        if key in (adult_boundary.KEY, adult_boundary.COMMON_KEY):
+            self.set_adult_content(value)
+            return
+        if key == SEED_LOCK_KEY:
+            self.set_seed_locked(value)
+            return
+        super().set_value(key, value)
+        self._keep_adult()
+
+    def choose(self, row_id: str, value: str) -> None:
+        """Pick a chip. The adult setting stays as it was."""
+        super().choose(row_id, value)
+        self._keep_adult()
+
+    def reset_group(self, group_id: str) -> None:
+        """Reset a preset group. The adult setting stays as it was."""
+        super().reset_group(group_id)
+        self._keep_adult()
+
+    def prompt_policy(self):
+        """The audience words for the stored setting."""
+        return adult_boundary.policy(self.adult_content())
+
+    def _keep_adult(self) -> None:
+        """Put the shared key back to the Canvas value when anything moved it."""
+        state = self.state
+        if state is None or not state.has(adult_boundary.KEY):
+            return
+        wanted = state.get(adult_boundary.KEY) is True
+        if state.has(adult_boundary.COMMON_KEY) and state.get(adult_boundary.COMMON_KEY) is wanted:
+            return
+        super().set_value(adult_boundary.COMMON_KEY, wanted)
+
+    def _review_prompt(self, prompt: str) -> bool:
+        """The shared gate review first, unchanged. Then the OFF boundary on the same words.
+
+        Every route that starts a picture asks this: generation, and the edit
+        routes (restyle, inpaint, outpaint, pose, depth, edge), because the
+        edit words are the prompt.
+        """
+        if not super()._review_prompt(prompt):
+            return False
+        reason = adult_boundary.refusal(prompt, allowed=self.adult_content())
+        if reason is None:
+            return True
+        self.block(reason)
+        return False
+
+
+@dataclass
+class CanvasShell:
+    """The headless screen, the descriptors, and the gate adapter."""
+
+    layout: SimpleLayout
+    settings: Settings
+    gate: ContentCheck | WorkerChecks
+    state_dir: Path
+    surface: AppSurface
+
+
+def canvas_state_dir() -> Path:
+    """Return ``<home>/state/canvas`` and create it when it is missing."""
+    path = state_dir() / "canvas"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def open_layout(state_dir_path: Path, *, gate: AgeGate, enlarge_installed: bool = False) -> CanvasShell:
+    """Build the image screen around an in-process gate (headless tools and tests).
+
+    ``gate`` is required. ``None`` and any stand-in are refused before the
+    shared screen is constructed. The window uses :func:`open_worker_layout`.
+
+    Args:
+        state_dir_path: Directory for ``image-settings.json`` and history.
+        gate: The process content gate.
+        enlarge_installed: True when the 4K chip can be selected.
+
+    Raises:
+        TypeError: ``gate`` is missing or is not the Canvas content gate.
+    """
+    from canvas.app.shell_gate import ContentCheck
+    from canvas.safety.gate import AgeGate
+
+    if not isinstance(gate, AgeGate):
+        raise TypeError("the screen needs the always-on content gate")
+    return _open(state_dir_path, ContentCheck(gate=gate), enlarge_installed)
+
+
+def open_worker_layout(state_dir_path: Path, *, checks: WorkerChecks, enlarge_installed: bool = False) -> CanvasShell:
+    """Build the image screen for the window. Checks run in the worker.
+
+    Args:
+        state_dir_path: Directory for ``image-settings.json`` and history.
+        checks: Answers the screen's review hooks from worker replies.
+        enlarge_installed: True when the 4K chip can be selected.
+
+    Raises:
+        TypeError: ``checks`` is not a :class:`WorkerChecks`.
+    """
+    if not isinstance(checks, WorkerChecks):
+        raise TypeError("the window screen answers its checks from the worker")
+    return _open(state_dir_path, checks, enlarge_installed)
+
+
+def _open(state_dir_path: Path, check: ContentCheck | WorkerChecks, enlarge_installed: bool) -> CanvasShell:
+    surface = surface_for("canvas")
+    settings = _settings()
+    presets = _presets(settings, enlarge_installed=enlarge_installed)
+    names = state_names(surface)
+    state_dir_path.mkdir(parents=True, exist_ok=True)
+    migrate_old_defaults(state_dir_path / names[0])
+    migrate_adult_content(state_dir_path / names[0])
+    layout = CanvasLayout(
+        presets=presets,
+        settings=settings,
+        state_dir=state_dir_path,
+        gate=check,
+        source_picture=True,
+        mask=True,
+        state_name=names[0],
+        history_name=names[1],
+    )
+    return CanvasShell(layout, settings, check, state_dir_path, surface)
+
+
+# Expert defaults saved by rc.30 and earlier.
+_OLD_DEFAULTS = {"shell.steps": 20, "shell.guidance": 7.0}
+
+
+def _shared_image_defaults() -> tuple[int, float]:
+    """Steps and guidance from common's shared image settings, not a Canvas copy."""
+    settings = reference_settings()
+    steps = settings.get("shell.steps")
+    guidance = settings.get("shell.guidance")
+    return int(steps.default), float(guidance.default)
+
+
+def migrate_old_defaults(path: Path) -> bool:
+    """Move saved steps and guidance that still equal the old defaults to the shared Turbo values.
+
+    Values the user changed are kept. Returns True when the file was rewritten.
+    """
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return False
+    values = payload.get("values") if isinstance(payload, dict) else None
+    if not isinstance(values, dict):
+        return False
+    for key, old in _OLD_DEFAULTS.items():
+        found = values.get(key)
+        if isinstance(found, bool) or not isinstance(found, (int, float)) or float(found) != float(old):
+            return False
+    steps, guidance = _shared_image_defaults()
+    values["shell.steps"] = steps
+    values["shell.guidance"] = guidance
+    overrides = payload.get("overrides")
+    if isinstance(overrides, dict):
+        for group, keys in overrides.items():
+            if isinstance(keys, list):
+                overrides[group] = [key for key in keys if key not in _OLD_DEFAULTS]
+    try:
+        path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    except OSError:
+        return False
+    return True
+
+
+def migrate_adult_content(path: Path) -> bool:
+    """Copy a stored ``image.adult_content`` into ``canvas.adult_content`` when the new key is missing.
+
+    Old configs only had the shared key. A config that already has the Canvas
+    key is left alone: Canvas keeps the two in step from then on. Returns True
+    when the file was rewritten.
+    """
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return False
+    values = payload.get("values") if isinstance(payload, dict) else None
+    if not isinstance(values, dict) or adult_boundary.KEY in values:
+        return False
+    old = values.get(adult_boundary.COMMON_KEY)
+    if not isinstance(old, bool):
+        return False
+    values[adult_boundary.KEY] = old
+    try:
+        path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    except OSError:
+        return False
+    return True
+
+
+def metadata_enabled(setting: object = None) -> bool:
+    """Whether saved pictures record how they were made.
+
+    The ``VOXPRINT_CANVAS_SAVE_METADATA`` environment variable wins
+    (``1/true/yes/on`` turns it on, ``0/false/no/off`` turns it off);
+    otherwise a bool setting decides. Off by default.
+    """
+    env = os.environ.get("VOXPRINT_CANVAS_SAVE_METADATA")
+    if env is not None:
+        return env.strip().lower() in ("1", "true", "yes", "on")
+    if isinstance(setting, bool):
+        return setting
+    return False
+
+
+def job_from(layout: SimpleLayout, live: Mapping[str, object] | None = None) -> PictureJob:
+    """Read the live chips and expert values into one job.
+
+    Args:
+        layout: A screen opened by :func:`open_layout`.
+        live: The live settings Yitro passes to the generator. Its steps,
+            guidance, and sampler win over the stored values when present.
+    """
+    values = dict(live or {})
+
+    def pick(key: str) -> object:
+        return values[key] if values.get(key) not in (None, "") else layout.get(key)
+
+    return PictureJob(
+        prompt=composed_prompt(layout),
+        negative=composed_negative(layout),
+        mode=picture_mode(layout),
+        aspect=str(layout.presets.get("size", "1:1")),
+        output=output_name(layout),
+        fmt=_format(layout.get("canvas.format")),
+        seed=layout.base_seed() if isinstance(layout, CanvasLayout) else int(layout.seed),
+        steps=_whole(pick("shell.steps")),
+        guidance=_decimal(pick("shell.guidance")),
+        sampler=str(pick("shell.sampler")),
+        copies=layout.batch_size(),
+        adult_content=adult_boundary.enabled(layout),
+        lora_path=str(pick("shell.addons") or ""),
+        lora_weight=_decimal(pick("shell.lora_weight")),
+        save_metadata=metadata_enabled(layout.get("canvas.save_metadata")),
+        model_id=str(pick(SETTING_KEY) or ""),
+    )
+
+
+def picture_mode(layout: SimpleLayout) -> Mode:
+    """The mode the chips describe. Words make a plain text job; the plan steers
+    it onto a picked generate model. A picture uses Change.
+
+    Args:
+        layout: A screen opened by :func:`open_layout`.
+
+    Raises:
+        ValueError: A chip value is not one this screen writes.
+    """
+    source = layout.get("canvas.source")
+    if source == "words":
+        if layout.get("canvas.variation") in {"varied", "quick"}:
+            return Mode.TEXT
+        raise ValueError("unknown variation")
+    if source != "picture":
+        raise ValueError("unknown source")
+    change = layout.get("canvas.change")
+    if change == "restyle":
+        return Mode.RESTYLE
+    if change == "inpaint":
+        return Mode.INPAINT
+    if change == "outpaint":
+        return Mode.OUTPAINT
+    if change == "pose":
+        return Mode.POSE
+    if change == "depth":
+        return Mode.DEPTH
+    if change == "edge":
+        return Mode.EDGE
+    raise ValueError("unknown change")
+
+
+def composed_prompt(layout: SimpleLayout) -> str:
+    """User words, the look suffix, and the audience line when it is on.
+
+    Args:
+        layout: A screen opened by :func:`open_layout`.
+    """
+    look = look_for(str(layout.get("canvas.style")))
+    policy = layout.prompt_policy()
+    parts = [part for part in (policy.template, layout.prompt.strip(), look.suffix) if part]
+    return " ".join(parts)
+
+
+def composed_line(layout: SimpleLayout, line: str) -> str:
+    """One batch line composed the way the prompt box text is.
+
+    The audience template and the look suffix apply to every line, so a batch
+    picture reads exactly like the same words typed into the prompt box.
+
+    Args:
+        layout: A screen opened by :func:`open_layout`.
+        line: One non-empty prompt line.
+    """
+    look = look_for(str(layout.get("canvas.style")))
+    policy = layout.prompt_policy()
+    parts = [part for part in (policy.template, line.strip(), look.suffix) if part]
+    return " ".join(parts)
+
+
+def composed_negative(layout: SimpleLayout) -> str:
+    """The live negative plus the audience negative when adult content is off.
+
+    Args:
+        layout: A screen opened by :func:`open_layout`.
+    """
+    live = str(layout.get("shell.negative") or "")
+    extra = layout.prompt_policy().negatives
+    return ", ".join(part for part in (live, extra) if part)
+
+
+def output_name(layout: SimpleLayout) -> str:
+    """``native``, ``2k``, or ``4k``. Exact size wins until it says to follow the chip.
+
+    Args:
+        layout: A screen opened by :func:`open_layout`.
+    """
+    band = str(layout.get("canvas.output_size"))
+    if band == "2k":
+        return "2k"
+    if band == "4k":
+        return "4k"
+    if band == "native":
+        return "native"
+    if band == "follow":
+        return "4k" if layout.get("shell.output") == "4k" else "native"
+    raise ValueError("unknown output size")
+
+
+def _settings() -> Settings:
+    settings = settings_for(surface_for("canvas"))
+    settings.add(_enum("canvas.style", "photo", tuple((look.style_id, style_label(look.style_id)) for look in LOOKS)))
+    settings.add(_enum("canvas.source", "words", (("words", "canvas.source.words"), ("picture", "canvas.source.picture"))))
+    settings.add(
+        _enum(
+            "canvas.variation",
+            "quick",
+            (("quick", "canvas.variation.quick"), ("varied", "canvas.variation.varied")),
+        )
+    )
+    settings.add(
+        _enum(
+            "canvas.change",
+            "restyle",
+            (
+                ("restyle", "canvas.change.restyle"),
+                ("inpaint", "canvas.change.inpaint"),
+                ("outpaint", "canvas.change.outpaint"),
+                ("pose", "canvas.change.pose"),
+                ("depth", "canvas.change.depth"),
+                ("edge", "canvas.change.edge"),
+            ),
+        )
+    )
+    settings.add(
+        _enum(
+            "canvas.format",
+            "webp",
+            (("avif", "canvas.format.avif"), ("jxl", "canvas.format.jxl"), ("webp", "canvas.format.webp")),
+        )
+    )
+    settings.add(_bool("canvas.save_metadata", False))
+    settings.add(_text(SETTING_KEY))
+    settings.add(_bool(adult_boundary.KEY, False))
+    settings.add(_bool(SEED_LOCK_KEY, False, expert=True))
+    settings.add(
+        _enum(
+            "canvas.export",
+            "webp",
+            (
+                ("jpg", "canvas.export.jpg"),
+                ("webp", "canvas.export.webp"),
+                ("avif", "canvas.export.avif"),
+            ),
+        )
+    )
+    settings.add(
+        _enum(
+            "canvas.output_size",
+            "follow",
+            (
+                ("follow", "canvas.output_size.follow"),
+                ("native", "canvas.output_size.native"),
+                ("2k", "canvas.output_size.2k"),
+                ("4k", "canvas.output_size.4k"),
+            ),
+            expert=True,
+        )
+    )
+    return settings
+
+
+def _enum(
+    setting_id: str,
+    default: str,
+    choices: tuple[tuple[str, str], ...],
+    *,
+    expert: bool = False,
+) -> SettingSpec:
+    return SettingSpec(
+        setting_id,
+        setting_id,
+        f"{setting_id}.help",
+        SettingType.ENUM,
+        default,
+        expert=expert,
+        group="image" if expert else "",
+        choices=tuple(Choice(value, label) for value, label in choices),
+    )
+
+
+def _bool(setting_id: str, default: bool, *, expert: bool = False) -> SettingSpec:
+    return SettingSpec(
+        setting_id,
+        setting_id,
+        f"{setting_id}.help",
+        SettingType.BOOL,
+        default,
+        expert=expert,
+        group="image" if expert else "",
+    )
+
+
+def _text(setting_id: str) -> SettingSpec:
+    """A stored text value the screens do not render (the model pick)."""
+    return SettingSpec(
+        setting_id,
+        setting_id,
+        f"{setting_id}.help",
+        SettingType.TEXT,
+        "",
+    )
+
+
+def _presets(settings: Settings, *, enlarge_installed: bool) -> PresetFile:
+    document = variant_presets(surface_for("canvas"), settings, enlarge_installed=enlarge_installed)
+    groups = []
+    for group in document.groups:
+        if group.group_id == "style":
+            group = _style_group()
+        groups.append(group)
+    return PresetFile(tuple(groups))
+
+
+def _style_group() -> PresetGroup:
+    options = tuple(
+        PresetOption(
+            look.style_id,
+            style_label(look.style_id),
+            (("canvas.style", look.style_id), ("shell.negative", look.negative)),
+        )
+        for look in LOOKS
+    )
+    return PresetGroup("style", "simple.style", options, "photo")
+
+
+def _whole(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError("expected a whole number")
+    return value
+
+
+def _decimal(value: object) -> float:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise ValueError("expected a number")
+    return float(value)
+
+
+def _format(value: object) -> OutputFormat:
+    if value == "avif":
+        return OutputFormat.AVIF
+    if value == "jxl":
+        return OutputFormat.JXL
+    if value == "webp":
+        return OutputFormat.WEBP
+    raise ValueError("unknown file type")

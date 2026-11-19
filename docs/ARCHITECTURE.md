@@ -1,0 +1,106 @@
+# Architecture
+
+VOXPrint AI Canvas is a local image application. It runs on the machine's NVIDIA GPU. The window, the checks, and the generator live in one Python package. The window process runs Qt only; model work and the checks run in a worker process (`voxprint_common.worker`, see below).
+
+## Layout
+
+| Path | Role |
+| --- | --- |
+| `canvas/app` | Startup, OS and GPU requirements, release check |
+| `canvas/ui` | Two-tab window and the suite palette |
+| `canvas/core` | Output formats and the VRAM budget |
+| `canvas/infra` | Model folder, GPU lock, thermal pause |
+| `canvas/models` | Registry, tier, diffusers plan, download pins |
+| `canvas/safety` | Content safety checks |
+| `canvas/pipeline` | In-process job and the worker-process boundary |
+| `canvas/worker_jobs.py` | Handlers the worker process runs for the window |
+| `canvas/ipc` | Window-to-worker request and reply schema, and the window's worker client |
+| `installer` | Windows setup and Linux archive |
+| `tools/audit.py` | Release audit |
+| `tools/bakeoff.py` | Text-base comparison on a supported GPU |
+
+## Modes
+
+v1 has two tabs.
+
+- Text to image uses Z-Image-Turbo (8 steps, guidance 0) in BF16 on a 16 GB card and on a 24 GB card. A 16 GB job loads the Qwen3-4B text encoder, frees it, denoises with one transformer block group streamed from pinned CPU memory (the full 6B weights, about 12.3 GB, stay in system RAM), then frees that and decodes with the VAE. The planning peak is 14.5 GB at 2048×1152 and 2048×2048. The encoder runs on CPU when the memory budget is short of its weights, and the VAE decode is tiled when a full decode is larger than the budget. Prompt embeddings stay cached, so a new seed skips the encoder. Cards with 24 GB or more can also select the 50-step Z-Image Creative plan. `CANVAS_VRAM_CAP_GB` or `--vram-cap-gb` lowers the card to that budget, so a 24 GB card capped at 16 GB takes this schedule.
+- Image to image covers restyle, inpaint, outpaint, pose, depth, and edge through the Z-Image pipelines and `alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union-2.1`.
+
+Photoshoot and Enhance use a separate scenario writer, a Qwen3-4B text model of about 8 GB. It is downloaded on first use, writes the scenario or the improved prompt, and is unloaded before diffusion, so on a 16 GB card it is not in memory with the picture model. A multi-frame series is phase-batched: prep (writer, then every frame prompt through the text encoder, embeddings kept in RAM), render (the picture model loaded once, every frame sampled while it stays resident), and decode (one VAE session for every latent). The Z-Image Qwen3-4B text encoder stays the generator's encoder. An English prompt stays English. Any other language is improved and written in English. Revert restores the text from before that rewrite. The original prompt and the rewrite both go through the content safety checks. A rewrite that drops or changes a stated age, or drops quoted lettering, is discarded and the original prompt is used.
+
+The registry pins diffusers 0.41.0 and transformers 5.19.0. Z-Image weights are BF16 on every tier. A 16 GB card loads the lite BF16 controlnet only for inpaint and guided modes. A 24 GB card uses the full BF16 controlnet. Creative stays hidden on 16 GB. Each 16 GB stage asks for the free memory left after the headroom, and a stage that is larger than that budget refuses the picture. The 16 GB runtime installs diffusers group offload (`use_stream`, `record_stream`, pinned transformer blocks) and falls back to sequential CPU offload when that hook is missing. The 4K chain unloads the generator, text encoder, and VAE on every tier before Enlarge, and the suite GPU lock is released for that spawn. `CANVAS_VRAM_CAP_GB` and `--vram-cap-gb` limit the memory this process may use and select the same tier value, `16gb` or `24gb`, from that limit.
+
+Both tabs offer the same aspect picker, grouped as Landscape (16:9, 21:9, 3:2, 4:3), Square (1:1), and Portrait (9:16, 2:3, 3:4). Each model has its own native frame in the registry, a multiple of 16, around 1–2 megapixels. Image to image starts from the input image's aspect. Output size 4K does not generate at 4K. It generates the model's ~2K frame for that aspect, then asks VOXPrint AI Enlarge through its headless CLI (`voxprint-enlarge-cli upscale --input … --output … --long-side 3840 --format avif --preset photo --json-progress --parent-lock-pid …`) to make the long side 3840. Canvas sets `VOXPRINT_GPU_PARENT_PID` to that same pid, releases the suite GPU lock while Enlarge runs, and takes the lock again afterwards. Enlarge is started with a clean environment: PATH, the home and temp variables, and the suite lock path. Discovery and the 4K checkbox use `voxprint-enlarge-cli --capabilities --json`. The option is disabled, with an install hint and an Install Enlarge button, when Enlarge is absent or cannot run. On every tier the generator, text encoder, and VAE are unloaded before the upscale, and Enlarge starts only when free GPU memory is above the amount Enlarge declares (6 GB when the capabilities document does not say). The enlarged image goes through the content safety checks before it is shown. A peak-VRAM probe marks generate, unload, and upscale so the chain can be measured.
+
+`tools/bakeoff.py` runs the same prompts and seeds for each text base and records time and peak VRAM. It writes images only in the operating system's temp directory.
+
+Third-party add-ons are off until you turn them on. The curated list has one model, Chroma1-HD, fetched from its upstream address when you ask. Files are stored in a `third-party` folder under the shared models directory. Voxprint does not host or redistribute those files.
+
+Model Forge LoRAs live in `user-models/lora/<id>` under the shared models folder. A folder is listed in Add-ons (LoRA) when `voxprint-model.json` is schema `voxprint-model/1`, the weight file matches the recorded size and SHA-256, and `base.mdl_id` is the Z-Image-Turbo base this app runs. One LoRA can be selected. LoRA strength is the expert field, kept inside the range recorded on that LoRA. The trigger word is a chip and is added to the prompt only when you press the chip. `tools/declared_age_shadow.py` writes a count report for a folder of images. The app does not import it.
+
+Weight files in the main registry are pinned by SHA-256. The loader refuses a missing file or a bad hash. A picture uses the pinned snapshot through diffusers 0.41.0 when those files are already on disk. The setup downloads the default Z-Image-Turbo pack. Z-Image-Turbo is taken from the public mirror first, then from the upstream repository.
+
+## Content gate: the request, not the result
+
+Decision (2026-11-16, supersedes the 2026-11-15 verified-LoRA rule): **Canvas screens the request, not the generated picture.** Every generation path (window, worker, `generate` including `--count`/`--seeds`/`--prompts`, Photoshoot, `batch`, `render_batch`, and the 4K Enlarge output) runs:
+
+1. The prompt check, `AgeGate.review_prompt` / `AgeGate.release_request` (prompt guard plus `refusal_stage`). It refuses only a prompt that describes someone under 18 AND hints at adult (18+) content; the 18+ switch counts as adult content (owner rule 2026-11-16). It is fail-closed: a guard that cannot load, errors, times out or answers junk refuses the request and nothing is generated or written.
+2. One age check on each uploaded photo (img2img, inpaint, structure guidance, references), only when the edit is 18+ by the same rule. An edit that is not 18+ loads no image model. An 18+ edit refuses only a photo of someone under 18, with the existing thresholds. A `generate --count/--seeds/--prompts` run, a series and a batch check each photo once (`AgeGate.input_run`). A check that fails on an 18+ edit refuses and is never cached.
+3. No check on generated pixels. A finished picture is minted through `canvas.safety.gate.release_generated`, the single exit for generated pictures; it wipes the raw buffer.
+
+Generation warms only the prompt guard (`AgeGate.warm_prompt`). The image check models are loaded lazily, the first time an input image is screened. All six safety models stay required on disk, because input checks need them. Forge-verified LoRA records (`canvas/lora_verify.py`) are kept as metadata and no longer change the gate. Model Forge runs the image checks on LoRA training images, because a LoRA trains once.
+
+## Batch mode and the warm pipeline
+
+`voxprint-canvas-cli batch --manifest file.json [--out DIR]` runs every entry of a JSON manifest. An entry has a `prompt` (an idea the scenario writer turns into `count` shots) or a `shot` (one pose or shot line drawn `count` times with consecutive seeds), and optionally `negative`, `seed`, `count` and `name`. The manifest is validated strictly, and `--out` is created and proven writable, before any model loads; either failure exits with code 2. The GPU lock is taken once for the whole batch. Each entry writes into its own subfolder, named after its sanitised `name` or its 1-based index, and `batch.json` in `--out` records every entry.
+
+The batch runs the series phases once across all entries (`canvas/pipeline/batch.py`, on the phase helpers in `canvas/pipeline/series.py`):
+
+1. Every prompt, shot line and negative prompt is checked like the prompt before anything else. A refused entry is recorded as `refused` and draws nothing.
+2. One scenario writer session writes every prompt entry, then leaves the card once.
+3. Every shot line is checked, then every line is encoded in one text-encoder session.
+4. The picture pipeline loads once, renders every entry, and decodes every entry in one VAE session. The whole batch runs inside one `pipeline_scope()`.
+5. Every picture is released through the gate (`release_generated`), then saved. No check runs on generated pixels: the prompts were screened in steps 1 and 3.
+
+Decision: **a refused or stopped entry does not stop the batch.** The other entries continue, and the command exits 1 when any entry wrote nothing (0 when every entry wrote at least one picture). A check or release that cannot finish is the exception: it stops every write after it, in every entry.
+
+Decision: **the window keeps the loaded pipeline between generations.** Before rc.32 each click ran in its own `pipeline_scope()`; on `ram32` the pipeline was released after the click and read from disk on the next one, and on `ram64`/`ram96` it was parked (VRAM copies dropped, RAM copies kept). Now the worker opens a process-lifetime hold (`hold_warm()` in `canvas/models/runtime.py`) on the window's first generation and closes it when the window closes (`drop_warm(release=True)`, sent as a `warm` request) or when the worker exits, so the next generation in the same worker reuses the loaded pipeline. Fail-safe rules:
+
+- After every generation `trim_warm()` runs the existing picture fit check on real free VRAM. When the card does not have that room, or its free memory cannot be read, the pipeline is parked: `ram64`/`ram96` keep the RAM copy, `ram32` drops it. Without a CUDA device nothing is on the card and the pipeline stays.
+- A model, tier or LoRA change loads again, as before: the pipeline key is compared on every call.
+- Stages that need the card still park the pipeline first: the scenario writer and the enhancer, the series before it releases its frames, and the 4K chain before Enlarge (`Pipeline._release_models` parks it). On `ram32` parking drops it.
+- An error inside a run parks or releases it, as before.
+
+## Window and worker process
+
+The window never loads a model. It sends requests (`canvas/ipc/schema.py`, protocol `canvas.worker/1`) to one long-lived worker process started by `voxprint_common.worker.WorkerHost` with the `spawn` method; the handlers are `canvas.worker_jobs:run` and `canvas.worker_jobs:check`. Generate, Photoshoot, Improve, LoRA import, the Diagnostics self-test, the GPU probe and the warm pipeline all run there, and checks run in the worker on every route. Every job is kind `inference`, so a crash fails the job and is not retried. The window reads events through `QtWorkerHost` on the UI thread and never waits on the worker.
+
+- A picture crosses as a file in a private per-session temporary folder, written by the worker after the picture was released by the gate. The window moves it into the pictures folder.
+- A crash, a missed heartbeat, a missed deadline, a reply that does not match the schema, or a worker that cannot start ends the job as unavailable, with nothing shown or saved. A crash shows a bar on the window; the window stays open and the worker starts again.
+- Generate waits for the worker's hello. The worker clears a stale GPU lock at hello, because the lock file is keyed by the CUDA device the worker uses.
+- Closing the app shuts the worker down, which releases its GPU memory.
+
+## Content safety checks
+
+The app runs content safety checks on a request before it keeps an image.
+
+Do not use the app to create content that is illegal or socially unacceptable; you are responsible for what you create.
+
+## Shared suite behaviour
+
+- The program is installed in `C:\Program Files\VOXPrint AI Suite\Canvas\` on Windows and `/opt/voxprint-ai-suite/canvas/` on Linux. The Windows Start menu folder is VOXPrint AI Suite. The window program is `voxprint-canvas.exe` and the command-line program is `voxprint-canvas-cli.exe`. An upgrade removes the previous install directory and its shortcuts, and leaves `%LOCALAPPDATA%\VOXPrint AI Suite` and `~/.local/share/voxprint-ai-suite` in place, including the shared manifest. 4K finds Enlarge in that shared manifest first, then `C:\Program Files\VOXPrint AI Suite\Enlarge\voxprint-enlarge-cli.exe` (Linux `/opt/voxprint-ai-suite/enlarge/voxprint-enlarge-cli`), then PATH.
+- Shared files live in `%LOCALAPPDATA%\VOXPrint AI Suite\shared` or `~/.local/share/voxprint-ai-suite/shared`. `manifest.json` is schema 1 and records which apps ref each component. An uninstall removes a component only when no app still refs it. The setup installs Python 3.14 when the suite runtime is missing, the CUDA 13.0 libraries, and the default Z-Image-Turbo pack. Optional packs download when a picture needs them, after the window shows the size and the estimated time. Every launch re-checks the recorded hashes and replaces a missing or corrupt file.
+- The GPU lock is one file per graphics card, `%TEMP%/voxprint-gpu-<device>.lock`, where the device is the UUID of the CUDA device the process uses (it follows `CUDA_VISIBLE_DEVICES`). Two processes on different cards run side by side; two on the same card exclude each other. A command takes the lock before it loads any weights and holds it until it ends. A live holder of the older machine-wide `%TEMP%/voxprint-gpu.lock` from another suite app still counts as busy. `VOXPRINT_GPU_LOCK` replaces the path with one fixed file. A lock is stale when the recorded process is gone, or when `eta` is more than two hours in the past.
+- The memory budget is free memory minus a headroom of at least 2 GB and at most 3 GB, and at least 8 percent of the card.
+- After 2.5 hours at full speed, work pauses while the 5-minute median temperature is at least 83 °C, or while a throttle has lasted more than 60 seconds. It resumes at 75 °C or below once the throttle has cleared.
+- The only network call besides model downloads is `https://api.github.com/repos/Mitroshenkov87/voxprint-canvas/releases/latest`.
+
+## Release identity
+
+`BUILD.json` ships in the package and is the copy of the version, the channel, the build number and the codename. The build number is the `build` field. `GITHUB_RUN_NUMBER` is not used. The About dialog and `voxprint-canvas --version` show `X.Y.Z RC · build N "Tavnit"` from that file. The startup splash shows `X.Y.Z RC build N "Codename"`. A release-candidate tag is published as `VOXPrint AI Canvas v<version> build N` with no codename. The codename stays in this file for the final release.
+
+Save, download and export use the approved icons in `canvas/ui/icons`. A row marked PENDING is not loaded. Icons are recoloured with a palette token. The floppy-disk drawing and the theme name `document-save` are not used.
+
+## What is still a stub
+
+HEIC still needs a system codec on the machine. A 16 GB job still runs its memory schedule, then offloads the real model. The official upstream transformer remains a fallback and is larger than the mirror pack.

@@ -1,0 +1,1266 @@
+"""Command line and window startup."""
+import argparse
+import contextlib
+import json
+import os
+import sys
+import time
+from collections.abc import Callable
+from importlib import import_module
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+from PySide6.QtCore import QTimer
+from PySide6.QtGui import QIcon
+from PySide6.QtWidgets import QApplication
+from voxprint_common.i18n import set_language, tr
+
+from canvas.app.branding import icon_path, set_app_user_model_id
+from canvas.app.identity import splash_line
+from canvas.app.i18n import text
+from canvas.app.info import APP_NAME, APP_VERSION, ENLARGE_NAME
+from canvas.app.platform import GpuCheck, OsCheck, check_gpu, current_os_check
+from canvas.app.updates import check_for_update
+from canvas.core.formats import parse_export_format, parse_format, picture_path
+from canvas.app.generate_batch import GeneratePlanError, item_path, load_prompt_file, parse_seeds, plan_items
+from canvas.safety.image import RawImage
+from canvas.safety.inputs import ImageRole, PendingInput
+from canvas.infra.enlarge import EnlargeClient, EnlargeError
+from canvas.infra.gpu import probe_gpu
+from canvas.infra import cuda_health, settings
+from canvas.infra.gpu_lock import GpuLockTimeout, forget_device_key, pinned
+from canvas.infra.manifest import ManifestError
+from canvas.infra.models_users import register, unregister
+from canvas.infra.paths import OutputFolderError, models_dir, prepare_output_folder, shared_dir
+from canvas.infra.vram import peak_allocated_bytes, set_vram_cap_gb
+from canvas.models.views import remove_views
+from canvas.models.provision import DownloadDeclined, ensure_plan, install_defaults, install_supporting, repair
+from canvas.models.user_lora import (
+    CODE_RETRAIN,
+    FORGE_BASE_ID,
+    LoraRejected,
+    UserLora,
+    apply_bound_lora,
+    apply_trigger,
+    cli_scale,
+    prepare_cli_lora,
+    retrain_rejection,
+    rewrite_alias,
+)
+from canvas.models.modes import Mode, Tier
+from canvas.models.plan import BaseNotSelected, ModeUnavailable, OptionalModelUnavailable, build_plan
+from canvas.models.registry import load_catalog
+from canvas.models.snapshots import SnapshotError
+from canvas.pipeline.series_text import DEFAULT_FRAMES, MAX_FRAMES, TEST_SERIES_CHARACTER
+from canvas.ui.styles import LOOKS
+from canvas.infra.stage_timer import StageTimes
+from canvas.ipc.client import WorkerClient, default_host
+from canvas.ui.shell_layout import canvas_state_dir, open_worker_layout
+from canvas.ui.shell_screen import ShellWindow
+from canvas.ui.worker_checks import WorkerChecks
+from voxprint_common.ui.simple_image import Phase
+from voxprint_common.worker.qt import install_crash_bar
+from canvas.ui.splash import Splash, show_splash
+
+if TYPE_CHECKING:
+    from canvas.app.generate_batch import GenerateItem
+    from canvas.models.registry import Catalog
+    from canvas.app.batch_cli import ManifestInvalid, default_out, load_manifest, run_batch_command, write_failed
+    from canvas.app.photoshoot_bench import live_generate, live_rewrite, run_bench
+    from canvas.app.photoshoot_cli import model_generate, model_rewrite, reject_frames, run_command
+    from canvas.app.selftest import selftest_report
+    from canvas.models.decode_noise import DecodeNoiseError
+    from canvas.models.loader import ModelNotReady, ZImageGenerator, load_catalog_stack
+    from canvas.models.runtime import InferenceUnavailable
+    from canvas.pipeline.bf16_schedule import VramRefused, is_out_of_memory
+    from canvas.pipeline.device_guard import DeviceRefused
+    from canvas.pipeline.enhance import EnhanceResult, fallback_message, open_rewriter, resolve_prompt, rewrite_text
+    from canvas.pipeline.gpu_release import release_gate_weights
+    from canvas.pipeline.pipeline import CoolingDown, EnlargeMissing, JobError, Pipeline
+    from canvas.pipeline.schedule import last_image_seconds, reset_image_seconds
+    from canvas.pipeline.series import SerialGate
+    from canvas.safety.gate import AgeGate, GenerationBlocked, SafetyError, SafetyUnavailable
+
+# Command-line names bound on first use: the window process loads no model code.
+_COMMAND_NAMES: dict[str, tuple[str, ...]] = {
+    "canvas.app.batch_cli": ("ManifestInvalid", "default_out", "load_manifest", "run_batch_command", "write_failed"),
+    "canvas.app.photoshoot_bench": ("live_generate", "live_rewrite", "run_bench"),
+    "canvas.app.photoshoot_cli": ("model_generate", "model_rewrite", "reject_frames", "run_command"),
+    "canvas.app.selftest": ("selftest_report",),
+    "canvas.models.loader": ("ModelNotReady", "ZImageGenerator", "load_catalog_stack"),
+    "canvas.models.decode_noise": ("DecodeNoiseError",),
+    "canvas.models.runtime": ("InferenceUnavailable",),
+    "canvas.pipeline.bf16_schedule": ("VramRefused", "is_out_of_memory"),
+    "canvas.pipeline.device_guard": ("DeviceRefused",),
+    "canvas.pipeline.enhance": ("EnhanceResult", "fallback_message", "open_rewriter", "resolve_prompt", "rewrite_text"),
+    "canvas.pipeline.gpu_release": ("release_gate_weights",),
+    "canvas.pipeline.pipeline": ("CoolingDown", "EnlargeMissing", "JobError", "Pipeline"),
+    "canvas.pipeline.schedule": ("last_image_seconds", "reset_image_seconds"),
+    "canvas.pipeline.series": ("SerialGate",),
+    "canvas.safety.gate": ("AgeGate", "GenerationBlocked", "SafetyError", "SafetyUnavailable"),
+}
+_COMMAND_MODULE = {name: module for module, names in _COMMAND_NAMES.items() for name in names}
+
+
+def __getattr__(name: str) -> Any:
+    """Bind one command-line name on first access."""
+    module = _COMMAND_MODULE.get(name)
+    if module is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module(module), name)
+    globals()[name] = value
+    return value
+
+
+def _command_imports() -> None:
+    """Bind every command-line name not bound yet. A name already set (a test double) is kept."""
+    for name in _COMMAND_MODULE:
+        if name not in globals():
+            __getattr__(name)
+
+_SEED_HELP = (
+    "whole number from 0 to 4294967295. Leave it out for a new random seed every time; "
+    "the seed used is printed and saved in the picture."
+)
+_EXIT_CODES = (
+    "exit codes:\n"
+    "  0  the picture was written\n"
+    "  1  the request failed\n"
+    "  2  the command or this machine cannot run"
+)
+
+
+def _gpu_argument(parser: argparse.ArgumentParser, default: object) -> None:
+    """``--gpu N``: the card this process uses. Allowed before or after the command."""
+    parser.add_argument("--gpu", type=int, default=default, metavar="N", help="use this CUDA device index")
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="voxprint-canvas",
+        description=APP_NAME,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=_EXIT_CODES,
+    )
+    parser.add_argument("--register-models", action="store_true", help="register Canvas in the shared resource manifest and the installed-apps list")
+    parser.add_argument("--unregister-models", action="store_true", help="remove Canvas from the shared resource manifest")
+    parser.add_argument("--check-update", action="store_true", help="print a newer GitHub release tag, if one exists")
+    parser.add_argument("--selftest", action="store_true", help="check the GPU, model files and encoders")
+    parser.add_argument("--deep", action="store_true", help="re-hash every model file during --selftest")
+    parser.add_argument(
+        "--save-metadata",
+        action="store_true",
+        help="write prompt, seed and LoRA metadata into saved pictures (or set VOXPRINT_CANVAS_SAVE_METADATA=1)",
+    )
+    parser.add_argument(
+        "--vram-cap-gb",
+        type=float,
+        default=None,
+        help="plan as if the GPU had this many GB (CANVAS_VRAM_CAP_GB)",
+    )
+    _gpu_argument(parser, None)
+    parser.add_argument("--json", action="store_true", help="print a JSON document")
+    parser.add_argument("--version", action="store_true", help="print the release identity and exit")
+    commands = parser.add_subparsers(dest="command", required=False)
+    generate = commands.add_parser(
+        "generate",
+        help="generate one or more pictures and exit",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=_EXIT_CODES,
+    )
+    generate.add_argument("--prompt", default="", help="text prompt for a new picture")
+    generate.add_argument(
+        "--prompts",
+        default="",
+        help="text file, one prompt per line, or JSONL with prompt and optional seed",
+    )
+    generate.add_argument("--edit-instruction", default="", help="instruction for editing --input")
+    generate.add_argument("--input", default="", help="image for inpaint, used with --mask")
+    generate.add_argument("--aspect", default="1:1")
+    generate.add_argument(
+        "--out", required=True,
+        help="picture file or, for a batch, a folder: .webp (default, quality 90), .avif, .jxl, .jpg or .heic; a .png path is saved as .webp; a batch names each file with an index and the seed; missing folders are created",
+    )
+    generate.add_argument("--mask", default="", help="mask image for inpaint, used with --input")
+    generate.add_argument("--output-size", default="native", choices=("native", "2k", "4k"))
+    generate.add_argument("--seed", type=int, default=None, help=_SEED_HELP + " A batch counts up from it.")
+    generate.add_argument("--seeds", default="", help="comma-separated seeds; the count follows the list")
+    generate.add_argument(
+        "--count",
+        type=int,
+        default=None,
+        metavar="N",
+        help="how many pictures to draw; the model is loaded once (default: 1)",
+    )
+    generate.add_argument(
+        "--enhance",
+        action="store_true",
+        help="improve the prompt before generating",
+    )
+    generate.add_argument(
+        "--vram-cap-gb",
+        type=float,
+        default=argparse.SUPPRESS,
+        help="plan as if the GPU had this many GB (CANVAS_VRAM_CAP_GB)",
+    )
+    generate.add_argument("--lora", default="", help="LoRA .safetensors file, .voxlora package, add-on folder, imported id, or voxprint-model.json alias")
+    generate.add_argument("--lora-scale", type=float, default=None, help="LoRA strength, from 0 to 2; the LoRA default when omitted")
+    _gpu_argument(generate, argparse.SUPPRESS)
+    generate.add_argument("--json", action="store_true")
+    bench = commands.add_parser(
+        "photoshoot-bench",
+        help="time a 6-frame Photoshoot series and exit",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=_EXIT_CODES,
+    )
+    bench.add_argument(
+        "--prompt",
+        default=TEST_SERIES_CHARACTER,
+        help="idea for the 6-frame series",
+    )
+    bench.add_argument("--out", required=True, help="folder for the series")
+    bench.add_argument("--seed", type=int, default=1)
+    _gpu_argument(bench, argparse.SUPPRESS)
+    bench.add_argument("--json", action="store_true")
+    photoshoot = commands.add_parser(
+        "photoshoot",
+        help="write a Photoshoot series and exit",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=_EXIT_CODES,
+    )
+    photoshoot.add_argument("--prompt", required=True, help="theme or idea for the series")
+    photoshoot.add_argument(
+        "--negative", default="",
+        help="negative prompt for every frame; it is checked like the prompt",
+    )
+    photoshoot.add_argument(
+        "--frames",
+        type=int,
+        default=DEFAULT_FRAMES,
+        help=f"how many frames to write, from 1 to {MAX_FRAMES}",
+    )
+    photoshoot.add_argument("--out", required=True, help="folder for the frames and scenario.txt")
+    photoshoot.add_argument("--seed", type=int, default=None, help=_SEED_HELP + " Frames count up from it.")
+    photoshoot.add_argument(
+        "--seed-mode", choices=("series", "locked"), default="series",
+        help="with --seed: series counts up from it (default), locked repeats the same seed on every frame",
+    )
+    photoshoot.add_argument(
+        "--style",
+        default="photo",
+        choices=tuple(look.style_id for look in LOOKS),
+        help="style id, the same ids as the app",
+    )
+    photoshoot.add_argument(
+        "--places",
+        default="same",
+        choices=("same", "different"),
+        help="one place, or a different place for each frame",
+    )
+    photoshoot.add_argument(
+        "--adult",
+        action="store_true",
+        help="use the adult-content (18+) prompt policy",
+    )
+    photoshoot.add_argument(
+        "--vram-cap-gb",
+        type=float,
+        default=argparse.SUPPRESS,
+        help="plan as if the GPU had this many GB (CANVAS_VRAM_CAP_GB)",
+    )
+    photoshoot.add_argument("--lora", default="", help="LoRA .safetensors file, .voxlora package, add-on folder, imported id, or voxprint-model.json alias")
+    photoshoot.add_argument("--lora-scale", type=float, default=None, help="LoRA strength, from 0 to 2; the LoRA default when omitted")
+    photoshoot.add_argument(
+        "--vram-trace",
+        action="store_true",
+        help="write a VRAM line to voxprint.log before and after each load, unload, and stage",
+    )
+    photoshoot.add_argument(
+        "--export-format",
+        default="webp",
+        choices=("webp", "jpg", "jpeg", "avif"),
+        help="frame file for Forge: webp (default, lossless), jpg, or avif; Canvas never writes PNG",
+    )
+    _gpu_argument(photoshoot, argparse.SUPPRESS)
+    photoshoot.add_argument("--json", action="store_true")
+    batch = commands.add_parser(
+        "batch",
+        help="run every entry of a manifest and exit",
+        description=(
+            "Run every entry of a JSON manifest. Each entry has a prompt or a shot line, and\n"
+            "optionally negative, seed, count and name. Every prompt and negative prompt is\n"
+            "checked like the prompt before anything is drawn; a refused entry is recorded in\n"
+            "batch.json and the other entries continue."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=_EXIT_CODES,
+    )
+    _gpu_argument(batch, argparse.SUPPRESS)
+    batch.add_argument("--manifest", required=True, help="JSON file with an entries list")
+    batch.add_argument(
+        "--out", default="",
+        help="folder for the entry subfolders and batch.json (default: <Documents>/VOXPrint Projects/Canvas/batch/<manifest>_batch)",
+    )
+    batch.add_argument(
+        "--style",
+        default="photo",
+        choices=tuple(look.style_id for look in LOOKS),
+        help="style id for every entry, the same ids as the app",
+    )
+    batch.add_argument(
+        "--places",
+        default="same",
+        choices=("same", "different"),
+        help="one place, or a different place for each frame of an entry",
+    )
+    batch.add_argument("--adult", action="store_true", help="use the adult-content (18+) prompt policy")
+    batch.add_argument(
+        "--vram-cap-gb",
+        type=float,
+        default=argparse.SUPPRESS,
+        help="plan as if the GPU had this many GB (CANVAS_VRAM_CAP_GB)",
+    )
+    batch.add_argument("--lora", default="", help="LoRA .safetensors file, .voxlora package, add-on folder, imported id, or voxprint-model.json alias")
+    batch.add_argument("--lora-scale", type=float, default=None, help="LoRA strength, from 0 to 2; the LoRA default when omitted")
+    batch.add_argument(
+        "--vram-trace",
+        action="store_true",
+        help="write a VRAM line to voxprint.log before and after each load, unload, and stage",
+    )
+    batch.add_argument(
+        "--export-format",
+        default="webp",
+        choices=("webp", "jpg", "jpeg", "avif"),
+        help="picture file for Forge: webp (default, lossless), jpg, or avif; Canvas never writes PNG",
+    )
+    batch.add_argument("--json", action="store_true")
+    return parser
+
+
+def _application() -> QApplication:
+    """The running application, creating one when startup has not yet done so."""
+    current = QApplication.instance()
+    if isinstance(current, QApplication):
+        return current
+    set_app_user_model_id()
+    app = QApplication(sys.argv)
+    # GNOME on Wayland matches the window to voxprint-canvas.desktop by app_id, not by setWindowIcon.
+    app.setDesktopFileName("voxprint-canvas")
+    from canvas.ui.fonts import register_fonts
+
+    register_fonts()
+    icon = icon_path()
+    if icon.is_file():
+        app.setWindowIcon(QIcon(str(icon)))
+    return app
+
+
+def _launch(tier: Tier, splash: Splash | None = None, app: QApplication | None = None) -> int:
+    """Open the shared screen. A gate that cannot be built does not open a window."""
+    if app is None:
+        app = _application()
+    if splash is None:
+        splash = show_splash()
+    # The GPU lock is keyed by the worker's CUDA device; the worker clears a stale one at hello.
+    lock_note = None
+
+    def stage(message: str) -> None:
+        print(message, file=sys.stderr)
+        splash.set_stage(message)
+
+    try:
+        install_defaults(load_catalog(), stage)
+    except ManifestError:
+        lock_note = "busy"
+    except (SnapshotError, OSError) as exc:
+        stage(str(exc))
+    enlarge = EnlargeClient()
+    # Checks and model work run in the worker process. Generation waits for its hello;
+    # a worker that cannot start leaves the window up and shows unavailable.
+    worker = WorkerClient(default_host(), tier=tier.value)
+    window = ShellWindow(
+        open_worker_layout(canvas_state_dir(), checks=WorkerChecks(worker), enlarge_installed=enlarge.ready()),
+        tier=tier,
+        enlarge=enlarge,
+        worker=worker,
+    )
+    install_crash_bar(window, worker.adapter, title=text("app.name"), body=text("gate.unavailable"))
+    if isinstance(app, QApplication):
+        app.aboutToQuit.connect(worker.shutdown)
+    window.show()
+    # Warm the worker right after the window shows, so its hello overlaps first paint.
+    worker.start()
+    if lock_note == "busy":
+        window.shell.layout.unavailable(text("startup.lock"))
+        window.view.refresh()
+    splash.finish(window)
+    def note_lock() -> None:
+        if worker.hello.get("lock") == "busy" and window.shell.layout.phase is not Phase.BUSY:
+            window.shell.layout.unavailable(text("startup.lock"))
+            window.view.refresh()
+
+    # The worker starts once the event loop runs; models still load on first use.
+    QTimer.singleShot(0, lambda: worker.when_ready(note_lock, lambda _reason: None))
+    try:
+        app.exec()
+    finally:
+        worker.shutdown()
+    return 0
+
+
+def _emit(payload: dict[str, object], as_json: bool, code: int) -> int:
+    if as_json:
+        print(json.dumps(payload))
+    elif payload.get("error"):
+        print(payload["error"], file=sys.stderr)
+    elif payload.get("path"):
+        print(payload["path"])
+    return code
+
+
+def _preflight_os_check() -> OsCheck:
+    """The startup OS check. An ok result can still carry a warning (unsupported
+    Linux distro with VOXPRINT_ALLOW_UNSUPPORTED_DISTRO=1); that warning is
+    printed to stderr so it is not silently swallowed."""
+    result = current_os_check()
+    if result.ok and result.message:
+        print(result.message, file=sys.stderr)
+    return result
+
+
+def _load_rgb(path: Path) -> RawImage:
+    """Read one RGB image from disk. PNG, JPEG, WebP, and AVIF are accepted as inputs."""
+    from PIL import Image
+
+    with Image.open(path) as image:
+        rgb = image.convert("RGB")
+        return RawImage(rgb.width, rgb.height, rgb.tobytes())
+
+
+def _pending_init(path: Path) -> PendingInput:
+    """An unscreened init image for inpaint."""
+    return PendingInput(ImageRole.INIT, _load_rgb(path))
+
+
+def _inputs(args: argparse.Namespace, mode: Mode) -> tuple[PendingInput, ...]:
+    """Images the command supplied. Text has none. Inpaint adds the mask."""
+    if mode is Mode.INPAINT:
+        return (
+            _pending_init(Path(args.input)),
+            PendingInput(ImageRole.MASK, _load_rgb(Path(args.mask))),
+        )
+    return ()
+
+
+def _generate(args: argparse.Namespace) -> int:
+    """Download what is missing, generate one image, and write it."""
+    _command_imports()
+    as_json = bool(args.json)
+    if str(args.edit_instruction or ""):
+        return _instruction_removed(as_json)
+    chosen, stopped = _take_lora(args, as_json)
+    if stopped is not None:
+        return stopped
+    os_result = _preflight_os_check()
+    if not os_result.ok:
+        return _emit({"ok": False, "error": os_result.message}, as_json, 2)
+    gpu = check_gpu(probe_gpu())
+    if not gpu.ok or gpu.tier is None:
+        return _emit({"ok": False, "error": gpu.message}, as_json, 2)
+    try:
+        file_prompts = load_prompt_file(Path(args.prompts)) if str(getattr(args, "prompts", "") or "") else None
+        seed_list = parse_seeds(str(getattr(args, "seeds", "") or ""))
+        items = plan_items(
+            prompt=str(args.prompt or ""),
+            count=getattr(args, "count", None),
+            seed=None if args.seed is None else int(args.seed),
+            seeds=seed_list or None,
+            prompts=file_prompts,
+        )
+    except GeneratePlanError as exc:
+        return _emit({"ok": False, "error": str(exc)}, as_json, 2)
+    mask = str(args.mask or "")
+    if mask:
+        if not args.input:
+            return _emit({"ok": False, "error": "Inpaint needs a prompt, an input image, and a mask."}, as_json, 2)
+        mode = Mode.INPAINT
+    else:
+        mode = Mode.TEXT
+    if args.enhance and mode is not Mode.TEXT:
+        return _emit({"ok": False, "error": "Enhance applies to a prompt."}, as_json, 2)
+    catalog = load_catalog()
+    root = models_dir()
+    output = args.output_size if args.output_size in {"4k", "2k"} else "native"
+    # canvas.toml can turn the writer on for a prompt; the flag still works on its own.
+    enhance = bool(args.enhance) or (mode is Mode.TEXT and settings.get().writer)
+    if not _single_generate(args, items):
+        return _generate_many(
+            args, items, mode, output, enhance, chosen, as_json, catalog, root, gpu,
+        )
+    path, png_warning = picture_path(Path(args.out))
+    if png_warning is not None:
+        print(f"warning: {png_warning}", file=sys.stderr)
+    try:
+        fmt = parse_format(path.suffix)
+        prepare_output_folder(path.parent)
+    except OutputFolderError as exc:
+        return _emit({"ok": False, "error": str(exc), "code": "output_folder"}, as_json, 2)
+    except ValueError as exc:
+        return _emit({"ok": False, "error": str(exc)}, as_json, 2)
+    active_prompt = items[0].prompt
+    outcome: EnhanceResult | None = None
+    # The alias becomes the trigger and the trigger leads, before the gate and the encoder see the prompt.
+    chosen_lora = None if chosen is None else chosen[0]
+    active = apply_trigger(active_prompt, chosen_lora)
+    reset_image_seconds()
+    progress = lambda message: print(message, file=sys.stderr)
+    started = time.perf_counter()
+    try:
+        with pinned("canvas-generate"), contextlib.ExitStack() as run_scope:
+            source = _inputs(args, mode)
+            install_supporting(catalog, progress)
+            stack = load_catalog_stack(root, catalog, writer=enhance)
+            gate = AgeGate(stack)
+            # One age check of an uploaded photo for the whole run, not one per item.
+            from canvas.safety.gate import input_run
+
+            run_scope.enter_context(input_run(gate))
+            gate.warm_prompt()
+            if enhance:
+                seen = rewrite_alias(active_prompt, chosen_lora)
+                gate.review_prompt(seen)
+                release_gate_weights(gate)
+                rewritten = rewrite_text(
+                    open_rewriter(catalog, gpu.tier, root, progress, stage="enhancer"), seen,
+                )
+                outcome = resolve_prompt(gate, seen, rewritten)
+                active = apply_trigger(outcome.prompt, chosen_lora)
+            screened = gate.release_request(active, mode.value, source)
+            try:
+                plan = build_plan(catalog, screened, gpu.tier)
+            finally:
+                screened.wipe()
+            ensure_plan(catalog, plan, progress, confirm=None)
+            generator = ZImageGenerator(catalog, gpu.tier)
+            # No --seed: a fresh random seed. --seed 0 is a real seed.
+            used_seed = items[0].seed
+            generator.seed = used_seed
+            generator.models = root
+            if chosen is not None:
+                apply_bound_lora(chosen[0], chosen[1], holder=generator)
+            pipeline = Pipeline(gate, generator, gpu.tier, use_gpu_lock=True, catalog=catalog, enlarge=EnlargeClient())
+            fresh = _inputs(args, mode)
+            from canvas.core.picture_meta import picture_fields
+            from canvas.ui.shell_layout import metadata_enabled
+            meta = picture_fields(
+                prompt=active,
+                seed=used_seed,
+                save_metadata=metadata_enabled(),
+                lora=None if chosen is None else chosen[0],
+                lora_path="" if chosen is None else str(chosen[0].weights),
+                lora_weight=0.7 if chosen is None else chosen[1],
+            )
+            pipeline.export(
+                active, mode, fresh, path, fmt, aspect=args.aspect, output=output,
+                seed=used_seed, metadata=meta,
+            )
+    except LoraRejected as exc:
+        return _emit_lora(exc.code, as_json, **exc.details)
+    except DecodeNoiseError as exc:
+        return _emit_decode_noise(exc.code, as_json)
+    except GpuLockTimeout as exc:
+        return _emit({"ok": False, "error": str(exc), "code": "gpu_busy"}, as_json, 1)
+    except (
+        SafetyError, SnapshotError, DownloadDeclined, InferenceUnavailable, ModelNotReady,
+        ModeUnavailable, BaseNotSelected, OptionalModelUnavailable, JobError, CoolingDown, EnlargeMissing, EnlargeError, VramRefused, DeviceRefused,
+        OSError,
+    ) as exc:
+        return _emit({"ok": False, "error": str(exc)}, as_json, 1)
+    if outcome is not None and outcome.fallback and not as_json:
+        print(fallback_message(outcome), file=sys.stderr)
+    return _emit(
+        _with_lora(_generate_payload(path, active_prompt, outcome, time.perf_counter() - started, used_seed), chosen),
+        as_json,
+        0,
+    )
+
+
+def _single_generate(args: argparse.Namespace, items: list) -> bool:
+    """True when the existing one-picture JSON payload still applies."""
+    return (
+        len(items) == 1
+        and not str(getattr(args, "prompts", "") or "")
+        and not str(getattr(args, "seeds", "") or "")
+        and getattr(args, "count", None) in (None, 1)
+    )
+
+
+def _generate_many(
+    args: argparse.Namespace,
+    items: list,
+    mode: Mode,
+    output: str,
+    enhance: bool,
+    chosen: tuple | None,
+    as_json: bool,
+    catalog: "Catalog",
+    root: Path,
+    gpu: Any,
+) -> int:
+    """Load the model once and write each planned picture through the same gate path."""
+    from canvas.core.picture_meta import picture_fields
+    from canvas.ui.shell_layout import metadata_enabled
+
+    chosen_lora = None if chosen is None else chosen[0]
+    out_arg = str(args.out)
+    out = Path(out_arg)
+    first, warning = item_path(out, items[0], total=len(items), out_arg=out_arg)
+    if warning is not None:
+        print(f"warning: {warning}", file=sys.stderr)
+    try:
+        parse_format(first.suffix)
+        prepare_output_folder(first.parent)
+    except OutputFolderError as exc:
+        return _emit({"ok": False, "error": str(exc), "code": "output_folder"}, as_json, 2)
+    except ValueError as exc:
+        return _emit({"ok": False, "error": str(exc)}, as_json, 2)
+    progress = lambda message: print(message, file=sys.stderr)
+    reset_image_seconds()
+    started = time.perf_counter()
+    rows: list[dict[str, object]] = []
+    pipeline = None
+    rewriter = None
+    halted: dict[str, object] | None = None
+    try:
+        with pinned("canvas-generate"), contextlib.ExitStack() as run_scope:
+            install_supporting(catalog, progress)
+            stack = load_catalog_stack(root, catalog, writer=enhance)
+            gate = AgeGate(stack)
+            # One age check of an uploaded photo for the whole run, not one per item.
+            from canvas.safety.gate import input_run
+
+            run_scope.enter_context(input_run(gate))
+            gate.warm_prompt()
+            for item in items:
+                active_prompt = item.prompt
+                outcome: EnhanceResult | None = None
+                active = apply_trigger(active_prompt, chosen_lora)
+                path, _warn = item_path(out, item, total=len(items), out_arg=out_arg)
+                try:
+                    fmt = parse_format(path.suffix)
+                    prepare_output_folder(path.parent)
+                    if enhance:
+                        seen = rewrite_alias(active_prompt, chosen_lora)
+                        gate.review_prompt(seen)
+                        release_gate_weights(gate)
+                        if rewriter is None:
+                            rewriter = open_rewriter(catalog, gpu.tier, root, progress, stage="enhancer")
+                        rewritten = rewrite_text(rewriter, seen)
+                        outcome = resolve_prompt(gate, seen, rewritten)
+                        active = apply_trigger(outcome.prompt, chosen_lora)
+                    if pipeline is None:
+                        source = _inputs(args, mode)
+                        screened = gate.release_request(active, mode.value, source)
+                        try:
+                            plan = build_plan(catalog, screened, gpu.tier)
+                        finally:
+                            screened.wipe()
+                        ensure_plan(catalog, plan, progress, confirm=None)
+                        generator = ZImageGenerator(catalog, gpu.tier)
+                        generator.models = root
+                        if chosen is not None:
+                            apply_bound_lora(chosen[0], chosen[1], holder=generator)
+                        pipeline = Pipeline(gate, generator, gpu.tier, use_gpu_lock=True, catalog=catalog, enlarge=EnlargeClient())
+                    setattr(pipeline.generator, "seed", item.seed)
+                    fresh = _inputs(args, mode)
+                    meta = picture_fields(
+                        prompt=active,
+                        seed=item.seed,
+                        save_metadata=metadata_enabled(),
+                        lora=chosen_lora,
+                        lora_path="" if chosen is None else str(chosen[0].weights),
+                        lora_weight=0.7 if chosen is None else chosen[1],
+                    )
+                    pipeline.export(
+                        active, mode, fresh, path, fmt, aspect=args.aspect, output=output,
+                        seed=item.seed, metadata=meta,
+                    )
+                except GenerationBlocked as exc:
+                    message = str(exc)
+                    print(f"{item.index}/{len(items)} seed={item.seed} refused: {message}", file=sys.stderr)
+                    rows.append(_batch_item(item, active, path, False, "refused", exc.code, message, outcome))
+                    continue
+                except (SafetyUnavailable, SafetyError) as exc:
+                    halted = {"ok": False, "error": str(exc), "code": getattr(exc, "code", "")}
+                    print(f"{item.index}/{len(items)} seed={item.seed} failed: {exc}", file=sys.stderr)
+                    rows.append(_batch_item(item, active, path, False, "failed", getattr(exc, "code", ""), str(exc), outcome))
+                    break
+                diffusion = last_image_seconds()
+                row = _batch_item(item, active, path, True, "ok", "", "", outcome)
+                if diffusion is not None:
+                    row["diffusion_seconds"] = round(diffusion, 3)
+                rows.append(row)
+                print(f"{item.index}/{len(items)} seed={item.seed} wrote {path}", file=sys.stderr)
+                if outcome is not None and outcome.fallback and not as_json:
+                    print(fallback_message(outcome), file=sys.stderr)
+    except LoraRejected as exc:
+        return _emit_lora(exc.code, as_json, **exc.details)
+    except DecodeNoiseError as exc:
+        return _emit_decode_noise(exc.code, as_json)
+    except GpuLockTimeout as exc:
+        return _emit({"ok": False, "error": str(exc), "code": "gpu_busy"}, as_json, 1)
+    except (
+        SnapshotError, DownloadDeclined, InferenceUnavailable, ModelNotReady,
+        ModeUnavailable, BaseNotSelected, OptionalModelUnavailable, JobError, CoolingDown, EnlargeMissing, EnlargeError, VramRefused, DeviceRefused,
+        OSError,
+    ) as exc:
+        return _emit({"ok": False, "error": str(exc)}, as_json, 1)
+    written = sum(1 for row in rows if row["ok"])
+    refused = sum(1 for row in rows if row.get("status") == "refused")
+    failed = sum(1 for row in rows if row.get("status") == "failed")
+    payload: dict[str, object] = {
+        "ok": written == len(items) and halted is None,
+        "written": written,
+        "refused": refused,
+        "failed": failed,
+        "items": rows,
+        "seconds": round(time.perf_counter() - started, 3),
+    }
+    if halted is not None:
+        payload["error"] = halted["error"]
+        payload["code"] = halted["code"]
+    code = 0 if payload["ok"] else 1
+    return _emit(_with_lora(payload, chosen), as_json, code)
+
+
+def _batch_item(
+    item: "GenerateItem",
+    used_prompt: str,
+    path: Path,
+    ok: bool,
+    status: str,
+    code: str,
+    message: str,
+    outcome: object,
+) -> dict[str, object]:
+    """One row of the generate-batch JSON summary."""
+    row: dict[str, object] = {
+        "index": item.index,
+        "prompt": item.prompt,
+        "used_prompt": used_prompt,
+        "seed": item.seed,
+        "ok": ok,
+        "status": status,
+        "path": str(path) if ok else "",
+    }
+    if code:
+        row["code"] = code
+    if message:
+        row["message"] = message
+    if outcome is not None:
+        row["enhanced_prompt"] = getattr(outcome, "rewritten", None)
+        row["fallback"] = getattr(outcome, "fallback", "")
+    return row
+
+
+def _photoshoot_bench(args: argparse.Namespace) -> int:
+    """Time a 6-frame series on this machine. A missing GPU writes no duration."""
+    _command_imports()
+    as_json = bool(args.json)
+    os_result = _preflight_os_check()
+    if not os_result.ok:
+        return _emit({"ok": False, "error": os_result.message}, as_json, 2)
+    gpu = check_gpu(probe_gpu())
+    if not gpu.ok or gpu.tier is None:
+        return _emit({"ok": False, "error": gpu.message}, as_json, 2)
+    folder = Path(args.out)
+    try:
+        prepare_output_folder(folder)
+    except OutputFolderError as exc:
+        return _emit({"ok": False, "error": str(exc), "code": "output_folder"}, as_json, 2)
+    try:
+        with pinned("canvas-photoshoot-bench"):
+            install_supporting(load_catalog(), lambda message: print(message, file=sys.stderr))
+            stack = load_catalog_stack(models_dir(), load_catalog(), writer=True)
+            gate = AgeGate(stack)
+            report = run_bench(
+                prompt=str(args.prompt),
+                folder=folder,
+                seed=int(args.seed),
+                tier=gpu.tier,
+                age_gate=gate,
+                rewrite=live_rewrite(gpu.tier),
+                generate=live_generate(gate, gpu.tier),
+            )
+    except GpuLockTimeout as exc:
+        return _emit({"ok": False, "error": str(exc), "code": "gpu_busy"}, as_json, 1)
+    except (
+        SafetyError, SnapshotError, DownloadDeclined, InferenceUnavailable, ModelNotReady,
+        ModeUnavailable, BaseNotSelected, OptionalModelUnavailable, JobError, CoolingDown, EnlargeMissing, EnlargeError, VramRefused, DeviceRefused,
+        OSError,
+    ) as exc:
+        return _emit({"ok": False, "error": str(exc)}, as_json, 1)
+    return _emit(report, as_json, 0 if report.get("ok") else 1)
+
+
+def _photoshoot(args: argparse.Namespace) -> int:
+    """Write a series into --out. A stopped frame is reported, not a crash."""
+    _command_imports()
+    if getattr(args, "vram_trace", False):
+        os.environ["VOXPRINT_VRAM_TRACE"] = "1"
+    as_json = bool(args.json)
+    frames = int(args.frames)
+    if frames < 1 or frames > MAX_FRAMES:
+        return _emit_photoshoot(reject_frames(frames), as_json, 2)
+    chosen, stopped = _take_lora(args, as_json)
+    if stopped is not None:
+        return stopped
+    os_result = _preflight_os_check()
+    if not os_result.ok:
+        return _emit({"ok": False, "error": os_result.message}, as_json, 2)
+    gpu = check_gpu(probe_gpu())
+    if not gpu.ok or gpu.tier is None:
+        return _emit({"ok": False, "error": gpu.message}, as_json, 2)
+    folder = Path(args.out)
+    adult = bool(args.adult)
+    style = str(args.style)
+    try:
+        prepare_output_folder(folder)
+    except OutputFolderError as exc:
+        return _emit({"ok": False, "error": str(exc), "code": "output_folder"}, as_json, 2)
+    try:
+        with pinned("canvas-photoshoot"):
+            install_supporting(load_catalog(), lambda message: print(message, file=sys.stderr))
+            stack = load_catalog_stack(models_dir(), load_catalog(), writer=True)
+            gate = AgeGate(stack)
+            serial = SerialGate.wrap(gate)
+            clock = StageTimes()
+            negative = str(args.negative)
+            payload, code = run_command(
+                idea=str(args.prompt),
+                folder=folder,
+                frames=frames,
+                seed=None if args.seed is None else int(args.seed),
+                seed_mode=str(args.seed_mode),
+                style=style,
+                places=str(args.places),
+                adult=adult,
+                age_gate=serial,
+                rewrite=model_rewrite(gpu.tier, adult),
+                generate=model_generate(
+                    serial, gpu.tier, style, adult,
+                    None if chosen is None else chosen[0],
+                    0.7 if chosen is None else chosen[1],
+                    negative,
+                ),
+                timings=clock,
+                container=parse_export_format(str(args.export_format)),
+                negative=negative,
+            )
+    except GpuLockTimeout:
+        return _emit_photoshoot(
+            {"ok": False, "error": "gpu_busy", "code": "gpu_busy", "message": "the GPU is busy"}, as_json, 1,
+        )
+    except (
+        SafetyError, SnapshotError, DownloadDeclined, InferenceUnavailable, ModelNotReady,
+        ModeUnavailable, BaseNotSelected, OptionalModelUnavailable, JobError, CoolingDown, EnlargeMissing, EnlargeError, VramRefused, DeviceRefused,
+        OSError,
+    ) as exc:
+        return _emit({"ok": False, "error": str(exc)}, as_json, 1)
+    return _emit_photoshoot(_with_lora(payload, chosen), as_json, code)
+
+
+def _batch(args: argparse.Namespace) -> int:
+    """Run a manifest into --out. The manifest and the folder are checked before any model loads."""
+    _command_imports()
+    if getattr(args, "vram_trace", False):
+        os.environ["VOXPRINT_VRAM_TRACE"] = "1"
+    as_json = bool(args.json)
+    manifest = Path(args.manifest)
+    try:
+        entries = load_manifest(manifest)
+    except ManifestInvalid as exc:
+        return _emit_batch({"ok": False, "error": "bad_manifest", "code": "bad_manifest", "message": str(exc)}, as_json, 2)
+    chosen, stopped = _take_lora(args, as_json)
+    if stopped is not None:
+        return stopped
+    os_result = _preflight_os_check()
+    if not os_result.ok:
+        return _emit({"ok": False, "error": os_result.message}, as_json, 2)
+    gpu = check_gpu(probe_gpu())
+    if not gpu.ok or gpu.tier is None:
+        return _emit({"ok": False, "error": gpu.message}, as_json, 2)
+    folder = Path(args.out) if str(args.out or "") else default_out(manifest)
+    try:
+        prepare_output_folder(folder)
+    except OutputFolderError as exc:
+        return _emit({"ok": False, "error": str(exc), "code": "output_folder"}, as_json, 2)
+    adult = bool(args.adult)
+    style = str(args.style)
+    tier = gpu.tier
+    lora = None if chosen is None else chosen[0]
+    scale = 0.7 if chosen is None else chosen[1]
+    try:
+        # One lock for the whole batch, taken before any weights load.
+        with pinned("canvas-batch"):
+            install_supporting(load_catalog(), lambda message: print(message, file=sys.stderr))
+            stack = load_catalog_stack(models_dir(), load_catalog(), writer=True)
+            serial = SerialGate.wrap(AgeGate(stack))
+            payload, code = run_batch_command(
+                entries=entries,
+                folder=folder,
+                style=style,
+                places=str(args.places),
+                adult=adult,
+                age_gate=serial,
+                # One writer session serves every entry, and the batch releases it once.
+                rewrite=model_rewrite(tier, adult),
+                frame_for=lambda entry: model_generate(serial, tier, style, adult, lora, scale, entry.negative),
+                timings=StageTimes(),
+                container=parse_export_format(str(args.export_format)),
+            )
+    except GpuLockTimeout:
+        write_failed(folder, entries, "gpu_busy", "the GPU is busy")
+        return _emit_batch(
+            {"ok": False, "error": "gpu_busy", "code": "gpu_busy", "message": "the GPU is busy"}, as_json, 1,
+        )
+    except (
+        SafetyError, SnapshotError, DownloadDeclined, InferenceUnavailable, ModelNotReady,
+        ModeUnavailable, BaseNotSelected, OptionalModelUnavailable, JobError, CoolingDown, EnlargeMissing, EnlargeError, VramRefused, DeviceRefused,
+        OSError,
+    ) as exc:
+        code_name = "vram" if isinstance(exc, VramRefused) else "error"
+        write_failed(folder, entries, code_name, str(exc))
+        return _emit({"ok": False, "error": str(exc), "code": code_name}, as_json, 1)
+    except Exception as exc:
+        if cuda_health.is_cuda_fault(exc):
+            cuda_health.mark_lost(exc)
+        if not (is_out_of_memory(exc) or cuda_health.lost()):
+            raise
+        message = str(VramRefused())
+        write_failed(folder, entries, "vram", message)
+        return _emit({"ok": False, "error": message, "code": "vram"}, as_json, 1)
+    return _emit_batch(_with_lora(payload, chosen), as_json, code)
+
+
+def _emit_batch(payload: dict[str, object], as_json: bool, code: int) -> int:
+    if as_json:
+        print(json.dumps(payload))
+        return code
+    if payload.get("error"):
+        print(str(payload.get("message") or payload["error"]), file=sys.stderr)
+        return code
+    entries = payload.get("entries")
+    if isinstance(entries, list):
+        for row in entries:
+            if not isinstance(row, dict):
+                continue
+            for path in row.get("frames") or ():
+                print(path)
+            if row.get("status") != "ok":
+                print(f"{row.get('name')}: {row.get('status')}: {row.get('message', '')}", file=sys.stderr)
+    summary = payload.get("summary")
+    if isinstance(summary, str):
+        print(summary)
+    return code
+
+
+def _emit_photoshoot(payload: dict[str, object], as_json: bool, code: int) -> int:
+    if as_json:
+        print(json.dumps(payload))
+        return code
+    if not payload.get("ok"):
+        print(_photoshoot_console(payload), file=sys.stderr)
+        return code
+    frames = payload.get("frames")
+    if isinstance(frames, list):
+        for path in frames:
+            print(path)
+    scenario = payload.get("scenario")
+    if isinstance(scenario, str) and scenario:
+        print(scenario)
+    shots = payload.get("shots")
+    if isinstance(shots, list):
+        for shot in shots:
+            if isinstance(shot, dict) and shot.get("code") == "not_produced":
+                print(tr("photoshoot.frame.blocked"), file=sys.stderr)
+    return code
+
+
+def _photoshoot_console(payload: dict[str, object]) -> str:
+    code = str(payload.get("code") or "")
+    if code == "internal":
+        return tr("photoshoot.code.internal")
+    if code.startswith("check."):
+        return text("gate.unavailable")
+    if code == "gpu_busy":
+        return text("startup.lock")
+    if code == "enlarge_unavailable":
+        return text("enlarge.hint", name=ENLARGE_NAME)
+    if code:
+        return tr(f"photoshoot.code.{code}")
+    error = str(payload.get("error") or "")
+    if error == "bad_frames":
+        return tr("photoshoot.frames.invalid", limit=MAX_FRAMES)
+    if error == "not_produced":
+        return tr("photoshoot.frame.blocked")
+    if error == "scenario":
+        return tr("photoshoot.scenario.stopped")
+    if error == "idea":
+        reason = payload.get("message")
+        if isinstance(reason, str) and reason.strip():
+            return reason
+        return tr("photoshoot.scenario.stopped")
+    message = payload.get("message")
+    if isinstance(message, str) and message.strip():
+        return message
+    return error
+
+
+def _leave_if_cuda_lost(code: int) -> int:
+    """Return ``code``, or leave with it now when the CUDA context was lost.
+
+    Interpreter teardown would free tensors of the broken context, and the driver aborts on that.
+    """
+    if cuda_health.lost():
+        cuda_health.exit_now(code)
+    return code
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Register the shared model folder, check for a release, or open the window."""
+    # The shared catalogs follow the system locale or VOXPRINT_LANG; Canvas is English.
+    set_language("en")
+    args = _parser().parse_args(argv)
+    if args.save_metadata:
+        os.environ["VOXPRINT_CANVAS_SAVE_METADATA"] = "1"
+    _apply_gpu_setting(args)
+    refused = _apply_vram_cap(args)
+    if refused is not None:
+        return refused
+    if args.version:
+        print(splash_line())
+        return 0
+    commands = {"generate": _generate, "photoshoot-bench": _photoshoot_bench, "photoshoot": _photoshoot, "batch": _batch}
+    command = commands.get(str(getattr(args, "command", None) or ""))
+    if command is not None:
+        return _leave_if_cuda_lost(command(args))
+    if args.selftest:
+        _command_imports()
+        report = selftest_report(deep=bool(args.deep))
+        if args.json:
+            print(json.dumps(report, indent=2))
+        else:
+            print("ok" if report["ok"] else "failed")
+        return 0 if report["ok"] else 2
+    if args.register_models:
+        register(shared_dir())
+        _register_install()
+        return 0
+    if args.unregister_models:
+        unregister(shared_dir())
+        _unregister_install()
+        # Views are Canvas links over the MDL blobs; the blobs stay with MDL.
+        remove_views(models_dir())
+        return 0
+    if args.check_update:
+        tag = check_for_update(APP_VERSION)
+        if tag:
+            print(tag)
+        return 0
+    app = _application()
+    splash = show_splash()
+    os_result = _preflight_os_check()
+    if not os_result.ok:
+        splash.close()
+        print(os_result.message, file=sys.stderr)
+        return 2
+    splash.set_stage(text("splash.gpu"))
+    gpu: GpuCheck = check_gpu(probe_gpu())
+    if not gpu.ok or gpu.tier is None:
+        splash.close()
+        print(gpu.message, file=sys.stderr)
+        return 2
+    _register_install()
+    _repair_shared(splash.set_stage)
+    code = _launch(gpu.tier, splash, app)
+    if code is None:
+        return 0
+    return int(code)
+
+
+def _chosen_lora(args: argparse.Namespace) -> tuple[UserLora, float] | None:
+    """The LoRA named by ``--lora``, checked before any model is opened.
+
+    Without ``--lora-scale`` the LoRA's own recorded default strength is used.
+    """
+    raw = str(getattr(args, "lora", "") or "").strip()
+    if not raw:
+        return None
+    lora = prepare_cli_lora(Path(raw))
+    wanted = getattr(args, "lora_scale", None)
+    scale = lora.default_strength if wanted is None else cli_scale(wanted)
+    return lora, scale
+
+
+def _take_lora(args: argparse.Namespace, as_json: bool) -> tuple[tuple[UserLora, float] | None, int | None]:
+    """The chosen LoRA, or an exit code when it cannot be used.
+
+    A base Canvas cannot run exits 2 before any model is opened.
+    """
+    try:
+        chosen = _chosen_lora(args)
+    except LoraRejected as exc:
+        return None, _emit_lora(exc.code, as_json, **exc.details)
+    if chosen is not None:
+        rejected = retrain_rejection(chosen[0])
+        if rejected is not None:
+            return None, _emit_lora(rejected.code, as_json, **rejected.details)
+    return chosen, None
+
+
+def _emit_lora(code: str, as_json: bool, **values: object) -> int:
+    """Exit 2. ``--json`` prints the stable code and the English sentence.
+
+    ``lora.retrain`` also names the trained base and the Z-Image retrain target.
+    """
+    message = text(code, "en", **values) if values else text(code, "en")
+    if as_json:
+        body: dict[str, object] = {"ok": False, "error": code, "message": message}
+        if code == CODE_RETRAIN:
+            body["retrain"] = {"from": str(values.get("base") or ""), "to": FORGE_BASE_ID}
+        print(json.dumps(body))
+    else:
+        print(message, file=sys.stderr)
+    return 2
+
+
+def _emit_decode_noise(code: str, as_json: bool) -> int:
+    """Exit 1. The decoder produced noise, so no picture was saved."""
+    message = text(code, "en")
+    if as_json:
+        print(json.dumps({"ok": False, "error": code, "message": message}))
+    else:
+        print(message, file=sys.stderr)
+    return 1
+
+
+def _with_lora(payload: dict[str, object], chosen: tuple[UserLora, float] | None) -> dict[str, object]:
+    """Add the LoRA name, scale, and trigger when a command asked for one."""
+    if chosen is None:
+        return payload
+    lora, scale = chosen
+    payload["lora"] = lora.id
+    payload["lora_scale"] = scale
+    payload["lora_trigger"] = lora.trigger
+    if lora.warnings:
+        payload["warnings"] = list(lora.warnings)
+    return payload
+
+
+def _generate_payload(
+    path: Path, original: str, outcome: EnhanceResult | None, seconds: float, seed: int | None = None,
+) -> dict[str, object]:
+    """JSON body for one generate command. Both prompts are present when enhancing."""
+    if outcome is None:
+        body: dict[str, object] = {
+            "ok": True,
+            "path": str(path),
+            "prompt": original,
+            "enhanced_prompt": None,
+            "used_prompt": original,
+            "fallback": "",
+        }
+    else:
+        body = {
+            "ok": True,
+            "path": str(path),
+            "prompt": outcome.original,
+            "enhanced_prompt": outcome.rewritten,
+            "used_prompt": outcome.prompt,
+            "fallback": outcome.fallback,
+        }
+    body["seconds_per_image"] = round(float(seconds), 3)
+    if seed is not None:
+        body["seed"] = int(seed)
+    diffusion = last_image_seconds()
+    if diffusion is not None:
+        body["diffusion_seconds"] = round(diffusion, 3)
+    peak = peak_allocated_bytes()
+    if peak is not None:
+        body["peak_allocated_bytes"] = peak
+    return body
+
+
+def _instruction_removed(as_json: bool) -> int:
+    """Exit 2. Instruction editing is not part of Canvas."""
+    message = text("edit.removed", "en")
+    if as_json:
+        print(json.dumps({"ok": False, "error": "removed", "message": message}))
+    else:
+        print(message, file=sys.stderr)
+    return 2
+
+
+def _apply_gpu_setting(args: argparse.Namespace | None = None) -> None:
+    """Pin the card before anything starts CUDA: ``--gpu``, else the ``gpu`` entry of canvas.toml.
+
+    CUDA_VISIBLE_DEVICES already naming a device wins over canvas.toml but not over ``--gpu``.
+    After the pin the only visible card is ``cuda:0``, and the per-card lock follows it.
+    """
+    chosen = getattr(args, "gpu", None)
+    if chosen is None and not os.environ.get("CUDA_VISIBLE_DEVICES", "").strip():
+        chosen = settings.get().gpu
+    if chosen is None:
+        return
+    os.environ.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(chosen)
+    forget_device_key()
+
+
+def _apply_vram_cap(args: argparse.Namespace) -> int | None:
+    """Store ``--vram-cap-gb`` where tier selection and the other cap reader look."""
+    cap = getattr(args, "vram_cap_gb", None)
+    if cap is None:
+        return None
+    try:
+        set_vram_cap_gb(float(cap))
+    except ValueError:
+        print("The VRAM cap must be greater than 0.", file=sys.stderr)
+        return 2
+    return None
+
+
+def _register_install() -> None:
+    """List Canvas in installed-apps.json. Safe to repeat; a failure never stops a launch."""
+    from canvas.models.mdl_registry import register_install
+
+    try:
+        register_install()
+    except OSError as exc:
+        print(f"Canvas could not be listed in the app registry: {exc}", file=sys.stderr)
+
+
+def _unregister_install() -> None:
+    """Remove Canvas from installed-apps.json. A failure never stops uninstall."""
+    from canvas.models.mdl_registry import unregister_install
+
+    try:
+        unregister_install()
+    except OSError as exc:
+        print(f"Canvas could not be removed from the app registry: {exc}", file=sys.stderr)
+
+
+def _repair_shared(stage: Callable[[str], None]) -> None:
+    def progress(message: str) -> None:
+        print(message, file=sys.stderr)
+        stage(message)
+
+    try:
+        repair(load_catalog(), progress)
+    except (SnapshotError, OSError) as exc:
+        progress(str(exc))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

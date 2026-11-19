@@ -1,0 +1,61 @@
+# Shared resources
+
+Suite apps share one folder and one manifest.
+
+| Platform | Folder |
+| --- | --- |
+| Windows | `%LOCALAPPDATA%\VOXPrint AI Suite\shared` |
+| Linux | `~/.local/share/voxprint-ai-suite/shared` |
+
+On Linux, `XDG_DATA_HOME/voxprint-ai-suite/shared` is used when `XDG_DATA_HOME` is set. `VOXPRINT_HOME` replaces the data home on either platform. A previous `Voxprint` or `voxprint` folder is moved to the new name once (voxprint-common 0.2.5). The program itself is installed under `C:\Program Files\VOXPrint AI Suite\Canvas\` or `/opt/voxprint-ai-suite/canvas/`, not in this data folder.
+
+The suite runtime is Python 3.14 at `shared/runtime/py314-torch2.11-cu130`. Every pinned dependency publishes a wheel that installs on Python 3.14, so Canvas uses that runtime. Required CI stays on Python 3.14. An experimental job probes Python 3.15 and is allowed to fail. The installer does not move to `cpython-3.15.2+20261026` until `onnxruntime-gpu` and `imagecodecs` publish regular cp315 wheels. The runtime contains PyTorch 2.11.0 for CUDA 13.0, the matching torchvision 0.26.0, and the GPU ONNX Runtime 1.31.0. Setup resolves numpy, torchao, and the other packages from PyPI, and takes torch and torchvision from the CUDA 13.0 index. torchao is pinned with `==` and is not taken from that index. The CPU ONNX Runtime build is not installed into it, because that build would shadow the GPU build. TensorRT 10.16.1.11 is an optional component, `tensorrt-10`. Python 3.14 has no TensorRT wheel, so setup skips it. The self-test records that note and does not fail.
+
+The setup installs anything that is missing before the first picture: the suite runtime when it is not already there, the CUDA 13.0 wheels, the default Z-Image-Turbo pack, and the models that ship with that pack. Progress is printed while those files are fetched. Wheels are cached in `shared/wheels` so another suite app can reuse them. A component that another app already refs is left in place. A different version is installed beside it, under a new path.
+
+Optional packs stay out of the setup. ControlNet lite and Creative Z-Image download only when a picture needs them. The window shows the size and an estimated time first.
+
+`voxprint-canvas --selftest` reads the GPU, the model files, and the output encoders. It does not download models or wheels, and its JSON report is the only text on stdout. A file whose path, size, and modification time match a record in the shared manifest is not hashed again. `--selftest --deep` hashes every file and refreshes that record. Files that have not been downloaded are reported as not downloaded, which is not a failure. A hash that does not match, or a check that cannot load after its files are present, is a failure. Launch repairs a recorded file only when it is missing or corrupt. Progress for that repair is printed to stderr.
+
+## Manifest
+
+`shared/manifest.json` is schema 1. Another suite app can read and write the same file. On Linux the path is `~/.local/share/voxprint-ai-suite/shared/manifest.json`. On Windows it is `%LOCALAPPDATA%\VOXPrint AI Suite\shared\manifest.json`.
+
+```json
+{
+  "schema": 1,
+  "components": {
+    "torch-2.11.0-cu130": {
+      "kind": "wheels",
+      "version": "2.11.0+cu130",
+      "path": "runtime/py314-torch2.11-cu130",
+      "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+      "installed_at": "2026-10-11T12:00:00+00:00",
+      "refs": ["enlarge", "canvas"]
+    }
+  }
+}
+```
+
+- The top-level keys Canvas writes are `schema` (the integer 1) and `components`. Any other top-level key is kept when Canvas writes the file.
+- A component id is lowercase and matches `[a-z0-9][a-z0-9._-]*`. Examples: `python-3.14`, `torch-2.11.0-cu130`, `onnxruntime-gpu-1.31`, `tensorrt-10`, and `model-` plus a SHA-256 prefix.
+- `kind` is `runtime`, `wheels`, `model`, or `tool`.
+- `version` is the component version, such as `2.11.0+cu130`.
+- `path` is relative to the shared directory. It must not be absolute and must not contain `..`.
+- `sha256` is the hex digest of the archive or of the lock file.
+- `installed_at` is an ISO-8601 timestamp with a numeric offset.
+- `refs` lists the suite apps that use the component. Installing Canvas adds `canvas`. Uninstalling removes `canvas`.
+
+A component is reused when the id, version, and sha256 all match. Otherwise Canvas installs beside it, under a new path, and does not overwrite a component another app still refs. The directory is deleted only when `refs` is empty and no other component still uses that path.
+
+Writes are atomic. Canvas locks `manifest.lock` (30 seconds), writes `manifest.json.tmp`, flushes it, and renames it onto `manifest.json`.
+
+An older Canvas file that has `version` and `resources` is read once, converted to components, and written back as schema 1. A pack becomes a model. A suite entry becomes a tool.
+
+## Model weights
+
+Weights live in the voxprint-common `models_dir()`: `VOXPRINT_MODELS_DIR`, then `models_dir` in `<data home>/state/suite.json`, then the legacy `state/models_dir.txt`, otherwise `<data home>/models`. VOXPrint MDL downloads there and Canvas loads from there. `shared/` holds only the runtime and `manifest.json`; a model component may be recorded with its absolute path inside `models_dir()`. Setup moves an older `shared/models` to `<data home>/models` once, before Python runs. When that move is not possible, it sets `models_dir` in `suite.json` to the old folder.
+
+### Model views
+
+VOXPrint MDL stores each downloaded file once as `models_dir()/blobs/<sha256>`. Canvas reads the installed `mdl.json` and, when every blob is present at the declared size, opens a view at `models_dir()/views/canvas/<id>-<digest12>/` in the repo layout. An `<id>-upstream` FP32 entry gets its own view. Each file is a hard link to its blob. The view is built in a staging folder, renamed into place, and described by a `.voxprint-view.json` marker that lists each path and its sha256. A missing blob, or a blob of the wrong size, is reported as not downloaded, and a stale view is removed. When a hard link fails, Linux uses a symbolic link. Small config and JSON files may be copied. Weights are never copied, so on Windows a failed link refuses the model. `from_pretrained` opens the folder with `local_files_only=True`. Canvas may delete views. It never deletes anything under `blobs/`. `--unregister-models` removes the views and leaves the blobs. A legacy `<org>--<repo>` folder, and its `<repo>--upstream` sibling, still load while those trees remain.

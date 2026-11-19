@@ -1,0 +1,78 @@
+# Code audit (tools/audit.py): ruff, mypy, bandit, pip-audit, vulture, radon, interrogate, gitleaks.
+# Generation extras (torch, diffusers) are not installed. Vulture and radon never fail the job.
+name: audit
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main, ui/shell-migration]
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install gitleaks
+        run: |
+          ver=8.30.1
+          curl -fsSL -o /tmp/gitleaks.tar.gz "https://github.com/gitleaks/gitleaks/releases/download/v${ver}/gitleaks_${ver}_linux_x64.tar.gz"
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          sudo mv /tmp/gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+      - name: Choose the gitleaks scan
+        id: leaks
+        shell: bash
+        run: |
+          set -euo pipefail
+          event="${{ github.event_name }}"
+          if [ "$event" = "schedule" ] || [ "$event" = "workflow_dispatch" ] || [ "$event" = "workflow_call" ]; then
+            echo "mode=full" >> "$GITHUB_OUTPUT"
+            echo "range=" >> "$GITHUB_OUTPUT"
+          elif [ "$event" = "pull_request" ]; then
+            echo "mode=diff" >> "$GITHUB_OUTPUT"
+            echo "range=${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            before="${{ github.event.before }}"
+            if [ -z "$before" ] || [ "$before" = "0000000000000000000000000000000000000000" ]; then
+              echo "mode=full" >> "$GITHUB_OUTPUT"
+              echo "range=" >> "$GITHUB_OUTPUT"
+            else
+              echo "mode=diff" >> "$GITHUB_OUTPUT"
+              echo "range=${before}..${{ github.sha }}" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+      - name: App environment and audit tools
+        run: |
+          python -m pip install -q uv
+          mkdir -p wheels
+          # Release pages are gone (2026-11-17); build the v0.7.4 wheel from its pinned commit archive (sha256-checked).
+          curl -fsSL -o /tmp/voxprint-common-0.7.4.tar.gz https://github.com/Mitroshenkov87/voxprint-common/archive/fc97031912b52b67d3a5164c37e6e9e603d5f945.tar.gz
+          echo "a373ea0c4526e1154a584308388e01ff0163a224370488acd20a17c53017992f  /tmp/voxprint-common-0.7.4.tar.gz" | sha256sum -c -
+          python -m pip wheel -q --no-deps -w wheels /tmp/voxprint-common-0.7.4.tar.gz
+          uv venv .app
+          uv venv .tools
+          uv pip install --python .app/bin/python --find-links wheels -e ".[dev]"
+          uv pip install --python .tools/bin/python -r tools/requirements-audit.txt
+      - name: Audit
+        run: |
+          .tools/bin/python tools/audit.py \
+            --python .app/bin/python \
+            --gitleaks-mode "${{ steps.leaks.outputs.mode }}" \
+            --gitleaks-range "${{ steps.leaks.outputs.range }}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: audit-report
+          path: audit-report.txt
+          retention-days: 14

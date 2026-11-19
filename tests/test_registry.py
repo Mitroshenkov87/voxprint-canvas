@@ -1,0 +1,159 @@
+"""Registry rules: permissive licences, no forbidden models, matching diffusers pin."""
+import hashlib
+import json
+from dataclasses import replace
+from pathlib import Path
+
+import pytest
+
+from canvas.models.loader import _control_file, ensure_weights, load_catalog_stack
+from canvas.models.pins import DIFFUSERS_PIN, PIPELINE_CONTROL
+from canvas.models.plan import CallPlan
+from canvas.models.registry import Catalog, RegistryError, load_catalog
+from canvas.safety.gate import SafetyUnavailable
+
+@pytest.fixture(autouse=True)
+def _placeholder_manifest(monkeypatch, tmp_path_factory):
+    # These tests describe the placeholder list; the real bundled pins would otherwise win.
+    from canvas.models import mdl_registry
+
+    monkeypatch.setattr(mdl_registry, "_BUNDLED", tmp_path_factory.mktemp("nobundle") / "mdl.json")
+
+
+
+def _rewrite(tmp_path: Path, mutate) -> Path:
+    raw = json.loads(Path("canvas/models/catalog.json").read_text(encoding="utf-8"))
+    mutate(raw)
+    path = tmp_path / "catalog.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    return path
+
+
+def test_catalog_loads_and_rejects_a_bad_pin_or_licence(tmp_path: Path):
+    catalog = load_catalog()
+    assert catalog.by_id("z-image-turbo-bf16-16gb").steps == 8
+    assert catalog.by_id("z-image-turbo-bf16-16gb").quant == "bf16"
+    ids = {spec.id for spec in catalog.models}
+    assert "z-image-turbo-fp8" not in ids
+    assert "z-image-turbo-fun-controlnet-union-fp8" not in ids
+    with pytest.raises(RegistryError):
+        load_catalog(_rewrite(tmp_path, lambda raw: raw.__setitem__("diffusers", "0.32.0")))
+    with pytest.raises(RegistryError):
+        load_catalog(_rewrite(tmp_path, lambda raw: raw["models"][0].__setitem__("licence", "GPL-3.0")))
+    with pytest.raises(RegistryError):
+        load_catalog(_rewrite(tmp_path, lambda raw: raw["models"][0].__setitem__("repo", "notai/nudenet")))
+    with pytest.raises(RegistryError):
+        load_catalog(_rewrite(tmp_path, lambda raw: raw["models"][0]["sources"].append({"kind": "http", "uri": "https://example.invalid"})))
+
+
+def test_z_image_fp8_is_rejected(tmp_path: Path):
+    catalog = load_catalog()
+    ids = {spec.id for spec in catalog.models}
+    assert "qwen-image-2512-fp8" not in ids
+
+    def as_fp8(raw: dict) -> None:
+        raw["models"][0]["quant"] = "fp8-e4m3"
+        raw["models"][0]["quality_gate"] = "passed"
+
+    with pytest.raises(RegistryError, match="BF16"):
+        load_catalog(_rewrite(tmp_path, as_fp8))
+
+
+def test_unpinned_weights_fail_closed(tmp_path: Path):
+    spec = load_catalog().by_id("qwen3guard-gen-0.6b")
+    with pytest.raises(SafetyUnavailable) as caught:
+        ensure_weights(spec, tmp_path)
+    assert caught.value.code == "missing_model"
+    with pytest.raises(SafetyUnavailable) as caught:
+        load_catalog_stack(tmp_path)
+    assert caught.value.code == "missing_model"
+
+
+def test_hash_mismatch_and_a_present_file(tmp_path: Path):
+    spec = load_catalog().by_id("qwen3guard-gen-0.6b")
+    payload = b"weights"
+    digest = hashlib.sha256(payload).hexdigest()
+    pinned = replace(spec, files={"weights": digest})
+    folder = tmp_path / "views" / "canvas" / "guard"
+    folder.mkdir(parents=True)
+    target = folder / "weights"
+    target.write_bytes(b"other")
+    with pytest.raises(SafetyUnavailable) as caught:
+        ensure_weights(pinned, tmp_path, folder)
+    assert caught.value.code == "hash_mismatch"
+    target.write_bytes(payload)
+    ensure_weights(pinned, tmp_path, folder)
+
+
+def test_release_pins_match_the_frozen_snapshots():
+    catalog = load_catalog()
+    turbo = catalog.by_id("z-image-turbo-bf16-16gb")
+    assert turbo.revision == "f332072aa78be7aecdf3ee76d5c247082da564a6"
+    assert turbo.mirror_revision == "111b2548fc0ef370976c9b43d1aed976cb7a2cf2"
+    assert turbo.fallback_mirror_revision == "75806c7417b435993a2b8b8346dd993dc09a52d5"
+    assert turbo.pinned()
+    # The FP8 pack: transformer and text-encoder weights are the mirror's fp8/ copies.
+    assert turbo.files["transformer/diffusion_pytorch_model-00001-of-00003.safetensors"] == (
+        "1ccf14129f3814c5641309110edf1eedb5bba072b59cb1df8fe20476b3e63107"
+    )
+    assert turbo.files["text_encoder/model-00001-of-00003.safetensors"] == (
+        "a9debdd67fa431b73909918b65859dedc429603e3c1f42f061d9bb31543ede05"
+    )
+    # The unlisted full-precision fallback keeps the author's original hashes.
+    official = turbo.fallback_files["transformer/diffusion_pytorch_model-00001-of-00003.safetensors"]
+    assert official == "95facd593e2549e8252acb571c653d57f7ddb7f1060d4e81712f152555a88804"
+    index = turbo.files["transformer/diffusion_pytorch_model.safetensors.index.json"]
+    packed = Path("canvas/models/turbo_transformer_index.json").read_bytes()
+    packed_hash = hashlib.sha256(packed).hexdigest()
+    # The packed LoRA table carries the module names of the transformer index; an
+    # FP8 repack renames nothing, so the legacy repack index stays valid.
+    legacy = next(entry for row in json.loads(
+        Path("canvas/models/catalog.json").read_text(encoding="utf-8")
+    )["models"] if row["id"] == "z-image-turbo-bf16-16gb" for entry in row.get("legacy") or ())
+    assert packed_hash in {index, legacy["files"]["transformer/diffusion_pytorch_model.safetensors.index.json"]["sha256"]}
+    names = json.loads(packed).get("weight_map", {})
+    assert names and all(isinstance(name, str) for name in names)
+    yunet = catalog.by_id("yunet-face")
+    assert yunet.files["face_detection_yunet_2023mar.onnx"] == (
+        "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4"
+    )
+    guard = catalog.by_id("qwen3guard-gen-0.6b")
+    assert guard.revision == "fada3b2f655b89601929198343c94cd2f64d93cc"
+    assert guard.pinned()
+
+
+def test_control_file_follows_the_tier(tmp_path: Path):
+    catalog = load_catalog()
+    payload = b"pack"
+    digest = hashlib.sha256(payload).hexdigest()
+    lite = catalog.by_id("z-image-turbo-fun-controlnet-union-bf16-lite")
+    full = catalog.by_id("z-image-turbo-fun-controlnet-union-bf16")
+    lite_name = next(iter(lite.files))
+    full_name = next(iter(full.files))
+    models = []
+    for spec in catalog.models:
+        if spec.id == lite.id:
+            models.append(replace(spec, files={lite_name: digest}))
+        elif spec.id == full.id:
+            models.append(replace(spec, files={full_name: digest}))
+        else:
+            models.append(spec)
+    edited = Catalog(catalog.diffusers, tuple(models), catalog.default_text_base, catalog.text_bases, catalog.sizes)
+    blob = tmp_path / "blobs" / digest
+    blob.parent.mkdir(parents=True)
+    blob.write_bytes(payload)
+    plan = CallPlan(
+        DIFFUSERS_PIN,
+        PIPELINE_CONTROL,
+        ("Tongyi-MAI/Z-Image-Turbo", "alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union-2.1"),
+        "bf16",
+        8,
+        0.0,
+        "",
+        "24gb",
+        "pose",
+    )
+    found = _control_file(edited, plan, tmp_path)
+    assert found is not None and found.name == full_name
+    found_lite = _control_file(edited, replace(plan, tier="16gb"), tmp_path)
+    assert found_lite is not None and found_lite.name == lite_name

@@ -1,0 +1,120 @@
+"""Diffusers 0.41.0 plans for the two tiers."""
+from dataclasses import replace
+
+import pytest
+
+from canvas.models.modes import Mode, Tier, visible_modes
+from canvas.models.pins import (
+    DIFFUSERS_PIN,
+    PIPELINE_CONTROL,
+    PIPELINE_CONTROL_INPAINT,
+    PIPELINE_IMG2IMG,
+    PIPELINE_INPAINT,
+    PIPELINE_TEXT,
+    REPO_CONTROL,
+    REPO_TURBO,
+)
+from canvas.models.plan import BaseNotSelected, build_plan
+from canvas.models.registry import load_catalog
+from canvas.safety.inputs import ImageRole, PendingInput
+from tests.fakes import World, rgb
+
+
+def _screened(mode: Mode, *roles: ImageRole):
+    world = World()
+    inputs = [PendingInput(role, rgb()) for role in roles]
+    return world.gate().release_request("a red boat", mode.value, inputs)
+
+
+def _screened_mode(value: str, *roles: ImageRole):
+    world = World()
+    inputs = [PendingInput(role, rgb()) for role in roles]
+    return world.gate().release_request("a red boat", value, inputs)
+
+
+def test_pin_and_visibility():
+    catalog = load_catalog()
+    assert catalog.diffusers == "0.41.0"
+    assert catalog.default_text_base == "z-image-turbo"
+    assert catalog.text_bases == ("z-image-turbo",)
+    assert DIFFUSERS_PIN == "0.41.0"
+    assert visible_modes(Tier.GB16) == visible_modes(Tier.GB24)
+    assert Mode.TEXT in visible_modes(Tier.GB16)
+    assert Mode.RESTYLE in visible_modes(Tier.GB16)
+    assert Mode.TEXT in visible_modes(Tier.GB24)
+    assert Mode.RESTYLE in visible_modes(Tier.GB24)
+    lite = catalog.by_id("z-image-turbo-fun-controlnet-union-bf16-lite")
+    full = catalog.by_id("z-image-turbo-fun-controlnet-union-bf16")
+    assert lite.repo == REPO_CONTROL and lite.variant == "lite" and lite.quant == "bf16"
+    assert lite.tier == "16gb" and lite.quality_gate == "passed"
+    assert full.variant == "full" and full.quant == "bf16" and full.quality_gate == "passed"
+    ids = {spec.id for spec in catalog.models}
+    assert "qwen-image-2512-fp8" not in ids
+    assert "z-image-creative-bf16" not in ids
+    assert "diffusers==0.41.0" in open("pyproject.toml", encoding="utf-8").read()
+
+
+def test_text_plan_follows_the_shared_model_default():
+    """A missing catalog default still follows common's model.default (z-image)."""
+    catalog = replace(load_catalog(), default_text_base=None)
+    plan = build_plan(catalog, _screened(Mode.TEXT), Tier.GB16)
+    assert plan.model_id == "z-image-turbo-bf16-16gb"
+
+
+def test_text_and_restyle_plans():
+    catalog = load_catalog()
+    implicit = build_plan(catalog, _screened(Mode.TEXT), Tier.GB16)
+    assert implicit.model_id == "z-image-turbo-bf16-16gb"
+    text = build_plan(catalog, _screened(Mode.TEXT), Tier.GB16, base="z-image-turbo")
+    assert text.diffusers == "0.41.0"
+    assert text.pipeline_class == PIPELINE_TEXT
+    assert text.repos == (REPO_TURBO,)
+    assert text.quant == "bf16"
+    assert text.steps == 8 and text.guidance_scale == 0.0
+    assert text.text_encoder == "Qwen/Qwen3-4B"
+    assert text.text_encoder_offload == "free-after-encode"
+    larger = build_plan(catalog, _screened(Mode.TEXT), Tier.GB24, base="z-image-turbo")
+    # One FP8 Turbo row serves both tiers, so 24 GB plans the same row and offload hint.
+    assert larger.model_id == "z-image-turbo-bf16-16gb"
+    assert larger.quant == "bf16" and larger.text_encoder_offload == "free-after-encode"
+    restyle = build_plan(catalog, _screened(Mode.RESTYLE, ImageRole.INIT), Tier.GB16)
+    assert restyle.pipeline_class == PIPELINE_IMG2IMG
+    assert restyle.repos == (REPO_TURBO,)
+    qwen = replace(
+        catalog,
+        default_text_base="qwen-image-2512",
+        text_bases=("z-image-turbo", "qwen-image-2512"),
+    )
+    # Implicit text plans follow common's model.default, not a leftover catalog default.
+    implicit_on_qwen = build_plan(qwen, _screened(Mode.TEXT), Tier.GB16)
+    assert implicit_on_qwen.model_id == "z-image-turbo-bf16-16gb"
+    with pytest.raises(BaseNotSelected):
+        build_plan(qwen, _screened(Mode.TEXT), Tier.GB16, base="qwen-image-2512")
+    with pytest.raises(BaseNotSelected):
+        build_plan(qwen, _screened(Mode.TEXT), Tier.GB24, base="qwen-image-2512")
+    restyle_on_qwen = build_plan(qwen, _screened(Mode.RESTYLE, ImageRole.INIT), Tier.GB16)
+    assert restyle_on_qwen.repos == (REPO_TURBO,) and restyle_on_qwen.pipeline_class == PIPELINE_IMG2IMG
+
+
+def test_control_plans():
+    catalog = load_catalog()
+    inpaint = build_plan(catalog, _screened(Mode.INPAINT, ImageRole.INIT, ImageRole.MASK), Tier.GB16)
+    assert inpaint.pipeline_class == PIPELINE_INPAINT
+    assert inpaint.repos == (REPO_TURBO, REPO_CONTROL)
+    outpaint = build_plan(catalog, _screened(Mode.OUTPAINT, ImageRole.INIT, ImageRole.MASK), Tier.GB24)
+    assert outpaint.pipeline_class == PIPELINE_INPAINT and outpaint.quant == "bf16"
+    pose = build_plan(catalog, _screened(Mode.POSE, ImageRole.POSE), Tier.GB16)
+    assert pose.pipeline_class == PIPELINE_CONTROL
+    depth = build_plan(catalog, _screened(Mode.DEPTH, ImageRole.DEPTH, ImageRole.MASK), Tier.GB24)
+    assert depth.pipeline_class == PIPELINE_CONTROL_INPAINT
+    edge = build_plan(catalog, _screened(Mode.EDGE, ImageRole.EDGE), Tier.GB16)
+    assert edge.pipeline_class == PIPELINE_CONTROL
+
+
+def test_the_retired_creative_mode_string_plans_as_text():
+    """A saved or CLI "text-creative" value quietly becomes plain text (Turbo)."""
+    catalog = load_catalog()
+    for tier in (Tier.GB16, Tier.GB24):
+        plan = build_plan(catalog, _screened_mode("text-creative"), tier)
+        assert plan.mode == Mode.TEXT.value
+        assert plan.model_id == "z-image-turbo-bf16-16gb"

@@ -1,0 +1,1197 @@
+"""Run one Photoshoot series in phases: prep, render, decode, then release.
+
+Prep writes the scenario with one writer session, reviews every prompt, and
+encodes every accepted line with the text encoder alone. Those embeddings stay
+in RAM, and prep fails when its models leave more than 0.5 GB on the card.
+Render loads the picture pipeline once and samples every frame while the
+denoiser stays on the GPU. Decode turns every kept latent into pixels in one
+VAE session. Each frame is released through the gate after the pipeline leaves
+the GPU, one frame at a time; no classifier runs on generated pixels (the
+prompts were screened in prep). RAM copies stay when the tier keeps them. A
+frame is written only after it is released.
+"""
+from __future__ import annotations
+
+import json
+import threading
+import time
+import zipfile
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
+from pathlib import Path
+from typing import Literal, Protocol, cast
+
+from canvas.app.i18n import text
+from canvas.app.shell_run import RunStopped
+from canvas.core.exchange import handoff_image
+from canvas.core.formats import EXPORT_FORMAT, OutputFormat, extension, save_image
+from canvas.infra.errors import note_crash, note_debug, note_error, note_timing
+from canvas.infra.phase_vram import Phase, ResidualVram, phase, require_released, start_phase
+from canvas.infra.stage_timer import StageTimes, log_detail, note_peak_mib, set_current, timed
+from canvas.infra.vram import peak_allocated_bytes
+from canvas.models import hot_tier as hot
+from canvas.models.decode_noise import DecodeNoiseError
+from canvas.models.runtime import (
+    clear_series_embeds,
+    decode_phase,
+    park_pipeline,
+    pipeline_scope,
+    render_phase,
+)
+from canvas.pipeline.bf16_schedule import VramRefused
+from canvas.pipeline.device_guard import DeviceRefused
+from canvas.pipeline.enhance import mask_numbers
+from canvas.pipeline.gpu_release import release_cuda_cache, release_gate_weights
+from canvas.pipeline.adult_direction import ages_allowed, with_adult_anchor, youth_cues
+from canvas.pipeline.frame_prompt import log_frame_prompt, strip_series_words, with_choices
+from canvas.pipeline.photoshoot import (
+    retry_prompt,
+    SCENARIO_CHUNK,
+    PlaceMode,
+    Scenario,
+    Shot,
+    accept_shot,
+    assemble_line,
+    describes_person,
+    fixed_appearance,
+    planned_shots,
+    single_frame,
+    read_drafts,
+    reply_declined,
+    scenario_request,
+    shot_identity,
+)
+from canvas.models.user_lora import UserLora, apply_trigger, rewrite_alias
+from canvas.safety.denylist import scan
+from canvas.safety.gate import (
+    AgeGate,
+    GenerationBlocked,
+    SafetyError,
+    SafetyUnavailable,
+    input_run,
+    issue,
+    release_generated,
+)
+from canvas.safety.image import RawImage, SafeImage
+
+StopCode = Literal["", "idea", "scenario", "cancelled", "error"]
+Source = Literal["", "writer", "mixed", "planned"]
+REFERENCE_STRENGTH = 0.80
+REFERENCE_MIN = 0.75
+_RAW_LIMIT = 6000
+_PICTURE_CODES = frozenset({"image", "input"})
+
+
+class SeriesFrame(Protocol):
+    """Pixels a frame callback can return. The gate reviews a copy."""
+
+    width: int
+    height: int
+
+    def to_bytes(self) -> bytes:
+        """RGB bytes, three per pixel."""
+
+
+@dataclass(frozen=True)
+class _CookShot:
+    """One frame whose prompt has already been accepted."""
+
+    index: int
+    line: str
+    seed: int
+
+
+@dataclass(frozen=True)
+class _Drawn:
+    """Pixels held in memory until the frame is released."""
+
+    index: int
+    line: str
+    seed: int
+    image: SeriesFrame
+
+
+@dataclass(frozen=True)
+class SeriesResult:
+    """SeriesResult."""
+
+    stopped: StopCode
+    reason: str
+    kept: tuple[Path, ...]
+    folder: Path | None
+    code: str = ""
+    source: Source = ""
+
+
+def run_series(
+    *,
+    idea: str,
+    count: int,
+    style: str,
+    place_mode: str,
+    seed: int,
+    strength: float | None,
+    include_camera: Callable[[], bool],
+    rewrite: Callable[[str], str],
+    age_gate: AgeGate,
+    draw_frame: Callable[[str, int, SeriesFrame | None, float | None], SeriesFrame | None],
+    cancelled: Callable[[], bool],
+    folder: Path,
+    on_scenario: Callable[[Scenario], None] | None = None,
+    line_for: Callable[[int], str] | None = None,
+    on_status: Callable[[int, str], None] | None = None,
+    adult: bool = False,
+    container: OutputFormat | None = None,
+    timings: StageTimes | None = None,
+    negative: str = "",
+) -> SeriesResult:
+    """Run series.
+
+    ``negative`` is the user's negative prompt. It is checked like the prompt,
+    before the writer, and a refusal stops the series with nothing drawn.
+    ``draw_frame`` is the one that applies it to the picture.
+
+    ``timings`` collects per-stage seconds (stage names only). Without it the
+    series keeps its own and writes one ``timing`` line to the generic log.
+    """
+    clock = timings if timings is not None else StageTimes()
+    previous_clock = set_current(clock)
+    noted: list[bool] = []
+    prep = start_phase("prep")
+    try:
+        with input_run(age_gate):
+            return _run_series(
+                idea=idea, count=count, style=style, place_mode=place_mode, seed=seed, strength=strength,
+                include_camera=include_camera, rewrite=rewrite, age_gate=age_gate, draw_frame=draw_frame,
+                cancelled=cancelled, folder=folder, on_scenario=on_scenario, line_for=line_for,
+                on_status=on_status, adult=adult, container=container, clock=clock, own_clock=timings is None,
+                noted=noted, prep=prep, negative=negative,
+            )
+    except DeviceRefused as exc:
+        note_error(exc.code)
+        if timings is None and not noted:
+            note_timing(clock.log_line())
+        return SeriesResult("error", str(exc), (), None, exc.code)
+    except ResidualVram as exc:
+        note_error(exc.code)
+        if timings is None and not noted:
+            note_timing(clock.log_line())
+        return SeriesResult("error", str(VramRefused()), (), None, exc.code)
+    except DecodeNoiseError as exc:
+        note_error(exc.code)
+        if timings is None and not noted:
+            note_timing(clock.log_line())
+        return SeriesResult("error", str(exc), (), None, exc.code)
+    finally:
+        _release_writer(rewrite)
+        prep.finish()
+        set_current(previous_clock)
+
+
+DrawFrame = Callable[[str, int, SeriesFrame | None, float | None], SeriesFrame | None]
+
+
+@dataclass
+class _Plan:
+    """One series whose prompts are checked, waiting for the picture model.
+
+    A batch holds one per entry. Render and decode fill ``drawn``, and the
+    release step writes them into ``folder``.
+    """
+
+    idea: str
+    scenario: Scenario
+    style: str
+    mode: PlaceMode
+    source: Source
+    folder: Path
+    strength: float | None
+    accepted: list[_CookShot]
+    prep_stop: Exception | None
+    blocked: list[int]
+    draw_frame: DrawFrame
+    on_status: Callable[[int, str], None] | None
+    hero: SeriesFrame | None = None
+    drawn: list[_Drawn] = field(default_factory=list)
+    sampled: list[_CookShot] = field(default_factory=list)
+    stop: RunStopped | None = None
+    stopped: bool = False
+    kept: list[Path] = field(default_factory=list)
+    saved_lines: list[str] = field(default_factory=list)
+    seeds: list[int] = field(default_factory=list)
+
+
+def _run_series(
+    *, idea: str, count: int, style: str, place_mode: str, seed: int, strength: float | None,
+    include_camera: Callable[[], bool], rewrite: Callable[[str], str], age_gate: AgeGate,
+    draw_frame: DrawFrame,
+    cancelled: Callable[[], bool], folder: Path, on_scenario: Callable[[Scenario], None] | None,
+    line_for: Callable[[int], str] | None, on_status: Callable[[int, str], None] | None,
+    adult: bool, container: OutputFormat | None, clock: StageTimes, own_clock: bool,
+    noted: list[bool], prep: Phase, negative: str = "",
+) -> SeriesResult:
+    hot.begin_job()
+    hot.note_tier()
+    gate = SerialGate.wrap(age_gate)
+    # A LoRA alias in the idea is the trigger from here on: the gate, the writer and the lines all see it.
+    idea = rewrite_alias(idea, getattr(draw_frame, "lora", None))
+    mode = place_mode_of(place_mode)
+    if mode is None:
+        return _stop("scenario", "", "scenario.format")
+    request = scenario_request(idea, count, style, mode, adult=adult)
+    if request is None:
+        return _stop("scenario", "", "scenario.format")
+    # The prompt check is the part of prep that has to finish before the writer.
+    # No picture check runs on generated frames, so no image model is loaded.
+    refused = screen_idea(gate, apply_trigger(idea, getattr(draw_frame, "lora", None)), negative, adult, clock)
+    if refused is not None:
+        return refused
+    try:
+        scenario, fail_code, source = write_scenario(idea, count, style, mode, rewrite, adult, seed, clock)
+    finally:
+        # Every chunk shared one writer. It leaves the card before the prompt checks.
+        free_writer(rewrite)
+    if scenario is None or len(scenario.shots) < count:
+        return _stop("scenario", "", fail_code if scenario is None else "scenario.count")
+    # The writer is gone. Only the prompt guard is confirmed here; the image
+    # check models are not loaded for generation.
+    warm_error = _warm_prompt_check(gate)
+    if warm_error is not None:
+        return _stop("error", warm_error.user_message, f"check.{warm_error.code}")
+    planned = plan_series(
+        gate=gate, idea=idea, scenario=scenario, source=source, style=style, mode=mode, seed=seed,
+        strength=series_strength(idea, mode, strength), adult=adult, include_camera=include_camera,
+        line_for=line_for, clock=clock, on_scenario=on_scenario, on_status=on_status,
+        cancelled=cancelled, folder=folder, draw_frame=draw_frame,
+    )
+    if isinstance(planned, SeriesResult):
+        if planned.stopped == "cancelled" and own_clock:
+            note_timing(clock.log_line())
+        return planned
+    try:
+        cook_plans([planned], gate, cancelled, clock, prep)
+        # Frames are released in order, and nothing is written before that.
+        return review_plans([planned], gate, container, clock)[0]
+    finally:
+        if own_clock:
+            note_timing(clock.log_line())
+            noted.append(True)
+
+
+def place_mode_of(place_mode: str) -> PlaceMode | None:
+    """``same`` or ``different``. Anything else is None."""
+    if place_mode == "same":
+        return "same"
+    if place_mode == "different":
+        return "different"
+    return None
+
+
+def screen_idea(
+    gate: AgeGate, idea: str, negative: str, adult: bool, clock: StageTimes,
+) -> SeriesResult | None:
+    """Check the idea and the negative prompt before the writer. None lets the series go on.
+
+    The negative prompt is checked like the prompt, and a refusal stops the
+    series the same way. Nothing is drawn after a stop.
+    """
+    with clock.measure("prep"):
+        reason = _refuse_prompt(gate, idea)
+        if not reason and negative.strip():
+            reason = _refuse_prompt(gate, negative)
+        # The writer needs the GPU to itself. Anything the check put on the card is dropped first.
+        release_gate_weights(gate)
+    if reason:
+        return _stop("idea", reason, "idea.policy")
+    if adult and not ages_allowed(idea):
+        return _stop("idea", "", "idea.minor")
+    return None
+
+
+def series_strength(idea: str, mode: PlaceMode, strength: float | None) -> float | None:
+    """The reference strength the series draws with.
+
+    None is the caller's default. A same-place person series then follows the
+    first frame loosely enough that the pose can still change. With different
+    places every shot is drawn from its own line, so its place and pose lead.
+    """
+    anchored = strength is None and mode == "same" and describes_person(idea)
+    return REFERENCE_STRENGTH if anchored else strength
+
+
+def write_scenario(
+    idea: str, count: int, style: str, mode: PlaceMode, rewrite: Callable[[str], str],
+    adult: bool, seed: int, clock: StageTimes,
+) -> tuple[Scenario | None, str, Source]:
+    """The scenario for one idea. The writer behind ``rewrite`` stays open for the caller to free."""
+    appearance = fixed_appearance(idea, seed)
+    with clock.measure("scenario"):
+        return _scenario(idea, count, style, mode, rewrite, adult=adult, appearance=appearance, seed=seed)
+
+
+def shot_scenario(shot: str, count: int, seed: int) -> Scenario | None:
+    """A scenario that draws one given shot line ``count`` times. No writer is used.
+
+    The line is the subject of every frame, so each frame repeats it with its
+    own seed. None for an empty line.
+    """
+    subject = shot.strip()
+    if not subject or count < 1:
+        return None
+    appearance = fixed_appearance(subject, seed)
+    if appearance and appearance not in subject:
+        subject = f"{appearance}, {subject}"
+    empty = Shot("", "", "", "")
+    return Scenario(subject, (subject,), "", tuple(empty for _index in range(count)), appearance)
+
+
+def free_writer(rewrite: Callable[[str], str]) -> None:
+    """Close the writer session and drop its VRAM copy before the next model."""
+    _release_writer(rewrite)
+    hot.deactivate("writer")
+    release_cuda_cache()
+
+
+def plan_series(
+    *, gate: AgeGate, idea: str, scenario: Scenario, source: Source, style: str, mode: PlaceMode,
+    seed: int, strength: float | None, adult: bool, include_camera: Callable[[], bool],
+    line_for: Callable[[int], str] | None, clock: StageTimes,
+    on_scenario: Callable[[Scenario], None] | None, on_status: Callable[[int, str], None] | None,
+    cancelled: Callable[[], bool], folder: Path, draw_frame: DrawFrame,
+) -> _Plan | SeriesResult:
+    """Check every shot line of one scenario. A SeriesResult is a stop with nothing drawn.
+
+    With a LoRA on ``draw_frame`` (its ``lora`` attribute), every line leads with the
+    trigger before the gate sees it, so the gate reviews the line that is encoded.
+    """
+    lora = getattr(draw_frame, "lora", None)
+    idea = rewrite_alias(idea, lora)
+    lines = [
+        _final_line(assemble_line(
+            scenario.subject_block, shot, include_camera=True, index=index, seed=seed, lora=lora,
+        ), lora)
+        for index, shot in enumerate(scenario.shots)
+    ]
+    try:
+        with clock.measure("prompt_check"):
+            verdicts = [_prompt_verdict(gate, _with_idea(idea, line)) for line in lines]
+    finally:
+        # The picture model is next. GPU weights from the check are dropped first.
+        release_gate_weights(gate)
+    refused = [_verdict_message(verdict) for verdict in verdicts]
+    hard = [
+        reason for line, reason, verdict in zip(lines, refused, verdicts, strict=True)
+        if reason and (_ends_series(verdict) or scan(line).minor)
+    ]
+    if hard or all(refused):
+        code = "scenario.minor" if hard else "scenario.policy"
+        return _stop("scenario", (hard or refused)[0] or "", code, source)
+    if adult and not ages_allowed("\n".join(lines)):
+        return _stop("scenario", "", "scenario.minor", source)
+    if on_scenario is not None:
+        on_scenario(scenario)
+    folder.mkdir(parents=True, exist_ok=True)
+    blocked: list[int] = []
+    accepted, prep_stop, cancelled_prep = _accepted_shots(
+        scenario, lines, verdicts, seed, idea, adult, include_camera, line_for, gate, clock, blocked,
+        on_status, cancelled, lora,
+    )
+    if cancelled_prep:
+        release_gate_weights(gate)
+        _write_meta(folder, idea, scenario, style, mode, [], [], blocked, [])
+        return SeriesResult("cancelled", "", (), folder, "", source)
+    return _Plan(
+        idea, scenario, style, mode, source, folder, strength, accepted, prep_stop, blocked, draw_frame, on_status,
+    )
+
+
+def cook_plans(
+    plans: list[_Plan], gate: AgeGate, cancelled: Callable[[], bool], clock: StageTimes, prep: Phase,
+) -> None:
+    """Encode, render and decode every plan on one loaded picture pipeline.
+
+    Every accepted line is encoded in one text-encoder session. A batch shares
+    one style, tier and LoRA, so the first plan's ``prepare`` serves them all.
+    The pipeline is parked once after the last decode, before the release step.
+    """
+    try:
+        shots = [shot for plan in plans for shot in plan.accepted]
+        if plans:
+            _encode_lines(plans[0].draw_frame, shots, clock)
+        # Prompt models are finished. The picture pipeline is the next thing on the GPU.
+        release_gate_weights(gate)
+        prep.finish()
+        require_released("prep")
+        _cook_groups(plans, cancelled, clock)
+    finally:
+        park_pipeline()
+        clear_series_embeds()
+    release_gate_weights(gate)
+
+
+def review_plans(
+    plans: list[_Plan], gate: AgeGate, container: OutputFormat | None, clock: StageTimes,
+) -> list[SeriesResult]:
+    """Release every held frame of every plan in one batch, then write them.
+
+    No classifier runs on the frames: the prompt checks ran before the draw. A
+    release that cannot finish stops every later write, in this plan and in
+    the plans after it. Each plan keeps its own series stop.
+    """
+    flat = [item for plan in plans for item in plan.drawn]
+    verdicts = _check_frames(flat, gate, clock)
+    results: list[SeriesResult] = []
+    start = 0
+    halted: tuple[str, str] | None = None
+    for plan in plans:
+        mine = verdicts[start:start + len(plan.drawn)]
+        start += len(plan.drawn)
+        check_code, check_reason, ending = _review_frames(
+            plan.drawn, gate, plan.folder, container, clock, plan.blocked, plan.kept,
+            plan.saved_lines, plan.seeds, plan.on_status, verdicts=mine, halted=halted is not None,
+            lora=getattr(plan.draw_frame, "lora", None),
+            lora_scale=getattr(plan.draw_frame, "lora_scale", None),
+        )
+        _write_meta(
+            plan.folder, plan.idea, plan.scenario, plan.style, plan.mode,
+            plan.saved_lines, plan.seeds, plan.blocked, plan.kept,
+        )
+        if halted is None and check_code:
+            halted = (check_code, check_reason)
+        elif halted is not None and not check_code:
+            check_code, check_reason = halted
+        results.append(_outcome(plan, check_code, check_reason, ending))
+    return results
+
+
+def _outcome(plan: _Plan, check_code: str, check_reason: str, ending: str | None) -> SeriesResult:
+    """The series result once the frames that passed are written."""
+    kept = tuple(plan.kept)
+    source = plan.source
+    cook_error = plan.stop
+    if plan.stopped:
+        return SeriesResult("cancelled", "", kept, plan.folder, "", source)
+    if cook_error is not None and cook_error.unavailable:
+        return SeriesResult("error", cook_error.message, kept, plan.folder, cook_error.code or "internal", source)
+    if cook_error is not None and (_ends_series(cook_error) or cook_error.code == "prompt"):
+        note_error("scenario.minor")
+        return SeriesResult("scenario", cook_error.message, kept, plan.folder, "scenario.minor", source)
+    if check_code:
+        note_error(check_code)
+        return SeriesResult("error", check_reason, kept, plan.folder, check_code, source)
+    if ending is not None:
+        note_error("scenario.minor")
+        return SeriesResult("scenario", ending, kept, plan.folder, "scenario.minor", source)
+    if plan.prep_stop is not None:
+        note_error("scenario.minor")
+        return SeriesResult(
+            "scenario", _verdict_message(plan.prep_stop) or "", kept, plan.folder, "scenario.minor", source,
+        )
+    if not kept:
+        note_error("not_produced")
+        return SeriesResult("", "", (), plan.folder, "not_produced", source)
+    return SeriesResult("", "", kept, plan.folder, "", source)
+
+
+def _remember_vram_peak() -> None:
+    """Record the CUDA allocation peak on the timing line."""
+    peak = peak_allocated_bytes()
+    if not peak or peak <= 0:
+        return
+    note_peak_mib(peak // (1024 * 1024))
+
+
+def _accepted_shots(
+    scenario: Scenario,
+    lines: list[str],
+    verdicts: list[Exception | None],
+    seed: int,
+    idea: str,
+    adult: bool,
+    include_camera: Callable[[], bool],
+    line_for: Callable[[int], str] | None,
+    gate: AgeGate,
+    clock: StageTimes,
+    blocked: list[int],
+    on_status: Callable[[int, str], None] | None,
+    cancelled: Callable[[], bool],
+    lora: UserLora | None = None,
+) -> tuple[list[_CookShot], Exception | None, bool]:
+    """Every shot line and its prompt verdict, before the picture model loads.
+
+    A series-ending prompt verdict keeps the shots accepted before it and stops
+    the list there. A refusal that does not end the series drops that shot.
+    """
+    accepted: list[_CookShot] = []
+    for index, shot in enumerate(scenario.shots):
+        if cancelled():
+            return accepted, None, True
+        line = (
+            assemble_line(
+                scenario.subject_block, shot, include_camera=include_camera(), index=index, seed=seed, lora=lora,
+            )
+            if line_for is None
+            else with_choices(line_for(index), index, seed)
+        )
+        line = _final_line(line, lora)
+        # The stored subject can still name the series and list every outfit.
+        # The photograph only has to keep the appearance once those words are gone.
+        identity = rewrite_alias(shot_identity(scenario.subject_block), lora)
+        if (identity and identity not in line) or (adult and youth_cues(line)):
+            blocked.append(index)
+            _status(on_status, index, "blocked")
+            continue
+        if adult:
+            line = with_adult_anchor(line)
+        if line == lines[index]:
+            verdict = verdicts[index]
+        else:
+            with clock.measure("prompt_check"):
+                verdict = _prompt_verdict(gate, _with_idea(idea, line))
+        if _verdict_message(verdict):
+            blocked.append(index)
+            _status(on_status, index, "blocked")
+            if _ends_series(verdict) or scan(line).minor:
+                return accepted, verdict, False
+            continue
+        log_frame_prompt(line)
+        accepted.append(_CookShot(index, line, seed + index))
+    return accepted, None, False
+
+
+def _release_writer(rewrite: Callable[[str], str]) -> None:
+    """Close the writer session behind ``rewrite``. A plain callable has none."""
+    release = getattr(rewrite, "release", None)
+    if callable(release):
+        release()
+
+
+def _encode_lines(
+    draw_frame: Callable[[str, int, SeriesFrame | None, float | None], SeriesFrame | None],
+    accepted: list[_CookShot],
+    clock: StageTimes,
+) -> None:
+    """Encode every accepted line with the text encoder alone. The embeddings stay in RAM."""
+    prepare = getattr(draw_frame, "prepare", None)
+    if not callable(prepare) or not accepted:
+        return
+    with clock.measure("encode_all"):
+        prepare([shot.line for shot in accepted])
+
+
+def _cook_groups(groups: list[_Plan], cancelled: Callable[[], bool], clock: StageTimes) -> None:
+    """Render every group's frames in one render phase, then decode them in one VAE session.
+
+    With a ``sample`` hook that returns True, the render phase only samples and
+    the decode phase turns each kept latent into pixels. A series that follows its first frame
+    draws that frame whole, because the later frames start from its pixels.
+    Without the hook every frame is drawn whole in the render phase. A stop
+    that ends one group leaves the other groups drawing.
+    """
+    stopped = False
+    halt: RunStopped | None = None
+    with pipeline_scope():
+        with phase("render"), render_phase():
+            for group in groups:
+                if halt is not None:
+                    group.stop = halt
+                    continue
+                if _render_group(group, cancelled, clock):
+                    stopped = True
+                    break
+                halt = _machine_stop(group.stop)
+        if any(group.sampled for group in groups):
+            with phase("decode"), decode_phase():
+                for group in groups:
+                    if not group.sampled:
+                        continue
+                    if halt is not None:
+                        group.stop = halt
+                        continue
+                    decoded, decode_stop, decode_cancelled = _decode_shots(group, cancelled, clock)
+                    group.drawn.extend(decoded)
+                    group.drawn.sort(key=lambda item: item.index)
+                    group.stop = group.stop or decode_stop
+                    halt = halt or _machine_stop(decode_stop)
+                    if decode_cancelled:
+                        stopped = True
+                        break
+    if stopped:
+        for group in groups:
+            group.stopped = True
+
+
+# The card, the lock, or the LoRA stopped a picture: the next group would load the model again and fail the same way.
+_MACHINE_STOPS = frozenset({"vram", "gpu_busy"})
+
+
+def _machine_stop(stop: RunStopped | None) -> RunStopped | None:
+    """The stop when it ends every group, otherwise None."""
+    if stop is None or not stop.unavailable:
+        return None
+    code = stop.code or ""
+    if code in _MACHINE_STOPS or code == "lora" or code.startswith("lora."):
+        return stop
+    return None
+
+
+def _render_group(group: _Plan, cancelled: Callable[[], bool], clock: StageTimes) -> bool:
+    """Draw or sample one group's frames. True when the run was cancelled."""
+    active = style_reference(group.strength)
+    draw_frame = group.draw_frame
+    sample = getattr(draw_frame, "sample", None)
+    for shot in group.accepted:
+        if cancelled():
+            return True
+        _status(group.on_status, shot.index, "drawing")
+        if cancelled():
+            return True
+        whole = not callable(sample) or (active is not None and group.hero is None)
+        reference = group.hero if active is not None else None
+        try:
+            started = time.perf_counter()
+            with clock.measure("render"):
+                image = None
+                if not whole and callable(sample):
+                    # A hook that kept nothing leaves this frame to be drawn whole.
+                    whole = sample(shot.line, shot.seed, reference, active) is not True
+                if whole:
+                    image = draw_frame(shot.line, shot.seed, reference, active)
+            _remember_vram_peak()
+            _log_frame("render", shot.index, started)
+        except RunStopped as exc:
+            _remember_vram_peak()
+            group.blocked.append(shot.index)
+            _status(group.on_status, shot.index, "blocked")
+            if exc.unavailable or _ends_series(exc) or (exc.code == "prompt" and scan(shot.line).minor):
+                group.stop = exc
+                return False
+            continue
+        if not whole:
+            group.sampled.append(shot)
+            continue
+        if image is None:
+            group.blocked.append(shot.index)
+            _status(group.on_status, shot.index, "blocked")
+            continue
+        if group.hero is None:
+            group.hero = image
+        group.drawn.append(_Drawn(shot.index, shot.line, _used_seed(draw_frame, shot.seed), image))
+    return False
+
+
+def _decode_shots(
+    group: _Plan, cancelled: Callable[[], bool], clock: StageTimes,
+) -> tuple[list[_Drawn], RunStopped | None, bool]:
+    """Decode one group's sampled frames inside the open VAE session.
+
+    Each call repeats the frame's own arguments, so it finds the latent its
+    sample left and does not sample again.
+    """
+    drawn: list[_Drawn] = []
+    active = style_reference(group.strength)
+    reference = group.hero if active is not None else None
+    for shot in group.sampled:
+        if cancelled():
+            return drawn, None, True
+        try:
+            started = time.perf_counter()
+            with clock.measure("decode"):
+                image = group.draw_frame(shot.line, shot.seed, reference, active)
+            _remember_vram_peak()
+            _log_frame("decode", shot.index, started)
+        except RunStopped as exc:
+            _remember_vram_peak()
+            group.blocked.append(shot.index)
+            _status(group.on_status, shot.index, "blocked")
+            if exc.unavailable or _ends_series(exc) or (exc.code == "prompt" and scan(shot.line).minor):
+                return drawn, exc, False
+            continue
+        if image is None:
+            group.blocked.append(shot.index)
+            _status(group.on_status, shot.index, "blocked")
+            continue
+        drawn.append(_Drawn(shot.index, shot.line, _used_seed(group.draw_frame, shot.seed), image))
+    return drawn, None, False
+
+
+def _log_frame(stage: str, index: int, started: float) -> None:
+    """One per-frame timing line for the render or decode phase."""
+    elapsed = max(0, int((time.perf_counter() - started) * 1000))
+    log_detail("frame", stage, "cuda" if peak_allocated_bytes() is not None else "cpu", f"index={index + 1} ms={elapsed}")
+
+
+def _review_frames(
+    drawn: list[_Drawn],
+    gate: AgeGate,
+    folder: Path,
+    container: OutputFormat | None,
+    clock: StageTimes,
+    blocked: list[int],
+    kept: list[Path],
+    saved_lines: list[str],
+    seeds: list[int],
+    on_status: Callable[[int, str], None] | None,
+    *,
+    verdicts: list[tuple[_Drawn, _Released | None, Exception | None]] | None = None,
+    halted: bool = False,
+    lora: object | None = None,
+    lora_scale: float | None = None,
+) -> tuple[str, str, str | None]:
+    """Release every held frame in one batch, then write the ones released before a series stop.
+
+    No classifier runs on generated frames. A release that cannot finish is
+    recorded once. Later frames are not written.
+
+    ``verdicts`` are this series' frames from a release the caller already ran
+    over a whole batch. ``halted`` means an earlier series in that batch had a
+    release that could not finish, so nothing here is written.
+    """
+    if verdicts is None:
+        verdicts = _check_frames(drawn, gate, clock)
+    save_stop = halted
+    crash_noted = False
+    check_code = ""
+    check_reason = ""
+    ending: str | None = None
+    for item, released, refusal in verdicts:
+        if released is None:
+            blocked.append(item.index)
+            _status(on_status, item.index, "blocked")
+            if isinstance(refusal, SafetyUnavailable):
+                if not crash_noted:
+                    note_crash(f"check.{refusal.code}", refusal)
+                    crash_noted = True
+                if not check_code:
+                    check_code = f"check.{refusal.code}"
+                    check_reason = _verdict_message(refusal) or text("gate.unavailable")
+                save_stop = True
+                continue
+            if _ends_series(refusal):
+                save_stop = True
+                if ending is None:
+                    ending = _verdict_message(refusal) or ""
+                continue
+            continue
+        if save_stop:
+            blocked.append(item.index)
+            _status(on_status, item.index, "blocked")
+            continue
+        with clock.measure("save"):
+            path = _store_frame(
+                folder, item.index, replace(released, seed=item.seed), container,
+                metadata=_frame_metadata(item, lora, lora_scale),
+            )
+        kept.append(path)
+        saved_lines.append(item.line)
+        seeds.append(item.seed)
+        _status(on_status, item.index, "kept")
+    return check_code, check_reason, ending
+
+
+def _check_frames(
+    drawn: list[_Drawn], gate: AgeGate, clock: StageTimes,
+) -> list[tuple[_Drawn, _Released | None, Exception | None]]:
+    """Every frame's release, in order. Nothing is written or shown here.
+
+    No picture classifier runs and no check model is loaded. The gate's
+    weights still leave VRAM once at the end, also when a call raises.
+    """
+    verdicts: list[tuple[_Drawn, _Released | None, Exception | None]] = []
+    try:
+        with phase("release"):
+            for item in drawn:
+                started = time.perf_counter()
+                with clock.measure("release"):
+                    released, refusal = _released_frame(item.image)
+                verdicts.append((item, released, refusal))
+                _log_frame("release", item.index, started)
+    finally:
+        release_gate_weights(gate)
+    return verdicts
+
+
+
+def style_reference(strength: float | None) -> float | None:
+    """Loose style strength, or None when the frame is drawn from text.
+
+    Args:
+        strength: Requested series strength. Below ``REFERENCE_MIN`` draws from text.
+    """
+    if isinstance(strength, bool) or not isinstance(strength, (int, float)):
+        return None
+    value = float(strength)
+    if value < REFERENCE_MIN:
+        return None
+    return value
+
+
+def _stop(stopped: StopCode, reason: str, code: str, source: Source = "") -> SeriesResult:
+    note_error(code)
+    return SeriesResult(stopped, reason, (), None, code, source)
+
+
+def _final_line(line: str, lora: UserLora | None) -> str:
+    """One photograph, series words removed. A LoRA trigger stays first, ahead of the lead."""
+    trigger = "" if lora is None else lora.trigger.strip()
+    if not trigger:
+        return single_frame(strip_series_words(line))
+    body = line.strip()
+    if body.casefold().startswith(f"{trigger.casefold()},"):
+        body = body[len(trigger) + 1:].strip()
+    return f"{trigger}, {single_frame(strip_series_words(body))}"
+
+
+def _with_idea(idea: str, line: str) -> str:
+    return f"{idea}\n{line}"
+
+
+def _warm_prompt_check(gate: AgeGate) -> SafetyUnavailable | None:
+    """Load the prompt guard before the frames. A failure stops the series before a frame is drawn.
+
+    Generation loads no picture-check model: a frame is released without a
+    classifier (:func:`canvas.safety.gate.release_generated`). A gate without
+    ``warm_prompt`` (a test double) has nothing to load.
+    """
+    warm = getattr(gate, "warm_prompt", None)
+    if not callable(warm):
+        return None
+    try:
+        warm()
+    except SafetyUnavailable as exc:
+        return exc
+    return None
+
+
+def _refuse_prompt(age_gate: AgeGate, prompt: str) -> str | None:
+    """Refuse prompt."""
+    return _verdict_message(_prompt_verdict(age_gate, prompt))
+
+
+def _prompt_verdict(age_gate: AgeGate, prompt: str) -> Exception | None:
+    """The stop a prompt review raised, or None when it may continue."""
+    try:
+        age_gate.review_prompt(prompt)
+    except Exception as exc:
+        return exc
+    return None
+
+
+def _verdict_message(verdict: BaseException | None) -> str | None:
+    if verdict is None:
+        return None
+    if isinstance(verdict, SafetyError):
+        return verdict.user_message
+    return text("gate.unavailable")
+
+
+def _ends_series(error: BaseException | None) -> bool:
+    """True when this per-frame stop ends the series with ``scenario.minor``."""
+    if isinstance(error, RunStopped):
+        error = error.__cause__
+    if not isinstance(error, GenerationBlocked):
+        return False
+    if error.code in _PICTURE_CODES:
+        return True
+    return error.code == "prompt"
+
+
+class SerialGate:
+    """The same gate, one call at a time across the series threads.
+
+    Every call goes to the wrapped gate unchanged. Only the concurrency differs.
+    """
+
+    def __init__(self, gate: AgeGate) -> None:
+        self._gate = gate
+        self._lock = threading.RLock()
+
+    @classmethod
+    def wrap(cls, gate: AgeGate) -> AgeGate:
+        """The gate behind a lock. Typed as the gate: every call is passed through unchanged."""
+        if isinstance(gate, SerialGate):
+            return gate
+        return cast(AgeGate, cls(gate))
+
+    def __getattr__(self, name: str) -> object:
+        attr = getattr(self._gate, name)
+        if not callable(attr):
+            return attr
+
+        def call(*args: object, **kwargs: object) -> object:
+            with self._lock:
+                return attr(*args, **kwargs)
+
+        return call
+
+
+@dataclass(frozen=True)
+class _Released:
+    width: int
+    height: int
+    data: bytes
+    safe: SafeImage | None
+    seed: int | None = None
+
+
+def _released_frame(image: SeriesFrame) -> tuple[_Released | None, Exception | None]:
+    """The released frame, or None with the error that stopped the release.
+
+    Canvas screens the request, not the result: the prompt checks ran before
+    the frame was drawn. No classifier runs here, with any LoRA or none.
+    """
+    raw = RawImage(image.width, image.height, image.to_bytes())
+    try:
+        released = release_generated(raw)
+    except Exception as exc:
+        return None, exc
+    return _Released(released.width, released.height, released.data, released), None
+
+
+def _used_seed(draw_frame: object, seed: int) -> int:
+    """The seed the draw hook really used. A hook may swap the planned seed for a fresh one."""
+    used = getattr(draw_frame, "used_seed", None)
+    return int(used(seed)) if callable(used) else int(seed)
+
+
+def _frame_metadata(item: _Drawn, lora: object | None, lora_scale: float | None) -> dict:
+    """Seed, and the full record when ``--save-metadata`` or the setting is on."""
+    from canvas.core.picture_meta import picture_fields
+    from canvas.models.user_lora import UserLora
+    from canvas.ui.shell_layout import metadata_enabled
+
+    selected = lora if isinstance(lora, UserLora) else None
+    strength = 0.7 if selected is None else selected.default_strength
+    if lora_scale is not None:
+        strength = float(lora_scale)
+    return picture_fields(
+        prompt=item.line,
+        seed=item.seed,
+        save_metadata=metadata_enabled(),
+        lora=selected,
+        lora_path="" if selected is None else str(selected.weights),
+        lora_weight=strength,
+    )
+
+
+def _store_frame(
+    folder: Path, index: int, released: _Released, container: OutputFormat | None,
+    metadata: dict | None = None,
+) -> Path:
+    """Write one frame in the export format. WebP is the Forge default.
+
+    WebP (lossless), JPEG and AVIF go through the Forge hand-off; never PNG. the contact sheet
+    reads any of them. Nothing here runs before the check.
+    """
+    # Canvas never writes PNG: an old PNG container means the WebP default.
+    fmt = EXPORT_FORMAT if container is None or container is OutputFormat.PNG else container
+    with timed("encode"):
+        if released.safe is None:
+            path = folder / f"{index + 1:02}.webp"
+            _write_lossless_webp(path, released.width, released.height, released.data)
+            return path
+        # The seed is the one field every saved frame carries, even with full metadata off.
+        path = folder / f"{index + 1:02}{extension(fmt)}"
+        handoff_image(released.safe, path, fmt, seed=released.seed, metadata=metadata)
+        return path
+
+
+def _status(callback: Callable[[int, str], None] | None, index: int, status: str) -> None:
+    if callback is not None:
+        callback(index, status)
+
+
+def _scenario(
+    idea: str,
+    count: int,
+    style: str,
+    mode: PlaceMode,
+    rewrite: Callable[[str], str],
+    *,
+    adult: bool,
+    appearance: str = "",
+    seed: int = 0,
+) -> tuple[Scenario | None, str, Source]:
+    """Shots from the writer, then planned shots for any shot it did not cover."""
+    subject = idea.strip()
+    if not subject:
+        return None, "scenario.format", ""
+    if appearance and appearance not in subject:
+        subject = f"{appearance}, {subject}"
+    collected: list[Shot] = []
+    place = ""
+    replies: list[str] = []
+    while len(collected) < count:
+        ask = min(SCENARIO_CHUNK, count - len(collected))
+        previous = tuple(
+            assemble_line(subject, shot, include_camera=True, index=index, seed=seed)
+            for index, shot in enumerate(collected)
+        )
+        request = scenario_request(idea, ask, style, mode, adult=adult, previous=previous)
+        if request is None:
+            return None, "scenario.format", ""
+        fresh, place, chunk_replies = _read_chunk(
+            idea, subject, ask, mode, place, tuple(collected), request, rewrite, adult,
+        )
+        replies.extend(chunk_replies)
+        collected.extend(fresh)
+        if not fresh:
+            break
+    written = len(collected)
+    if written < count:
+        note_error(_reply_code(tuple(replies)) if written == 0 else "scenario.count")
+        collected.extend(planned_shots(idea, count - written, mode, place=place, taken=tuple(collected), adult=adult))
+    if len(collected) < count:
+        return None, "scenario.count", ""
+    source: Source = "writer" if written >= count else ("planned" if written == 0 else "mixed")
+    return Scenario(subject, (subject,), place, tuple(collected[:count]), appearance), "", source
+
+
+def _read_chunk(
+    idea: str,
+    subject: str,
+    ask: int,
+    mode: PlaceMode,
+    place: str,
+    taken: tuple[Shot, ...],
+    request: str,
+    rewrite: Callable[[str], str],
+    adult: bool = False,
+) -> tuple[list[Shot], str, tuple[str, ...]]:
+    """Accepted shots for one chunk, the series place, and the raw replies.
+
+    A refusal, or a reply with no shot lines at all, is asked once more (with the
+    adult-fiction note when 18+ is on). A reply whose lines were all left out by
+    the series checks is not asked again. The caller fills what is still missing
+    from the planned shots, so a writer that keeps declining does not end the series.
+    """
+    replies: list[str] = []
+    fresh: list[Shot] = []
+    for prompt in (request, retry_prompt(request, adult)):
+        raw = rewrite(prompt)
+        replies.append(raw)
+        fresh, place = _accept_reply(idea, subject, ask, mode, place, taken, raw)
+        if len(fresh) < ask:
+            note_debug("scenario.raw", mask_numbers(raw)[:_RAW_LIMIT])
+        if fresh or read_drafts(raw):
+            break
+    return fresh, place, tuple(replies)
+
+
+def _accept_reply(
+    idea: str,
+    subject: str,
+    ask: int,
+    mode: PlaceMode,
+    place: str,
+    taken: tuple[Shot, ...],
+    raw: str,
+) -> tuple[list[Shot], str]:
+    drafts = read_drafts(raw)
+    if mode == "same" and not place:
+        place = next((draft.place.strip() for draft in drafts if draft.place.strip()), "")
+    fresh: list[Shot] = []
+    for draft in drafts:
+        if len(fresh) >= ask:
+            break
+        shot = accept_shot(idea, subject, mode, place, taken + tuple(fresh), draft)
+        if shot is not None:
+            fresh.append(shot)
+    return fresh, place
+
+
+def _reply_code(replies: tuple[str, ...]) -> str:
+    if replies and all("{" not in reply for reply in replies) and any(reply_declined(reply) for reply in replies):
+        return "scenario.declined"
+    return "scenario.format"
+
+
+def _write_meta(
+    folder: Path,
+    idea: str,
+    scenario: Scenario,
+    style: str,
+    mode: PlaceMode,
+    lines: list[str],
+    seeds: list[int],
+    blocked: list[int],
+    kept: list[Path],
+) -> None:
+    document = {
+        "idea": idea,
+        "subject_block": scenario.subject_block,
+        "place_mode": mode,
+        "style": style,
+        "lines": lines,
+        "seeds": seeds,
+        "blocked": blocked,
+        "appearance": scenario.appearance,
+    }
+    (folder / "series.json").write_text(json.dumps(document, ensure_ascii=False, indent=2), encoding="utf-8")
+    if not kept:
+        return
+    suffix = kept[0].suffix.lower()
+    overview = folder / f"overview{'.webp' if suffix == '.png' else suffix}"
+    _write_sheet(overview, kept)
+    with zipfile.ZipFile(folder / "series.zip", "w") as archive:
+        for path in kept:
+            archive.write(path, path.name)
+        archive.write(overview, overview.name)
+
+
+def _write_sheet(path: Path, frames: list[Path]) -> None:
+    images = [_read_frame(frame) for frame in frames]
+    cell = 64
+    gap = 8
+    width = len(images) * cell + (len(images) + 1) * gap
+    height = cell + 2 * gap
+    canvas = bytearray(b"\x20\x20\x29" * (width * height))
+    for index, (src_w, src_h, src) in enumerate(images):
+        left = gap + index * (cell + gap)
+        for y in range(cell):
+            for x in range(cell):
+                sx = min(src_w - 1, x * src_w // cell)
+                sy = min(src_h - 1, y * src_h // cell)
+                pixel = src[(sy * src_w + sx) * 3:(sy * src_w + sx) * 3 + 3]
+                dest = ((gap + y) * width + left + x) * 3
+                canvas[dest:dest + 3] = pixel
+    _write_overview(path, width, height, bytes(canvas))
+
+
+def _read_frame(path: Path) -> tuple[int, int, bytes]:
+    """8-bit RGB of one saved frame in any container the series writes.
+
+    PNG frames are encoded with scanline filters (Sub, Up, Paeth). The pixels
+    must be unfiltered and converted to 8-bit RGB, or the contact sheet is
+    colour noise. PIL handles that for every container the series writes.
+    """
+    from PIL import Image
+
+    with Image.open(path) as image:
+        rgb = image.convert("RGB")
+        return rgb.width, rgb.height, rgb.tobytes()
+
+
+
+def _write_overview(path: Path, width: int, height: int, rgb: bytes) -> None:
+    """The contact sheet, in the same container as the frames.
+
+    The sheet is assembled from frames that already passed the check, so it is
+    issued as a released image and saved with the series master purpose.
+    """
+    fmt = {
+        ".jpg": OutputFormat.JPEG,
+        ".jpeg": OutputFormat.JPEG,
+        ".webp": OutputFormat.WEBP,
+        ".avif": OutputFormat.AVIF,
+    }[path.suffix.lower()]
+    save_image(issue(RawImage(width, height, rgb)), path, fmt, purpose="master")
+
+
+def _write_lossless_webp(path: Path, width: int, height: int, rgb: bytes) -> None:
+    """A series picture without a released token (a review stub): lossless WebP, never PNG."""
+    if len(rgb) != width * height * 3:
+        raise ValueError("frame bytes do not match the frame size")
+    from PIL import Image
+
+    Image.frombytes("RGB", (width, height), rgb).save(path, format="WEBP", lossless=True)

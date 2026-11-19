@@ -1,0 +1,68 @@
+"""Free CUDA memory before another suite app uses the GPU.
+
+torch is imported inside the functions that touch the device. That package is
+an optional extra, so unit tests can import the pipeline without it. This is
+not a circular import.
+"""
+from __future__ import annotations
+
+import gc
+from typing import Any
+
+from canvas.infra import cuda_health
+from canvas.infra.errors import note_error
+from canvas.infra.stage_timer import log_detail
+from canvas.infra.vram_trace import note_vram
+
+
+def release_gate_weights(gate: object) -> None:
+    """Drop a gate's GPU weights, then return the freed blocks to the driver."""
+    note_vram("gate", "before", gate)
+    release = getattr(gate, "release_weights", None)
+    if callable(release):
+        release()
+    release_cuda_cache()
+    note_vram("gate", "after")
+
+
+def release_cuda_cache() -> bool:
+    """Collect dropped models and return their CUDA blocks to the driver.
+
+    Returns True when a CUDA cache was released. A failed release marks the
+    CUDA context lost (:mod:`canvas.infra.cuda_health`): nothing is collected or
+    released after that, and the caller ends the job with code ``vram``.
+    """
+    if cuda_health.lost():
+        return False
+    gc.collect()
+    torch = _torch()
+    if torch is None or not torch.cuda.is_available():
+        return False
+    try:
+        torch.cuda.empty_cache()
+        ipc_collect = getattr(torch.cuda, "ipc_collect", None)
+        if ipc_collect is not None:
+            ipc_collect()
+    except Exception as exc:  # an out-of-memory or driver error must not end the process
+        note_error("cuda.release")
+        log_detail("cuda", "release_failed", "cuda", f"{type(exc).__name__}")
+        cuda_health.mark_lost(exc)
+        return False
+    return True
+
+
+def free_vram_gb() -> float | None:
+    """Free GPU memory in GB, or None when this process has no CUDA device."""
+    torch = _torch()
+    if cuda_health.lost() or torch is None or not torch.cuda.is_available():
+        return None
+    free, _total = torch.cuda.mem_get_info()
+    return float(free) / (1024 ** 3)
+
+
+def _torch() -> Any | None:
+    try:
+        import torch
+    except ImportError:
+        return None
+    return torch

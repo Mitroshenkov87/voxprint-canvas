@@ -1,0 +1,6 @@
+# Accepted pip-audit advisories. The release audit blocks on high and critical
+# advisories that are not listed here. Each entry needs an id and a reason.
+# "package" is optional; when set, the id matches only that distribution.
+# Match is against the advisory id and any alias (PYSEC, GHSA, CVE).
+
+# No accepted advisories yet. Add one only with a written reason.

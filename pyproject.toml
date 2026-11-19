@@ -1,0 +1,93 @@
+[project]
+name = "voxprint-canvas"
+version = "0.1.0"
+description = "Local text-to-image generation for the VOXPrint AI Suite."
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.14"
+authors = [{ name = "Aleksandr Mitroshenkov" }]
+dependencies = [
+    # Shared shell and worker host (v0.7.4). Installers and CI resolve this from the sha256-checked release wheel.
+    "voxprint-common[ui]==0.7.4",
+    "PySide6==6.12.0",
+    "numpy==2.5.4",
+    "pillow==13.0.0",
+    "imagecodecs==2026.10.10",
+    "onnxruntime-gpu==1.31.0",
+    "psutil==7.0.0",
+]
+
+[project.optional-dependencies]
+# pytest-qt is MIT. The GUI smoke walk (voxprint_common.testing.gui_smoke) uses its qtbot.
+dev = ["pytest>=8.3", "pytest-qt>=4.5", "ruff>=0.8", "mypy>=1.13", "opencv-python-headless>=4.11"]
+# MkDocs is BSD-2-Clause. Material is MIT. mkdocstrings and Griffe are ISC.
+docs = ["mkdocs>=1.6,<2", "mkdocs-material>=9.5,<10", "mkdocstrings[python]>=0.26,<2"]
+# Generation and safety weights are not installed in CI. The worker imports them only when a pinned model is ready.
+gen = [
+    # The installer keeps the tested default (torch 2.11.0+cu130, torchvision 0.26.0+cu130)
+    # exact in constraints-cuda.txt; constraints.txt repeats these same ranges, so the
+    # two files cannot fight each other. A plain pip install of the gen extra must
+    # still resolve when a compatible newer CUDA wheel is already present (for example 2.14.1 / 0.29.2).
+    "torch>=2.11,<2.15",
+    "torchvision>=0.26,<0.30",
+    "accelerate==1.15.0",
+    "diffusers==0.41.0",
+    # peft is Apache-2.0. diffusers loads LoRA adapters through it.
+    "peft==0.21.2",
+    # CVE-2026-9856 floor is 5.14. 5.19.0 is the newest 5.x and includes the regex ReDoS fixes from 5.14 and 5.15.
+    "transformers==5.19.0",
+    "torchao==0.18.0",
+    # timm is Apache-2.0.
+    "timm==1.0.30",
+    "safetensors==0.8.0",
+    "tokenizers==0.23.3",
+    "huggingface-hub==1.33.0",
+    "opencv-python-headless==5.0.0.93",
+    "pillow==13.0.0",
+    "imagecodecs==2026.10.10",
+    "onnxruntime-gpu==1.31.0",
+]
+
+[project.scripts]
+voxprint-canvas-cli = "canvas.app.main:main"
+
+[project.gui-scripts]
+voxprint-canvas = "canvas.app.main:main"
+
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["canvas*"]
+
+[tool.setuptools.package-data]
+"canvas" = ["mdl.json"]
+"canvas.models" = ["catalog.json", "third_party.json", "turbo_transformer_index.json", "turbo_transformer_shapes.json"]
+"canvas.app" = ["BUILD.json", "messages.json"]
+"canvas.infra" = ["uv.cu130.toml"]
+"canvas.ui" = ["art/splash.jpg", "art/splash@2x.jpg", "locales/*.json", "fonts/*.ttf", "fonts/OFL.txt"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+src = ["canvas", "tests", "tools"]
+
+[tool.ruff.lint]
+select = ["F", "E9"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.interrogate]
+ignore-init-method = true
+ignore-init-module = false
+ignore-magic = true
+ignore-module = false
+ignore-nested-functions = true
+ignore-private = true
+ignore-semiprivate = true
+fail-under = 65
+color = false
+omit-covered-files = true

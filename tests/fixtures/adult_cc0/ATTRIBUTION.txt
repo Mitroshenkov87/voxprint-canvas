@@ -1,0 +1,16 @@
+CC0 1.0 photographs of clearly adult subjects. These copies are resized for the real-weight image check and stay CC0.
+
+torso_40.jpg
+  Source: https://commons.wikimedia.org/wiki/File:Adult_Female_Torso_-_40_Years_Old.jpg
+  The file description says the subject is around forty years old.
+  Licence: CC0.
+
+torso_40_b.jpg
+  Source: https://commons.wikimedia.org/wiki/File:Adult_Female_Torso_-_40_Years_Old_(2).jpg
+  The same file description: the subject is around forty years old.
+  Licence: CC0.
+
+garden_older_man.jpg
+  Source: https://commons.wikimedia.org/wiki/File:A_nude_man_poses_in_the_formal_garden_of_a_privately_owned_chateau_near_Paris.jpg
+  Commons category: Nude old men.
+  Licence: CC0.

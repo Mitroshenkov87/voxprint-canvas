@@ -1,0 +1,653 @@
+# Unit tests. No GPU and no generation weights.
+name: tests
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main, ui/shell-migration]
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    # Windows is parked until the apps work on Linux (2026-11-17): its jobs report but do not block.
+    continue-on-error: ${{ matrix.os == 'windows-latest' }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Qt libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 \
+            libgl1 \
+            libdbus-1-3 \
+            libfontconfig1 \
+            libglib2.0-0 \
+            libxkbcommon0 \
+            libxkbcommon-x11-0 \
+            libxcb-cursor0 \
+            libxcb-icccm4 \
+            libxcb-image0 \
+            libxcb-keysyms1 \
+            libxcb-randr0 \
+            libxcb-render-util0 \
+            libxcb-render0 \
+            libxcb-shape0 \
+            libxcb-shm0 \
+            libxcb-sync1 \
+            libxcb-util1 \
+            libxcb-xfixes0 \
+            libxcb-xkb1
+      - name: Install
+        shell: bash
+        run: |
+          python -m pip install -q uv
+          mkdir -p wheels
+          # Release pages are gone (2026-11-17); build the v0.7.4 wheel from its pinned commit archive (sha256-checked).
+          curl -fsSL -o /tmp/voxprint-common-0.7.4.tar.gz https://github.com/Mitroshenkov87/voxprint-common/archive/fc97031912b52b67d3a5164c37e6e9e603d5f945.tar.gz
+          echo "a373ea0c4526e1154a584308388e01ff0163a224370488acd20a17c53017992f  /tmp/voxprint-common-0.7.4.tar.gz" | sha256sum -c -
+          python -m pip wheel -q --no-deps -w wheels /tmp/voxprint-common-0.7.4.tar.gz
+          uv venv .venv
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            uv pip install --python .venv/Scripts/python.exe --find-links wheels -e ".[dev]"
+          else
+            uv pip install --python .venv/bin/python --find-links wheels -e ".[dev]"
+          fi
+      - name: Test
+        shell: bash
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            .venv/Scripts/python.exe -m pytest
+          else
+            .venv/bin/python -m pytest
+          fi
+  test-py315:
+    # Experimental probe. Allowed to fail until onnxruntime-gpu and imagecodecs
+    # publish regular cp315 wheels (not the freethreaded cp315t build).
+    name: "test-py315 (experimental)"
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.15"
+      - name: Qt libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 \
+            libgl1 \
+            libdbus-1-3 \
+            libfontconfig1 \
+            libglib2.0-0 \
+            libxkbcommon0 \
+            libxkbcommon-x11-0 \
+            libxcb-cursor0 \
+            libxcb-icccm4 \
+            libxcb-image0 \
+            libxcb-keysyms1 \
+            libxcb-randr0 \
+            libxcb-render-util0 \
+            libxcb-render0 \
+            libxcb-shape0 \
+            libxcb-shm0 \
+            libxcb-sync1 \
+            libxcb-util1 \
+            libxcb-xfixes0 \
+            libxcb-xkb1
+      - name: Install on Python 3.15
+        run: |
+          python -m pip install -q uv
+          mkdir -p wheels
+          # Release pages are gone (2026-11-17); build the v0.7.4 wheel from its pinned commit archive (sha256-checked).
+          curl -fsSL -o /tmp/voxprint-common-0.7.4.tar.gz https://github.com/Mitroshenkov87/voxprint-common/archive/fc97031912b52b67d3a5164c37e6e9e603d5f945.tar.gz
+          echo "a373ea0c4526e1154a584308388e01ff0163a224370488acd20a17c53017992f  /tmp/voxprint-common-0.7.4.tar.gz" | sha256sum -c -
+          python -m pip wheel -q --no-deps -w wheels /tmp/voxprint-common-0.7.4.tar.gz
+          uv venv .venv
+          uv pip install --python .venv/bin/python --find-links wheels -e ".[dev]"
+      - name: Test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: .venv/bin/python -m pytest
+  gui-smoke:
+    # The shared headless GUI walk (voxprint_common.testing.gui_smoke) on the Canvas window,
+    # wired to a real spawned worker. Offscreen Qt, so no display server is needed.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    # Windows is parked until the apps work on Linux (2026-11-17): its jobs report but do not block.
+    continue-on-error: ${{ matrix.os == 'windows-latest' }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Qt libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 \
+            libgl1 \
+            libdbus-1-3 \
+            libfontconfig1 \
+            libglib2.0-0 \
+            libxkbcommon0 \
+            libxkbcommon-x11-0 \
+            libxcb-cursor0 \
+            libxcb-icccm4 \
+            libxcb-image0 \
+            libxcb-keysyms1 \
+            libxcb-randr0 \
+            libxcb-render-util0 \
+            libxcb-render0 \
+            libxcb-shape0 \
+            libxcb-shm0 \
+            libxcb-sync1 \
+            libxcb-util1 \
+            libxcb-xfixes0 \
+            libxcb-xkb1
+      - name: Install
+        shell: bash
+        run: |
+          python -m pip install -q uv
+          mkdir -p wheels
+          # Release pages are gone (2026-11-17); build the v0.7.4 wheel from its pinned commit archive (sha256-checked).
+          curl -fsSL -o /tmp/voxprint-common-0.7.4.tar.gz https://github.com/Mitroshenkov87/voxprint-common/archive/fc97031912b52b67d3a5164c37e6e9e603d5f945.tar.gz
+          echo "a373ea0c4526e1154a584308388e01ff0163a224370488acd20a17c53017992f  /tmp/voxprint-common-0.7.4.tar.gz" | sha256sum -c -
+          python -m pip wheel -q --no-deps -w wheels /tmp/voxprint-common-0.7.4.tar.gz
+          uv venv .venv
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            uv pip install --python .venv/Scripts/python.exe --find-links wheels -e ".[dev]"
+          else
+            uv pip install --python .venv/bin/python --find-links wheels -e ".[dev]"
+          fi
+      - name: GUI smoke
+        shell: bash
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            .venv/Scripts/python.exe -m pytest -v tests/test_gui_smoke.py tests/test_ui_no_torch.py
+          else
+            .venv/bin/python -m pytest -v tests/test_gui_smoke.py tests/test_ui_no_torch.py
+          fi
+  model-index:
+    # mdl.json must match the signed Model Forge index (tools/check_model_index.py).
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install the pinned voxprint-common
+        # The release wheel the installers vendor, checked by sha256; it carries the Model Forge key.
+        run: |
+          # Release pages are gone (2026-11-17); build the v0.7.4 wheel from its pinned commit archive (sha256-checked).
+          curl -fsSL -o /tmp/voxprint-common-0.7.4.tar.gz https://github.com/Mitroshenkov87/voxprint-common/archive/fc97031912b52b67d3a5164c37e6e9e603d5f945.tar.gz
+          echo "a373ea0c4526e1154a584308388e01ff0163a224370488acd20a17c53017992f  /tmp/voxprint-common-0.7.4.tar.gz" | sha256sum -c -
+          python -m pip wheel -q --no-deps -w . /tmp/voxprint-common-0.7.4.tar.gz
+          python -m pip install -q -c constraints.txt voxprint_common-0.7.4-py3-none-any.whl
+      - name: Compare mdl.json with the signed model index
+        run: python tools/check_model_index.py
+  enlarge-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Qt libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 \
+            libgl1 \
+            libdbus-1-3 \
+            libfontconfig1 \
+            libglib2.0-0 \
+            libxkbcommon0 \
+            libxkbcommon-x11-0 \
+            libxcb-cursor0 \
+            libxcb-icccm4 \
+            libxcb-image0 \
+            libxcb-keysyms1 \
+            libxcb-randr0 \
+            libxcb-render-util0 \
+            libxcb-render0 \
+            libxcb-shape0 \
+            libxcb-shm0 \
+            libxcb-sync1 \
+            libxcb-util1 \
+            libxcb-xfixes0 \
+            libxcb-xkb1
+      - name: Install
+        run: |
+          python -m pip install -q uv
+          mkdir -p wheels
+          # Release pages are gone (2026-11-17); build the v0.7.4 wheel from its pinned commit archive (sha256-checked).
+          curl -fsSL -o /tmp/voxprint-common-0.7.4.tar.gz https://github.com/Mitroshenkov87/voxprint-common/archive/fc97031912b52b67d3a5164c37e6e9e603d5f945.tar.gz
+          echo "a373ea0c4526e1154a584308388e01ff0163a224370488acd20a17c53017992f  /tmp/voxprint-common-0.7.4.tar.gz" | sha256sum -c -
+          python -m pip wheel -q --no-deps -w wheels /tmp/voxprint-common-0.7.4.tar.gz
+          uv venv .venv
+          uv pip install --python .venv/bin/python --find-links wheels -e ".[dev]"
+      - name: Check the pinned Enlarge release
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: .venv/bin/python tools/check_enlarge_release.py
+  library-compat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install CPU torch and the generation stack
+        run: |
+          python -m pip install -q uv
+          mkdir -p wheels
+          # Release pages are gone (2026-11-17); build the v0.7.4 wheel from its pinned commit archive (sha256-checked).
+          curl -fsSL -o /tmp/voxprint-common-0.7.4.tar.gz https://github.com/Mitroshenkov87/voxprint-common/archive/fc97031912b52b67d3a5164c37e6e9e603d5f945.tar.gz
+          echo "a373ea0c4526e1154a584308388e01ff0163a224370488acd20a17c53017992f  /tmp/voxprint-common-0.7.4.tar.gz" | sha256sum -c -
+          python -m pip wheel -q --no-deps -w wheels /tmp/voxprint-common-0.7.4.tar.gz
+          uv venv .venv
+          uv pip install --python .venv/bin/python \
+            --index-url https://download.pytorch.org/whl/cpu \
+            --extra-index-url https://pypi.org/simple \
+            --find-links wheels \
+            -c constraints.txt \
+            -e ".[dev,gen]"
+      - name: Encoder compatibility
+        env:
+          VOXPRINT_REQUIRE_GEN: "1"
+        run: .venv/bin/python -m pytest -p no:pytest-qt tests/test_transformers_compat.py tests/test_lora_diffusers.py
+  gate-weights:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Cache the small content-check models
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/.cache/voxprint-gate
+          key: gate-models-v2-${{ hashFiles('canvas/models/catalog.json', 'mdl.json') }}
+          restore-keys: gate-models-v2-
+      - name: Install the pinned CPU stack
+        run: |
+          python -m pip install -q uv
+          mkdir -p wheels
+          # Release pages are gone (2026-11-17); build the v0.7.4 wheel from its pinned commit archive (sha256-checked).
+          curl -fsSL -o /tmp/voxprint-common-0.7.4.tar.gz https://github.com/Mitroshenkov87/voxprint-common/archive/fc97031912b52b67d3a5164c37e6e9e603d5f945.tar.gz
+          echo "a373ea0c4526e1154a584308388e01ff0163a224370488acd20a17c53017992f  /tmp/voxprint-common-0.7.4.tar.gz" | sha256sum -c -
+          python -m pip wheel -q --no-deps -w wheels /tmp/voxprint-common-0.7.4.tar.gz
+          uv venv .venv
+          uv pip install --python .venv/bin/python \
+            --index-url https://download.pytorch.org/whl/cpu \
+            --extra-index-url https://pypi.org/simple \
+            --find-links wheels \
+            -c constraints.txt \
+            -e ".[dev,gen]"
+      - name: Download the small content-check models
+        env:
+          VOXPRINT_HOME: /home/runner/.cache/voxprint-gate
+        run: |
+          .venv/bin/python -m canvas.models.mdl_fetch gate
+      - name: Real-weight checks
+        env:
+          VOXPRINT_REQUIRE_GATE: "1"
+          VOXPRINT_HOME: /home/runner/.cache/voxprint-gate
+        run: .venv/bin/python -m pytest -p no:pytest-qt tests/test_gate_weights.py
+  enhance-weights:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Cache the Qwen3-4B text encoder
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/.cache/voxprint-enhance
+          key: enhance-encoder-v2-${{ hashFiles('canvas/models/catalog.json', 'mdl.json') }}
+          restore-keys: enhance-encoder-v2-
+      - name: Install the pinned CPU stack
+        run: |
+          python -m pip install -q uv
+          mkdir -p wheels
+          # Release pages are gone (2026-11-17); build the v0.7.4 wheel from its pinned commit archive (sha256-checked).
+          curl -fsSL -o /tmp/voxprint-common-0.7.4.tar.gz https://github.com/Mitroshenkov87/voxprint-common/archive/fc97031912b52b67d3a5164c37e6e9e603d5f945.tar.gz
+          echo "a373ea0c4526e1154a584308388e01ff0163a224370488acd20a17c53017992f  /tmp/voxprint-common-0.7.4.tar.gz" | sha256sum -c -
+          python -m pip wheel -q --no-deps -w wheels /tmp/voxprint-common-0.7.4.tar.gz
+          uv venv .venv
+          uv pip install --python .venv/bin/python \
+            --index-url https://download.pytorch.org/whl/cpu \
+            --extra-index-url https://pypi.org/simple \
+            --find-links wheels \
+            -c constraints.txt \
+            -e ".[dev,gen]"
+      - name: Download the text encoder
+        env:
+          VOXPRINT_HOME: /home/runner/.cache/voxprint-enhance
+        run: |
+          .venv/bin/python -m canvas.models.mdl_fetch encoder
+      - name: Rewrite a tiny prompt on CPU
+        env:
+          VOXPRINT_REQUIRE_ENHANCE: "1"
+          VOXPRINT_HOME: /home/runner/.cache/voxprint-enhance
+          OMP_NUM_THREADS: "1"
+          MKL_NUM_THREADS: "1"
+          TOKENIZERS_PARALLELISM: "false"
+        run: .venv/bin/python -m pytest -p no:pytest-qt tests/test_enhance_weights.py
+  pdf-guide:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: PDF libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            fonts-dejavu-core \
+            libpango-1.0-0 \
+            libpangocairo-1.0-0 \
+            libpangoft2-1.0-0 \
+            libcairo2 \
+            libgdk-pixbuf-2.0-0 \
+            shared-mime-info
+      - name: Build the guide
+        run: |
+          python -m pip install --require-hashes -r installer/requirements-pdf.txt
+          python scripts/build_pdf_guide.py docs/guide/dist
+          VOXPRINT_PDF_GUIDE_DIR=docs/guide/dist python -m pytest tests/test_pdf_guide.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pdf-guide
+          path: docs/guide/dist/*.pdf
+          if-no-files-found: error
+  windows-install:
+    needs: pdf-guide
+    runs-on: windows-latest
+    continue-on-error: true  # Windows parked (2026-11-17)
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - name: Guide PDFs
+        uses: actions/download-artifact@v4
+        with:
+          name: pdf-guide
+          path: installer/windows/staging/docs
+      - name: Free disk space
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "SilentlyContinue"
+          @(
+            "C:\Program Files (x86)\Android",
+            "C:\Program Files\Android",
+            "C:\Program Files (x86)\Microsoft Visual Studio",
+            "C:\Program Files\Microsoft Visual Studio",
+            "C:\Program Files (x86)\Microsoft SQL Server",
+            "C:\Program Files\Microsoft SQL Server",
+            "C:\Program Files (x86)\Google",
+            "C:\Program Files\Google",
+            "C:\hostedtoolcache\windows\go",
+            "C:\hostedtoolcache\windows\Ruby",
+            "C:\hostedtoolcache\windows\PyPy",
+            "C:\hostedtoolcache\windows\node"
+          ) | ForEach-Object {
+            if (Test-Path $_) { Remove-Item $_ -Recurse -Force }
+          }
+          Get-PSDrive -Name C | Format-List
+      - name: Inno Setup 6
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $stage = "installer\windows\staging"
+          New-Item -ItemType Directory -Force $stage | Out-Null
+          Copy-Item -Path canvas -Destination $stage -Recurse
+          Copy-Item -Path tools -Destination $stage -Recurse
+          New-Item -ItemType Directory -Force (Join-Path $stage "scripts") | Out-Null
+          Copy-Item "scripts/vm_test.sh" (Join-Path $stage "scripts/vm_test.sh")
+          Copy-Item "scripts/vm_test.ps1" (Join-Path $stage "scripts/vm_test.ps1")
+          foreach ($name in @("pyproject.toml", "README.md", "LICENSE", "NOTICE", "BUILD.json", "constraints.txt", "constraints-cuda.txt", "mdl.json")) {
+            Copy-Item $name (Join-Path $stage $name)
+          }
+          $uvZip = Join-Path $env:TEMP "uv-windows.zip"
+          $uvDir = Join-Path $env:TEMP "uv-windows"
+          Invoke-WebRequest -Uri "https://github.com/astral-sh/uv/releases/download/0.13.0/uv-x86_64-pc-windows-msvc.zip" -OutFile $uvZip
+          if (Test-Path $uvDir) { Remove-Item -Recurse -Force $uvDir }
+          Expand-Archive -Path $uvZip -DestinationPath $uvDir -Force
+          $uvExe = Get-ChildItem -Path $uvDir -Recurse -Filter uv.exe | Select-Object -First 1
+          if (-not $uvExe) { throw "uv.exe was not in the download" }
+          Copy-Item $uvExe.FullName (Join-Path $stage "uv.exe")
+          Copy-Item installer\windows\install.ps1 (Join-Path $stage "install.ps1")
+          Copy-Item installer\windows\voxprint-canvas.cmd (Join-Path $stage "voxprint-canvas.cmd")
+          foreach ($pdf in @("VOXPrint-AI-Canvas-Guide-en.pdf")) {
+            $guide = Join-Path $stage "docs\$pdf"
+            if (-not (Test-Path -LiteralPath $guide)) { throw "missing guide PDF: $guide" }
+          }
+          Get-ChildItem $stage -Recurse -Directory -Filter __pycache__ | Remove-Item -Recurse -Force
+          $iscc = @(
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+            "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $iscc) { throw "Inno Setup was not installed" }
+          New-Item -ItemType Directory -Force dist | Out-Null
+          & $iscc "/Odist" "installer\windows\voxprint-canvas.iss"
+          if ($LASTEXITCODE -ne 0) { throw "the setup compiler failed" }
+          if (-not (Test-Path "dist\VoxprintCanvasSetup.exe")) { throw "the setup executable is missing" }
+      - name: Upload the Setup .exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: VoxprintCanvasSetup
+          path: dist/VoxprintCanvasSetup.exe
+          if-no-files-found: error
+          retention-days: 30
+      - name: Run install.ps1
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $env:Path = ($env:Path -split ';' | Where-Object {
+            $_ -and ($_ -notmatch '(?i)(^|[\\/])Git([\\/]|$)')
+          }) -join ';'
+          $gitCmd = Get-Command git -ErrorAction SilentlyContinue
+          if ($gitCmd) { throw "git is still on PATH: $($gitCmd.Source)" }
+          $source = (Resolve-Path "installer\windows\staging").Path
+          $install = Join-Path $env:ProgramFiles "VOXPrint AI Suite\Canvas"
+          if (Test-Path -LiteralPath $install) { Remove-Item -LiteralPath $install -Recurse -Force }
+          New-Item -ItemType Directory -Force -Path $install | Out-Null
+          Copy-Item -Path (Join-Path $source "*") -Destination $install -Recurse -Force
+          $script = Join-Path $install "install.ps1"
+          & pwsh -NoProfile -ExecutionPolicy Bypass -File $script
+          if ($LASTEXITCODE -ne 0) { throw "install.ps1 exited $LASTEXITCODE" }
+          Write-Host "install.ps1 exited 0"
+          $programFiles = [System.IO.Path]::GetFullPath($env:ProgramFiles).TrimEnd('\') + '\'
+          if (-not $install.StartsWith($programFiles, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "install dir is not under Program Files: $install"
+          }
+          $cfgPath = Join-Path $install "venv\pyvenv.cfg"
+          if (-not (Test-Path -LiteralPath $cfgPath)) { throw "venv pyvenv.cfg is missing" }
+          $pyHome = $null
+          $executable = $null
+          foreach ($line in Get-Content -LiteralPath $cfgPath) {
+            if ($line.StartsWith("home = ")) { $pyHome = $line.Substring(7).Trim() }
+            if ($line.StartsWith("executable = ")) { $executable = $line.Substring(13).Trim() }
+          }
+          if ($executable) {
+            $base = $executable
+          } elseif ($pyHome) {
+            $base = Join-Path $pyHome "python.exe"
+          } else {
+            throw "pyvenv.cfg has no base interpreter"
+          }
+          $baseFull = [System.IO.Path]::GetFullPath($base)
+          $prefix = $install.TrimEnd('\') + '\'
+          if (-not $baseFull.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "venv base interpreter is outside the install dir: $baseFull"
+          }
+          foreach ($rootName in @("LOCALAPPDATA", "APPDATA", "TEMP", "TMP")) {
+            $root = [Environment]::GetEnvironmentVariable($rootName)
+            if ([string]::IsNullOrWhiteSpace($root)) { continue }
+            $user = [System.IO.Path]::GetFullPath($root).TrimEnd('\') + '\'
+            if ($baseFull.StartsWith($user, [System.StringComparison]::OrdinalIgnoreCase)) {
+              throw "venv base interpreter is in a user-writable folder: $baseFull"
+            }
+          }
+          Write-Host "venv base interpreter is under the install dir: $baseFull"
+          $pythonRoot = (Join-Path $install "python").TrimEnd('\') + '\'
+          if (-not $baseFull.StartsWith($pythonRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "venv base interpreter is outside {app}\python: $baseFull"
+          }
+          if ($baseFull -match 'cpython-3\.14-windows-x86_64-none') {
+            throw "venv base interpreter still uses the uv alias link: $baseFull"
+          }
+          $cursor = $baseFull
+          while (-not [string]::IsNullOrWhiteSpace($cursor)) {
+            if (Test-Path -LiteralPath $cursor) {
+              $attrs = [System.IO.File]::GetAttributes($cursor)
+              if (($attrs -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "venv base interpreter path contains a link: $cursor"
+              }
+            }
+            $parent = [System.IO.Path]::GetDirectoryName($cursor)
+            if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $cursor) { break }
+            $cursor = $parent
+          }
+          Write-Host "venv base interpreter starts with {app}\python: $baseFull"
+          $site = Join-Path $install "venv\Lib\site-packages"
+          $versionPy = Join-Path $site "torch\version.py"
+          if (-not (Test-Path -LiteralPath $versionPy)) { throw "torch\version.py is missing: $versionPy" }
+          $torchText = Get-Content -LiteralPath $versionPy -Raw
+          if (-not $torchText.Contains("13.0")) { throw "torch.version.cuda is not 13.0: $versionPy" }
+          function Assert-Dist([string]$Prefix, [string]$Version) {
+            $found = $false
+            foreach ($dir in @(Get-ChildItem -LiteralPath $site -Directory)) {
+              if ($dir.Name.StartsWith($Prefix, [System.StringComparison]::OrdinalIgnoreCase) -and $dir.Name.EndsWith(".dist-info", [System.StringComparison]::OrdinalIgnoreCase)) {
+                $meta = Join-Path $dir.FullName "METADATA"
+                $raw = Get-Content -LiteralPath $meta -Raw
+                if ($raw.Contains("Version: $Version")) { $found = $true }
+              }
+            }
+            if (-not $found) { throw "missing $Prefix $Version under $site" }
+          }
+          Assert-Dist "torch-" "2.11.0+cu130"
+          Assert-Dist "torchvision-" "0.26.0+cu130"
+          $gpuDist = "onnx" + "runtime" + "_gpu-"
+          Assert-Dist $gpuDist "1.31.0"
+          Assert-Dist "peft-" "0.21.2"
+          & (Join-Path $install "venv\Scripts\python.exe") -c "from peft import inject_adapter_in_model, set_peft_model_state_dict"
+          if ($LASTEXITCODE -ne 0) { throw "peft does not import in the installed venv" }
+          $cpuDist = "onnx" + "runtime" + "-"
+          foreach ($dir in @(Get-ChildItem -LiteralPath $site -Directory)) {
+            if ($dir.Name.StartsWith($cpuDist, [System.StringComparison]::OrdinalIgnoreCase) -and $dir.Name.EndsWith(".dist-info", [System.StringComparison]::OrdinalIgnoreCase)) {
+              throw "CPU onnx runtime dist-info is installed: $($dir.Name)"
+            }
+          }
+          Write-Host "torch.version.cuda is 13.0 from files under the install dir"
+      - name: Smoke script runs from PowerShell 7 against the installed Python
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $out = Join-Path $env:RUNNER_TEMP "smoke"
+          & pwsh -NoProfile -ExecutionPolicy Bypass -File tools\smoke_16gb.ps1 -VramCapGB 16 -Out $out
+          $code = $LASTEXITCODE
+          Write-Host "smoke_16gb.ps1 exited $code"
+          # The runner has no GPU: setup, the wheel check and MDL must pass, then exit 3.
+          if ($code -ne 3) { throw "smoke_16gb.ps1 exited $code instead of 3 (no GPU)" }
+          $result = Get-Content -Raw (Join-Path $out "result-16gb.json") | ConvertFrom-Json
+          if ($result.exit_code -ne 3 -or $result.pass -ne "16gb" -or $result.vram_cap_gb -ne 16) { throw "unexpected result-16gb.json" }
+          & pwsh -NoProfile -ExecutionPolicy Bypass -File tools\smoke_16gb.ps1 -Python C:\missing\python.exe -Out $out
+          if ($LASTEXITCODE -ne 2) { throw "a missing -Python exited $LASTEXITCODE instead of 2" }
+          Write-Host "smoke_16gb.ps1: exit 3 without a GPU, exit 2 without Python"
+          exit 0
+      - name: Smoke script still runs from Windows PowerShell 5.1 (fallback)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $out = Join-Path $env:RUNNER_TEMP "smoke-legacy"
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\smoke_16gb.ps1 -VramCapGB 16 -Out $out
+          $code = $LASTEXITCODE
+          Write-Host "smoke_16gb.ps1 exited $code"
+          # The runner has no GPU: setup, the wheel check and MDL must pass, then exit 3.
+          if ($code -ne 3) { throw "smoke_16gb.ps1 exited $code instead of 3 (no GPU)" }
+          $result = Get-Content -Raw (Join-Path $out "result-16gb.json") | ConvertFrom-Json
+          if ($result.exit_code -ne 3 -or $result.pass -ne "16gb" -or $result.vram_cap_gb -ne 16) { throw "unexpected result-16gb.json" }
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\smoke_16gb.ps1 -Python C:\missing\python.exe -Out $out
+          if ($LASTEXITCODE -ne 2) { throw "a missing -Python exited $LASTEXITCODE instead of 2" }
+          Write-Host "smoke_16gb.ps1 under 5.1: exit 3 without a GPU, exit 2 without Python"
+          exit 0
+      - name: Signature-check helper accepts a Microsoft-signed file and rejects an unsigned one
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $helper = "installer\windows\vxsigcheck.exe"
+          if (-not (Test-Path -LiteralPath $helper)) { throw "the setup compiler did not build vxsigcheck.exe" }
+          $pwshExe = (Get-Command pwsh).Source
+          & $helper $pwshExe "Microsoft Corporation"
+          if ($LASTEXITCODE -ne 0) { throw "vxsigcheck rejected $pwshExe (exit $LASTEXITCODE)" }
+          & $helper $pwshExe "Someone Else"
+          if ($LASTEXITCODE -ne 2) { throw "vxsigcheck accepted the wrong publisher (exit $LASTEXITCODE)" }
+          & $helper (Resolve-Path "tools\smoke_16gb.ps1").Path "Microsoft Corporation"
+          if ($LASTEXITCODE -ne 1) { throw "vxsigcheck accepted an unsigned file (exit $LASTEXITCODE)" }
+          Write-Host "vxsigcheck: Microsoft-signed accepted, wrong publisher and unsigned rejected"
+          exit 0
+      - name: A failing install.ps1 makes Setup exit non-zero
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $marker = "C:\voxprint-setup-broke.txt"
+          if (Test-Path $marker) { Remove-Item -Force $marker }
+          @(
+            'param([string]$Scope = "All")'
+            'Set-Content -LiteralPath "C:\voxprint-setup-broke.txt" -Value "broke"'
+            'exit 9'
+          ) | Set-Content -LiteralPath "installer\windows\staging\install.ps1" -Encoding ascii
+          if (Test-Path "installer\windows\staging\venv") {
+            Remove-Item -Recurse -Force "installer\windows\staging\venv"
+          }
+          $iscc = @(
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+            "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $iscc) { throw "Inno Setup was not installed" }
+          & $iscc "/Odist-broken" "installer\windows\voxprint-canvas.iss"
+          if ($LASTEXITCODE -ne 0) { throw "the setup compiler failed" }
+          $log = "C:\voxprint-setup.log"
+          if (Test-Path $log) { Remove-Item -Force $log }
+          $setup = Start-Process -FilePath (Resolve-Path "dist-broken\VoxprintCanvasSetup.exe") -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/SP-","/NORESTART","/LOG=$log" -Wait -PassThru
+          $code = $setup.ExitCode
+          Write-Host "Setup exited $code"
+          if (Test-Path $log) { Get-Content $log -Tail 40 }
+          if (-not (Test-Path $marker)) { throw "Setup did not run install.ps1 (exit $code)" }
+          if ($code -eq 0) { throw "a broken install.ps1 left Setup at exit 0" }
+          if ($code -ne 9) { throw "Setup exited $code instead of install.ps1's exit 9" }
+          if (-not (Select-String -LiteralPath $log -Pattern 'Setup script host: .*\\pwsh\.exe' -Quiet)) { throw "Setup did not run its scripts under PowerShell 7" }
+          Write-Host "Broken install.ps1 made Setup exit $code"
